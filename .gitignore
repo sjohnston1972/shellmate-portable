@@ -9,10 +9,17 @@ env/
 # Environment
 .env
 
-# Runtime data
+# Runtime data — the portable data directory created next to the executable
+ShellMate-Data/
+
+# Legacy pre-portable locations (migrated on first run by backend/paths.py)
 logs/
 profiles/saved.json
 settings.json
+
+# PyInstaller build output
+build/
+dist/
 
 # Test artifacts
 test_ui.py

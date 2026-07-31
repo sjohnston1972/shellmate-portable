@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 
-RUN mkdir -p /app/profiles /app/logs
+RUN mkdir -p /app/ShellMate-Data
 
 EXPOSE 8765
 

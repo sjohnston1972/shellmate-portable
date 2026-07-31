@@ -3,19 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ShellMate</title>
+  <title>ShellMate Portable</title>
 
-  <!-- Google Fonts — UI fonts + terminal monospace fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Fira+Code:wght@400;500&family=Source+Code+Pro:wght@400;500&family=Roboto+Mono:wght@400;500&family=Ubuntu+Mono:wght@400;700&family=Inconsolata:wght@400;500&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+  <!-- All third-party assets are served locally so ShellMate works with no
+       internet access at all. Refresh them with: python tools/vendor_assets.py -->
 
-  <!-- xterm.js from CDN -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+  <!-- UI fonts + terminal monospace fonts -->
+  <link rel="stylesheet" href="/static/vendor/fonts.css" />
+  <link rel="stylesheet" href="/static/vendor/material-symbols.css" />
+
+  <!-- xterm.js 5.3.0 and addons -->
+  <link rel="stylesheet" href="/static/vendor/xterm.css" />
+  <script src="/static/vendor/xterm.js"></script>
+  <script src="/static/vendor/xterm-addon-fit.js"></script>
+  <script src="/static/vendor/xterm-addon-web-links.js"></script>
 
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
@@ -34,6 +35,12 @@
       </a>
       <a href="#" id="sidebar-link-logs" class="sidebar-link" title="Logs">
         <span class="material-symbols-outlined">list_alt</span>
+      </a>
+      <a href="#" id="sidebar-link-history" class="sidebar-link" title="Session history">
+        <span class="material-symbols-outlined">search</span>
+      </a>
+      <a href="#" id="sidebar-link-sftp" class="sidebar-link" title="Files (SFTP)">
+        <span class="material-symbols-outlined">description</span>
       </a>
       <a href="#" id="sidebar-link-settings" class="sidebar-link" title="Settings">
         <span class="material-symbols-outlined">settings</span>
@@ -61,7 +68,7 @@
          TAB BAR
     ================================================================ -->
     <header id="tab-bar">
-      <button id="tab-bar-brand" title="Home / Quick connect">ShellMate</button>
+      <button id="tab-bar-brand" title="Home / Quick connect">ShellMate Portable</button>
       <div id="tab-list"></div>
 
       <!-- Learn / Troubleshoot mode toggle — click to switch -->
@@ -86,7 +93,7 @@
         <!-- Welcome screen shown when no tabs are open -->
         <div id="welcome-screen">
           <div id="welcome-content">
-            <h1><img src="/static/Untitled-removebg-preview.png" alt="" id="welcome-logo" />ShellMate</h1>
+            <h1><img src="/static/Untitled-removebg-preview.png" alt="" id="welcome-logo" />ShellMate Portable</h1>
 
             <!-- Saved session quick-launch grid -->
             <div id="welcome-profiles-grid"></div>
@@ -189,6 +196,8 @@
     <footer id="status-bar">
       <span id="status-connection">No active session</span>
       <span class="status-sep">|</span>
+      <span id="status-device" title="Detected device platform">Device: —</span>
+      <span class="status-sep">|</span>
       <span id="status-buffer">Buffer: 0L</span>
       <span class="status-sep">|</span>
       <span id="status-tabs">Tabs: 0</span>
@@ -225,33 +234,168 @@
           <input type="text" id="field-label" placeholder="e.g. core-switch-01" />
         </div>
 
+        <!-- Transport picker. Switching this shows/hides the field groups
+             below via connections.js — SSH and telnet want a host, serial
+             wants a COM port. -->
         <div class="form-group">
-          <label for="field-hostname">Hostname / IP <span class="required">*</span></label>
-          <input type="text" id="field-hostname" placeholder="192.168.1.1" required />
+          <label for="field-conntype">Connection type</label>
+          <select id="field-conntype">
+            <option value="ssh" selected>SSH</option>
+            <option value="serial">Serial console</option>
+            <option value="telnet">Telnet</option>
+          </select>
         </div>
 
-        <div class="form-row">
+        <!-- ===== Network transports (SSH / Telnet) ===== -->
+        <div class="conn-fields" data-for="ssh telnet">
           <div class="form-group">
-            <label for="field-port">Port</label>
-            <input type="number" id="field-port" value="22" min="1" max="65535" />
+            <label for="field-hostname">Hostname / IP <span class="required">*</span></label>
+            <input type="text" id="field-hostname" placeholder="192.168.1.1" />
           </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="field-port">Port</label>
+              <input type="number" id="field-port" value="22" min="1" max="65535" />
+            </div>
+            <div class="form-group">
+              <label for="field-username">Username</label>
+              <input type="text" id="field-username" placeholder="admin" />
+            </div>
+          </div>
+
           <div class="form-group">
-            <label for="field-conntype">Type</label>
-            <select id="field-conntype">
-              <option value="ssh" selected>SSH</option>
-              <option value="serial">Serial</option>
-            </select>
+            <label for="field-password">Password</label>
+            <input type="password" id="field-password" />
+            <p class="field-hint" data-for="telnet">
+              Optional. If given, ShellMate answers the device's login prompts for you.
+            </p>
           </div>
         </div>
 
-        <div class="form-group">
-          <label for="field-username">Username <span class="required">*</span></label>
-          <input type="text" id="field-username" placeholder="admin" required />
+        <!-- ===== Serial console ===== -->
+        <div class="conn-fields" data-for="serial">
+          <div class="form-group">
+            <label for="field-serial-port">Serial port <span class="required">*</span></label>
+            <div class="input-with-button">
+              <select id="field-serial-port"></select>
+              <button type="button" id="btn-refresh-ports" class="btn-tertiary" title="Rescan for serial ports">
+                <span class="material-symbols-outlined">search</span>
+              </button>
+            </div>
+            <p class="field-hint" id="serial-port-hint"></p>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="field-baud">Baud rate</label>
+              <select id="field-baud">
+                <option value="1200">1200</option>
+                <option value="2400">2400</option>
+                <option value="4800">4800</option>
+                <option value="9600" selected>9600</option>
+                <option value="19200">19200</option>
+                <option value="38400">38400</option>
+                <option value="57600">57600</option>
+                <option value="115200">115200</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="field-databits">Data bits</label>
+              <select id="field-databits">
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8" selected>8</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="field-parity">Parity</label>
+              <select id="field-parity">
+                <option value="N" selected>None</option>
+                <option value="E">Even</option>
+                <option value="O">Odd</option>
+                <option value="M">Mark</option>
+                <option value="S">Space</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="field-stopbits">Stop bits</label>
+              <select id="field-stopbits">
+                <option value="1" selected>1</option>
+                <option value="1.5">1.5</option>
+                <option value="2">2</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="field-flow">Flow control</label>
+              <select id="field-flow">
+                <option value="none" selected>None</option>
+                <option value="xonxoff">XON/XOFF</option>
+                <option value="rtscts">RTS/CTS</option>
+                <option value="dsrdtr">DSR/DTR</option>
+              </select>
+            </div>
+          </div>
+          <p class="field-hint">Cisco console default is 9600 8-N-1 with no flow control.</p>
         </div>
 
-        <div class="form-group">
-          <label for="field-password">Password <span class="required">*</span></label>
-          <input type="password" id="field-password" required />
+        <!-- Offered for every transport that takes credentials. Hidden for
+             serial, which has none. -->
+        <div class="conn-fields" data-for="ssh telnet">
+          <label class="checkbox-row" for="field-remember">
+            <input type="checkbox" id="field-remember" />
+            <span>Remember these credentials in the encrypted vault</span>
+          </label>
+          <p class="field-hint" id="remember-hint"></p>
+        </div>
+
+        <!-- ===== SSH-only advanced options ===== -->
+        <div class="conn-fields" data-for="ssh">
+          <details id="ssh-advanced">
+            <summary>Key authentication and jump host</summary>
+
+            <div class="form-group">
+              <label for="field-key-path">Private key file</label>
+              <input type="text" id="field-key-path" placeholder="C:\Users\you\.ssh\id_ed25519" />
+              <p class="field-hint">Ed25519, ECDSA, RSA or DSA. The key never leaves this machine.</p>
+            </div>
+
+            <div class="form-group">
+              <label for="field-key-passphrase">Key passphrase</label>
+              <input type="password" id="field-key-passphrase" />
+            </div>
+
+            <div class="form-group">
+              <label for="field-jump-host">Jump host / bastion</label>
+              <input type="text" id="field-jump-host" placeholder="bastion.example.com" />
+              <p class="field-hint">Connects through this host, like OpenSSH's ProxyJump.</p>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="field-jump-port">Jump port</label>
+                <input type="number" id="field-jump-port" value="22" min="1" max="65535" />
+              </div>
+              <div class="form-group">
+                <label for="field-jump-username">Jump username</label>
+                <input type="text" id="field-jump-username" placeholder="same as above" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="field-jump-password">Jump password</label>
+              <input type="password" id="field-jump-password" />
+            </div>
+
+            <div class="form-group">
+              <label for="field-jump-key-path">Jump private key file</label>
+              <input type="text" id="field-jump-key-path" placeholder="(optional)" />
+            </div>
+          </details>
         </div>
 
         <div id="form-error" class="form-error hidden"></div>
@@ -415,9 +559,80 @@ GigEth0/2     unassigned    YES unset  down     down
         </section>
 
         <!-- AI Providers -->
+        <!-- Device awareness -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Device Awareness</h3>
+          <p class="settings-section-hint">ShellMate identifies what it is connected to and adapts. Platform definitions live in <code>platforms.json</code> in your data folder — edit it to add a platform or correct a command.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-auto-paging">Turn paging off on connect</label>
+            <input type="checkbox" id="setting-auto-paging" class="setting-checkbox" />
+          </div>
+          <p class="settings-section-hint">Sends the right command for the platform, so you stop typing <code>terminal length 0</code>. Nothing is sent to a device ShellMate cannot confidently identify.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-expand-aliases">Expand command aliases</label>
+            <input type="checkbox" id="setting-expand-aliases" class="setting-checkbox" />
+          </div>
+          <p class="settings-section-hint">Type <code>ints</code> and get the right interface command for whatever you are connected to. Only a bare alias on its own is expanded, and the terminal shows what was actually sent.</p>
+        </section>
+
+        <!-- Output highlighting -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Output Colours</h3>
+          <p class="settings-section-hint">Colour terminal text by pattern, so the line that matters stands out of a wall of output. Patterns are regular expressions.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-highlight-enabled">Enable highlighting</label>
+            <input type="checkbox" id="setting-highlight-enabled" class="setting-checkbox" />
+          </div>
+
+          <div id="highlight-rules"></div>
+
+          <div class="setting-row">
+            <button type="button" id="highlight-add-rule" class="btn-secondary">
+              <span class="material-symbols-outlined">add</span>
+              Add rule
+            </button>
+            <button type="button" id="highlight-reset" class="btn-tertiary">Reset to defaults</button>
+          </div>
+        </section>
+
+        <!-- Credentials vault -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Credentials Vault</h3>
+          <p class="settings-section-hint">API keys and remembered device passwords are encrypted on disk. Nothing sensitive is ever written in plain text.</p>
+
+          <div class="setting-row">
+            <span class="setting-label">Status</span>
+            <span id="vault-status-text" class="setting-value">Checking…</span>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="vault-mode-select">Protected by</label>
+            <select id="vault-mode-select" class="setting-input setting-input-full">
+              <option value="dpapi">This Windows account (no password to type)</option>
+              <option value="password">A master password (works on any machine)</option>
+            </select>
+            <p class="settings-section-hint" id="vault-mode-hint"></p>
+          </div>
+
+          <div class="setting-row setting-row-stack hidden" id="vault-password-row">
+            <label class="setting-label" for="vault-new-password">Master password</label>
+            <input type="password" id="vault-new-password" class="setting-input setting-input-full" autocomplete="new-password" />
+            <label class="setting-label" for="vault-confirm-password">Confirm</label>
+            <input type="password" id="vault-confirm-password" class="setting-input setting-input-full" autocomplete="new-password" />
+          </div>
+
+          <div class="setting-row">
+            <button type="button" id="vault-apply-mode" class="btn-secondary">Apply</button>
+            <span id="vault-mode-result" class="setting-value"></span>
+          </div>
+        </section>
+
         <section class="settings-section">
           <h3 class="settings-section-title">AI Providers</h3>
-          <p class="settings-section-hint">API keys and endpoints. Anything saved here overrides the matching <code>.env</code> variable. Leaving a field empty falls back to <code>.env</code>.</p>
+          <p class="settings-section-hint">API keys and endpoints. Keys are stored in the encrypted vault above; anything saved here overrides the matching <code>.env</code> variable. Leaving a field empty falls back to <code>.env</code>.</p>
 
           <div class="setting-row setting-row-stack">
             <label class="setting-label" for="setting-anthropic-key">Anthropic API key</label>
@@ -503,6 +718,144 @@ GigEth0/2     unassigned    YES unset  down     down
       </div>
       <div class="panel-body">
         <div id="logs-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       CONFIG DIFF MODAL
+       Opened from the drift banner shown when a device's configuration has
+       changed since the last visit.
+  ================================================================ -->
+  <div id="diff-overlay" class="panel-overlay hidden">
+    <div id="diff-panel" class="side-panel side-panel-wide">
+      <div class="panel-header">
+        <h2 class="panel-title" id="diff-title">Configuration changes</h2>
+        <button id="diff-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div id="diff-summary"></div>
+      <div class="panel-body">
+        <div id="diff-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       SESSION HISTORY PANEL
+       Full-text search across every command ever run. The point of storing
+       transcripts rather than flat logs: a question, not a grep.
+  ================================================================ -->
+  <div id="history-overlay" class="panel-overlay hidden">
+    <div id="history-panel" class="side-panel side-panel-wide">
+      <div class="panel-header">
+        <h2 class="panel-title">Session History</h2>
+        <button id="history-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <div id="history-toolbar">
+        <input type="search" id="history-query" placeholder="Search commands and output…"
+               autocomplete="off" spellcheck="false" />
+        <select id="history-device" aria-label="Filter by device">
+          <option value="">All devices</option>
+        </select>
+        <select id="history-range" aria-label="Filter by date">
+          <option value="">Any time</option>
+          <option value="1">Last 24 hours</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+      </div>
+
+      <div id="history-stats"></div>
+
+      <div class="panel-body">
+        <div id="history-results"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session detail / replay, layered above the history list -->
+  <div id="replay-overlay" class="panel-overlay hidden">
+    <div id="replay-panel" class="side-panel side-panel-wide">
+      <div class="panel-header">
+        <h2 class="panel-title" id="replay-title">Session</h2>
+        <button id="replay-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div id="replay-meta"></div>
+      <div class="panel-body">
+        <div id="replay-commands"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       VAULT UNLOCK MODAL
+       Shown at startup only when the vault is protected by a master
+       password. A DPAPI vault unlocks silently as the logged-in user.
+  ================================================================ -->
+  <div id="vault-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="vault-title">
+    <div id="vault-dialog">
+      <div id="vault-header">
+        <span class="material-symbols-outlined" style="color:var(--primary)">bookmark_add</span>
+        <h2 id="vault-title">Unlock your vault</h2>
+      </div>
+      <p class="vault-label">
+        Your API keys and saved device passwords are encrypted with a master password.
+      </p>
+      <form id="vault-form" autocomplete="off">
+        <input type="password" id="vault-password" class="setting-input setting-input-full"
+               placeholder="Master password" autocomplete="current-password" />
+        <div id="vault-error" class="form-error hidden"></div>
+        <div id="vault-actions">
+          <button type="button" id="vault-skip" class="btn-secondary">Continue without unlocking</button>
+          <button type="submit" id="vault-unlock-btn" class="btn-primary">Unlock</button>
+        </div>
+      </form>
+      <p class="vault-hint">
+        Without unlocking, ShellMate still works — you will just have to type your keys and
+        passwords by hand this session.
+      </p>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       SFTP FILE BROWSER PANEL
+       Browses the active SSH tab's remote filesystem over the connection
+       that tab already has open — no second login.
+  ================================================================ -->
+  <div id="sftp-overlay" class="panel-overlay hidden">
+    <div id="sftp-panel" class="side-panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Files</h2>
+        <button id="sftp-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <div id="sftp-toolbar">
+        <button id="sftp-up" class="btn-tertiary" title="Up one directory">
+          <span class="material-symbols-outlined">open_in_new</span>
+        </button>
+        <input type="text" id="sftp-path" spellcheck="false" aria-label="Remote path" />
+        <button id="sftp-go" class="btn-tertiary" title="Go to path">
+          <span class="material-symbols-outlined">search</span>
+        </button>
+        <button id="sftp-upload-btn" class="btn-tertiary" title="Upload a file here">
+          <span class="material-symbols-outlined">upload</span>
+        </button>
+        <input type="file" id="sftp-upload-input" class="hidden" />
+      </div>
+
+      <div class="panel-body">
+        <div id="sftp-status" class="hidden"></div>
+        <div id="sftp-list"></div>
       </div>
     </div>
   </div>
@@ -644,7 +997,14 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/mode.js?v=3"></script>
   <script src="/static/js/chat.js?v=2"></script>
   <script src="/static/js/settings.js?v=2"></script>
+  <script src="/static/js/highlight.js"></script>
+  <script src="/static/js/device.js"></script>
+  <script src="/static/js/highlight_settings.js"></script>
+  <script src="/static/js/vault.js"></script>
+  <script src="/static/js/history.js"></script>
+  <script src="/static/js/drift.js"></script>
   <script src="/static/js/logs.js"></script>
+  <script src="/static/js/sftp.js"></script>
   <script src="/static/js/jira.js"></script>
   <script>
     // ----------------------------------------------------------------

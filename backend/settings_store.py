@@ -1,16 +1,20 @@
 """
 settings_store.py — Application settings persistence for ShellMate.
-Settings are stored in settings.json at the project root.
+Settings are stored in settings.json in the portable data directory
+(see backend/paths.py).
 
 Also provides effective-config helpers — settings.json overrides .env values
 for API keys, model URLs, and the Chroma DB URL.
 """
 import json
+import logging
 from pathlib import Path
 
 from backend import config as env_config
+from backend import paths
+from backend.vault import VaultError, vault
 
-SETTINGS_FILE = Path(__file__).parent.parent / "settings.json"
+logger = logging.getLogger(__name__)
 
 DEFAULT_SETTINGS: dict = {
     "terminal": {
@@ -22,6 +26,27 @@ DEFAULT_SETTINGS: dict = {
         "scrollback_lines": 5000,
         "right_click_paste": True,
         "copy_on_select": False,
+        # Expand short aliases ("ints") into the right command for whatever
+        # platform the tab is connected to.
+        "expand_aliases": True,
+        # Send the platform's paging-off command on connect, so nobody types
+        # "terminal length 0" a hundred times a week.
+        "auto_paging_off": True,
+    },
+    # Regex rules that colour terminal output. Applied to plain text only, so
+    # colour a device sends itself is never disturbed.
+    "highlight": {
+        "enabled": True,
+        "rules": [
+            {"pattern": r"\b(down|err-disabled|failed|failure|denied|unreachable)\b",
+             "colour": "red", "ignore_case": True},
+            {"pattern": r"\b(error|errors|CRC|drop|drops|discard|discards)\b",
+             "colour": "orange", "ignore_case": True},
+            {"pattern": r"\b(up|connected|established|active|success|ok)\b",
+             "colour": "green", "ignore_case": True},
+            {"pattern": r"\b(warning|notice|shutdown|disabled)\b",
+             "colour": "yellow", "ignore_case": True},
+        ],
     },
     "logging": {
         "enabled": False,
@@ -66,10 +91,11 @@ SECRET_FIELDS = {
 
 def get_settings() -> dict:
     """Return raw stored settings deep-merged over the defaults."""
-    if not SETTINGS_FILE.exists():
+    settings_file = paths.settings_file()
+    if not settings_file.exists():
         return _deep_merge(DEFAULT_SETTINGS, {})
     try:
-        stored = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        stored = json.loads(settings_file.read_text(encoding="utf-8"))
         return _deep_merge(DEFAULT_SETTINGS, stored)
     except Exception:
         return _deep_merge(DEFAULT_SETTINGS, {})
@@ -88,11 +114,17 @@ def get_settings_for_ui() -> dict:
     out_providers: dict = {}
     has_value: dict = {}
     for k, v in providers.items():
-        if k in SECRET_FIELDS and v:
+        # A secret's real home is the vault, so "is it set?" has to be asked
+        # there. settings.json is only consulted as a fallback for a key that
+        # predates the vault and has not been migrated yet.
+        stored = vault.get(k) if k in SECRET_FIELDS else ""
+        effective = stored or v
+
+        if k in SECRET_FIELDS and effective:
             out_providers[k] = "•" * 8
         else:
             out_providers[k] = v or ""
-        has_value[k] = bool(v)
+        has_value[k] = bool(effective)
 
     env_preconfigured: dict = {}
     for field, env_name in ENV_BACKED_FIELDS.items():
@@ -114,39 +146,150 @@ def update_settings(partial: dict) -> dict:
     """
     Persist a partial settings update.
 
-    Special handling for `providers` secret fields: a value of all dots (the
-    masked placeholder the UI receives) means "leave unchanged" — only real
-    edits get written.
+    Secrets are diverted into the encrypted vault and never reach
+    settings.json. Everything else is merged and written as before.
+
+    A secret arriving as the masked placeholder ("••••••••") means the user
+    did not touch that field, so it is dropped rather than saved — otherwise
+    opening the settings panel and pressing Save would overwrite every stored
+    key with a row of dots.
     """
+    incoming = dict(partial)
+    secrets = _extract_secrets(incoming)
+
+    if secrets:
+        try:
+            vault.set_many(secrets)
+        except VaultError as exc:
+            raise VaultError(f"Could not save to the vault: {exc}") from exc
+
     current = get_settings()
-    cleaned = _strip_masked_secrets(partial, current)
-    merged = _deep_merge(current, cleaned)
-    SETTINGS_FILE.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+    merged = _deep_merge(current, incoming)
+
+    # Belt and braces: even if a secret slipped through the extraction above,
+    # it must not be written to disk in the clear.
+    for field in SECRET_FIELDS:
+        if field in merged.get("providers", {}):
+            merged["providers"][field] = ""
+
+    settings_file = paths.settings_file()
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+    settings_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
     return get_settings_for_ui()
 
 
+def log_directory() -> Path:
+    """
+    Resolve the configured session-log directory to an absolute path.
+
+    An absolute path in settings is honoured as-is, so a user can log straight
+    to a network share.  A relative one resolves against the portable data
+    directory — never the working directory, which for a double-clicked
+    executable is wherever Explorer happened to leave us.
+    """
+    configured = (get_settings().get("logging", {}) or {}).get("directory", "logs")
+    candidate = Path(configured)
+    return candidate if candidate.is_absolute() else paths.data_dir() / candidate
+
+
 def get_effective(field: str, env_fallback: str = "") -> str:
-    """Return the active value for a provider field — settings.json wins, .env fills in."""
-    s = get_settings()
-    val = (s.get("providers", {}) or {}).get(field, "") or ""
-    return val or env_fallback
+    """
+    Return the active value for a provider field.
+
+    Order of precedence:
+
+    1. The encrypted vault — where every secret now lives.
+    2. settings.json — non-secret fields (Ollama host, Chroma URL) only, plus
+       any plaintext secret left behind by a version predating the vault and
+       not yet migrated.
+    3. The matching .env variable.
+
+    Every AI client resolves its credentials through here, so this one function
+    is what makes the vault apply everywhere.
+    """
+    if field in SECRET_FIELDS:
+        stored = vault.get(field)
+        if stored:
+            return stored
+
+    settings = get_settings()
+    value = (settings.get("providers", {}) or {}).get(field, "") or ""
+    return value or env_fallback
 
 
-def _strip_masked_secrets(partial: dict, current: dict) -> dict:
-    """If a secret field arrived as the masked placeholder, drop it."""
-    if "providers" not in partial or not isinstance(partial["providers"], dict):
-        return partial
-    out = dict(partial)
-    p = dict(partial["providers"])
-    cur_p = current.get("providers", {}) or {}
-    for k in list(p.keys()):
-        if k in SECRET_FIELDS:
-            v = p[k]
-            # Pure-mask placeholder → keep existing value
-            if isinstance(v, str) and v and set(v) <= {"•"}:
-                p[k] = cur_p.get(k, "")
-    out["providers"] = p
-    return out
+# ---------------------------------------------------------------------------
+# Migration off plaintext storage
+# ---------------------------------------------------------------------------
+
+
+def migrate_plaintext_secrets() -> list[str]:
+    """
+    Move any plaintext API keys out of settings.json and into the vault.
+
+    Versions before the vault wrote provider keys straight into settings.json.
+    Leaving them there would mean the vault protects new keys while the old
+    ones stay readable next to it, which is worse than either option alone.
+
+    Skipped silently when the vault is locked — the user gets a prompt first,
+    and migration runs on the next write instead.
+
+    Returns:
+        Names of the fields moved, for the startup log. Never their values.
+    """
+    settings = get_settings()
+    providers = settings.get("providers", {}) or {}
+
+    plaintext = {
+        field: providers.get(field, "")
+        for field in SECRET_FIELDS
+        if providers.get(field)
+    }
+    if not plaintext:
+        return []
+
+    try:
+        vault.set_many(plaintext)
+    except VaultError as exc:
+        logger.warning("Could not migrate plaintext keys into the vault: %s", exc)
+        return []
+
+    # Only blank them in settings.json once the vault write has succeeded, so a
+    # failure here can never destroy the only copy.
+    cleared = {field: "" for field in plaintext}
+    current = get_settings()
+    current.setdefault("providers", {}).update(cleared)
+    settings_file = paths.settings_file()
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+    settings_file.write_text(json.dumps(current, indent=2), encoding="utf-8")
+
+    return sorted(plaintext)
+
+
+def _extract_secrets(partial: dict) -> dict[str, str]:
+    """
+    Pull secret provider fields out of *partial*, mutating it in place.
+
+    Returns the secrets the user actually changed, ready for the vault.
+    Values that are the masked placeholder are treated as "unchanged" and
+    excluded from both the return value and the settings written to disk.
+    """
+    providers = partial.get("providers")
+    if not isinstance(providers, dict):
+        return {}
+
+    secrets: dict[str, str] = {}
+    for field in list(providers):
+        if field not in SECRET_FIELDS:
+            continue
+        value = providers.pop(field)
+        if not isinstance(value, str):
+            continue
+        # Unchanged: the UI echoed back the mask it was given.
+        if value and set(value) <= {"•"}:
+            continue
+        secrets[field] = value
+
+    return secrets
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

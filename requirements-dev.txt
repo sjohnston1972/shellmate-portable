@@ -1,0 +1,18 @@
+# Build- and development-time dependencies for ShellMate.
+# Not needed to run the application — see requirements.txt for that, and
+# nothing here is bundled into the shipped executable.
+
+-r requirements.txt
+
+# Packaging the portable executable (build.spec)
+pyinstaller>=6.3.0
+
+# tools/vendor_assets.py — downloads and subsets the frontend assets.
+# brotli is what gives fontTools woff2 read/write support.
+fonttools>=4.50.0
+brotli>=1.1.0
+
+# Verifies the subsetted icon font still renders. Same shaping engine the
+# browser uses, so a pass here means the icons will not silently degrade
+# into plain text.
+uharfbuzz>=0.39.0

@@ -15,8 +15,10 @@ services:
       # Lets the container reach Ollama (or any other service) running on the Windows host
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./profiles:/app/profiles
-      - ./logs:/app/logs
+      # Settings, connection profiles and session logs all live in this one
+      # directory now (see backend/paths.py), so a single mount persists
+      # everything across container rebuilds.
+      - ./ShellMate-Data:/app/ShellMate-Data
     ports:
       # Optional: expose for direct local access at http://localhost:8765
       # The Cloudflare tunnel reaches the container via the net_core network and does not need this.
