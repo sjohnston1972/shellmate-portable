@@ -4384,3 +4384,154 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   padding: 12px 16px;
   border-top: 1px solid var(--outline);
 }
+
+/* --------------------------------------------------------------------------
+   Broadcast — the command library and sequence options
+   -------------------------------------------------------------------------- */
+#broadcast-library-search {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+#broadcast-library-search:focus { outline: none; border-color: var(--primary-container); }
+
+#broadcast-library {
+  max-height: 190px;
+  overflow-y: auto;
+  margin: 0 -8px 14px;
+  padding: 0 8px 2px;
+  /* A rule under the list, so a library that scrolls does not look like it
+     simply ends where the visible area does. */
+  border-bottom: 1px solid var(--outline);
+}
+
+.snippet-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.snippet-load {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  color: var(--on-surface-dim);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.snippet-load:hover { background: var(--surface-high); color: var(--on-surface); }
+
+.snippet-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snippet-tag {
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--surface-highest);
+  color: var(--on-surface-muted);
+}
+
+/* The ones that change something on the device, called out rather than left
+   to be discovered from the command text. */
+.snippet-writes {
+  background: rgba(255,180,171,0.16);
+  color: var(--error);
+}
+
+.snippet-delete {
+  background: none;
+  border: none;
+  color: var(--on-surface-muted);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.snippet-delete:hover { color: var(--error); }
+.snippet-delete .material-symbols-outlined { font-size: 14px; }
+
+.broadcast-options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 4px;
+  flex-wrap: wrap;
+}
+
+.broadcast-options .setting-label { flex: 0 0 auto; }
+
+#broadcast-wait {
+  width: 78px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+#broadcast-wait:focus { outline: none; border-color: var(--primary-container); }
+
+.broadcast-unit {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  margin-left: -4px;
+}
+
+.broadcast-options .btn-secondary {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.broadcast-options .btn-secondary .material-symbols-outlined { font-size: 15px; }
+
+.broadcast-target-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--on-surface-muted);
+  flex-shrink: 0;
+  min-width: 12px;
+}
+
+.broadcast-target-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Says what Send is about to do, right beside it. */
+#broadcast-summary {
+  margin-left: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+}

@@ -951,11 +951,31 @@ GigEth0/2     unassigned    YES unset  down     down
         </button>
       </div>
       <div class="panel-body">
-        <p class="settings-section-hint">The command is sent once to each device you choose, and each reports back separately. Nothing is mirrored as you type.</p>
+        <p class="settings-section-hint">Commands are sent once to each device you choose, and each reports back separately. Nothing is mirrored as you type.</p>
+
+        <!-- The library first: reaching for a command someone already wrote
+             and checked is better than improvising one to send to a fleet. -->
+        <div class="broadcast-targets-head">
+          <span class="setting-label">Library</span>
+          <input type="search" id="broadcast-library-search" placeholder="Search…" />
+        </div>
+        <div id="broadcast-library"></div>
 
         <div class="setting-row-stack">
-          <label class="setting-label" for="broadcast-command">Command</label>
-          <textarea id="broadcast-command" rows="2" spellcheck="false" placeholder="show version"></textarea>
+          <label class="setting-label" for="broadcast-command">Commands</label>
+          <textarea id="broadcast-command" rows="5" spellcheck="false"
+                    placeholder="show version&#10;show ip interface brief"></textarea>
+          <p class="field-hint">One per line, sent in order. Ctrl+Enter sends.</p>
+        </div>
+
+        <div class="broadcast-options">
+          <label class="setting-label" for="broadcast-wait">Wait between commands</label>
+          <input type="number" id="broadcast-wait" min="0" max="60000" step="100" value="500" />
+          <span class="broadcast-unit">ms</span>
+          <button type="button" id="broadcast-save" class="btn-secondary">
+            <span class="material-symbols-outlined">save</span>
+            Save to library
+          </button>
         </div>
 
         <div class="broadcast-targets-head">
@@ -970,6 +990,7 @@ GigEth0/2     unassigned    YES unset  down     down
             <span class="material-symbols-outlined">send</span>
             Send
           </button>
+          <span id="broadcast-summary"></span>
         </div>
 
         <div id="broadcast-results"></div>

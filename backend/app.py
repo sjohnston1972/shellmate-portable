@@ -44,6 +44,7 @@ from backend.profiles import (
     save_plaintext_credentials, save_profile,
 )
 from backend import platforms as platforms_module
+from backend import snippets
 from backend.session.redact import redact
 from backend.session.transcript import detect_hostname
 from backend.settings_store import (
@@ -864,66 +865,175 @@ class BroadcastRequest(BaseModel):
     """Body for POST /api/broadcast."""
 
     session_ids: list[str]
-    command: str
+    # Either form works. `command` is the single-line original and may itself
+    # contain newlines, which are split into separate commands; `commands` is
+    # the explicit list. Both exist so the one-liner in the docs keeps working.
+    command: str = ""
+    commands: list[str] = []
+    # Milliseconds between one command and the next on the same device. Devices
+    # do not answer instantly, and a save in particular needs a moment before
+    # it will accept anything else.
+    wait_ms: int = 500
     # Enter is pressed unless the caller says otherwise. The alternative
     # default leaves a half-typed line sitting at the prompt on every device,
     # which is a worse thing to do by accident than running the command.
     execute: bool = True
 
+    def command_list(self) -> list[str]:
+        """Every command to send, in order, however the caller expressed it."""
+        raw = list(self.commands) if self.commands else [self.command]
+        out = []
+        for item in raw:
+            # A pasted block arrives as one string. Each line is a command;
+            # blank lines are the paste's formatting, not instructions.
+            out.extend(line.strip() for line in str(item).splitlines() if line.strip())
+        return out
+
+
+# A whole sequence runs inside one request, so it needs a ceiling. Long enough
+# for a real save-and-verify across a rack, short enough that a mistyped wait
+# cannot hold a connection open all afternoon.
+BROADCAST_MAX_SECONDS = 180
+
 
 @app.post("/api/broadcast")
 async def broadcast(request: BroadcastRequest) -> dict:
     """
-    Send one command to several sessions.
+    Send one or more commands to several sessions.
 
     Deliberately compose-and-send rather than mirroring keystrokes into every
     tab. Mirroring means a stray keypress — or a half-typed command answered
     by a device that autocompletes — reaches the whole fleet, and the operator
-    never sees the finished command before it lands. Here the command is
+    never sees the finished command before it lands. Here the commands are
     written once, the targets are named, and each result comes back
     individually so a partial failure is visible rather than assumed.
 
-    Each command still passes through that session's outbound pipeline, so
+    Devices run **concurrently** and commands run **in order** on each one.
+    That is the only arrangement that makes the wait mean what people expect:
+    a two-second gap between save and verify, not two seconds multiplied by
+    the number of switches.
+
+    Every command still passes through that session's outbound pipeline, so
     alias expansion and (later) guardrails apply exactly as when typed.
     """
-    command = request.command.strip()
-    if not command:
+    commands = request.command_list()
+    if not commands:
         raise HTTPException(status_code=400, detail="No command given.")
     if not request.session_ids:
         raise HTTPException(status_code=400, detail="No sessions selected.")
 
-    results = []
-    for session_id in request.session_ids:
+    wait = max(0, min(60_000, request.wait_ms)) / 1000
+
+    async def run_one(session_id: str) -> dict:
         session = session_manager.get_session(session_id)
         if session is None:
-            results.append({"session_id": session_id, "ok": False,
-                            "label": "", "error": "Session not found"})
-            continue
+            return {"session_id": session_id, "ok": False, "label": "",
+                    "error": "Session not found", "sent": []}
 
         label = session.get("display_label") or session.get("hostname") or session_id[:8]
         handler = session["handler"]
 
         if not handler.is_connected:
-            results.append({"session_id": session_id, "ok": False,
-                            "label": label, "error": "Not connected"})
-            continue
+            return {"session_id": session_id, "ok": False, "label": label,
+                    "error": "Not connected", "sent": []}
 
-        try:
-            outbound = session["pipeline"].process(command + ("\r" if request.execute else ""))
-            await asyncio.to_thread(handler.send, outbound.encode("utf-8", errors="replace"))
-            expansion = session["pipeline"].last_expansion
-            results.append({
-                "session_id": session_id, "ok": True, "label": label,
-                "sent": expansion[1] if expansion else command,
-            })
-        except Exception as exc:
-            logger.warning("Broadcast to %s failed: %s", label, exc)
-            results.append({"session_id": session_id, "ok": False,
-                            "label": label, "error": str(exc)})
+        sent = []
+        for index, command in enumerate(commands):
+            try:
+                outbound = session["pipeline"].process(
+                    command + ("\r" if request.execute else ""))
+                await asyncio.to_thread(
+                    handler.send, outbound.encode("utf-8", errors="replace"))
+                expansion = session["pipeline"].last_expansion
+                sent.append(expansion[1] if expansion else command)
+            except Exception as exc:
+                logger.warning("Broadcast to %s failed on %r: %s", label, command, exc)
+                # Stop this device rather than pressing on: the rest of a
+                # sequence rarely makes sense once a step has failed, and
+                # blindly continuing is how half-applied changes happen.
+                return {"session_id": session_id, "ok": False, "label": label,
+                        "error": f"{exc} (after {len(sent)} of {len(commands)})",
+                        "sent": sent}
+
+            if wait and index < len(commands) - 1:
+                await asyncio.sleep(wait)
+
+        return {"session_id": session_id, "ok": True, "label": label, "sent": sent}
+
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*(run_one(sid) for sid in request.session_ids)),
+            timeout=BROADCAST_MAX_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=(f"The sequence was still running after {BROADCAST_MAX_SECONDS}s "
+                    f"and was abandoned. Some commands will already have been sent — "
+                    f"check the tabs."),
+        ) from None
 
     sent = sum(1 for r in results if r["ok"])
-    logger.info("Broadcast %r to %s of %s sessions", command, sent, len(results))
-    return {"command": command, "sent": sent, "total": len(results), "results": results}
+    logger.info("Broadcast %s command(s) to %s of %s sessions",
+                len(commands), sent, len(results))
+    return {
+        "commands": commands, "command": commands[0],
+        "sent": sent, "total": len(results), "results": results,
+    }
+
+
+# ---------------------------------------------------------------------------
+# REST — The saved command library
+# ---------------------------------------------------------------------------
+
+
+class SnippetRequest(BaseModel):
+    """Body for PUT /api/snippets/{id}."""
+
+    name: str = ""
+    commands: list[str] = []
+    description: str = ""
+    platform: str = ""
+    wait_ms: int = 500
+    writes: bool = False
+
+
+@app.get("/api/snippets")
+async def snippets_list() -> dict:
+    """Return the saved command library."""
+    library = await asyncio.to_thread(snippets.load_snippets)
+    return {
+        "snippets": [s.as_dict() for s in library],
+        "path": str(snippets.snippets_path()),
+    }
+
+
+@app.put("/api/snippets/{snippet_id}")
+async def snippet_save(snippet_id: str, request: SnippetRequest) -> dict:
+    """Create or update one snippet. Pass "new" as the id to create one."""
+    fields = request.model_dump()
+    fields["id"] = "" if snippet_id == "new" else snippet_id
+    try:
+        saved = await asyncio.to_thread(snippets.save_snippet, fields)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return saved.as_dict()
+
+
+@app.delete("/api/snippets/{snippet_id}")
+async def snippet_delete(snippet_id: str) -> dict:
+    """Remove a snippet from the library."""
+    removed = await asyncio.to_thread(snippets.delete_snippet, snippet_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="No such snippet.")
+    return {"status": "ok", "id": snippet_id}
+
+
+@app.post("/api/snippets/reset")
+async def snippets_reset() -> dict:
+    """Put the shipped library back, discarding every edit."""
+    library = await asyncio.to_thread(snippets.reset_to_defaults)
+    return {"snippets": [s.as_dict() for s in library]}
 
 
 # ---------------------------------------------------------------------------

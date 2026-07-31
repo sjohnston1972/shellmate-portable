@@ -1,15 +1,58 @@
 # Broadcast and the local API
 
-## Sending one command to several devices
+## Sending commands to several devices
 
 Open **Broadcast** from the sidebar, or press `Ctrl+Shift+B`.
 
-Tick the devices, type the command, and send. Each device reports back
+Tick the devices, write the commands, and send. Each device reports back
 individually, so a session that was disconnected shows as a failure rather
 than being quietly skipped.
 
 Disconnected sessions start unticked and cannot be selected — they would fail
-anyway, and a checkbox that does nothing is worse than one that is absent.
+anyway, and a checkbox that does nothing is worse than one that is absent. The
+tab you were looking at starts ticked.
+
+### The library
+
+The commands worth broadcasting are usually the ones you send often, and a
+broadcast is the worst possible place to be improvising. So the library holds
+them, written once and checked: saving the configuration on each platform,
+interface and error summaries, neighbours, logs, a health check.
+
+Click one to load it. **Save to library** puts whatever is in the box back,
+under a name.
+
+Anything that changes the device is marked **writes**. Nothing destructive
+ships in the library — `write erase` one mis-click away is not a default.
+
+The library lives in `snippets.json` in your data folder, so you can edit it
+in bulk or carry it between machines. Deleting a built-in keeps it deleted.
+
+### Sequences
+
+One command per line, sent in order, with a wait between them. That is what
+makes save-and-verify a single action:
+
+```
+write memory
+show startup-config | include ^Building
+```
+
+A device that has just written its configuration will not answer for a second
+or two, so the wait is part of the task rather than a preference — snippets
+carry their own.
+
+Devices run **at the same time** and commands run **in order on each device**.
+A two-second gap means two seconds, not two seconds multiplied by the number
+of switches.
+
+A block of configuration is just several lines. If one fails, that device
+stops there rather than pressing on: the rest of a sequence rarely makes sense
+once a step has failed, and continuing is how half-applied changes happen.
+
+There is no progress bar. There does not need to be one — the commands appear
+in the tabs as they land, which is a better view of what is happening than any
+progress bar would be.
 
 ### Why it is not keystroke mirroring
 
@@ -21,11 +64,11 @@ That is the wrong shape for a tool used on production kit:
 - Devices with different prompts, or that autocomplete differently, diverge
   part-way through.
 
-Here the command is written once, the targets are listed by name, and you
-confirm a summary before anything is sent. Slower by a second, and much
-harder to regret.
+Here the commands are written once, and before anything is sent you confirm a
+summary listing every command against every device by name. Slower by a
+second, and much harder to regret.
 
-Each command still passes through that session's normal outbound path, so
+Every command still passes through that session's normal outbound path, so
 alias expansion applies exactly as it would if you had typed it.
 
 ## The local API
@@ -48,7 +91,7 @@ taken. `GET /api/system/info` confirms which.
 | `GET` | `/api/sessions` | List open sessions |
 | `POST` | `/api/sessions` | Open a connection |
 | `DELETE` | `/api/sessions/{id}` | Close one |
-| `POST` | `/api/broadcast` | Send a command to several sessions |
+| `POST` | `/api/broadcast` | Send commands to several sessions |
 
 Opening an SSH session:
 
@@ -66,6 +109,30 @@ curl -X POST http://127.0.0.1:8765/api/broadcast \
   -H "Content-Type: application/json" \
   -d '{"session_ids":["...","..."],"command":"show version"}'
 ```
+
+A sequence, with a wait between each command:
+
+```
+curl -X POST http://127.0.0.1:8765/api/broadcast \
+  -H "Content-Type: application/json" \
+  -d '{"session_ids":["...","..."],
+       "commands":["write memory","show startup-config | include ^Building"],
+       "wait_ms":2500}'
+```
+
+`command` also accepts a block with newlines in it, which is split into one
+command per line. A whole sequence runs inside the one request and is
+abandoned after 180 seconds, so a mistyped wait cannot hold the connection
+open indefinitely.
+
+### The command library
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/snippets` | The saved command library |
+| `PUT` | `/api/snippets/{id}` | Create or update one (`new` to create) |
+| `DELETE` | `/api/snippets/{id}` | Remove one |
+| `POST` | `/api/snippets/reset` | Restore the shipped library |
 
 ### History and configuration
 

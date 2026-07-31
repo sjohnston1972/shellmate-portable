@@ -119,5 +119,6 @@ Everything lives in `ShellMate-Data` beside the executable.
 | `vault.json` | API keys and saved passwords, encrypted |
 | `shellmate.db` | Session history and configuration snapshots |
 | `platforms.json` | What ShellMate knows about each device type |
+| `snippets.json` | The saved command library used by Broadcast |
 | `logs/` | Session logs, if you turn them on |
 | `shellmate.log` | What the application itself did, for troubleshooting |
