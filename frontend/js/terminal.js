@@ -254,28 +254,26 @@
       return true;
     });
 
-    // Double-click: copy the word xterm selects.
-    // Strategy: set a flag on the SECOND mousedown (detail===2, before xterm
-    // processes the click), then read the selection inside onSelectionChange
-    // which fires the instant xterm has committed the word selection.
-    let _pendingDblClickCopy = false;
-
-    container.addEventListener('mousedown', (e) => {
-      if (e.detail === 2) {
-        _pendingDblClickCopy = true;
-        // Safety reset in case onSelectionChange never fires
-        setTimeout(() => { _pendingDblClickCopy = false; }, 500);
-      }
-    });
-
-    terminal.onSelectionChange(() => {
-      if (!_pendingDblClickCopy) return;
-      _pendingDblClickCopy = false;
-      const sel = terminal.getSelection();
-      if (!sel) return;
-      navigator.clipboard.writeText(sel)
-        .then(() => { window._showCopyToast && window._showCopyToast(sel); })
-        .catch(() => {});
+    // Copy whatever the mouse selects — a dragged range or a double-clicked
+    // word. This previously only handled double-click, by flagging the second
+    // mousedown and reading the selection in onSelectionChange, so dragging
+    // out a range selected it but copied nothing.
+    //
+    // Waiting for mouseup rather than onSelectionChange is what makes a drag
+    // work: xterm fires selection changes continuously while the pointer
+    // moves, so copying on those would clip the selection to wherever the
+    // mouse happened to be part-way through.
+    container.addEventListener('mouseup', (e) => {
+      if (e.button !== 0) return;            // left button only
+      // Let xterm commit the selection before reading it.
+      setTimeout(() => {
+        if (!terminal.hasSelection()) return;
+        const sel = terminal.getSelection();
+        if (!sel) return;
+        navigator.clipboard.writeText(sel)
+          .then(() => { window._showCopyToast && window._showCopyToast(sel); })
+          .catch(() => {});
+      }, 0);
     });
 
     // Right-click: paste from clipboard

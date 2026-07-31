@@ -150,6 +150,54 @@ def save_profile(fields: dict) -> dict:
     return profile
 
 
+def record_detected_hostname(target: str, port: int, username: str, detected: str) -> bool:
+    """
+    Note the device's real name against the profile used to reach it.
+
+    Connecting by IP leaves a saved connection called "192.168.20.16", which
+    tells you nothing on the welcome screen. The hostname is known a second
+    after connecting, so use it.
+
+    The connect target is deliberately *not* rewritten. A profile named
+    "S3-R1" that still dials the IP works everywhere; one that dials "S3-R1"
+    only works where that name resolves, which on a management network is
+    frequently nowhere. So the display name changes and the address does not.
+
+    The name is only filled in when the user has not chosen one — a profile
+    someone deliberately called "Glasgow core, top of rack" is left alone.
+
+    Returns:
+        True if a profile was updated.
+    """
+    if not detected or not target:
+        return False
+
+    profiles = _load()
+    changed = False
+
+    for profile in profiles:
+        if profile.get("hostname") != target:
+            continue
+        if int(profile.get("port") or 0) != int(port or 0):
+            continue
+        if username and profile.get("username") not in ("", username):
+            continue
+
+        profile["detected_hostname"] = detected
+
+        # Only replace a name that is still just the address.
+        current = (profile.get("name") or "").strip()
+        if current in ("", target) and current != detected:
+            profile["name"] = detected
+            changed = True
+        elif profile.get("detected_hostname") != detected:
+            changed = True
+
+    if changed:
+        _save(profiles)
+    return changed
+
+
 def delete_profile(profile_id: str) -> bool:
     """
     Delete a profile and any credentials remembered for it.

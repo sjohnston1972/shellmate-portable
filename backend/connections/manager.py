@@ -45,6 +45,16 @@ class SessionManager:
         # Primary store: session_id -> session dict
         self._sessions: dict[str, dict[str, Any]] = {}
 
+        # "host:port" -> hostname the device reported.
+        #
+        # Exists to remove an ordering race. A device announces its name
+        # within milliseconds of connecting, but the frontend saves the
+        # connection profile a moment later — so the name is usually known
+        # *before* there is a profile to write it to, and the write is lost.
+        # Recording it here means profile creation can look it up whichever
+        # way round the two happen.
+        self.detected_hostnames: dict[str, str] = {}
+
     # ------------------------------------------------------------------
     # Session creation
     # ------------------------------------------------------------------

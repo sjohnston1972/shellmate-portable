@@ -62,6 +62,14 @@
     document.getElementById('btn-refresh-ports')
       .addEventListener('click', () => loadSerialPorts());
 
+    const forgetBtn = document.getElementById('btn-forget-credentials');
+    if (forgetBtn) {
+      forgetBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        forgetSavedCredentials();
+      });
+    }
+
     typeSelect.addEventListener('change', () => applyConnectionType(typeSelect.value));
 
     overlay.addEventListener('click', (e) => {
@@ -422,17 +430,37 @@
   function updateRememberHint() {
     const hint = document.getElementById('remember-hint');
     const box  = document.getElementById('field-remember');
+    const badge = document.getElementById('saved-credential-badge');
     if (!hint || !box) return;
 
+    if (badge) badge.classList.toggle('hidden', !activeProfileHasCredentials);
+
     if (activeProfileHasCredentials) {
-      hint.textContent = 'A password is already saved for this connection — leave the field blank to use it.';
+      hint.textContent = 'Leave the password blank to use the saved one, or type a new one to replace it.';
       box.checked = true;
-    } else if (!activeProfileId) {
-      hint.textContent = 'Saved against this connection once it succeeds, encrypted on disk.';
-      box.checked = false;
+      const field = document.getElementById('field-password');
+      if (field) field.placeholder = 'Using saved password';
     } else {
-      hint.textContent = 'Saved against this connection once it succeeds.';
+      hint.textContent = activeProfileId
+        ? 'Saved against this connection once it succeeds.'
+        : 'Saved against this connection once it succeeds, encrypted on disk.';
       box.checked = false;
+      const field = document.getElementById('field-password');
+      if (field) field.placeholder = '';
+    }
+  }
+
+  /** Forget the credential stored for the profile currently in the dialog. */
+  async function forgetSavedCredentials() {
+    if (!activeProfileId) return;
+    try {
+      await fetch(`/api/profiles/${activeProfileId}/credentials`, { method: 'DELETE' });
+      activeProfileHasCredentials = false;
+      updateRememberHint();
+      await loadProfiles();
+      renderWelcomeProfiles();
+    } catch (e) {
+      showError('Could not forget the saved password.');
     }
   }
 

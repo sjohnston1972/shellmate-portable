@@ -265,7 +265,14 @@
           </div>
 
           <div class="form-group">
-            <label for="field-password">Password</label>
+            <label for="field-password">
+              Password
+              <span id="saved-credential-badge" class="saved-badge hidden">
+                <span class="material-symbols-outlined">bookmark_add</span>
+                saved in vault
+                <button type="button" id="btn-forget-credentials" title="Forget the saved password">forget</button>
+              </span>
+            </label>
             <input type="password" id="field-password" />
             <p class="field-hint" data-for="telnet">
               Optional. If given, ShellMate answers the device's login prompts for you.

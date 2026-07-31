@@ -39,7 +39,7 @@ from backend.connections.manager import SessionManager
 from backend.connections.serial_handler import available_ports
 from backend.profiles import (
     CREDENTIAL_FIELDS, delete_profile, forget_credentials, get_profiles,
-    load_credentials, save_credentials, save_profile,
+    load_credentials, record_detected_hostname, save_credentials, save_profile,
 )
 from backend.session.transcript import detect_hostname
 from backend.settings_store import (
@@ -539,7 +539,25 @@ async def list_profiles() -> list[dict]:
 @app.post("/api/profiles")
 async def create_profile(request: SaveProfileRequest) -> dict:
     """Save a connection profile (no password or passphrase is ever stored)."""
-    return save_profile(request.model_dump())
+    profile = save_profile(request.model_dump())
+
+    # The device usually announces its name before the frontend gets round to
+    # saving the profile, so the name is known but there was nothing to write
+    # it to. Look it up by target rather than relying on the two happening in
+    # a particular order.
+    target = f"{request.hostname}:{request.port}"
+    detected = session_manager.detected_hostnames.get(target)
+    if detected and detected != request.hostname:
+        try:
+            await asyncio.to_thread(
+                record_detected_hostname,
+                request.hostname, request.port, request.username, detected,
+            )
+            return next((p for p in get_profiles() if p["id"] == profile["id"]), profile)
+        except Exception as exc:
+            logger.debug("Could not name the new profile after the device: %s", exc)
+
+    return profile
 
 
 @app.delete("/api/profiles/{profile_id}")
@@ -972,7 +990,29 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         # Config snapshots are keyed by hostname, and keying
                         # them by IP would file the same device under two
                         # names depending on how it was reached that day.
+                        previous_target = session["hostname"]
                         session["hostname"] = detected
+
+                        # Remember it against the address so a profile saved
+                        # after this point can still be named correctly.
+                        session_manager.detected_hostnames[
+                            f"{previous_target}:{session.get('port') or 0}"
+                        ] = detected
+
+                        # Name the saved connection after the device, so the
+                        # welcome screen shows "S3-R1" rather than an address.
+                        # The address it dials is left alone — see
+                        # record_detected_hostname.
+                        try:
+                            await asyncio.to_thread(
+                                record_detected_hostname,
+                                previous_target,
+                                session.get("port") or 0,
+                                session.get("username") or "",
+                                detected,
+                            )
+                        except Exception as exc:
+                            logger.debug("Could not record hostname on profile: %s", exc)
 
         except WebSocketDisconnect:
             pass

@@ -17,6 +17,13 @@
   // State
   // -------------------------------------------------------------------------
 
+  /**
+   * Ctrl-U: kill the current input line. Recognised by IOS, NX-OS, Junos
+   * and readline shells alike. Written as an escape rather than a literal
+   * control byte so the source file stays plain text.
+   */
+  const KILL_LINE = '\x15';
+
   /** @type {Array<Object>} All open tabs */
   const tabs = [];
 
@@ -49,6 +56,10 @@
       welcomeScreen.classList.remove('hidden');
       if (typeof window.renderWelcomeProfiles === 'function') window.renderWelcomeProfiles();
     });
+
+    // Right-click the brand for a quicker route than the welcome screen.
+    document.getElementById('tab-bar-brand')
+      .addEventListener('contextmenu', _showBrandContextMenu);
 
     // Keyboard shortcuts
     document.addEventListener('keydown', handleKeyboard);
@@ -419,9 +430,18 @@
     _hideTabContextMenu();
     _ctxSessionId = sessionId;
 
+    const tab = tabs.find(t => t.sessionId === sessionId);
+    const disconnected = tab && !tab.isConnected;
+
     _ctxMenu = document.createElement('div');
     _ctxMenu.className = 'tab-context-menu';
     _ctxMenu.innerHTML = `
+      ${disconnected ? `
+      <button data-action="reconnect">
+        <span class="material-symbols-outlined">add_circle</span>
+        Reconnect
+      </button>
+      <div class="ctx-sep"></div>` : ''}
       <button data-action="clear">
         <span class="material-symbols-outlined">backspace</span>
         Clear console
@@ -451,6 +471,7 @@
       const tab = tabs.find(t => t.sessionId === _ctxSessionId);
       if (tab) {
         switch (btn.dataset.action) {
+          case 'reconnect': _reconnectSession(tab);   break;
           case 'clear':     _clearConsole(tab);       break;
           case 'copy':      _copyHistory(tab);        break;
           case 'duplicate': _duplicateSession(tab);   break;
@@ -472,9 +493,22 @@
     if (_ctxMenu) { _ctxMenu.remove(); _ctxMenu = null; }
   }
 
-  /** Clear the xterm.js viewport and scrollback for this tab. */
+  /**
+   * Clear the console: both the display and whatever is half-typed.
+   *
+   * terminal.clear() only wipes what ShellMate has drawn. Anything already
+   * typed at the prompt lives on the *device's* input line, so it survives
+   * and reappears on the fresh screen. Ctrl-U is the kill-line on IOS, NX-OS,
+   * Junos and readline shells alike, so send that too and let the device
+   * redraw an empty prompt.
+   */
   function _clearConsole(tab) {
     try { tab.terminalInstance.clear(); } catch (_) {}
+    try {
+      if (tab.isConnected && tab.websocket && tab.websocket.readyState === WebSocket.OPEN) {
+        tab.websocket.send(JSON.stringify({ type: 'input', data: KILL_LINE }));
+      }
+    } catch (_) {}
   }
 
   /** Copy all lines from the terminal buffer to clipboard. */
@@ -497,6 +531,140 @@
   }
 
   /** Open the connection dialog pre-filled with this session's details. */
+  /**
+   * Context menu on the brand: new session, or straight to a saved one.
+   *
+   * The saved connections are listed inline rather than behind a submenu —
+   * reconnecting to a device you use daily should be one gesture, not three.
+   */
+  async function _showBrandContextMenu(e) {
+    e.preventDefault();
+    _hideTabContextMenu();
+
+    let profiles = [];
+    try {
+      const res = await fetch('/api/profiles');
+      if (res.ok) profiles = await res.json();
+    } catch (_) { /* the New session option still works */ }
+
+    _ctxMenu = document.createElement('div');
+    _ctxMenu.className = 'tab-context-menu';
+
+    const newBtn = document.createElement('button');
+    newBtn.dataset.action = 'new';
+    newBtn.innerHTML =
+      '<span class="material-symbols-outlined">add_circle</span> New session';
+    _ctxMenu.appendChild(newBtn);
+
+    if (profiles.length) {
+      const sep = document.createElement('div');
+      sep.className = 'ctx-sep';
+      _ctxMenu.appendChild(sep);
+
+      const heading = document.createElement('div');
+      heading.className = 'ctx-heading';
+      heading.textContent = 'Saved connections';
+      _ctxMenu.appendChild(heading);
+
+      profiles.slice(0, 12).forEach(p => {
+        const btn = document.createElement('button');
+        btn.dataset.action = 'open';
+        btn.dataset.profileId = p.id;
+        const icon = document.createElement('span');
+        icon.className = 'material-symbols-outlined';
+        icon.textContent = p.connection_type === 'serial' ? 'cable' : 'terminal';
+        const label = document.createElement('span');
+        // textContent — a profile name is user input.
+        label.textContent = p.name || p.hostname || p.serial_port || 'unnamed';
+        btn.appendChild(icon);
+        btn.appendChild(label);
+        _ctxMenu.appendChild(btn);
+      });
+    }
+
+    document.body.appendChild(_ctxMenu);
+    _ctxMenu.style.left = `${Math.min(e.clientX, window.innerWidth - 240)}px`;
+    _ctxMenu.style.top  = `${Math.min(e.clientY, window.innerHeight - 60 - _ctxMenu.offsetHeight)}px`;
+
+    _ctxMenu.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('[data-action]');
+      if (!btn) return;
+      if (btn.dataset.action === 'new') {
+        if (typeof window.showConnectionDialog === 'function') window.showConnectionDialog();
+      } else if (btn.dataset.action === 'open') {
+        const profile = profiles.find(p => p.id === btn.dataset.profileId);
+        if (profile && typeof window.showConnectionDialog === 'function') {
+          window.showConnectionDialog(profile);
+        }
+      }
+      _hideTabContextMenu();
+    });
+
+    setTimeout(() => {
+      document.addEventListener('click', _hideTabContextMenu, { once: true });
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') _hideTabContextMenu();
+      }, { once: true });
+    }, 0);
+  }
+
+  /**
+   * Reconnect a dropped session, reusing the details already on the tab.
+   *
+   * Tries silently first: if the device has a saved profile with credentials
+   * in the vault, the backend can fill them in and the session comes straight
+   * back. Only when that is not possible does the dialog appear, pre-filled,
+   * so the user types a password rather than everything.
+   *
+   * The old tab is closed only once the new one is up — a failed reconnect
+   * must not also lose the buffer you were reading.
+   */
+  async function _reconnectSession(tab) {
+    const index = tabs.findIndex(t => t.sessionId === tab.sessionId);
+
+    let profile = null;
+    try {
+      const res = await fetch('/api/profiles');
+      const profiles = res.ok ? await res.json() : [];
+      profile = profiles.find(p =>
+        (p.connection_type || 'ssh') === (tab.connectionType || 'ssh') &&
+        (p.hostname === tab.hostname || p.name === tab.label)) || null;
+    } catch (_) { /* fall through to the dialog */ }
+
+    if (profile && profile.has_saved_credentials) {
+      try {
+        const res = await fetch('/api/sessions', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            connection_type: profile.connection_type || 'ssh',
+            hostname:        profile.hostname || '',
+            port:            profile.port || 22,
+            username:        profile.username || '',
+            serial_port:     profile.serial_port || '',
+            baud_rate:       profile.baud_rate || 9600,
+            display_label:   profile.name || '',
+            profile_id:      profile.id,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (index !== -1) closeTab(index);
+          createTab(data);
+          return;
+        }
+      } catch (_) { /* fall through to the dialog */ }
+    }
+
+    if (typeof window.showConnectionDialog === 'function') {
+      window.showConnectionDialog(profile || {
+        name:            tab.label,
+        hostname:        tab.hostname,
+        connection_type: tab.connectionType || 'ssh',
+      });
+    }
+  }
+
   async function _duplicateSession(tab) {
     try {
       const res      = await fetch('/api/sessions');
