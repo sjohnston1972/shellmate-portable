@@ -65,6 +65,8 @@
 }
 
 /* Elements that use hardcoded light-on-dark rgba values need explicit overrides */
+[data-theme="light"] #sidebar-logo-img,
+[data-theme="light"] #welcome-logo               { filter: none; }
 [data-theme="light"] .sidebar-link               { color: rgba(28,27,34,0.35); }
 [data-theme="light"] .sidebar-link:hover         { color: var(--primary); }
 [data-theme="light"] .sidebar-link.active        { color: var(--primary-container); }
@@ -182,6 +184,9 @@ a {
   width: 40px;
   height: 40px;
   object-fit: contain;
+  /* The logo is dark line-art on transparency and vanishes on a dark
+     surface. Inverting turns it white; the light theme resets it below. */
+  filter: invert(1);
 }
 
 /* Nav section — grows to fill space between logo and bottom links */
@@ -980,6 +985,11 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 
 /* Chat input area */
 #chat-input-area {
+  /* One height for the input and the send button. Derived from the UI font
+     so they stay matched when it changes: the textarea sizes itself to
+     line-height + padding + border, and a fixed button height drifts out of
+     step the moment the font does. */
+  --chat-bar-h: calc(var(--ui-font-size, 13px) * 1.4 + 18px);
   display: flex;
   align-items: flex-end;
   gap: 8px;
@@ -998,7 +1008,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   font-size: var(--ui-font-size, 13px);
   padding: 8px 10px;
   resize: none;
-  min-height: 36px;
+  min-height: var(--chat-bar-h);
   max-height: 120px;
   overflow-y: auto;
   line-height: 1.4;
@@ -1015,8 +1025,13 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #chat-send {
-  padding: 8px 12px;
+  /* Matches the input exactly; see --chat-bar-h above. */
+  height: var(--chat-bar-h);
+  padding: 0 14px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 4px;
 }
 
@@ -1055,6 +1070,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #welcome-logo {
+  filter: invert(1);
   height: 1.5em;
   width: auto;
   object-fit: contain;
@@ -1248,6 +1264,12 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 #status-context.ctx-green { color: #4ade80; }
 #status-context.ctx-amber { color: #fbbf24; }
 #status-context.ctx-red   { color: #f87171; }
+
+/* The shades above are tuned for a dark background. On light they drop to
+   roughly 2:1 against the status bar, which is unreadable. */
+[data-theme="light"] #status-context.ctx-green { color: #15803d; }
+[data-theme="light"] #status-context.ctx-amber { color: #a16207; }
+[data-theme="light"] #status-context.ctx-red   { color: #b91c1c; }
 
 #status-connection {
   color: var(--on-surface-dim);
@@ -1964,6 +1986,15 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   padding: 10px 12px;
   transition: background 0.2s, color 0.2s;
   /* background/color/font set by JS */
+
+  /* Fixed height, deliberately. The preview renders at whatever font size
+     and line height the user is choosing, so letting it size to its content
+     meant every adjustment resized this block and nudged the whole settings
+     panel up or down — moving the control out from under the pointer mid-
+     drag. Larger fonts now scroll inside the preview instead. */
+  height: 150px;
+  overflow: auto;
+  box-sizing: border-box;
 }
 
 .settings-preview-terminal pre {

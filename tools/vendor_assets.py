@@ -118,21 +118,44 @@ def vendor_font_stylesheet(filename: str, url: str) -> list[Path]:
     return written
 
 
-def used_icon_names() -> set[str]:
-    """
-    Return every Material Symbols ligature name referenced by the frontend.
+def _frontend_sources() -> list[Path]:
+    return [FRONTEND_DIR / "index.html", *(FRONTEND_DIR / "js").glob("*.js")]
 
-    Icons are written as the icon name in the element body, e.g.
-    ``<span class="material-symbols-outlined">settings</span>``, and the font
-    renders that text through a ligature.
+
+def used_icon_names(available: set[str] | None = None) -> set[str]:
+    """
+    Return every Material Symbols ligature name the frontend might use.
+
+    Icons usually appear as the name in the element body, e.g.
+    ``<span class="material-symbols-outlined">settings</span>``, which the
+    font renders through a ligature. But plenty are assigned from JavaScript
+    instead — ``icon.textContent = 'dark_mode'``, or picked by a ternary —
+    and a scan that only reads markup misses those. That is not a
+    hypothetical: subsetting on the markup alone dropped ``dark_mode`` and
+    ``cable``, and the theme toggle rendered the words "dark_mode" on screen.
+
+    So when the full font is available, every identifier-shaped token in the
+    frontend is intersected with the font's own glyph names. That
+    over-includes a little — "search" and "close" are ordinary words as well
+    as icons — but a few unnecessary glyphs cost a kilobyte each, whereas a
+    missing one is a visible defect. Erring towards including is the right
+    way round.
+
+    Args:
+        available: Glyph names present in the full font. When omitted, falls
+            back to the markup-only scan.
     """
     names: set[str] = set()
-    pattern = re.compile(r"material-symbols-outlined[^>]*>\s*([a-z0-9_]+)\s*<")
+    markup = re.compile(r"material-symbols-outlined[^>]*>\s*([a-z0-9_]+)\s*<")
+    token = re.compile(r"\b([a-z][a-z0-9_]{2,30})\b")
 
-    sources = [FRONTEND_DIR / "index.html", *(FRONTEND_DIR / "js").glob("*.js")]
-    for source in sources:
-        if source.exists():
-            names.update(pattern.findall(source.read_text(encoding="utf-8")))
+    for source in _frontend_sources():
+        if not source.exists():
+            continue
+        text = source.read_text(encoding="utf-8")
+        names.update(markup.findall(text))
+        if available:
+            names.update(t for t in token.findall(text) if t in available)
 
     return names
 
@@ -178,6 +201,10 @@ def subset_icon_font(font_path: Path, icon_names: set[str]) -> None:
 
     font = TTFont(str(font_path))
     available = set(font.getGlyphOrder())
+
+    # Recompute against the real glyph list: names assigned from JavaScript
+    # are only discoverable by intersecting source tokens with it.
+    icon_names = used_icon_names(available)
 
     # Glyph names match icon names exactly. The ".fill" variants back the FILL
     # axis, so keep them too or filled icons fall back to the outlined shape.
@@ -273,11 +300,9 @@ def main() -> int:
         # The icon font is the one worth shrinking; the text fonts are already
         # split into small per-subset files by Google.
         if filename == "material-symbols.css" and written:
-            icons = used_icon_names()
-            if icons:
-                subset_icon_font(written[0], icons)
-            else:
-                print("    ! found no icon references - keeping the full font")
+            # The real set is resolved inside subset_icon_font, once the
+            # font's glyph names are known.
+            subset_icon_font(written[0], used_icon_names())
 
     print("\nDone.")
     return 0

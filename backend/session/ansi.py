@@ -95,23 +95,115 @@ def apply_carriage_returns(line: str) -> str:
     return result
 
 
+# Cursor movement and erase within a line. These have to be *applied*, not
+# stripped: a device redrawing its input line moves the cursor back and
+# retypes over what is there, so discarding the movement concatenates the two
+# versions instead of overwriting.
+_CUB = re.compile(r"\x1b\[(\d*)D")     # cursor back
+_CUF = re.compile(r"\x1b\[(\d*)C")     # cursor forward
+_EL = re.compile(r"\x1b\[(\d?)K")      # erase in line
+_CHA = re.compile(r"\x1b\[(\d*)G")     # cursor to column
+
+# Anything that moves the cursor or erases within the current line.
+_LINE_EDIT_RE = re.compile(r"\x1b\[\d*[DCGK]")
+
+
+def apply_line_edits(text: str) -> str:
+    """
+    Replay cursor movement and erase-in-line against a single line.
+
+    Devices redraw their input line rather than reprinting it: tab completion,
+    ``?`` help, and arrow-key history all emit "move the cursor back N, then
+    write". Stripping those escapes — as simply removing all sequences does —
+    turns ``Tunnel7`` + back-7 + ``Tunnel7`` into ``Tunnel7Tunnel7``.
+
+    That is not hypothetical. A real session recorded a command as
+    ``Tunnel7Tunnel7Tunnel7S3-R2#Tunnel7Tunnel7Tunnel7``.
+
+    This models just enough of a terminal to be correct for one line: a
+    character buffer and a cursor. Writing overwrites at the cursor rather
+    than appending, which is what a terminal actually does.
+    """
+    if not _LINE_EDIT_RE.search(text):
+        return text
+
+    buffer: list[str] = []
+    cursor = 0
+    index = 0
+    length = len(text)
+
+    def write(char: str) -> None:
+        nonlocal cursor
+        if cursor < len(buffer):
+            buffer[cursor] = char        # overwrite, as a terminal does
+        else:
+            buffer.extend(" " * (cursor - len(buffer)))
+            buffer.append(char)
+        cursor += 1
+
+    while index < length:
+        char = text[index]
+
+        if char == "\x1b" and index + 1 < length and text[index + 1] == "[":
+            match = _LINE_EDIT_RE.match(text, index)
+            if match:
+                sequence = match.group(0)
+                digits = sequence[2:-1]
+                final = sequence[-1]
+                count = int(digits) if digits.isdigit() else (0 if final == "K" else 1)
+
+                if final == "D":
+                    cursor = max(0, cursor - max(1, count))
+                elif final == "C":
+                    cursor = cursor + max(1, count)
+                elif final == "G":
+                    cursor = max(0, count - 1)       # columns are 1-based
+                elif final == "K":
+                    if count == 0:                   # to end of line
+                        del buffer[cursor:]
+                    elif count == 1:                 # to start of line
+                        for i in range(min(cursor, len(buffer))):
+                            buffer[i] = " "
+                    else:                            # whole line
+                        # Erases the content but leaves the cursor where it
+                        # is, per ECMA-48. Devices that mean "start again"
+                        # follow this with a CR or ESC[G, and honouring that
+                        # rather than assuming it keeps us faithful.
+                        buffer[:] = [" "] * len(buffer)
+                index = match.end()
+                continue
+
+        if char == "\b":
+            cursor = max(0, cursor - 1)
+        else:
+            write(char)
+        index += 1
+
+    return "".join(buffer)
+
+
 def clean(text: str) -> str:
     """
     Convert a raw terminal stream into the text a human would see.
 
-    Applied in the order a terminal would: sequences first (so a backspace
-    hidden inside one is not misread), then backspace, then per-line carriage
-    returns.
+    Order matters, and mirrors what a terminal does:
+
+    1. Replay cursor movement and erase-in-line, *before* anything is
+       stripped — those sequences carry meaning that is lost once removed.
+    2. Drop the remaining sequences, which are purely presentational.
+    3. Resolve backspace and carriage returns.
 
     Line endings are normalised to ``\\n``. Trailing whitespace is left alone —
     it is occasionally meaningful in configuration output.
     """
+    # Normalise CRLF first so lines can be handled individually below.
+    text = text.replace("\r\n", "\n")
+
+    if _LINE_EDIT_RE.search(text):
+        text = "\n".join(apply_line_edits(line) for line in text.split("\n"))
+
     text = strip_ansi(text)
     text = apply_backspace(text)
-
-    # Normalise CRLF before resolving bare CRs, or every line would look like
-    # it were being overwritten by an empty string.
-    text = text.replace("\r\n", "\n")
 
     if "\r" in text:
         text = "\n".join(apply_carriage_returns(line) for line in text.split("\n"))

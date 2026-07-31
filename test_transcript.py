@@ -103,6 +103,48 @@ def test_carriage_returns() -> None:
           f"got {clean('line one' + chr(13) + chr(10) + 'line two')!r}")
 
 
+def test_cursor_movement() -> None:
+    """
+    Devices redraw their input line; the movement must be applied, not stripped.
+
+    Regression test for a command recorded from a live router as
+    'Tunnel7Tunnel7Tunnel7S3-R2#Tunnel7Tunnel7Tunnel7'. Stripping the cursor
+    escapes concatenated each redraw instead of overwriting.
+    """
+    print("\n-- Cursor movement and erase-in-line --")
+
+    esc = "\x1b"
+    cases = [
+        ("the redraw seen on a real router",
+         f"S3-R2#Tunnel7{esc}[7DTunnel7{esc}[7DTunnel7", "S3-R2#Tunnel7"),
+        ("tab completion replacing the tail",
+         f"sw#sh ip int br{esc}[6D{esc}[Kinterface brief", "sw#sh ip interface brief"),
+        ("erase to end of line",
+         f"sw#show running-config{esc}[14D{esc}[Kversion", "sw#show version"),
+        ("cursor forward returns to where it was",
+         f"sw#show{esc}[3D{esc}[3C version", "sw#show version"),
+        ("cursor to an absolute column",
+         f"abcdef{esc}[3GXY", "abXYef"),
+        # ECMA-48: erase-all clears the line but does not move the cursor,
+        # so the following text lands where the cursor already was.
+        ("erase the whole line leaves the cursor put",
+         f"rubbish{esc}[2Kclean", "       clean"),
+        ("erase-all followed by a column reset starts over",
+         f"rubbish{esc}[2K{esc}[1Gclean", "clean  "),
+        ("text with no movement is untouched",
+         "sw#show version", "sw#show version"),
+    ]
+    for name, raw, want in cases:
+        got = clean(raw)
+        check(name, got == want, f"got {got!r}, want {want!r}")
+
+    parser = TranscriptParser()
+    records = parser.feed(f"S3-R2#Tunnel7{esc}[7DTunnel7{esc}[7DTunnel7\r\nS3-R2#")
+    check("the command is recorded as what was left on screen",
+          bool(records) and records[0].command == "Tunnel7",
+          f"got {[r.command for r in records]}")
+
+
 def test_clean_combined() -> None:
     print("\n-- Combined cleaning --")
 
@@ -341,6 +383,7 @@ def main() -> int:
         test_ansi_stripping,
         test_backspace,
         test_carriage_returns,
+        test_cursor_movement,
         test_clean_combined,
         test_prompt_matching,
         test_command_extraction,
