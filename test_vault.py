@@ -300,6 +300,72 @@ def test_profile_credentials() -> None:
         shutil.rmtree(directory, ignore_errors=True)
 
 
+def test_plaintext_credentials() -> None:
+    """
+    The opt-in plaintext store keeps its promise, and keeps out of the others.
+
+    The point of this option is that the user chose it, so what matters is
+    that it does exactly what it says: the password is readable in a file
+    named for what it is, and profiles.json still holds nothing sensitive.
+    """
+    print("\n-- Plaintext credentials --")
+    directory = Path(tempfile.mkdtemp(prefix="shellmate-plain-"))
+    paths._data_dir_cache = directory
+    vault.lock()
+    try:
+        profile = profiles_module.save_profile({
+            "name": "lab-sw", "hostname": "10.0.0.5",
+            "username": "admin", "connection_type": "ssh",
+        })
+        profile_id = profile["id"]
+
+        profiles_module.save_plaintext_credentials(profile_id, {"password": "plain-pw"})
+
+        check("credentials are flagged as saved",
+              profiles_module.has_credentials(profile_id))
+        check("and reported as plaintext",
+              profiles_module.credential_storage(profile_id) == "plaintext",
+              profiles_module.credential_storage(profile_id))
+
+        plain_file = directory / "credentials-plaintext.json"
+        check("written to a file named for what it is", plain_file.exists())
+        check("the password is readable there, as promised",
+              "plain-pw" in plain_file.read_text(encoding="utf-8"))
+
+        on_disk = (directory / "profiles.json").read_text(encoding="utf-8")
+        check("profiles.json still holds no secret", "plain-pw" not in on_disk, on_disk)
+
+        loaded = profiles_module.load_credentials(profile_id)
+        check("it round-trips through the normal loader",
+              loaded.get("password") == "plain-pw", str(loaded))
+
+        listed = profiles_module.get_profiles()
+        check("the profile listing carries the storage kind, not the value",
+              listed[0].get("credential_storage") == "plaintext"
+              and "plain-pw" not in json.dumps(listed), json.dumps(listed))
+
+        # A vault entry must take precedence, so a profile cannot end up with
+        # two different remembered passwords and no way to tell which is used.
+        profiles_module.save_credentials(profile_id, {"password": "vault-pw"})
+        check("a vault entry wins over a plaintext one",
+              profiles_module.load_credentials(profile_id).get("password") == "vault-pw",
+              str(profiles_module.load_credentials(profile_id)))
+        check("and the storage kind says so",
+              profiles_module.credential_storage(profile_id) == "vault")
+
+        # Forgetting has to clear both, or "forget" would leave the password
+        # sitting in the plaintext file.
+        profiles_module.forget_credentials(profile_id)
+        check("forgetting clears both stores",
+              not profiles_module.has_credentials(profile_id))
+        check("the plaintext file no longer holds it",
+              "plain-pw" not in plain_file.read_text(encoding="utf-8"),
+              plain_file.read_text(encoding="utf-8"))
+    finally:
+        vault.lock()
+        shutil.rmtree(directory, ignore_errors=True)
+
+
 def test_api_never_leaks_secrets() -> None:
     """No endpoint may return a stored secret."""
     print("\n-- API surface --")
@@ -383,6 +449,7 @@ def main() -> int:
         test_settings_migration,
         test_update_settings_diverts_secrets,
         test_profile_credentials,
+        test_plaintext_credentials,
         test_api_never_leaks_secrets,
         test_locked_vault_degrades_gracefully,
     ):

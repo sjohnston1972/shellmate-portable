@@ -53,6 +53,11 @@ class ConnectionParams:
     # --- SSH key authentication -------------------------------------------
     private_key_path: str = ""
     private_key_passphrase: str = ""
+    # The account the key belongs to. SSH authenticates one username per
+    # connection, so this simply takes precedence over `username` when set —
+    # it exists so the name can be given beside the key it goes with, rather
+    # than in a field further up the dialog.
+    private_key_username: str = ""
 
     # --- SSH jump host / bastion ------------------------------------------
     jump_host: str = ""
@@ -69,6 +74,16 @@ class ConnectionParams:
     parity: str = "N"                     # N, E, O, M, S
     stop_bits: float = 1                  # 1, 1.5, 2
     flow_control: str = "none"            # none | xonxoff | rtscts | dsrdtr
+
+    def effective_username(self) -> str:
+        """
+        The account to authenticate as.
+
+        A username given beside the key wins, because someone who filled that
+        in was answering the question "who does this key belong to" and meant
+        it for this connection.
+        """
+        return (self.private_key_username or self.username or "").strip()
 
     def label(self) -> str:
         """Human-readable name for the tab, falling back to the target."""

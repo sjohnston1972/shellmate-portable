@@ -87,20 +87,100 @@ def load_credentials(profile_id: str) -> dict:
         value = vault.get(_credential_key(profile_id, field))
         if value:
             out[field] = value
-    return out
+    return out or _load_plaintext().get(profile_id, {})
 
 
 def has_credentials(profile_id: str) -> bool:
-    """True when any credential is remembered for this profile."""
-    return any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS)
+    """True when any credential is remembered for this profile, either way."""
+    if any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS):
+        return True
+    return bool(_load_plaintext().get(profile_id))
+
+
+def credential_storage(profile_id: str) -> str:
+    """Where this profile's credentials are kept: "vault", "plaintext" or ""."""
+    if any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS):
+        return "vault"
+    if _load_plaintext().get(profile_id):
+        return "plaintext"
+    return ""
 
 
 def forget_credentials(profile_id: str) -> None:
-    """Remove every remembered credential for a profile."""
+    """Remove every remembered credential for a profile, from both stores."""
     try:
         vault.set_many({_credential_key(profile_id, f): "" for f in CREDENTIAL_FIELDS})
     except VaultError:
         pass
+    _forget_plaintext(profile_id)
+
+
+# ---------------------------------------------------------------------------
+# Plaintext credentials — opt-in, and deliberately not in profiles.json
+#
+# Some users would rather not deal with a vault at all. That is their call to
+# make, but it does not get to weaken the guarantee profiles.json carries: that
+# file is meant to be readable, shareable and diffable, and SECRET_FIELDS stops
+# a credential reaching it whatever a caller passes.
+#
+# So plaintext credentials live in their own file, named for what it is. A user
+# who finds `credentials-plaintext.json` in the data folder knows immediately
+# what they are looking at, and profiles.json stays safe to send to a
+# colleague. The file is written 0600 where the platform honours it.
+# ---------------------------------------------------------------------------
+
+
+def _plaintext_file():
+    return paths.data_dir() / "credentials-plaintext.json"
+
+
+def _load_plaintext() -> dict:
+    path = _plaintext_file()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_plaintext(data: dict) -> None:
+    path = _plaintext_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    try:
+        # Best effort: no-op on Windows, where the ACL inherited from the
+        # user's own data directory is what actually protects it.
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def save_plaintext_credentials(profile_id: str, values: dict) -> bool:
+    """
+    Write a profile's credentials to disk unencrypted, at the user's request.
+
+    Returns True if anything was written. Storing nothing clears the entry, so
+    unticking the option and reconnecting forgets what was there.
+    """
+    kept = {f: values.get(f, "") for f in CREDENTIAL_FIELDS if values.get(f)}
+    data = _load_plaintext()
+
+    if not kept:
+        data.pop(profile_id, None)
+        _write_plaintext(data)
+        return False
+
+    data[profile_id] = kept
+    _write_plaintext(data)
+    return True
+
+
+def _forget_plaintext(profile_id: str) -> None:
+    data = _load_plaintext()
+    if data.pop(profile_id, None) is not None:
+        _write_plaintext(data)
 
 
 def get_profiles() -> list[dict]:
@@ -112,7 +192,11 @@ def get_profiles() -> list[dict]:
     """
     profiles = _load()
     for profile in profiles:
-        profile["has_saved_credentials"] = has_credentials(profile.get("id", ""))
+        profile_id = profile.get("id", "")
+        profile["has_saved_credentials"] = has_credentials(profile_id)
+        # Which store, so the dialog can show the right option already ticked
+        # and not quietly move a password from one to the other.
+        profile["credential_storage"] = credential_storage(profile_id)
     return profiles
 
 

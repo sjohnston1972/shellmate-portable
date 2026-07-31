@@ -386,6 +386,19 @@
             <input type="checkbox" id="field-remember" />
             <span>Remember these credentials in the encrypted vault</span>
           </label>
+
+          <!-- The alternative, for people who would rather not deal with a
+               vault. Ticking one unticks the other: a credential lives in one
+               place, and two independent checkboxes would imply otherwise. -->
+          <label class="checkbox-row" for="field-remember-plain">
+            <input type="checkbox" id="field-remember-plain" />
+            <span>Remember these credentials in plain text</span>
+          </label>
+          <p class="field-hint field-warn hidden" id="plaintext-warning">
+            Written unencrypted to <code>credentials-plaintext.json</code> in your
+            data folder. Anyone who can read that folder can read the password.
+          </p>
+
           <p class="field-hint" id="remember-hint"></p>
         </div>
 
@@ -396,8 +409,20 @@
 
             <div class="form-group">
               <label for="field-key-path">Private key file</label>
-              <input type="text" id="field-key-path" placeholder="C:\Users\you\.ssh\id_ed25519" />
+              <div class="field-with-button">
+                <input type="text" id="field-key-path" placeholder="C:\Users\you\.ssh\id_ed25519" />
+                <button type="button" class="btn-secondary btn-browse" data-target="field-key-path">
+                  <span class="material-symbols-outlined">folder</span>
+                  Browse
+                </button>
+              </div>
               <p class="field-hint">Ed25519, ECDSA, RSA or DSA. The key never leaves this machine.</p>
+            </div>
+
+            <div class="form-group">
+              <label for="field-key-username">Username for this key</label>
+              <input type="text" id="field-key-username" placeholder="(uses the username above)" />
+              <p class="field-hint">The account the key belongs to. Given here it takes precedence over the username above.</p>
             </div>
 
             <div class="form-group">
@@ -429,7 +454,13 @@
 
             <div class="form-group">
               <label for="field-jump-key-path">Jump private key file</label>
-              <input type="text" id="field-jump-key-path" placeholder="(optional)" />
+              <div class="field-with-button">
+                <input type="text" id="field-jump-key-path" placeholder="(optional)" />
+                <button type="button" class="btn-secondary btn-browse" data-target="field-jump-key-path">
+                  <span class="material-symbols-outlined">folder</span>
+                  Browse
+                </button>
+              </div>
             </div>
           </details>
         </div>
@@ -1217,6 +1248,7 @@ GigEth0/2     unassigned    YES unset  down     down
        window.shellshellmateSettings), then connections → tabs → terminal
   ================================================================ -->
   <script src="/static/js/connections.js"></script>
+  <script src="/static/js/filepicker.js"></script>
   <script src="/static/js/tabs.js"></script>
   <script src="/static/js/layout.js"></script>
   <script src="/static/js/terminal.js"></script>

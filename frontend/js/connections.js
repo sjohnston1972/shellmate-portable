@@ -29,6 +29,8 @@
    */
   let activeProfileId = '';
   let activeProfileHasCredentials = false;
+  /** Where this profile's credentials are kept: "vault", "plaintext" or "". */
+  let activeProfileStorage = '';
 
   document.addEventListener('DOMContentLoaded', () => {
     overlay          = document.getElementById('modal-overlay');
@@ -61,6 +63,8 @@
 
     document.getElementById('btn-refresh-ports')
       .addEventListener('click', () => loadSerialPorts());
+
+    bindCredentialStorage();
 
     const forgetBtn = document.getElementById('btn-forget-credentials');
     if (forgetBtn) {
@@ -101,6 +105,7 @@
 
     activeProfileId = (prefill && prefill.id) || '';
     activeProfileHasCredentials = Boolean(prefill && prefill.has_saved_credentials);
+    activeProfileStorage = (prefill && prefill.credential_storage) || '';
 
     const type = (prefill && prefill.connection_type) || 'ssh';
     typeSelect.value = type;
@@ -374,6 +379,7 @@
     setField('field-username', p.username || '');
 
     setField('field-key-path', p.private_key_path || '');
+    setField('field-key-username', p.private_key_username || '');
     setField('field-jump-host', p.jump_host || '');
     setField('field-jump-port', p.jump_port || 22);
     setField('field-jump-username', p.jump_username || '');
@@ -409,6 +415,8 @@
   function buildPayload() {
     const type = typeSelect.value;
     const remember = document.getElementById('field-remember');
+    const plain    = document.getElementById('field-remember-plain');
+    const wantsPlain = Boolean(plain && plain.checked);
 
     const payload = {
       connection_type: type,
@@ -416,7 +424,8 @@
       // The backend fills remembered credentials in server-side from this id,
       // so a saved password never travels to the browser.
       profile_id:           activeProfileId,
-      remember_credentials: Boolean(remember && remember.checked),
+      remember_credentials: wantsPlain || Boolean(remember && remember.checked),
+      credential_storage:   wantsPlain ? 'plaintext' : 'vault',
     };
 
     if (type === 'serial') {
@@ -441,6 +450,7 @@
     if (type === 'ssh') {
       Object.assign(payload, {
         private_key_path:       value('field-key-path'),
+        private_key_username:   value('field-key-username'),
         private_key_passphrase: document.getElementById('field-key-passphrase').value,
         jump_host:              value('field-jump-host'),
         jump_port:              number('field-jump-port', 22),
@@ -461,8 +471,9 @@
    * accepted.
    */
   function updateRememberHint() {
-    const hint = document.getElementById('remember-hint');
-    const box  = document.getElementById('field-remember');
+    const hint  = document.getElementById('remember-hint');
+    const box   = document.getElementById('field-remember');
+    const plain = document.getElementById('field-remember-plain');
     const badge = document.getElementById('saved-credential-badge');
     if (!hint || !box) return;
 
@@ -470,7 +481,11 @@
 
     if (activeProfileHasCredentials) {
       hint.textContent = 'Leave the password blank to use the saved one, or type a new one to replace it.';
-      box.checked = true;
+      // Tick whichever store this profile's credentials are actually in, so
+      // reconnecting cannot silently move a password from one to the other.
+      const plaintext = activeProfileStorage === 'plaintext';
+      box.checked   = !plaintext;
+      if (plain) plain.checked = plaintext;
       const field = document.getElementById('field-password');
       if (field) field.placeholder = 'Using saved password';
     } else {
@@ -478,9 +493,40 @@
         ? 'Saved against this connection once it succeeds.'
         : 'Saved against this connection once it succeeds, encrypted on disk.';
       box.checked = false;
+      if (plain) plain.checked = false;
       const field = document.getElementById('field-password');
       if (field) field.placeholder = '';
     }
+
+    updatePlaintextWarning();
+  }
+
+  /**
+   * Keep the two storage choices exclusive, and say what plaintext means.
+   *
+   * A credential lives in one place. Two checkboxes that could both be ticked
+   * would suggest otherwise, and the user would have no way to tell which had
+   * won.
+   */
+  function bindCredentialStorage() {
+    const vaultBox = document.getElementById('field-remember');
+    const plainBox = document.getElementById('field-remember-plain');
+    if (!vaultBox || !plainBox) return;
+
+    vaultBox.addEventListener('change', () => {
+      if (vaultBox.checked) plainBox.checked = false;
+      updatePlaintextWarning();
+    });
+    plainBox.addEventListener('change', () => {
+      if (plainBox.checked) vaultBox.checked = false;
+      updatePlaintextWarning();
+    });
+  }
+
+  function updatePlaintextWarning() {
+    const plainBox = document.getElementById('field-remember-plain');
+    const warning  = document.getElementById('plaintext-warning');
+    if (warning && plainBox) warning.classList.toggle('hidden', !plainBox.checked);
   }
 
   /** Forget the credential stored for the profile currently in the dialog. */
@@ -489,6 +535,7 @@
     try {
       await fetch(`/api/profiles/${activeProfileId}/credentials`, { method: 'DELETE' });
       activeProfileHasCredentials = false;
+      activeProfileStorage = '';
       updateRememberHint();
       await loadProfiles();
       renderWelcomeProfiles();
@@ -505,7 +552,11 @@
     if (!payload.hostname) return 'Hostname is required.';
 
     if (payload.connection_type === 'ssh') {
-      if (!payload.username) return 'Username is required.';
+      // Either field satisfies it: someone connecting with a key may well
+      // have given the account name beside the key rather than above.
+      if (!payload.username && !payload.private_key_username) {
+        return 'Username is required.';
+      }
       // A key counts as a credential in its own right, and so does one already
       // in the vault — the backend fills that in, so a blank box is fine.
       if (!payload.password && !payload.private_key_path && !activeProfileHasCredentials) {
@@ -525,7 +576,8 @@
       hostname:         payload.hostname || '',
       port:             payload.port || 22,
       username:         payload.username || '',
-      private_key_path: payload.private_key_path || '',
+      private_key_path:     payload.private_key_path || '',
+      private_key_username: payload.private_key_username || '',
       jump_host:        payload.jump_host || '',
       jump_port:        payload.jump_port || 22,
       jump_username:    payload.jump_username || '',
@@ -597,7 +649,8 @@
         console.error('createTab() not found — is tabs.js loaded?');
       }
 
-      await autoSaveProfile(payload, wantsRemember, credentials);
+      await autoSaveProfile(payload, wantsRemember, credentials,
+                            payload.credential_storage);
 
     } catch (err) {
       showError(err.message || 'Could not connect. Check the address and credentials.');
@@ -610,7 +663,7 @@
    * Skipped when an equivalent profile already exists, or the list would fill
    * with duplicates of the device someone reconnects to twenty times a day.
    */
-  async function autoSaveProfile(payload, wantsRemember, credentials) {
+  async function autoSaveProfile(payload, wantsRemember, credentials, storage) {
     try {
       const r = await fetch('/api/profiles');
       const existing = r.ok ? await r.json() : [];
@@ -643,7 +696,7 @@
           await fetch(`/api/profiles/${profile.id}/credentials`, {
             method:  'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify(credentials),
+            body:    JSON.stringify({ ...credentials, storage: storage || 'vault' }),
           });
         }
       }

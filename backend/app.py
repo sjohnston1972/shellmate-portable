@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import re
+from pathlib import Path
 
 from fastapi import (
     FastAPI, File, HTTPException, Request, Response, UploadFile, WebSocket,
@@ -31,7 +32,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from backend import paths
+from backend import desktop, paths
 from backend.configs import capture_config, diff_snapshots, drift_report
 from backend.connections.base import ConnectionError_, ConnectionParams
 from backend.connections import sftp
@@ -39,7 +40,8 @@ from backend.connections.manager import SessionManager
 from backend.connections.serial_handler import available_ports
 from backend.profiles import (
     CREDENTIAL_FIELDS, delete_profile, forget_credentials, get_profiles,
-    load_credentials, record_detected_hostname, save_credentials, save_profile,
+    load_credentials, record_detected_hostname, save_credentials,
+    save_plaintext_credentials, save_profile,
 )
 from backend import platforms as platforms_module
 from backend.session.redact import redact
@@ -120,6 +122,7 @@ class CreateSessionRequest(BaseModel):
     # SSH key authentication
     private_key_path: str = ""
     private_key_passphrase: str = ""
+    private_key_username: str = ""
 
     # SSH jump host / bastion
     jump_host: str = ""
@@ -142,12 +145,16 @@ class CreateSessionRequest(BaseModel):
     # vault server-side.
     profile_id: str = ""
     remember_credentials: bool = False
+    # "vault" (encrypted, the default) or "plaintext". The two are alternatives
+    # rather than independent choices — a credential lives in one place.
+    credential_storage: str = "vault"
 
     def to_params(self) -> ConnectionParams:
         """Convert to the transport-layer parameter object."""
         fields = self.model_dump()
         fields.pop("profile_id", None)
         fields.pop("remember_credentials", None)
+        fields.pop("credential_storage", None)
         return ConnectionParams(**fields)
 
 
@@ -163,6 +170,7 @@ class SaveProfileRequest(BaseModel):
     # Reconnect details worth remembering. Never any secret — no password and
     # no key passphrase is ever written to a profile.
     private_key_path: str = ""
+    private_key_username: str = ""
     jump_host: str = ""
     jump_port: int = 22
     jump_username: str = ""
@@ -220,7 +228,17 @@ async def create_session(request: CreateSessionRequest) -> dict:
     # Only remember credentials that actually worked — storing them before the
     # handshake would persist a typo the user is about to correct.
     if to_remember:
-        save_credentials(request.profile_id, to_remember)
+        if request.credential_storage == "plaintext":
+            # The user asked for this explicitly. Logged at warning level
+            # because a device password landing on disk unencrypted should be
+            # visible in the record afterwards, not silent.
+            logger.warning(
+                "Saving credentials for profile %s in PLAIN TEXT at the user's request",
+                request.profile_id,
+            )
+            save_plaintext_credentials(request.profile_id, to_remember)
+        else:
+            save_credentials(request.profile_id, to_remember)
 
     return session
 
@@ -410,6 +428,8 @@ class ProfileCredentialsRequest(BaseModel):
     private_key_passphrase: str = ""
     jump_password: str = ""
     jump_private_key_passphrase: str = ""
+    # "vault" (encrypted) or "plaintext", at the user's explicit choice.
+    storage: str = "vault"
 
 
 @app.put("/api/profiles/{profile_id}/credentials")
@@ -425,7 +445,17 @@ async def remember_profile_credentials(
 
     Returns only whether anything was stored — never the values back.
     """
-    stored = save_credentials(profile_id, request.model_dump())
+    values = request.model_dump()
+    storage = values.pop("storage", "vault")
+
+    if storage == "plaintext":
+        logger.warning(
+            "Saving credentials for profile %s in PLAIN TEXT at the user's request",
+            profile_id,
+        )
+        return {"status": "ok", "stored": save_plaintext_credentials(profile_id, values)}
+
+    stored = save_credentials(profile_id, values)
     if not stored and vault.is_locked():
         raise HTTPException(
             status_code=400,
@@ -501,6 +531,90 @@ async def serial_ports() -> list[dict]:
     converters attached.
     """
     return await asyncio.to_thread(available_ports)
+
+
+# ---------------------------------------------------------------------------
+# REST — Picking a file on this machine
+#
+# SSH key authentication needs a filesystem *path*. A browser file input hands
+# over the contents and deliberately withholds the path, so the only ways to
+# get one are the platform's own dialog — available when running in the native
+# window — or letting the user walk the filesystem in the interface. Both are
+# provided: the OS dialog is the better experience and the in-app browser is
+# what makes the feature work at all when ShellMate is opened in a browser.
+#
+# Loopback-only, like everything else here, and nothing reads file contents.
+# ---------------------------------------------------------------------------
+
+
+class PickFileRequest(BaseModel):
+    """Body for POST /api/pick-file."""
+
+    title: str = "Select a file"
+    directory: str = ""
+    # ("Key files (*.pem;*.ppk)", "All files (*.*)") — the platform dialog's
+    # own format, passed through untouched.
+    file_types: list[str] = []
+
+
+@app.post("/api/pick-file")
+async def pick_file(request: PickFileRequest) -> dict:
+    """
+    Raise the platform's file dialog.
+
+    ``available`` is false when there is no native window, which is not an
+    error — it tells the interface to open its own browser instead. Reporting
+    that as a failure would leave the button looking broken in exactly the
+    situation where a working alternative exists.
+    """
+    if not desktop.has_native_window():
+        return {"available": False, "path": ""}
+
+    path = await asyncio.to_thread(
+        desktop.pick_file, request.title, request.directory, tuple(request.file_types),
+    )
+    return {"available": True, "path": path or "", "cancelled": not path}
+
+
+@app.get("/api/local/browse")
+async def local_browse(path: str = "") -> dict:
+    """
+    List a directory on this machine, for the in-app file picker.
+
+    Directories and file names only — never contents. Unreadable entries are
+    skipped rather than failing the whole listing, because one locked folder
+    should not make a directory unbrowsable.
+    """
+    def _listing() -> dict:
+        # Default somewhere useful: this is reached for from the SSH key field.
+        base = Path(path).expanduser() if path else (Path.home() / ".ssh")
+        if not base.exists():
+            base = Path.home()
+        base = base.resolve()
+
+        if base.is_file():
+            base = base.parent
+
+        entries = []
+        try:
+            for item in sorted(base.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+                try:
+                    is_dir = item.is_dir()
+                    entries.append({
+                        "name": item.name,
+                        "path": str(item),
+                        "is_dir": is_dir,
+                        "size": 0 if is_dir else item.stat().st_size,
+                    })
+                except OSError:
+                    continue
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        parent = str(base.parent) if base.parent != base else ""
+        return {"path": str(base), "parent": parent, "entries": entries}
+
+    return await asyncio.to_thread(_listing)
 
 
 def _require_session(session_id: str) -> dict:

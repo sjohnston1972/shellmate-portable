@@ -107,6 +107,8 @@ class SSHHandler(ConnectionHandler):
         """Establish the SSH connection and open an interactive shell."""
         params = self.params
 
+        username = params.effective_username()
+
         try:
             sock = self._open_jump_channel() if params.jump_host else None
 
@@ -117,12 +119,12 @@ class SSHHandler(ConnectionHandler):
             # Blocking on an unknown-host prompt would make the tool unusable.
             self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-            logger.info("Connecting to %s as %s", params.target(), params.username)
+            logger.info("Connecting to %s as %s", params.target(), username)
 
             self._client.connect(
                 hostname=params.hostname,
                 port=params.port,
-                username=params.username,
+                username=username,
                 sock=sock,
                 timeout=CONNECT_TIMEOUT,
                 allow_agent=False,
@@ -142,7 +144,7 @@ class SSHHandler(ConnectionHandler):
         except paramiko.AuthenticationException as exc:
             self.disconnect()
             raise ConnectionError_(
-                f"Authentication failed for {params.username}@{params.hostname}. "
+                f"Authentication failed for {username}@{params.hostname}. "
                 f"Check the username, password or key."
             ) from exc
         except paramiko.SSHException as exc:

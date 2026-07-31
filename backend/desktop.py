@@ -42,6 +42,50 @@ MIN_WIDTH = 900
 MIN_HEIGHT = 560
 
 
+# The live pywebview window, when there is one. None under --no-window, in a
+# plain browser, or when the WebView2 runtime is missing.
+_active_window = None
+
+
+def has_native_window() -> bool:
+    """True when a real OS file dialog can be raised."""
+    return _active_window is not None
+
+
+def pick_file(title: str = "Select a file",
+              directory: str = "",
+              file_types: tuple[str, ...] = ()) -> str | None:
+    """
+    Raise the platform's own file dialog and return the chosen path.
+
+    Returns None when the user cancels *and* when there is no native window,
+    which the caller has to distinguish by asking :func:`has_native_window`
+    first — the two mean different things to the interface, which offers its
+    own browser in the second case.
+
+    pywebview marshals this onto the GUI thread itself, so calling it from the
+    server thread is supported.
+    """
+    window = _active_window
+    if window is None:
+        return None
+    try:
+        import webview
+        result = window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            directory=directory or "",
+            allow_multiple=False,
+            file_types=file_types or (),
+        )
+    except Exception as exc:
+        logger.info("Native file dialog failed (%s)", exc)
+        return None
+
+    if not result:
+        return None
+    return result[0] if isinstance(result, (list, tuple)) else str(result)
+
+
 def wait_until_serving(port: int, timeout: float = 15.0) -> bool:
     """
     Block until the server answers, or the timeout expires.
@@ -283,6 +327,13 @@ class Desktop:
                 text_select=True,
             )
             self._window.events.closing += self._on_closing
+
+            # Published so the HTTP layer can raise a real OS file dialog. The
+            # UI is a web page and a browser file input yields no filesystem
+            # path, only contents — and a path is exactly what SSH key
+            # authentication needs.
+            global _active_window
+            _active_window = self._window
 
             # private_mode=False with a storage path in the data directory:
             # the UI keeps quick buttons, the chat pop-out position and the

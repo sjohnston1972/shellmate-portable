@@ -122,6 +122,16 @@ def _frontend_sources() -> list[Path]:
     return [FRONTEND_DIR / "index.html", *(FRONTEND_DIR / "js").glob("*.js")]
 
 
+# Glyph names in the font that name characters rather than icons. Every one is
+# also a plausible English word, so the token scan below would otherwise pick
+# them up out of prose.
+NON_ICON_GLYPHS = {
+    "space", "underscore", "period", "comma", "colon", "semicolon", "hyphen",
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "notdef",
+}
+
+
 def used_icon_names(available: set[str] | None = None) -> set[str]:
     """
     Return every Material Symbols ligature name the frontend might use.
@@ -157,7 +167,13 @@ def used_icon_names(available: set[str] | None = None) -> set[str]:
         if available:
             names.update(t for t in token.findall(text) if t in available)
 
-    return names
+    # The font names its ordinary characters too, in the usual PostScript way,
+    # and several of those names are also ordinary English words that turn up
+    # in comments. "space" is the one that bites: it is a real glyph name, so
+    # the intersection above accepts it, but it is a character rather than a
+    # ligature and the shaping check then reports it as broken. Dropping them
+    # here keeps that check meaningful instead of teaching it to ignore things.
+    return names - NON_ICON_GLYPHS
 
 
 def subset_icon_font(font_path: Path, icon_names: set[str]) -> None:
