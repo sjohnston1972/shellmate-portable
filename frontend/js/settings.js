@@ -253,11 +253,24 @@
     document.documentElement.style.setProperty('--ui-font-size', px);
   }
 
+  /**
+   * Push the user's colour rules into the highlighter.
+   *
+   * Called on load and after every save so an edited rule takes effect on the
+   * next line of output, without reconnecting or reloading the page.
+   */
+  function _applyHighlightRules(s) {
+    if (window.shellmateHighlight) {
+      window.shellmateHighlight.setRules(s.highlight || { enabled: false, rules: [] });
+    }
+  }
+
   async function loadSettings() {
     try {
       const res = await fetch('/api/settings');
       currentSettings = await res.json();
       window.shellmateSettings = currentSettings;
+      _applyHighlightRules(currentSettings);
       _applyUiFontSize((currentSettings.appearance || {}).ui_font_size || 14);
     } catch (e) {
       console.warn('Could not load settings:', e);
@@ -289,6 +302,16 @@
     _checked('setting-cursor-blink',      t.cursor_blink      !== false);
     _checked('setting-right-click-paste', t.right_click_paste !== false);
     _checked('setting-copy-on-select',    !!t.copy_on_select);
+    _checked('setting-expand-aliases',    t.expand_aliases  !== false);
+    _checked('setting-auto-paging',       t.auto_paging_off !== false);
+
+    // Colour rules are a repeating row, so their editor owns the DOM.
+    const h = s.highlight || {};
+    _checked('setting-highlight-enabled', h.enabled !== false);
+    if (window.highlightRulesEditor) {
+      window.highlightRulesEditor.render(
+        h.rules && h.rules.length ? h.rules : window.highlightRulesEditor.DEFAULT_RULES);
+    }
     _checked('setting-logging-enabled',   !!l.enabled);
     _val('setting-log-dir',          l.directory || 'logs');
     _val('setting-color-scheme',     a.color_scheme  || 'deep_space');
@@ -353,6 +376,13 @@
         scrollback_lines:  parseInt(_gval('setting-scrollback'), 10),
         right_click_paste: _gchecked('setting-right-click-paste'),
         copy_on_select:    _gchecked('setting-copy-on-select'),
+        expand_aliases:    _gchecked('setting-expand-aliases'),
+        auto_paging_off:   _gchecked('setting-auto-paging'),
+      },
+      highlight: {
+        enabled: _gchecked('setting-highlight-enabled'),
+        rules:   window.highlightRulesEditor
+          ? window.highlightRulesEditor.collect() : [],
       },
       logging: {
         enabled:   _gchecked('setting-logging-enabled'),
@@ -376,6 +406,7 @@
       });
       currentSettings = await res.json();
       window.shellmateSettings = currentSettings;
+      _applyHighlightRules(currentSettings);
       _applyUiFontSize((currentSettings.appearance || {}).ui_font_size || 14);
       // Notify terminal.js to apply new settings
       window.dispatchEvent(new CustomEvent('shellmate:settings-changed', { detail: currentSettings }));
@@ -530,5 +561,6 @@
   window.getColorScheme     = (name) => COLOR_SCHEMES[name] || COLOR_SCHEMES.deep_space;
   window.getAllColorSchemes  = () => COLOR_SCHEMES;
   window.openSettings       = openSettings;
+  window.reloadSettings     = loadSettings;
 
 })();

@@ -138,7 +138,14 @@
 
       switch (msg.type) {
         case 'output':
-          terminal.write(msg.data);
+          // Apply the user's colour rules on the way to the screen. The
+          // unmodified text is what gets buffered and sent to the AI — the
+          // colour is a reading aid, not part of the data.
+          terminal.write(
+            window.shellmateHighlight
+              ? window.shellmateHighlight.apply(msg.data)
+              : msg.data
+          );
           // Count newlines to maintain a running buffer line total
           _bufferLines += (msg.data.match(/\n/g) || []).length;
           if (typeof window.updateStatusBar === 'function') window.updateStatusBar();
@@ -155,6 +162,20 @@
           if (typeof window.updateStatusBar === 'function') {
             window.updateStatusBar();
           }
+          break;
+
+        case 'device_identified':
+          // Say what the device was recognised as, and what was sent to it.
+          // Nothing is typed into someone's session without telling them.
+          window.dispatchEvent(new CustomEvent('shellmate:device-identified', {
+            detail: { sessionId, ...msg }
+          }));
+          break;
+
+        case 'alias_expanded':
+          window.dispatchEvent(new CustomEvent('shellmate:alias-expanded', {
+            detail: { sessionId, typed: msg.typed, sent: msg.sent }
+          }));
           break;
 
         default:
