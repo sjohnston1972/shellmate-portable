@@ -1,4 +1,4 @@
-# ShellMate
+# ShellMate Portable
 
 ## Project overview
 
@@ -61,15 +61,36 @@ mate/
 ├── .env.example               # Template for configuration
 ├── .env                       # User's local config (gitignored)
 ├── requirements.txt           # Python dependencies
+├── requirements-dev.txt       # Build + asset-vendoring dependencies
+├── build.spec                 # PyInstaller definition for the portable .exe
 ├── run.py                     # Entry point — starts the server and opens browser
+├── tools/
+│   └── vendor_assets.py       # Downloads/subsets frontend assets (build-time only)
 ├── backend/
 │   ├── __init__.py
+│   ├── paths.py               # ALL filesystem locations resolve here
+│   ├── desktop.py             # Native window + system tray
+│   ├── server.py              # Port selection and single-instance lock
 │   ├── app.py                 # FastAPI application, routes, WebSocket handlers
+│   ├── platforms.py           # Per-platform commands, aliases (user-editable)
+│   ├── fingerprint.py         # Identify vendor/OS/version on connect
+│   ├── onboard.py             # Once-per-session identify-and-configure
+│   ├── pipeline.py            # Outbound chokepoint (aliases; guardrails next)
+│   ├── store.py               # SQLite session history + FTS5 search
+│   ├── configs.py             # Config capture, diff, drift-on-connect
+│   ├── vault.py               # Encrypted credential storage
+│   ├── session/
+│   │   ├── ansi.py            # Escape/backspace/CR handling
+│   │   ├── transcript.py      # Prompt detection + command segmentation
+│   │   └── buffer.py          # Rolling screen buffer
 │   ├── connections/
 │   │   ├── __init__.py
-│   │   ├── manager.py         # Connection lifecycle — creates, tracks and destroys sessions by ID
-│   │   ├── ssh_handler.py     # SSH connection using paramiko
-│   │   └── serial_handler.py  # Serial connection using pyserial
+│   │   ├── base.py            # ConnectionHandler contract + ConnectionParams
+│   │   ├── manager.py         # Session lifecycle + transport registry
+│   │   ├── ssh_handler.py     # SSH via paramiko (key auth, jump host, 2nd channel)
+│   │   ├── serial_handler.py  # Serial console via pyserial
+│   │   ├── telnet_handler.py  # Telnet over a raw socket, with IAC negotiation
+│   │   └── sftp.py            # File transfer over an existing SSH transport
 │   ├── ai/
 │   │   ├── __init__.py
 │   │   ├── router.py          # Routes AI requests to selected backend
@@ -90,9 +111,159 @@ mate/
 │       ├── chat.js            # AI chat panel logic
 │       ├── commands.js         # Command suggestion and approval UI
 │       └── connections.js      # Connection dialog and profile management
+├── frontend/vendor/           # Bundled xterm.js + fonts (no CDN at runtime)
 └── profiles/
     └── examples.json          # Example connection profiles
 ```
+
+## Portable runtime — rules that must not be broken
+
+ShellMate ships as a single PyInstaller `--onefile` executable that runs with no
+install and no administrator rights.
+
+**Never derive a writable path from `__file__`.** Under `--onefile` the process
+unpacks into a temporary directory that the bootloader deletes on exit, so
+anything written relative to `__file__` is lost the moment the app closes — with
+no error. All locations come from `backend/paths.py`:
+
+| Helper | Meaning | Writable? |
+|---|---|---|
+| `app_dir()` | Folder containing the executable | — |
+| `resource_dir()` | Bundled assets (`sys._MEIPASS` when frozen) | **No** — wiped on exit |
+| `data_dir()` | `ShellMate-Data/` beside the exe, falling back to `%LOCALAPPDATA%` | Yes |
+
+Two further constraints:
+
+- **No CDN references in the frontend.** ShellMate must work fully air-gapped.
+  Third-party assets live in `frontend/vendor/`, refreshed by
+  `python tools/vendor_assets.py`. That script also subsets the Material Symbols
+  icon font and verifies with HarfBuzz that every icon still shapes to a single
+  glyph — a broken subset renders icons as plain text and raises no error.
+- **Don't hardcode the port.** `backend/server.py` picks a free one at startup.
+
+## The desktop shell
+
+The UI is still a local web page; `backend/desktop.py` only changes the frame
+around it. A native window via pywebview (WebView2), falling back to a
+chromeless Edge window, then to the default browser — it must always start,
+because a missing runtime is not a reason to be unable to reach a device.
+
+Consequences worth knowing before editing `run.py`:
+
+- **The server runs on a daemon thread and the window owns the main thread.**
+  Native GUI toolkits require their event loop on the process main thread, so
+  the ordering is forced, not preferred.
+- **Closing the window hides it.** Terminal sessions live in the server
+  process; closing the window while a device is mid-reload must not drop the
+  connection. Quitting is explicit, from the tray.
+- **`uvicorn.run(log_config=None)`.** Its default config calls `dictConfig`
+  and replaces the process's log handlers, which silently truncates the log
+  file — the only diagnostic a windowed build has.
+- **The build is windowed (`console=False`).** Startup failures raise a
+  message box pointing at `ShellMate-Data/shellmate.log`.
+- **Tests must pass `--no-window`**, or `run.py` blocks on a window.
+
+## Transports
+
+All connection types implement `ConnectionHandler` in `backend/connections/base.py`
+and are registered in `HANDLERS` in `manager.py`. Adding one means a subclass and
+one line — nothing above the transport layer branches on connection type.
+
+The subtle part of the contract is `recv()`, which returns:
+
+| Value | Meaning |
+|---|---|
+| `bytes` | Data arrived |
+| `None` | Nothing arrived yet — still connected |
+| `b""` | The far end closed |
+
+Conflating the last two drops sessions the moment a user stops typing, which is
+why idleness is a return value here rather than an exception as in raw paramiko.
+
+Two more rules worth stating because breaking them fails silently:
+
+- **Credentials are scrubbed after connecting** via `ConnectionParams.scrub_secrets()`,
+  and `SECRET_FIELDS` in `profiles.py` blocks them from ever being written to disk.
+  `_public_view()` in `manager.py` keeps `params` out of every API response.
+- **Telnet auto-login is deadline-bounded.** It answers a login prompt once and
+  then disables itself. Without that, a prompt regex matching ordinary output an
+  hour into a session would type a password into a live device.
+
+## The transcript layer
+
+A terminal stream is not text — it is instructions to a display, and the same
+visible line can arrive as any number of byte sequences. Two modules turn it
+back into something answerable:
+
+- `session/ansi.py` — undoes escape sequences, backspace (how a device erases
+  `--More--`) and bare carriage returns (how it redraws a line in place).
+  Without this, stored output is unsearchable: a coloured interface name has
+  escape codes buried inside the word.
+- `session/transcript.py` — reconstructs commands by watching for the device
+  prompt. Everything between one prompt and the next is one command and its
+  output.
+
+`PROMPT_RE` is the **single** prompt pattern, covering IOS, NX-OS, ASA, Junos,
+PAN-OS and Linux. There were previously three Cisco-only copies (in `app.py`,
+`ai/router.py`, and none at all in the store); anything needing prompt
+detection uses `match_prompt()` or `detect_hostname()`.
+
+The parser is deliberately conservative. A missed prompt merges two records; a
+*false* prompt slices real output in half and files configuration lines under
+the wrong command — much worse when the result is evidence of what changed.
+
+`store.py` persists it all to SQLite with FTS5. Recording is automatic and
+unconditional, and every write is wrapped so that a history failure can never
+interrupt a live session.
+
+## Device awareness
+
+`fingerprint.py` identifies the device from its banner, falling back to the
+prompt shape, and refines with a version command where a second channel is
+available. Every result carries a **confidence**, and
+`certain_enough_to_act` gates anything that touches the device — acting on a
+weak guess is how a tool ends up sending `terminal length 0` to a firewall.
+
+`platforms.py` holds everything platform-specific: paging-off command, config
+command, aliases, dangerous commands. These are **data, not code** — written to
+`platforms.json` in the data dir on first run and read back in preference to
+the built-ins, so a new platform is a text edit rather than a rebuild.
+
+`pipeline.py` is the chokepoint every keystroke passes through on its way out.
+It assembles keystrokes into lines and can rewrite one before it reaches the
+device. Alias expansion lives there today; Phase 6's guardrails and paste
+throttling extend the same chain.
+
+Two rules for anything that writes into a live session:
+
+- **Never send silently.** The paging command is echoed like any other, and the
+  UI says what was sent and why. People have to account for what happened in
+  their sessions afterwards.
+- **Never guess.** The generic profile sends nothing at all. A wrong command is
+  worse than a command not sent.
+
+## Secrets
+
+Nothing sensitive is ever written in plain text. `backend/vault.py` encrypts
+with Windows DPAPI by default, or scrypt + AES-GCM under a master password.
+
+Rules that keep it that way:
+
+- **Never write a secret to settings.json or profiles.json.** `update_settings()`
+  diverts `SECRET_FIELDS` into the vault and blanks them before writing;
+  `save_profile()` strips `SECRET_FIELDS` from whatever it is handed. Both
+  enforce it rather than trusting callers.
+- **Resolve credentials through `get_effective()`.** It reads vault → settings →
+  `.env`, so every AI client picks up the vault without changing.
+- **Saved device passwords never reach the browser.** The frontend sends a
+  `profile_id` and the backend fills credentials in server-side. Nothing
+  returns a stored secret — profile listings carry a `has_saved_credentials`
+  boolean instead.
+- **The whole entry set is one AEAD blob**, not per-entry ciphertext. Per-entry
+  encryption would leak which keys exist and let entries be swapped or replayed
+  undetected.
+- **A locked vault degrades to "no value"** rather than raising, so a forgotten
+  master password never blocks reaching a device.
 
 ## Configuration (.env)
 

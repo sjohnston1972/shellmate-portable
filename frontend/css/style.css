@@ -77,7 +77,7 @@
 [data-theme="light"] .chat-welcome               { color: rgba(28,27,34,0.75); }
 [data-theme="light"] .chat-welcome-hint          { color: rgba(28,27,34,0.55); }
 [data-theme="light"] #chat-input::placeholder    { color: rgba(28,27,34,0.3); }
-[data-theme="light"] #modal-dialog               { background: rgba(235,235,238,0.97); box-shadow: 0 24px 64px rgba(0,0,0,0.2); }
+[data-theme="light"] #modal-dialog               { --modal-bg: rgba(235,235,238,0.97); --modal-bg-solid: #EBEBEE; box-shadow: 0 24px 64px rgba(0,0,0,0.2); }
 [data-theme="light"] #paste-dialog               { background: rgba(235,235,238,0.97); box-shadow: 0 24px 48px -12px rgba(0,0,100,0.15); }
 [data-theme="light"] .side-panel                 { background: rgba(238,238,241,0.98); }
 [data-theme="light"] #btn-new-tab                { color: #fff; }
@@ -209,7 +209,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(229,226,225,0.4);
+  color: var(--on-surface-muted);
   transition: background 0.15s, color 0.15s;
   cursor: pointer;
 }
@@ -299,7 +299,7 @@ a {
   white-space: nowrap;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 12px;
-  color: rgba(229,226,225,0.55);
+  color: var(--on-surface-dim);
   transition: background 0.12s, color 0.12s, border-color 0.12s, box-shadow 0.12s;
   min-width: 80px;
   max-width: 200px;
@@ -541,6 +541,8 @@ a {
   min-height: 0;
   width: 100%;
   height: 100%;
+  /* Anchors the absolutely positioned drift banner. */
+  position: relative;
 }
 
 /* Ensure terminals-container inside terminal-pane fills properly */
@@ -709,13 +711,13 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   gap: 8px;
   text-align: center;
   padding: 32px 16px;
-  color: rgba(229,226,225,0.4);
+  color: var(--on-surface-muted);
   font-size: 16px;
 }
 
 .chat-welcome-hint {
   font-size: 11px;
-  color: rgba(229,226,225,0.25);
+  color: var(--on-surface-muted);
 }
 
 /* Chat bubbles */
@@ -1009,7 +1011,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #chat-input::placeholder {
-  color: rgba(229,226,225,0.25);
+  color: var(--on-surface-muted);
 }
 
 #chat-send {
@@ -1233,7 +1235,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   gap: 8px;
   font-family: 'JetBrains Mono', monospace;
   font-size: calc(var(--ui-font-size, 14px) - 3px);
-  color: rgba(229,226,225,0.4);
+  color: var(--on-surface-muted);
   flex-shrink: 0;
   /* No top border — tonal shift from bedrock to panel creates the division */
 }
@@ -1248,7 +1250,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 #status-context.ctx-red   { color: #f87171; }
 
 #status-connection {
-  color: rgba(229,226,225,0.7);
+  color: var(--on-surface-dim);
 }
 
 /* --------------------------------------------------------------------------
@@ -1297,7 +1299,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   gap: 6px;
   padding: 8px 16px;
   background: transparent;
-  color: rgba(229,226,225,0.7);
+  color: var(--on-surface-dim);
   border-radius: var(--radius-md);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
@@ -1326,7 +1328,20 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #modal-dialog {
-  background: rgba(32,32,32,0.92);
+  /* Held in a variable so the sticky action bar below can match whichever
+     theme is active without repeating the colour. */
+  --modal-bg: rgba(32,32,32,0.92);
+  /* Opaque twin of --modal-bg. The dialog itself is translucent over a
+     blurred backdrop, which looks good — but the sticky action bar has to
+     fully hide the form scrolling underneath it, and 92% opacity leaves a
+     ghost of the text showing through. */
+  --modal-bg-solid: #202020;
+  background: var(--modal-bg);
+  display: flex;
+  flex-direction: column;
+  /* Expanding "Key authentication and jump host" made the dialog taller than
+     the screen, pushing Connect out of reach with nothing to scroll. */
+  max-height: 92vh;
   backdrop-filter: blur(20px);
   border: 1px solid rgba(70,69,85,0.3);
   border-radius: var(--radius-lg);
@@ -1390,11 +1405,14 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 
 .form-group label {
   font-family: 'Inter', system-ui, sans-serif;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgba(229,226,225,0.5);
+  /* Full contrast. A field label is not decoration — it is the only thing
+     telling you what to type, and a dimmed uppercase 11px label was hard to
+     read on dark and invisible on light. */
+  color: var(--on-surface);
 }
 
 .optional {
@@ -1426,6 +1444,108 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   border-color: var(--primary-container);
 }
 
+/* ---------------------------------------------------------------------------
+   Connection-type field groups
+   Shown/hidden by connections.js as the transport selector changes.
+--------------------------------------------------------------------------- */
+
+.conn-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.conn-fields.hidden,
+.field-hint.hidden {
+  display: none;
+}
+
+/* Explanatory text under a field — the Cisco console defaults, what a jump
+   host does. Sized down so it reads as guidance, not as another label. */
+.field-hint {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--on-surface-muted);
+  margin: 2px 0 0;
+}
+
+/* A select with a refresh button beside it (the serial port picker). */
+.input-with-button {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.input-with-button select,
+.input-with-button input {
+  flex: 1;
+  min-width: 0;   /* lets the select shrink instead of forcing the row wide */
+}
+
+.input-with-button .btn-tertiary {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+}
+
+/* Collapsed-by-default advanced SSH options (key auth, jump host). Most
+   connections need none of it, so it stays out of the way until asked for. */
+#ssh-advanced {
+  border: 1px solid rgba(70,69,85,0.4);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.12);
+}
+
+#ssh-advanced > summary {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--on-surface);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+#ssh-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+#ssh-advanced > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.12s;
+}
+
+#ssh-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+#ssh-advanced > summary:hover {
+  color: var(--on-surface);
+}
+
+#ssh-advanced[open] > summary {
+  margin-bottom: 12px;
+}
+
+/* Direct children only. Without the child combinator this also matches the
+   second .form-group inside a .form-row, pushing it down so the two fields in
+   a row no longer line up. */
+#ssh-advanced > .form-group + .form-group,
+#ssh-advanced > .form-group + .form-row,
+#ssh-advanced > .form-row + .form-group {
+  margin-top: 12px;
+}
+
+/* Three-across row for the serial line settings (parity / stop bits / flow). */
+.form-row:has(> .form-group:nth-child(3)) {
+  grid-template-columns: repeat(3, 1fr);
+}
+
 .form-group input::placeholder {
   color: var(--on-surface-muted);
 }
@@ -1447,11 +1567,33 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 /* Modal action buttons */
+/* The form scrolls; the dialog itself does not, so the action bar can stay
+   pinned. min-height:0 is required or a flex child refuses to shrink below
+   its content and the overflow never engages. */
+#connection-form {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+  /* Room for the sticky footer, plus space for the focus ring on the last
+     field so it is not clipped by the scroll container. */
+  padding: 2px 2px 0;
+  margin: -2px -2px 0;
+}
+
 #modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 6px;
+  /* Pinned so Connect is reachable however long the form gets. */
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  padding: 12px 0 2px;
+  background: var(--modal-bg-solid);
+  /* Hairline so the pinned bar reads as a footer rather than as content that
+     happens to have stopped scrolling. */
+  border-top: 1px solid var(--outline);
 }
 
 /* --------------------------------------------------------------------------
@@ -2006,6 +2148,578 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   text-decoration: none;
 }
 
+/* ---------------------------------------------------------------------------
+   Output colour rule editor
+--------------------------------------------------------------------------- */
+
+.highlight-rule {
+  display: grid;
+  grid-template-columns: 1fr 110px auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--outline);
+}
+
+.highlight-pattern,
+.highlight-colour {
+  background: var(--surface-high);
+  border: 1px solid rgba(70,69,85,0.4);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.highlight-pattern:focus,
+.highlight-colour:focus {
+  outline: none;
+  border-color: var(--primary-container);
+}
+
+.highlight-case {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.highlight-case input {
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.highlight-remove {
+  background: none;
+  border: none;
+  color: var(--on-surface-muted);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+}
+
+.highlight-remove:hover {
+  color: var(--error);
+}
+
+.highlight-remove .material-symbols-outlined {
+  font-size: 16px;
+}
+
+/* The live preview spans the full width beneath its rule's controls. */
+.highlight-preview {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--bedrock);
+  border-radius: var(--radius-md);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--on-surface-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.highlight-preview-error {
+  color: var(--error);
+}
+
+.highlight-nomatch {
+  margin-top: 4px;
+  font-style: italic;
+  opacity: 0.6;
+}
+
+/* Preview swatches. These mirror the 256-colour SGR codes the highlighter
+   emits, so what the preview shows is what the terminal will render. */
+.hl-red     { color: #ff5f5f; }
+.hl-orange  { color: #ffaf5f; }
+.hl-yellow  { color: #ffd75f; }
+.hl-green   { color: #87d787; }
+.hl-blue    { color: #87afff; }
+.hl-cyan    { color: #87d7d7; }
+.hl-magenta { color: #d787d7; }
+.hl-grey    { color: #8a8a8a; }
+.hl-white   { color: #eeeeee; }
+
+/* Transient note when ShellMate sent something on the user's behalf. Stacks
+   above the drift banner rather than overlapping it. */
+.device-note {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: rgba(32,32,32,0.96);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  transition: opacity 0.6s;
+  pointer-events: none;
+}
+
+.device-note .material-symbols-outlined {
+  font-size: 15px;
+  color: var(--primary);
+}
+
+.device-note-alias {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.device-note-fade {
+  opacity: 0;
+}
+
+/* Device identity shown in the status bar once the device is fingerprinted. */
+#status-device {
+  color: var(--on-surface-muted);
+}
+
+#status-device.status-device-known {
+  color: var(--primary);
+}
+
+/* ---------------------------------------------------------------------------
+   Config drift banner and diff view
+--------------------------------------------------------------------------- */
+
+/* Floats over the terminal rather than displacing it — arriving at a device
+   should not reflow the screen under the cursor. */
+.drift-banner {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(32,32,32,0.96);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 28px -10px rgba(0,0,0,0.6);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  animation: drift-in 0.18s ease-out;
+}
+
+@keyframes drift-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* A changed config is the one worth noticing. */
+.drift-banner-changed {
+  border-color: var(--primary-container);
+}
+
+.drift-icon {
+  flex: 0 0 auto;
+  font-size: 18px;
+  color: var(--on-surface-muted);
+}
+
+.drift-banner-changed .drift-icon {
+  color: var(--primary);
+}
+
+.drift-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.drift-action {
+  flex: 0 0 auto;
+  background: var(--primary-container);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  color: var(--on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.drift-dismiss {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--on-surface-muted);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+}
+
+.drift-dismiss:hover {
+  color: var(--on-surface);
+}
+
+.drift-dismiss .material-symbols-outlined {
+  font-size: 16px;
+}
+
+#diff-summary {
+  padding: 10px 24px;
+  font-size: 12px;
+  color: var(--on-surface-muted);
+  border-bottom: 1px solid var(--outline);
+}
+
+#diff-body {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 8px 0;
+}
+
+.diff-line {
+  padding: 0 24px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--on-surface-dim);
+}
+
+.diff-add {
+  background: rgba(64,192,120,0.12);
+  color: #7ee2a8;
+}
+
+.diff-remove {
+  background: rgba(240,90,90,0.12);
+  color: #f08a8a;
+}
+
+.diff-hunk {
+  color: var(--primary);
+  margin-top: 6px;
+}
+
+.diff-file {
+  color: var(--on-surface-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Session history and replay panels
+--------------------------------------------------------------------------- */
+
+/* History needs more room than the logs list: results carry a command, a
+   device, a timestamp and a snippet of output. */
+.side-panel-wide {
+  width: 620px;
+  max-width: 96vw;
+}
+
+#history-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--outline);
+}
+
+#history-query {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-high);
+  border: 1px solid rgba(70,69,85,0.4);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  color: var(--on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+}
+
+#history-query:focus {
+  outline: none;
+  border-color: var(--primary-container);
+}
+
+#history-toolbar select {
+  flex: 0 0 auto;
+  max-width: 150px;
+  background: var(--surface-high);
+  border: 1px solid rgba(70,69,85,0.4);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  color: var(--on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+}
+
+#history-stats {
+  padding: 8px 24px;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  border-bottom: 1px solid var(--outline);
+}
+
+.history-row {
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--outline);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.history-row:hover {
+  background: var(--surface-high);
+}
+
+.history-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-command {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-meta {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--on-surface-muted);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Snippets are output fragments — clamp to two lines so one verbose result
+   cannot push everything else off the screen. */
+.history-snippet {
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--on-surface-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.history-empty,
+.history-loading {
+  padding: 32px 24px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--on-surface-muted);
+  text-align: center;
+}
+
+/* Layered above the history list, so returning to results is one Escape. */
+#replay-overlay {
+  z-index: 520;
+}
+
+#replay-meta {
+  padding: 10px 24px;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  border-bottom: 1px solid var(--outline);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.replay-entry {
+  border-bottom: 1px solid var(--outline);
+  padding: 12px 24px;
+}
+
+.replay-command {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+.replay-prompt {
+  color: var(--primary);
+  flex: 0 0 auto;
+}
+
+.replay-timing {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--on-surface-muted);
+}
+
+/* Output can be a whole running-config. Cap the height and let it scroll
+   rather than making the reader page past thousands of lines to reach the
+   next command. */
+.replay-output {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--on-surface-dim);
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------------------------------------------------------------------------
+   SFTP file browser panel
+   Mirrors the logs panel styling so the two side panels read as one family.
+--------------------------------------------------------------------------- */
+
+#sftp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--outline);
+}
+
+#sftp-path {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-high);
+  border: 1px solid rgba(70,69,85,0.4);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+#sftp-path:focus {
+  outline: none;
+  border-color: var(--primary-container);
+}
+
+#sftp-toolbar .btn-tertiary {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+}
+
+/* "Up one directory" — reuse of the open_in_new glyph, rotated to point up. */
+#sftp-up .material-symbols-outlined {
+  transform: rotate(-90deg);
+}
+
+#sftp-status {
+  padding: 10px 24px;
+  font-size: 12px;
+  color: var(--on-surface-muted);
+  border-bottom: 1px solid var(--outline);
+}
+
+#sftp-status.sftp-status-error {
+  color: var(--error);
+}
+
+.sftp-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--outline);
+  transition: background 0.12s;
+}
+
+.sftp-row:hover {
+  background: var(--surface-high);
+}
+
+.sftp-row-dir {
+  cursor: pointer;
+}
+
+.sftp-icon {
+  color: var(--on-surface-muted);
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
+.sftp-row-dir .sftp-icon {
+  color: var(--primary);
+}
+
+.sftp-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sftp-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sftp-meta {
+  font-size: 10px;
+  color: var(--on-surface-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.sftp-action {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: var(--on-surface-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  transition: color 0.12s, background 0.12s;
+}
+
+.sftp-action:hover {
+  color: var(--on-surface);
+  background: rgba(255,255,255,0.06);
+}
+
+.sftp-action-danger:hover {
+  color: var(--error);
+}
+
+.sftp-action .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.sftp-empty,
+.sftp-loading {
+  padding: 32px 24px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--on-surface-muted);
+  text-align: center;
+}
+
 .logs-empty {
   padding: 32px 24px;
   font-size: 13px;
@@ -2030,6 +2744,109 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 /* --------------------------------------------------------------------------
    Paste confirmation modal
    -------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+   Vault unlock modal
+   Same shape as the paste confirmation, one z-index above everything else so
+   it is the first thing seen when a master-password vault needs opening.
+--------------------------------------------------------------------------- */
+
+#vault-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(4px);
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#vault-overlay.hidden {
+  display: none;
+}
+
+#vault-dialog {
+  background: rgba(32,32,32,0.97);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 440px;
+  max-width: 95vw;
+  box-shadow: 0 24px 48px -12px rgba(15,0,105,0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+#vault-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#vault-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--on-surface);
+}
+
+.vault-label {
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.vault-hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--on-surface-muted);
+  margin: 0;
+}
+
+#vault-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#vault-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.vault-result-error {
+  color: var(--error);
+}
+
+/* Checkbox + label on one line, used for "remember these credentials". */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  cursor: pointer;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+/* Read-only status text in a settings row. */
+.setting-value {
+  font-size: 12px;
+  color: var(--on-surface-muted);
+  text-align: right;
+}
+
 #paste-overlay {
   position: fixed;
   inset: 0;

@@ -4,7 +4,6 @@ Builds context from session buffers, optionally retrieves design-guideline snipp
 from a configured Chroma vector DB, and streams the response.
 """
 import logging
-import re
 from collections.abc import AsyncIterator
 
 from backend.ai.prompts import build_context_prompt, get_system_prompt
@@ -12,22 +11,41 @@ from backend.ai import chroma_client
 from backend.connections.manager import SessionManager
 from backend.settings_store import get_settings
 
+from backend.session.ansi import clean
+from backend.session.transcript import match_prompt
+
 logger = logging.getLogger(__name__)
 
-# Regex to extract CLI commands from buffer (lines ending with a prompt + command)
-_CMD_RE = re.compile(r"[A-Za-z0-9._\-]{1,64}(?:\([^)]*\))?[#>]\s*(.+)")
-
-
 def _extract_commands(buffer_text: str) -> list[str]:
-    """Pull command strings from terminal output by matching prompt lines."""
+    """
+    Pull the commands run in this session out of the terminal text.
+
+    Uses the shared prompt parser rather than a private regex, so Junos,
+    PAN-OS and Linux prompts are recognised as well as Cisco ones. This
+    previously had its own Cisco-only pattern, which meant the AI was told
+    "no commands have been run" on any non-Cisco device.
+    """
     commands = []
     for line in buffer_text.splitlines():
-        m = _CMD_RE.match(line.strip())
-        if m:
-            cmd = m.group(1).strip()
-            if cmd:
-                commands.append(cmd)
+        found = match_prompt(line.strip())
+        if found and found[1].strip():
+            commands.append(found[1].strip())
     return commands
+
+
+def _session_text(session: dict, lines: int) -> str:
+    """
+    Return a session's recent output as the engineer would see it.
+
+    Escape sequences, backspaces and pager artefacts are removed first.
+    Sending the raw stream wastes tokens on invisible control codes and, worse,
+    splits words the model needs to read — a coloured interface name arrives
+    with escape codes buried in the middle of it.
+    """
+    buffer = session.get("buffer")
+    if buffer is None:
+        return ""
+    return clean(buffer.get_text(lines))
 
 
 async def stream_chat(
@@ -77,9 +95,8 @@ async def stream_chat(
                 session.get("display_label") or
                 session.get("hostname", active_session_id[:8])
             )
-            buf = session.get("buffer")
-            if buf:
-                active_buffer = buf.get_text(200)
+            if session.get("buffer"):
+                active_buffer = _session_text(session, 200)
                 command_history = _extract_commands(active_buffer)
 
     # Extra contexts (/context all or /context N)
@@ -94,7 +111,7 @@ async def stream_chat(
             if sess and sess.get("buffer"):
                 extra_contexts.append({
                     "label":  sess.get("display_label") or sess.get("hostname", sid[:8]),
-                    "buffer": sess["buffer"].get_text(100),
+                    "buffer": _session_text(sess, 100),
                 })
     elif context_mode.isdigit():
         tab_num = int(context_mode)
@@ -109,7 +126,7 @@ async def stream_chat(
                             target.get("display_label") or
                             target.get("hostname", "")
                         ),
-                        "buffer": sess["buffer"].get_text(100),
+                        "buffer": _session_text(sess, 100),
                     })
 
     # Optional Chroma-backed design-guideline snippets. Only queried when a URL

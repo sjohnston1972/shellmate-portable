@@ -21,17 +21,33 @@ import asyncio
 import json
 import logging
 import re
-from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI, File, HTTPException, Request, Response, UploadFile, WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend import paths
+from backend.configs import capture_config, diff_snapshots, drift_report
+from backend.connections.base import ConnectionError_, ConnectionParams
+from backend.connections import sftp
 from backend.connections.manager import SessionManager
-from backend.profiles import get_profiles, save_profile, delete_profile
-from backend.settings_store import get_settings, get_settings_for_ui, update_settings
+from backend.connections.serial_handler import available_ports
+from backend.profiles import (
+    CREDENTIAL_FIELDS, delete_profile, forget_credentials, get_profiles,
+    load_credentials, save_credentials, save_profile,
+)
+from backend.session.transcript import detect_hostname
+from backend.settings_store import (
+    get_settings, get_settings_for_ui, log_directory, migrate_plaintext_secrets,
+    update_settings,
+)
+from backend.store import store
+from backend.vault import VaultError, vault
 from backend.ai.router import stream_chat
 from backend.ai import chroma_client
 from backend.config import DEFAULT_AI_BACKEND, JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
@@ -42,25 +58,29 @@ logger = logging.getLogger(__name__)
 # Application and globals
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="ShellMate", )
+app = FastAPI(title="ShellMate Portable")
 
 # Single global session manager — all state lives here
 session_manager = SessionManager()
 
-# Absolute path to the frontend directory
-FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+# Absolute path to the frontend directory. Read-only and, in a frozen build,
+# inside PyInstaller's temporary extraction directory — never write here.
+FRONTEND_DIR = paths.frontend_dir()
 
 # ---------------------------------------------------------------------------
-# CORS — allow the browser to call the API from localhost origins
+# CORS — allow the browser to call the API from the loopback origin it was
+# served from.
+#
+# The port is not known at import time because ShellMate picks a free one at
+# startup (see backend/server.py), so match loopback origins by regex rather
+# than listing them. The previous literal "http://localhost:*" entry was not
+# valid CORS syntax — origins are compared as exact strings, so it never
+# matched anything.
 # ---------------------------------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8765",
-        "http://127.0.0.1:8765",
-        "http://localhost:*",
-    ],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -90,20 +110,66 @@ class CreateSessionRequest(BaseModel):
 
     hostname: str
     port: int = 22
-    username: str
-    password: str
+    username: str = ""
+    password: str = ""
     connection_type: str = "ssh"
     display_label: str = ""
+
+    # SSH key authentication
+    private_key_path: str = ""
+    private_key_passphrase: str = ""
+
+    # SSH jump host / bastion
+    jump_host: str = ""
+    jump_port: int = 22
+    jump_username: str = ""
+    jump_password: str = ""
+    jump_private_key_path: str = ""
+    jump_private_key_passphrase: str = ""
+
+    # Serial console
+    serial_port: str = ""
+    baud_rate: int = 9600
+    data_bits: int = 8
+    parity: str = "N"
+    stop_bits: float = 1
+    flow_control: str = "none"
+
+    # Credential handling. The browser never receives a stored password: it
+    # sends the profile id and the backend fills the credentials in from the
+    # vault server-side.
+    profile_id: str = ""
+    remember_credentials: bool = False
+
+    def to_params(self) -> ConnectionParams:
+        """Convert to the transport-layer parameter object."""
+        fields = self.model_dump()
+        fields.pop("profile_id", None)
+        fields.pop("remember_credentials", None)
+        return ConnectionParams(**fields)
 
 
 class SaveProfileRequest(BaseModel):
     """Body for POST /api/profiles."""
 
     name: str = ""
-    hostname: str
+    hostname: str = ""
     port: int = 22
-    username: str
+    username: str = ""
     connection_type: str = "ssh"
+
+    # Reconnect details worth remembering. Never any secret — no password and
+    # no key passphrase is ever written to a profile.
+    private_key_path: str = ""
+    jump_host: str = ""
+    jump_port: int = 22
+    jump_username: str = ""
+    serial_port: str = ""
+    baud_rate: int = 9600
+    data_bits: int = 8
+    parity: str = "N"
+    stop_bits: float = 1
+    flow_control: str = "none"
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -115,27 +181,332 @@ class UpdateSettingsRequest(BaseModel):
 @app.post("/api/sessions")
 async def create_session(request: CreateSessionRequest) -> dict:
     """
-    Create a new SSH session and return its metadata.
+    Create a session over SSH, serial or telnet and return its metadata.
 
-    The SSH connection is made synchronously here; if it fails the error
-    is returned as a 400 so the frontend can show a useful message.
+    The connection is established synchronously; on failure the handler's
+    message is returned as a 400 so the frontend can show something the user
+    can act on rather than a stack trace.
     """
+    params = request.to_params()
+
+    # Fill in anything the user chose to have remembered. Only fields left
+    # blank are filled, so a password typed in the dialog always wins over a
+    # stale stored one.
+    if request.profile_id:
+        for field, value in load_credentials(request.profile_id).items():
+            if not getattr(params, field, ""):
+                setattr(params, field, value)
+
+    # Captured before connecting because the handler scrubs them from params
+    # the moment authentication succeeds.
+    to_remember = {
+        field: getattr(params, field, "")
+        for field in CREDENTIAL_FIELDS
+    } if (request.remember_credentials and request.profile_id) else {}
+
     try:
-        # Run the blocking paramiko connect in a thread so we don't stall
-        # the event loop during the TCP + SSH handshake
-        session = await asyncio.to_thread(
-            session_manager.create_session,
-            request.hostname,
-            request.port,
-            request.username,
-            request.password,
-            request.connection_type,
-            request.display_label,
-        )
-        return session
-    except Exception as exc:
-        logger.error("Failed to create session: %s", exc)
+        # Every transport blocks while connecting, so run it off the event loop.
+        session = await asyncio.to_thread(session_manager.create_session, params)
+    except ConnectionError_ as exc:
+        # Already phrased for the user by the handler.
+        logger.info("Connection failed: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Unexpected error creating session")
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Only remember credentials that actually worked — storing them before the
+    # handshake would persist a typo the user is about to correct.
+    if to_remember:
+        save_credentials(request.profile_id, to_remember)
+
+    return session
+
+
+# ---------------------------------------------------------------------------
+# REST — Session history
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/history/search")
+async def history_search(
+    q: str = "", hostname: str = "", since: float | None = None,
+    until: float | None = None, limit: int = 100,
+) -> dict:
+    """
+    Search every command ever run.
+
+    This is the point of storing transcripts rather than flat log files:
+    "what did I change on the Glasgow core last Tuesday" becomes a query with
+    a device filter and a date range, instead of grep across a folder.
+    """
+    hits = await asyncio.to_thread(
+        store.search, q.strip(), hostname.strip(), since, until, limit,
+    )
+    return {"query": q, "count": len(hits), "results": hits}
+
+
+@app.get("/api/history/sessions")
+async def history_sessions(limit: int = 50, hostname: str = "") -> list[dict]:
+    """List recorded sessions, newest first."""
+    return await asyncio.to_thread(store.list_sessions, limit, hostname.strip())
+
+
+@app.get("/api/history/sessions/{session_id}")
+async def history_session_detail(session_id: str) -> dict:
+    """Return one recorded session with every command it ran, for replay."""
+    session = await asyncio.to_thread(store.get_session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="No such session in history")
+    return session
+
+
+@app.delete("/api/history/sessions/{session_id}")
+async def history_delete_session(session_id: str) -> dict:
+    """Delete a recorded session and its commands."""
+    if not await asyncio.to_thread(store.delete_session, session_id):
+        raise HTTPException(status_code=404, detail="No such session in history")
+    return {"status": "ok"}
+
+
+@app.get("/api/history/devices")
+async def history_devices() -> list[str]:
+    """Every device seen, for the history filter."""
+    return await asyncio.to_thread(store.known_hostnames)
+
+
+@app.get("/api/history/stats")
+async def history_stats() -> dict:
+    """Summary counts for the history panel header."""
+    return await asyncio.to_thread(store.stats)
+
+
+# ---------------------------------------------------------------------------
+# REST — Configuration snapshots
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/configs/{hostname}")
+async def config_list(hostname: str, limit: int = 50) -> list[dict]:
+    """List stored configuration snapshots for a device, newest first."""
+    return await asyncio.to_thread(store.list_snapshots, hostname, limit)
+
+
+@app.get("/api/configs/snapshot/{snapshot_id}")
+async def config_get(snapshot_id: int) -> dict:
+    """Return one configuration snapshot in full."""
+    snapshot = await asyncio.to_thread(store.get_snapshot, snapshot_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="No such snapshot")
+    return snapshot
+
+
+@app.get("/api/configs/diff/{old_id}/{new_id}")
+async def config_diff_endpoint(old_id: int, new_id: int) -> dict:
+    """Return a unified diff between two stored snapshots."""
+    old = await asyncio.to_thread(store.get_snapshot, old_id)
+    new = await asyncio.to_thread(store.get_snapshot, new_id)
+    if old is None or new is None:
+        raise HTTPException(status_code=404, detail="No such snapshot")
+    return diff_snapshots(old, new)
+
+
+@app.post("/api/sessions/{session_id}/snapshot")
+async def capture_snapshot(session_id: str) -> dict:
+    """
+    Capture the device's running configuration now.
+
+    Runs on a second SSH channel so it does not disturb whatever the user is
+    typing in the tab.
+    """
+    session = _require_session(session_id)
+    try:
+        return await asyncio.to_thread(capture_config, session)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/sessions/{session_id}/drift")
+async def session_drift(session_id: str) -> dict:
+    """
+    Report what has changed on this device since it was last visited.
+
+    Every login becomes a drift check: "you were last here 12 days ago, 4
+    lines have changed."
+    """
+    session = _require_session(session_id)
+    return await asyncio.to_thread(drift_report, session)
+
+
+# ---------------------------------------------------------------------------
+# REST — Credentials vault
+# ---------------------------------------------------------------------------
+
+
+class VaultUnlockRequest(BaseModel):
+    """Body for POST /api/vault/unlock."""
+
+    password: str = ""
+
+
+class VaultModeRequest(BaseModel):
+    """Body for POST /api/vault/mode."""
+
+    mode: str                 # "dpapi" | "password"
+    password: str = ""        # required when mode is "password"
+
+
+@app.get("/api/vault/status")
+async def vault_status() -> dict:
+    """
+    Report how secrets are stored and whether the vault needs unlocking.
+
+    Returns no secrets and no key names — only what the UI needs to decide
+    whether to show an unlock prompt.
+    """
+    return vault.status()
+
+
+@app.post("/api/vault/unlock")
+async def vault_unlock(request: VaultUnlockRequest) -> dict:
+    """Unlock a master-password vault for the rest of this session."""
+    try:
+        # scrypt is deliberately slow, so keep it off the event loop.
+        await asyncio.to_thread(vault.unlock, request.password)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Any plaintext keys left by an older version can only be migrated once
+    # the vault is readable, so this is the natural moment to try.
+    for field in migrate_plaintext_secrets():
+        logger.info("Migrated %s into the vault", field)
+
+    return vault.status()
+
+
+@app.post("/api/vault/lock")
+async def vault_lock() -> dict:
+    """Forget the decrypted vault, requiring the master password again."""
+    vault.lock()
+    return vault.status()
+
+
+@app.post("/api/vault/mode")
+async def vault_set_mode(request: VaultModeRequest) -> dict:
+    """Switch between DPAPI and master-password storage, re-encrypting."""
+    try:
+        await asyncio.to_thread(vault.set_mode, request.mode, request.password)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return vault.status()
+
+
+class ProfileCredentialsRequest(BaseModel):
+    """Body for PUT /api/profiles/{id}/credentials."""
+
+    password: str = ""
+    private_key_passphrase: str = ""
+    jump_password: str = ""
+    jump_private_key_passphrase: str = ""
+
+
+@app.put("/api/profiles/{profile_id}/credentials")
+async def remember_profile_credentials(
+    profile_id: str, request: ProfileCredentialsRequest,
+) -> dict:
+    """
+    Remember credentials for a profile.
+
+    Needed for the first connection to a new device: at connect time no
+    profile existed yet, so there was nowhere to file the credentials. The
+    frontend creates the profile, then calls this.
+
+    Returns only whether anything was stored — never the values back.
+    """
+    stored = save_credentials(profile_id, request.model_dump())
+    if not stored and vault.is_locked():
+        raise HTTPException(
+            status_code=400,
+            detail="The vault is locked, so credentials could not be saved.",
+        )
+    return {"status": "ok", "stored": stored}
+
+
+@app.delete("/api/profiles/{profile_id}/credentials")
+async def forget_profile_credentials(profile_id: str) -> dict:
+    """Forget the credentials remembered for a profile."""
+    forget_credentials(profile_id)
+    return {"status": "ok", "profile_id": profile_id}
+
+
+@app.get("/api/sftp/{session_id}/list")
+async def sftp_list(session_id: str, path: str = ".") -> dict:
+    """List a remote directory over the tab's existing SSH connection."""
+    session = _require_session(session_id)
+    try:
+        return await asyncio.to_thread(sftp.list_directory, session, path)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/sftp/{session_id}/download")
+async def sftp_download(session_id: str, path: str) -> Response:
+    """Download a remote file."""
+    session = _require_session(session_id)
+    try:
+        data = await asyncio.to_thread(sftp.read_file, session, path)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # Take only the basename, and strip anything that could steer where the
+    # browser writes it or break out of the Content-Disposition header.
+    filename = re.sub(r'[^\w\-. ]', "_", path.rsplit("/", 1)[-1]) or "download"
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/sftp/{session_id}/upload")
+async def sftp_upload(session_id: str, path: str, file: UploadFile = File(...)) -> dict:
+    """Upload a file to the remote path."""
+    session = _require_session(session_id)
+    data = await file.read()
+    try:
+        return await asyncio.to_thread(sftp.write_file, session, path, data)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/sftp/{session_id}/file")
+async def sftp_delete(session_id: str, path: str) -> dict:
+    """Delete a remote file."""
+    session = _require_session(session_id)
+    try:
+        return await asyncio.to_thread(sftp.delete_file, session, path)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/serial/ports")
+async def serial_ports() -> list[dict]:
+    """
+    List serial ports present on this machine.
+
+    Backs the port picker in the connection dialog: "COM3" on its own is not
+    enough to identify the right adapter when a laptop has a dock and two USB
+    converters attached.
+    """
+    return await asyncio.to_thread(available_ports)
+
+
+def _require_session(session_id: str) -> dict:
+    """Look up a session or raise a 404. Shared by the SFTP endpoints."""
+    session = session_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
 
 
 @app.get("/api/sessions")
@@ -167,11 +538,8 @@ async def list_profiles() -> list[dict]:
 
 @app.post("/api/profiles")
 async def create_profile(request: SaveProfileRequest) -> dict:
-    """Save a connection profile (no password stored)."""
-    return save_profile(
-        request.name, request.hostname, request.port,
-        request.username, request.connection_type,
-    )
+    """Save a connection profile (no password or passphrase is ever stored)."""
+    return save_profile(request.model_dump())
 
 
 @app.delete("/api/profiles/{profile_id}")
@@ -186,6 +554,26 @@ async def remove_profile(profile_id: str) -> dict:
 # REST — Settings
 # ---------------------------------------------------------------------------
 
+@app.get("/api/system/info")
+async def system_info() -> dict:
+    """
+    Report where ShellMate is storing data and whether it is running frozen.
+
+    The UI shows this so the user is never wrong about where their profiles
+    live — particularly when the portable location was read-only and we
+    silently fell back to per-user storage.
+    """
+    return {
+        # Marker used by the single-instance check in backend/server.py to
+        # confirm a responding port is actually us.
+        "app":            "shellmate-portable",
+        "data_dir":       str(paths.data_dir()),
+        "using_fallback": paths.data_dir_is_fallback(),
+        "portable":       paths.is_frozen(),
+        "log_dir":        str(log_directory()),
+    }
+
+
 @app.get("/api/settings")
 async def get_app_settings() -> dict:
     """Return current application settings (secrets masked, env flags included)."""
@@ -195,7 +583,12 @@ async def get_app_settings() -> dict:
 @app.post("/api/settings")
 async def save_app_settings(request: UpdateSettingsRequest) -> dict:
     """Persist updated settings and return the merged result."""
-    return update_settings(request.settings)
+    try:
+        return update_settings(request.settings)
+    except VaultError as exc:
+        # Most likely a locked master-password vault. The user needs to unlock
+        # it, not see a 500.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +750,7 @@ async def ollama_models() -> list[dict]:
 async def list_logs() -> list[dict]:
     """Return a list of available session log files."""
     from datetime import datetime
-    logs_dir = Path(__file__).parent.parent / "logs"
+    logs_dir = log_directory()
     if not logs_dir.exists():
         return []
     files = []
@@ -377,7 +770,7 @@ async def download_log(filename: str) -> FileResponse:
     # Sanitize filename — only allow safe characters to prevent path traversal
     if not re.match(r'^[\w\-\.]+\.log$', filename):
         raise HTTPException(status_code=400, detail="Invalid filename")
-    log_path = Path(__file__).parent.parent / "logs" / filename
+    log_path = log_directory() / filename
     if not log_path.exists():
         raise HTTPException(status_code=404, detail="Log file not found")
     return FileResponse(str(log_path), filename=filename)
@@ -387,21 +780,11 @@ async def download_log(filename: str) -> FileResponse:
 # WebSocket — terminal I/O
 # ---------------------------------------------------------------------------
 
-# Regex patterns for Cisco CLI prompts (used for hostname detection)
-# Matches lines like:  switch01#   or   Router>   or   ASA-FW(config)#
-_PROMPT_PATTERN = re.compile(
-    r"(?:^|\r?\n)"           # start of string or new line
-    r"([A-Za-z0-9._\-]{1,64})"  # hostname — alphanumeric + common chars
-    r"(?:\([^)]*\))?"        # optional mode suffix e.g. (config)
-    r"[#>]\s*$"              # prompt character at end of line
-)
-
-
 @app.websocket("/ws/terminal/{session_id}")
 async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
     """
-    Bidirectional WebSocket bridge between the browser xterm.js and the
-    remote device's paramiko channel.
+    Bidirectional WebSocket bridge between the browser's xterm.js and the
+    device, whatever the transport underneath is.
 
     Each session_id gets its own WebSocket connection.  Multiple tabs in
     the browser each connect here with their own session_id — they are
@@ -417,12 +800,11 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
         await websocket.close()
         return
 
-    channel = session["channel"]
     handler = session["handler"]
     hostname_sent = False  # Only send hostname_detected once per session
 
     async def read_from_client() -> None:
-        """Forward browser keystrokes / resize events to the SSH channel."""
+        """Forward browser keystrokes / resize events to the device."""
         try:
             while True:
                 raw = await websocket.receive_text()
@@ -437,37 +819,95 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 if msg_type == "input":
                     data: str = msg.get("data", "")
                     if data and handler.is_connected:
-                        await asyncio.to_thread(channel.send, data.encode("utf-8", errors="replace"))
+                        # Everything the user sends goes through the pipeline,
+                        # which assembles keystrokes into lines and may rewrite
+                        # one (an alias) before it reaches the device.
+                        outbound = session["pipeline"].process(data)
+                        await asyncio.to_thread(
+                            handler.send, outbound.encode("utf-8", errors="replace")
+                        )
+
+                        # Say so when a command was rewritten. Silently sending
+                        # something other than what was typed would be worse
+                        # than not helping at all.
+                        expansion = session["pipeline"].last_expansion
+                        if expansion:
+                            await websocket.send_text(json.dumps({
+                                "type": "alias_expanded",
+                                "typed": expansion[0],
+                                "sent":  expansion[1],
+                            }))
 
                 elif msg_type == "resize":
                     cols = int(msg.get("cols", 80))
                     rows = int(msg.get("rows", 24))
                     await asyncio.to_thread(handler.resize, cols, rows)
 
+                elif msg_type == "break":
+                    # Serial only: the break signal used to drop a booting
+                    # Cisco device into ROMMON.
+                    if hasattr(handler, "send_break"):
+                        await asyncio.to_thread(handler.send_break)
+
         except WebSocketDisconnect:
             pass
         except Exception as exc:
             logger.warning("read_from_client error (session %s): %s", session_id, exc)
 
+    async def maybe_onboard() -> None:
+        """
+        Identify the device and apply its platform settings, once.
+
+        Called on every pass of the read loop *including idle ones*. After the
+        login banner a device says nothing until it is spoken to, so a check
+        that only ran when new output arrived would not fire until the user
+        started typing — and the paging command would then interleave with
+        their first keystroke.
+        """
+        onboarder = session["onboarder"]
+        if onboarder.done:
+            return
+
+        at_prompt = bool(session["transcript"].last_prompt)
+        if not onboarder.ready(at_prompt):
+            return
+
+        summary = onboarder.run(session["transcript"].last_prompt)
+        session["fingerprint"] = summary
+        session["pipeline"].platform = summary["platform"]
+
+        terminal_settings = get_settings().get("terminal", {})
+        session["pipeline"].expand_aliases = bool(
+            terminal_settings.get("expand_aliases", True)
+        )
+
+        await websocket.send_text(
+            json.dumps({"type": "device_identified", **summary})
+        )
+
+        if (summary["paging_command"]
+                and terminal_settings.get("auto_paging_off", True)
+                and handler.is_connected):
+            await asyncio.to_thread(
+                handler.send, (summary["paging_command"] + "\r").encode()
+            )
+
     async def read_from_channel() -> None:
-        """Forward SSH channel output to the browser and session buffer."""
-        import socket as _socket
+        """Forward device output to the browser and the session buffer."""
         nonlocal hostname_sent
         try:
             while True:
-                # channel.recv blocks up to the channel timeout (0.5 s).
-                # A socket.timeout means no data arrived — just keep looping.
-                # b"" means the channel was closed by the remote end.
-                try:
-                    data_bytes: bytes = await asyncio.to_thread(channel.recv, 4096)
-                except _socket.timeout:
-                    # No data in this window — check if still connected
-                    if channel.closed:
-                        data_bytes = b""
-                    else:
-                        continue
-                except Exception:
-                    data_bytes = b""
+                # See ConnectionHandler.recv: None means idle (keep waiting),
+                # b"" means the far end closed.
+                data_bytes = await asyncio.to_thread(handler.recv, 4096)
+
+                if data_bytes is None:
+                    # Idle, but onboarding may still be due — see maybe_onboard.
+                    try:
+                        await maybe_onboard()
+                    except Exception as exc:
+                        logger.warning("Onboarding failed for %s: %s", session_id, exc)
+                    continue
 
                 if not data_bytes:
                     # Channel closed (device disconnected or session ended)
@@ -485,10 +925,19 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 # Write to session buffer
                 session_manager.write_to_buffer(session_id, text)
 
+                # Reconstruct commands from the stream and record them. Any
+                # failure here is logged and dropped: history is valuable, but
+                # never worth interrupting a live session for.
+                try:
+                    for record in session["transcript"].feed(text):
+                        store.add_command(session_id, record)
+                except Exception as exc:
+                    logger.warning("Transcript error on session %s: %s", session_id, exc)
+
                 # File logging (if enabled in settings)
                 _settings = get_settings()
                 if _settings.get("logging", {}).get("enabled"):
-                    _log_dir = Path(__file__).parent.parent / _settings["logging"].get("directory", "logs")
+                    _log_dir = log_directory()
                     _log_dir.mkdir(parents=True, exist_ok=True)
                     _log_file = _log_dir / f"{session_id[:8]}-{session.get('hostname', 'session')}.log"
                     from datetime import datetime
@@ -498,20 +947,32 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 # Send output to browser
                 await websocket.send_text(json.dumps({"type": "output", "data": text}))
 
-                # Try to detect the device hostname from prompt patterns
+                # Collect banner text for identification, then run the same
+                # onboarding check the idle path uses.
+                try:
+                    session["onboarder"].observe(text)
+                    await maybe_onboard()
+                except Exception as exc:
+                    logger.warning("Onboarding failed for session %s: %s", session_id, exc)
+
+                # Name the tab after the device. Uses the shared cross-vendor
+                # prompt parser, so Junos and PAN-OS are recognised as well as
+                # IOS — the old pattern here understood Cisco only.
                 if not hostname_sent:
-                    match = _PROMPT_PATTERN.search(text)
-                    if match:
-                        detected = match.group(1)
-                        # Sanity check: must look like a real hostname
-                        if len(detected) >= 2 and not detected.isdigit():
-                            await websocket.send_text(
-                                json.dumps({
-                                    "type": "hostname_detected",
-                                    "hostname": detected,
-                                })
-                            )
-                            hostname_sent = True
+                    detected = detect_hostname(text)
+                    if detected:
+                        await websocket.send_text(
+                            json.dumps({"type": "hostname_detected", "hostname": detected})
+                        )
+                        hostname_sent = True
+                        # Connections are often opened by IP, so recording the
+                        # real name is what makes searching by device work.
+                        store.update_session_hostname(session_id, detected)
+                        # Update the live session too, not just the database.
+                        # Config snapshots are keyed by hostname, and keying
+                        # them by IP would file the same device under two
+                        # names depending on how it was reached that day.
+                        session["hostname"] = detected
 
         except WebSocketDisconnect:
             pass
