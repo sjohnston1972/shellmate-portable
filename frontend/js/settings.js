@@ -314,6 +314,14 @@
         h.rules && h.rules.length ? h.rules : window.highlightRulesEditor.DEFAULT_RULES);
     }
     _checked('setting-logging-enabled',   !!l.enabled);
+    _checked('setting-redact-secrets',    l.redact_secrets !== false);
+
+    const ser = s.serial || {};
+    _val('setting-serial-baud',      ser.baud_rate    || 9600);
+    _val('setting-serial-databits',  ser.data_bits    || 8);
+    _val('setting-serial-parity',    ser.parity       || 'N');
+    _val('setting-serial-stopbits',  ser.stop_bits    || 1);
+    _val('setting-serial-flow',      ser.flow_control || 'none');
     _val('setting-log-dir',          l.directory || 'logs');
     _val('setting-color-scheme',     a.color_scheme  || 'deep_space');
     _val('setting-ui-font-size',     a.ui_font_size  || 14);
@@ -389,8 +397,16 @@
           ? window.highlightRulesEditor.collect() : [],
       },
       logging: {
-        enabled:   _gchecked('setting-logging-enabled'),
-        directory: _gval('setting-log-dir'),
+        enabled:        _gchecked('setting-logging-enabled'),
+        directory:      _gval('setting-log-dir'),
+        redact_secrets: _gchecked('setting-redact-secrets'),
+      },
+      serial: {
+        baud_rate:    parseInt(_gval('setting-serial-baud'), 10) || 9600,
+        data_bits:    parseInt(_gval('setting-serial-databits'), 10) || 8,
+        parity:       _gval('setting-serial-parity') || 'N',
+        stop_bits:    parseFloat(_gval('setting-serial-stopbits')) || 1,
+        flow_control: _gval('setting-serial-flow') || 'none',
       },
       appearance: {
         color_scheme:        schemeName,

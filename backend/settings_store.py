@@ -51,9 +51,21 @@ DEFAULT_SETTINGS: dict = {
     "logging": {
         "enabled": False,
         "directory": "logs",
+        # Mask credentials in written logs. On by default: a session log is
+        # meant to be handed to someone else, and devices echo.
+        "redact_secrets": True,
     },
     "appearance": {
         "color_scheme": "deep_space",
+    },
+    # Defaults for a serial console, so the same values are not re-entered on
+    # every connection. Cisco console is 9600 8-N-1 with no flow control.
+    "serial": {
+        "baud_rate": 9600,
+        "data_bits": 8,
+        "parity": "N",
+        "stop_bits": 1,
+        "flow_control": "none",
     },
     # User-overridable API keys / endpoints. Empty string means "fall back
     # to whatever .env provides". Keys persisted here override .env.

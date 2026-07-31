@@ -41,6 +41,8 @@ from backend.profiles import (
     CREDENTIAL_FIELDS, delete_profile, forget_credentials, get_profiles,
     load_credentials, record_detected_hostname, save_credentials, save_profile,
 )
+from backend import platforms as platforms_module
+from backend.session.redact import redact
 from backend.session.transcript import detect_hostname
 from backend.settings_store import (
     get_settings, get_settings_for_ui, log_directory, migrate_plaintext_secrets,
@@ -739,6 +741,74 @@ async def post_session_to_jira(request: Request) -> dict:
 # REST — Ollama model list
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# REST — Platform definitions
+# ---------------------------------------------------------------------------
+
+
+class PlatformRequest(BaseModel):
+    """Body for PUT /api/platforms/{id}."""
+
+    name: str = ""
+    paging_off: str = ""
+    show_run: str = ""
+    version_command: str = ""
+    signatures: list[str] = []
+    aliases: dict[str, str] = {}
+    dangerous_commands: list[str] = []
+    config_mode_markers: list[str] = []
+    comment_prefix: str = "!"
+
+
+@app.get("/api/platforms")
+async def platforms_list() -> dict:
+    """
+    Return every platform definition.
+
+    These drive paging-off, config retrieval, aliases and the dangerous-command
+    list, and are editable both here and in platforms.json.
+    """
+    return {
+        "platforms": {key: p.as_dict() for key, p in platforms_module.load_profiles().items()},
+        "builtin": sorted(platforms_module.BUILTIN),
+        "path": str(platforms_module.profiles_path()),
+    }
+
+
+@app.put("/api/platforms/{platform_id}")
+async def platform_save(platform_id: str, request: PlatformRequest) -> dict:
+    """Create or update one platform definition."""
+    try:
+        updated = await asyncio.to_thread(
+            platforms_module.save_profile_edits, platform_id, request.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return updated.as_dict()
+
+
+@app.delete("/api/platforms/{platform_id}")
+async def platform_delete(platform_id: str) -> dict:
+    """Delete a platform the user added. Built-ins cannot be removed."""
+    try:
+        removed = await asyncio.to_thread(platforms_module.delete_platform, platform_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="No such platform")
+    return {"status": "ok"}
+
+
+@app.post("/api/platforms/reset")
+async def platforms_reset() -> dict:
+    """Discard every edit and restore the built-in definitions."""
+    try:
+        profiles = await asyncio.to_thread(platforms_module.reset_to_defaults)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"platforms": {key: p.as_dict() for key, p in profiles.items()}}
+
+
 @app.get("/api/providers/{provider}/test")
 async def provider_test(provider: str) -> dict:
     """
@@ -982,8 +1052,15 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     _log_dir.mkdir(parents=True, exist_ok=True)
                     _log_file = _log_dir / f"{session_id[:8]}-{session.get('hostname', 'session')}.log"
                     from datetime import datetime
+                    # Devices echo, so a password typed at a login prompt
+                    # can land in a file that exists to be handed to someone
+                    # else. The live terminal always shows the truth; only
+                    # what is written to disk is masked.
+                    _logged = (redact(text)
+                               if _settings["logging"].get("redact_secrets", True)
+                               else text)
                     with open(_log_file, "a", encoding="utf-8") as _lf:
-                        _lf.write(f"[{datetime.now().isoformat()}] {text}")
+                        _lf.write(f"[{datetime.now().isoformat()}] {_logged}")
 
                 # Send output to browser
                 await websocket.send_text(json.dumps({"type": "output", "data": text}))

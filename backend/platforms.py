@@ -71,25 +71,47 @@ BUILTIN: dict[str, PlatformProfile] = {
         version_command="show version",
         signatures=["cisco ios software", "ios-xe", "ios software", "cisco ios"],
         aliases={
-            "ints":     "show ip interface brief",
-            "int":      "show ip interface brief",
-            "ver":      "show version",
-            "run":      "show running-config",
-            "start":    "show startup-config",
-            "arp":      "show ip arp",
-            "mac":      "show mac address-table",
-            "cdp":      "show cdp neighbors detail",
-            "lldp":     "show lldp neighbors detail",
-            "routes":   "show ip route",
-            "bgp":      "show ip bgp summary",
-            "ospf":     "show ip ospf neighbor",
-            "vlans":    "show vlan brief",
-            "trunks":   "show interfaces trunk",
-            "log":      "show logging",
-            "errors":   "show interfaces | include error|CRC|drop",
-            "poe":      "show power inline",
-            "stp":      "show spanning-tree summary",
-            "uptime":   "show version | include uptime",
+            'acl': 'show access-lists',
+            'alarms': 'show facility-alarm status',
+            'arp': 'show ip arp',
+            'bgp': 'show ip bgp summary',
+            'cdp': 'show cdp neighbors detail',
+            'clock': 'show clock',
+            'counters': 'show interfaces counters',
+            'cpu': 'show processes cpu sorted | exclude 0.00',
+            'default': 'show ip route 0.0.0.0',
+            'desc': 'show interfaces description',
+            'dhcp': 'show ip dhcp binding',
+            'diff': 'show archive config differences',
+            'eigrp': 'show ip eigrp neighbors',
+            'errors': 'show interfaces | include line protocol|error|CRC|drop',
+            'flash': 'show flash:',
+            'hsrp': 'show standby brief',
+            'int': 'show ip interface brief',
+            'ints': 'show ip interface brief',
+            'inv': 'show inventory',
+            'lldp': 'show lldp neighbors detail',
+            'log': 'show logging',
+            'mac': 'show mac address-table',
+            'mem': 'show memory statistics',
+            'nat': 'show ip nat translations',
+            'nei': 'show cdp neighbors',
+            'ntp': 'show ntp associations',
+            'ospf': 'show ip ospf neighbor',
+            'port': 'show interfaces status',
+            'power': 'show power inline',
+            'routes': 'show ip route',
+            'run': 'show running-config',
+            'start': 'show startup-config',
+            'stp': 'show spanning-tree summary',
+            'temp': 'show environment temperature',
+            'trunks': 'show interfaces trunk',
+            'uptime': 'show version | include uptime',
+            'users': 'show users',
+            'ver': 'show version',
+            'vlans': 'show vlan brief',
+            'vrf': 'show vrf',
+            'vrrp': 'show vrrp brief',
         },
         dangerous_commands=[
             "reload", "write erase", "erase startup-config", "erase nvram:",
@@ -108,19 +130,46 @@ BUILTIN: dict[str, PlatformProfile] = {
         version_command="show version",
         signatures=["nx-os", "nxos", "nexus"],
         aliases={
-            "ints":   "show interface brief",
-            "int":    "show interface brief",
-            "ver":    "show version",
-            "run":    "show running-config",
-            "arp":    "show ip arp",
-            "mac":    "show mac address-table",
-            "cdp":    "show cdp neighbors detail",
-            "routes": "show ip route",
-            "bgp":    "show ip bgp summary",
-            "vlans":  "show vlan brief",
-            "vpc":    "show vpc",
-            "log":    "show logging last 100",
-            "uptime": "show version | include uptime",
+            'acl': 'show access-lists',
+            'alarms': 'show logging last 50',
+            'arp': 'show ip arp',
+            'bgp': 'show ip bgp summary',
+            'cdp': 'show cdp neighbors detail',
+            'clock': 'show clock',
+            'counters': 'show interface counters',
+            'cpu': 'show system resources',
+            'default': 'show ip route 0.0.0.0/0',
+            'desc': 'show interface description',
+            'dhcp': 'show ip dhcp binding',
+            'eigrp': 'show ip eigrp neighbors',
+            'errors': 'show interface counters errors',
+            'flash': 'dir bootflash:',
+            'hsrp': 'show hsrp brief',
+            'int': 'show interface brief',
+            'ints': 'show interface brief',
+            'inv': 'show inventory',
+            'lldp': 'show lldp neighbors detail',
+            'log': 'show logging last 100',
+            'mac': 'show mac address-table',
+            'mem': 'show system resources',
+            'nei': 'show cdp neighbors',
+            'ntp': 'show ntp peer-status',
+            'ospf': 'show ip ospf neighbor',
+            'port': 'show interface status',
+            'power': 'show environment power',
+            'routes': 'show ip route',
+            'run': 'show running-config',
+            'start': 'show startup-config',
+            'stp': 'show spanning-tree summary',
+            'temp': 'show environment temperature',
+            'trunks': 'show interface trunk',
+            'uptime': 'show version | include uptime',
+            'users': 'show users',
+            'ver': 'show version',
+            'vlans': 'show vlan brief',
+            'vpc': 'show vpc',
+            'vrf': 'show vrf',
+            'vrrp': 'show vrrp',
         },
         dangerous_commands=[
             "reload", "write erase", "shutdown", "no shutdown",
@@ -137,14 +186,23 @@ BUILTIN: dict[str, PlatformProfile] = {
         version_command="show version",
         signatures=["adaptive security appliance", "cisco asa"],
         aliases={
-            "ints":   "show interface ip brief",
-            "ver":    "show version",
-            "run":    "show running-config",
-            "routes": "show route",
-            "xlate":  "show xlate",
-            "conns":  "show conn count",
-            "failover": "show failover",
-            "log":    "show logging",
+            'acl': 'show access-list',
+            'arp': 'show arp',
+            'clock': 'show clock',
+            'conns': 'show conn count',
+            'cpu': 'show cpu usage',
+            'failover': 'show failover',
+            'ha': 'show failover',
+            'int': 'show interface ip brief',
+            'ints': 'show interface ip brief',
+            'log': 'show logging',
+            'mem': 'show memory',
+            'nat': 'show nat',
+            'routes': 'show route',
+            'run': 'show running-config',
+            'sessions': 'show conn count',
+            'ver': 'show version',
+            'xlate': 'show xlate',
         },
         dangerous_commands=[
             "reload", "write erase", "clear configure", "shutdown",
@@ -161,18 +219,41 @@ BUILTIN: dict[str, PlatformProfile] = {
         version_command="show version",
         signatures=["junos", "juniper"],
         aliases={
-            "ints":   "show interfaces terse",
-            "int":    "show interfaces terse",
-            "ver":    "show version",
-            "run":    "show configuration | display set",
-            "arp":    "show arp",
-            "routes": "show route",
-            "bgp":    "show bgp summary",
-            "ospf":   "show ospf neighbor",
-            "lldp":   "show lldp neighbors",
-            "log":    "show log messages | last 100",
-            "uptime": "show system uptime",
-            "alarms": "show chassis alarms",
+            'alarms': 'show chassis alarms',
+            'arp': 'show arp',
+            'bgp': 'show bgp summary',
+            'clock': 'show system uptime',
+            'cpu': 'show chassis routing-engine',
+            'default': 'show route 0.0.0.0/0',
+            'desc': 'show interfaces descriptions',
+            'dhcp': 'show dhcp server binding',
+            'diff': 'show | compare',
+            'disk': 'show system storage',
+            'errors': 'show interfaces extensive | match error',
+            'ha': 'show chassis cluster status',
+            'int': 'show interfaces terse',
+            'ints': 'show interfaces terse',
+            'inv': 'show chassis hardware',
+            'lldp': 'show lldp neighbors',
+            'log': 'show log messages | last 100',
+            'mac': 'show ethernet-switching table',
+            'mem': 'show system memory',
+            'nat': 'show security nat source summary',
+            'nei': 'show lldp neighbors',
+            'ntp': 'show ntp associations',
+            'ospf': 'show ospf neighbor',
+            'policy': 'show security policies',
+            'power': 'show chassis power',
+            'routes': 'show route',
+            'run': 'show configuration | display set',
+            'stp': 'show spanning-tree bridge',
+            'temp': 'show chassis environment',
+            'uptime': 'show system uptime',
+            'users': 'show system users',
+            'ver': 'show version',
+            'vlans': 'show vlans',
+            'vrf': 'show route instance',
+            'vrrp': 'show vrrp summary',
         },
         dangerous_commands=[
             "request system reboot", "request system halt", "delete",
@@ -190,14 +271,24 @@ BUILTIN: dict[str, PlatformProfile] = {
         version_command="show system info",
         signatures=["pan-os", "palo alto", "panorama"],
         aliases={
-            "ints":     "show interface all",
-            "ver":      "show system info",
-            "run":      "show config running",
-            "routes":   "show routing route",
-            "arp":      "show arp all",
-            "sessions": "show session all",
-            "log":      "show log system direction equal backward",
-            "ha":       "show high-availability state",
+            'arp': 'show arp all',
+            'bgp': 'show routing protocol bgp summary',
+            'conns': 'show session info',
+            'cpu': 'show system resources',
+            'diff': 'show config diff',
+            'disk': 'show system disk-space',
+            'ha': 'show high-availability state',
+            'int': 'show interface all',
+            'ints': 'show interface all',
+            'log': 'show log system direction equal backward',
+            'nat': 'show running nat-policy',
+            'policy': 'show running security-policy',
+            'routes': 'show routing route',
+            'run': 'show config running',
+            'sessions': 'show session all',
+            'uptime': 'show system info | match uptime',
+            'users': 'show admins',
+            'ver': 'show system info',
         },
         dangerous_commands=[
             "request restart system", "request shutdown system", "delete",
@@ -214,16 +305,41 @@ BUILTIN: dict[str, PlatformProfile] = {
         version_command="show version",
         signatures=["arista", "eos"],
         aliases={
-            "ints":   "show interfaces status",
-            "ver":    "show version",
-            "run":    "show running-config",
-            "arp":    "show ip arp",
-            "mac":    "show mac address-table",
-            "routes": "show ip route",
-            "bgp":    "show ip bgp summary",
-            "lldp":   "show lldp neighbors",
-            "mlag":   "show mlag",
-            "log":    "show logging last 100",
+            'acl': 'show ip access-lists',
+            'arp': 'show ip arp',
+            'bgp': 'show ip bgp summary',
+            'clock': 'show clock',
+            'counters': 'show interfaces counters',
+            'cpu': 'show processes top once',
+            'default': 'show ip route 0.0.0.0',
+            'desc': 'show interfaces description',
+            'errors': 'show interfaces counters errors',
+            'flash': 'dir flash:',
+            'int': 'show interfaces status',
+            'ints': 'show interfaces status',
+            'inv': 'show inventory',
+            'lldp': 'show lldp neighbors',
+            'log': 'show logging last 100',
+            'mac': 'show mac address-table',
+            'mem': 'show version | include Memory',
+            'mlag': 'show mlag',
+            'nei': 'show lldp neighbors',
+            'ntp': 'show ntp associations',
+            'ospf': 'show ip ospf neighbor',
+            'port': 'show interfaces status',
+            'power': 'show power',
+            'routes': 'show ip route',
+            'run': 'show running-config',
+            'start': 'show startup-config',
+            'stp': 'show spanning-tree',
+            'temp': 'show system environment temperature',
+            'trunks': 'show interfaces trunk',
+            'uptime': 'show version | include Uptime',
+            'users': 'show users',
+            'ver': 'show version',
+            'vlans': 'show vlan',
+            'vrf': 'show vrf',
+            'vrrp': 'show vrrp',
         },
         dangerous_commands=[
             "reload", "write erase", "shutdown", "no shutdown", "delete flash:",
@@ -239,11 +355,21 @@ BUILTIN: dict[str, PlatformProfile] = {
         version_command="uname -a",
         signatures=["gnu/linux", "ubuntu", "debian", "centos", "red hat"],
         aliases={
-            "ints":   "ip -br addr",
-            "routes": "ip route",
-            "arp":    "ip neigh",
-            "listen": "ss -tulpn",
-            "log":    "journalctl -n 100 --no-pager",
+            'arp': 'ip neigh',
+            'clock': 'date',
+            'cpu': 'top -bn1 | head -20',
+            'disk': 'df -h',
+            'int': 'ip -br addr',
+            'ints': 'ip -br addr',
+            'listen': 'ss -tulpn',
+            'log': 'journalctl -n 100 --no-pager',
+            'mem': 'free -h',
+            'ntp': 'timedatectl status',
+            'routes': 'ip route',
+            'sessions': 'ss -tunap',
+            'uptime': 'uptime',
+            'users': 'who',
+            'ver': 'uname -a',
         },
         dangerous_commands=["rm -rf", "mkfs", "dd if=", "shutdown", "reboot", "init 0"],
         config_mode_markers=[],
@@ -311,7 +437,9 @@ def load_profiles(refresh: bool = False) -> dict[str, PlatformProfile]:
                     values.setdefault("name", key)
                     merged[key] = PlatformProfile(**_only_known_fields(values))
                 else:
-                    merged[key] = PlatformProfile(**{**base.as_dict(), **_only_known_fields(values)})
+                    merged[key] = PlatformProfile(
+                        **_merge_profile(base.as_dict(), _only_known_fields(values))
+                    )
         except (OSError, json.JSONDecodeError, TypeError) as exc:
             logger.warning("Ignoring unreadable platforms.json (%s); using built-ins", exc)
 
@@ -323,6 +451,32 @@ def _only_known_fields(values: dict) -> dict:
     """Drop unrecognised keys so a stray field cannot break construction."""
     allowed = set(PlatformProfile.__dataclass_fields__)
     return {k: v for k, v in values.items() if k in allowed}
+
+
+def _merge_profile(base: dict, stored: dict) -> dict:
+    """
+    Combine a built-in profile with the user's edits to it.
+
+    Aliases merge key by key rather than being replaced wholesale. If the
+    stored file simply won, anyone who had ever opened platforms.json would be
+    frozen on the alias set that existed the day they did — new built-ins
+    would never reach them, which is exactly the wrong outcome for a file
+    people are encouraged to edit.
+
+    To suppress a built-in alias, map it to an empty string. That is a
+    deliberate act and survives upgrades, whereas absence cannot be
+    distinguished from "this predates the alias existing".
+    """
+    result = dict(base)
+
+    for key, value in stored.items():
+        if key == "aliases" and isinstance(value, dict):
+            combined = {**base.get("aliases", {}), **value}
+            result[key] = {k: v for k, v in combined.items() if v}
+        else:
+            result[key] = value
+
+    return result
 
 
 def _write_defaults(path) -> None:
@@ -341,6 +495,100 @@ def _write_defaults(path) -> None:
         logger.info("Wrote default platform definitions to %s", path)
     except OSError as exc:
         logger.warning("Could not write platform definitions: %s", exc)
+
+
+def save_profile_edits(platform_id: str, values: dict) -> PlatformProfile:
+    """
+    Persist edits to one platform.
+
+    Writes the whole set back so the file stays a complete, readable record
+    rather than a sparse overlay someone has to mentally merge with the
+    built-ins to understand.
+
+    Raises:
+        ValueError: The identifier is missing or the values are unusable.
+    """
+    if not platform_id:
+        raise ValueError("A platform id is required.")
+
+    profiles = load_profiles()
+    base = profiles.get(platform_id)
+
+    fields = _only_known_fields(values)
+    fields.setdefault("id", platform_id)
+    fields.setdefault("name", base.name if base else platform_id)
+
+    if base is not None:
+        fields = _merge_profile(base.as_dict(), fields)
+    else:
+        fields = {**PlatformProfile(id=platform_id, name=fields["name"]).as_dict(), **fields}
+
+    try:
+        updated = PlatformProfile(**fields)
+    except TypeError as exc:
+        raise ValueError(f"Those platform settings are not usable: {exc}") from exc
+
+    profiles[platform_id] = updated
+    _write_all(profiles)
+
+    global _cache
+    _cache = profiles
+    return updated
+
+
+def delete_platform(platform_id: str) -> bool:
+    """
+    Remove a platform the user added.
+
+    Built-ins are never deleted — they would simply reappear from the defaults
+    on the next load, which would look like the delete had silently failed.
+    """
+    if platform_id in BUILTIN:
+        raise ValueError(
+            f"'{platform_id}' is built in and cannot be deleted. Edit it instead, "
+            f"or reset to defaults."
+        )
+
+    profiles = load_profiles()
+    if platform_id not in profiles:
+        return False
+
+    del profiles[platform_id]
+    _write_all(profiles)
+
+    global _cache
+    _cache = profiles
+    return True
+
+
+def reset_to_defaults() -> dict[str, PlatformProfile]:
+    """Discard every edit and restore the built-in definitions."""
+    global _cache
+    _cache = None
+    path = profiles_path()
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        raise ValueError(f"Could not remove {path.name}: {exc}") from exc
+    return load_profiles(refresh=True)
+
+
+def _write_all(profiles: dict[str, PlatformProfile]) -> None:
+    """Write the full platform set to disk."""
+    document = {
+        "_comment": (
+            "Platform definitions for ShellMate Portable. Editable here or in "
+            "Settings. Delete this file to restore the built-in defaults. To "
+            "suppress a built-in alias, set it to an empty string."
+        ),
+        "platforms": {key: profile.as_dict() for key, profile in profiles.items()},
+    }
+    path = profiles_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Could not write {path.name}: {exc}") from exc
 
 
 def get_profile(platform_id: str) -> PlatformProfile:

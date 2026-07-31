@@ -72,6 +72,12 @@
 
     typeSelect.addEventListener('change', () => applyConnectionType(typeSelect.value));
 
+    ['field-baud', 'field-databits', 'field-parity', 'field-stopbits', 'field-flow']
+      .forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', () => { el.dataset.userEdited = '1'; });
+      });
+
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) hideConnectionDialog();
     });
@@ -138,7 +144,34 @@
     const portField = document.getElementById('field-port');
     if (DEFAULT_PORTS[type] && portField) portField.value = DEFAULT_PORTS[type];
 
-    if (type === 'serial') loadSerialPorts();
+    if (type === 'serial') {
+      loadSerialPorts();
+      applySerialDefaults();
+    }
+  }
+
+  /**
+   * Start a serial connection from the defaults set in Settings.
+   *
+   * Only fills fields the user has not already changed in this dialog, so
+   * switching connection type back and forth does not wipe what they typed.
+   */
+  function applySerialDefaults() {
+    const d = (window.shellmateSettings || {}).serial || {};
+    if (!Object.keys(d).length) return;
+    const pairs = [
+      ['field-baud',     d.baud_rate],
+      ['field-databits', d.data_bits],
+      ['field-parity',   d.parity],
+      ['field-stopbits', d.stop_bits],
+      ['field-flow',     d.flow_control],
+    ];
+    pairs.forEach(([id, value]) => {
+      const el = document.getElementById(id);
+      if (el && value !== undefined && value !== null && !el.dataset.userEdited) {
+        el.value = String(value);
+      }
+    });
   }
 
   /**
