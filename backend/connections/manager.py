@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from backend.alerts import AlertTracker
 from backend.connections.base import ConnectionError_, ConnectionHandler, ConnectionParams
 from backend.connections.serial_handler import SerialHandler
 from backend.connections.ssh_handler import SSHHandler
@@ -104,6 +105,9 @@ class SessionManager:
             # Chokepoint for everything the user sends. Alias expansion today,
             # guardrails and paste throttling next.
             "pipeline":        OutboundPipeline(),
+            # Tracks anything scheduled on the device that has not happened
+            # yet — a pending reload, a commit waiting to be confirmed.
+            "alerts":          AlertTracker(),
             "params":          params,
             "hostname":        params.hostname or params.serial_port,
             "port":            params.port,

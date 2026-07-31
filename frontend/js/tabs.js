@@ -350,10 +350,24 @@
    *
    * @param {number} index
    */
-  function closeTab(index) {
+  function closeTab(index, options) {
     if (index < 0 || index >= tabs.length) return;
 
     const tab = tabs[index];
+
+    // Closing a tab tears down the session on the other end of it. A
+    // disconnected one has nothing left to lose and closes without a word —
+    // a confirmation that always appears is one people learn to click through.
+    const settings = (window.shellmateSettings || {}).interface || {};
+    const ask = settings.confirm_close_tab !== false;
+    if (ask && tab.isConnected && !(options && options.force)) {
+      if (!window.confirm(
+        `Close ${tab.label}?\n\nThe session is still connected and will be ` +
+        `disconnected.`)) {
+        return;
+      }
+    }
+
     const { sessionId, websocket, terminalInstance, containerId, tabEl } = tab;
 
     // Tell the backend to tear down the session

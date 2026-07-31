@@ -178,6 +178,14 @@
           }));
           break;
 
+        case 'pending_action':
+          // Something is scheduled on this device — a reload, a commit
+          // waiting to be confirmed. alerts.js owns what that looks like.
+          window.dispatchEvent(new CustomEvent('shellmate:pending-action', {
+            detail: { sessionId, pending: msg.pending }
+          }));
+          break;
+
         default:
           break;
       }

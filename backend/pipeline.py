@@ -71,6 +71,13 @@ class OutboundPipeline:
     # Commands the pipeline rewrote, for the UI to report honestly.
     last_expansion: tuple[str, str] | None = field(default=None, init=False)
 
+    # The full command lines completed by this batch of keystrokes, after any
+    # expansion. Published rather than merely used here because other things
+    # need to know what was actually sent — the alert tracker has to see
+    # "reload in 10" the moment Enter is pressed, and this is the one place
+    # where a line is known to be complete.
+    completed_commands: list[str] = field(default_factory=list, init=False)
+
     def process(self, data: str) -> str:
         """
         Transform outbound keystrokes.
@@ -86,6 +93,7 @@ class OutboundPipeline:
 
         out: list[str] = []
         self.last_expansion = None
+        self.completed_commands = []
 
         for char in data:
             if char in (CR, LF):
@@ -122,6 +130,9 @@ class OutboundPipeline:
         line = self._line
         self._line = ""
 
+        if line.strip():
+            self.completed_commands.append(line.strip())
+
         if not self.expand_aliases or not self.platform:
             return terminator
         if not line.strip() or len(line) > MAX_ALIAS_LINE:
@@ -130,6 +141,12 @@ class OutboundPipeline:
         expansion = resolve_alias(self.platform, line)
         if not expansion:
             return terminator
+
+        # What reaches the device is the expansion, so that is what anything
+        # downstream should be told about — an alias for `reload in 10` has to
+        # raise the same alert as typing it out.
+        if self.completed_commands:
+            self.completed_commands[-1] = expansion
 
         self.last_expansion = (line.strip(), expansion)
         logger.info("Expanded alias %r to %r", line.strip(), expansion)
@@ -142,6 +159,7 @@ class OutboundPipeline:
         """Forget the partial line, e.g. after a reconnect."""
         self._line = ""
         self.last_expansion = None
+        self.completed_commands = []
 
     @property
     def current_line(self) -> str:

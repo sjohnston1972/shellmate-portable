@@ -232,6 +232,9 @@
       <span id="status-tabs">Tabs: 0</span>
       <span class="status-sep">|</span>
       <span id="status-context" title="Estimated AI context usage">Context: —</span>
+      <!-- Pushed to the right and only present when something is pending, so
+           the countdown is the one thing in the bar that draws the eye. -->
+      <span id="status-alert"></span>
     </footer>
 
   </div><!-- /#right-main -->
@@ -590,6 +593,17 @@ GigEth0/2     unassigned    YES unset  down     down
         <!-- Interface -->
         <section class="settings-section">
           <h3 class="settings-section-title">ShellMate Interface</h3>
+          <p class="settings-section-hint">These are kept in <code>settings.json</code> in your data folder, so they travel with it — and are the same whether you use the window or open ShellMate in a browser.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-theme">Theme</label>
+            <select id="setting-theme" class="setting-input">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="system">Follow the system</option>
+            </select>
+          </div>
+
           <div class="setting-row">
             <label class="setting-label" for="setting-ui-font-size">UI Text Size</label>
             <div class="setting-input-group">
@@ -597,6 +611,106 @@ GigEth0/2     unassigned    YES unset  down     down
               <span class="setting-unit">px</span>
             </div>
           </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-density">Density</label>
+            <select id="setting-density" class="setting-input">
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-tab-label-width">Maximum tab width</label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-tab-label-width" class="setting-input setting-input-sm" min="60" max="400" step="10" />
+              <span class="setting-unit">px</span>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-connection-dot">Connection dot on tabs</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-connection-dot" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-confirm-close-tab">Confirm before closing a live tab</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-confirm-close-tab" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <p class="settings-section-hint">Closing a tab disconnects the session. A tab that is already disconnected closes without asking.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-confirm-quit">Confirm before quitting</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-confirm-quit" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <p class="settings-section-hint">Quit from the tray drops every connection. Closing the window does not — it keeps everything running behind the tray icon.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-start-minimised">Start minimised to the tray</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-start-minimised" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-remember-window">Remember window size and position</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-remember-window" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </section>
+
+        <!-- Alerts -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Alerts</h3>
+          <p class="settings-section-hint">ShellMate watches for things that will happen to a device unless someone intervenes — <code>reload in 10</code>, or a Junos <code>commit confirmed</code> waiting to be confirmed. The countdown on the tab and in the status bar is always shown; these control how loudly it interrupts you.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-alert-flash">Flash the tab</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-alert-flash" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <p class="settings-section-hint">Over the last five minutes only. A tab that pulses for ten minutes is one people stop seeing.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-alert-sound">Audible warning</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-alert-sound" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <p class="settings-section-hint">A short tone at ten minutes, five, one and ten seconds. Synthesised in the browser, so it works with no network at all.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-alert-popup">Pop-up notifications</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-alert-popup" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <p class="settings-section-hint">The one that reaches you when you are looking at a different tab. Click it to jump to the device. The last warning stays until dismissed.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-reduce-motion">Reduce motion</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-reduce-motion" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <p class="settings-section-hint">Replaces the flashing with a steady outline. Your system setting is honoured too.</p>
         </section>
 
         <!-- Terminal Behavior -->
@@ -1268,10 +1382,12 @@ GigEth0/2     unassigned    YES unset  down     down
        SCRIPTS — order matters: settings first (loads settings into
        window.shellshellmateSettings), then connections → tabs → terminal
   ================================================================ -->
+  <script src="/static/js/prefs.js"></script>
   <script src="/static/js/connections.js"></script>
   <script src="/static/js/filepicker.js"></script>
   <script src="/static/js/tabs.js"></script>
   <script src="/static/js/layout.js"></script>
+  <script src="/static/js/alerts.js"></script>
   <script src="/static/js/terminal.js"></script>
   <script src="/static/js/mode.js?v=3"></script>
   <script src="/static/js/chat.js?v=2"></script>
@@ -1364,20 +1480,43 @@ GigEth0/2     unassigned    YES unset  down     down
       const icon = document.getElementById('theme-icon');
       const root = document.documentElement;
 
-      function applyTheme(theme) {
+      /** Resolve "system" against what the OS is actually asking for. */
+      function effective(choice) {
+        if (choice !== 'system') return choice;
+        return window.matchMedia('(prefers-color-scheme: light)').matches
+          ? 'light' : 'dark';
+      }
+
+      function paint(choice) {
+        const theme = effective(choice);
         root.setAttribute('data-theme', theme);
         icon.textContent = theme === 'light' ? 'dark_mode' : 'light_mode';
         btn.title = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
-        localStorage.setItem('shellmate-theme', theme);
       }
 
-      // Restore saved preference, defaulting to dark
-      const saved = localStorage.getItem('shellmate-theme') || 'dark';
-      applyTheme(saved);
+      // The choice lives in settings.json, not localStorage, so it travels
+      // with the data folder and is the same in the window and in a browser.
+      // Painted from the last known value first so the page does not flash
+      // dark before the settings arrive.
+      let choice = window.__shellmateThemeChoice || 'dark';
+      paint(choice);
+
+      window.shellmateTheme = {
+        apply(next) { choice = next || 'dark'; paint(choice); },
+        current: () => choice,
+      };
+
+      window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+        if (choice === 'system') paint(choice);
+      });
 
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        applyTheme(root.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+        const next = effective(choice) === 'light' ? 'dark' : 'light';
+        window.shellmateTheme.apply(next);
+        if (typeof window.saveInterfacePreference === 'function') {
+          window.saveInterfacePreference('theme', next);
+        }
       });
     })();
   </script>

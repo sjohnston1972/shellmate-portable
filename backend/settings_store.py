@@ -58,6 +58,57 @@ DEFAULT_SETTINGS: dict = {
     "appearance": {
         "color_scheme": "deep_space",
     },
+    # The application around the terminal.
+    #
+    # Everything here used to live in the browser's localStorage, which quietly
+    # broke a promise the manual makes: move ShellMate-Data and your setup
+    # moves with it. It did travel under the native window, whose storage sits
+    # inside the data folder — but opening http://localhost:8765 in a browser
+    # gave a different set of preferences, and nothing reconciled the two.
+    "interface": {
+        # "dark" | "light" | "system"
+        "theme": "dark",
+        # Which split layout to open with. See frontend/js/layout.js.
+        "default_layout": "single",
+        # Fraction of the window the chat pane takes. Dragging the divider
+        # used to be forgotten the moment the page reloaded.
+        "chat_pane_fraction": 0.3333,
+        # Saved chat quick-buttons and the pop-out window's geometry.
+        "quick_buttons": [],
+        "chat_popout": None,
+        # Closing a tab kills the session on the other end of it. Worth a
+        # question when that session is still connected.
+        "confirm_close_tab": True,
+        # Quit is the one action that really does drop every device, which is
+        # precisely what closing the window was designed not to do.
+        "confirm_quit": True,
+        # "comfortable" | "compact"
+        "density": "comfortable",
+        "max_tab_label_px": 160,
+        "show_connection_dot": True,
+    },
+    # Remembered so it opens where it was left rather than at a fixed size in
+    # the middle of whichever monitor Windows picks.
+    "window": {
+        "width": 0,          # 0 means "use the default"
+        "height": 0,
+        "x": None,
+        "y": None,
+        "start_minimised": False,
+    },
+    # How loudly to say that something is about to happen to a device — a
+    # pending reload, a commit waiting to be confirmed. The countdown itself is
+    # not switchable: it is the information, not the interruption.
+    "alerts": {
+        # The tab pulses over the last five minutes.
+        "flash_tab": True,
+        # A short synthesised tone at each threshold. No audio file is fetched.
+        "sound": True,
+        # A toast, which is what reaches someone looking at another tab.
+        "popup": True,
+        # Honours prefers-reduced-motion as well; this forces it on.
+        "reduce_motion": False,
+    },
     # Defaults for a serial console, so the same values are not re-entered on
     # every connection. Cisco console is 9600 8-N-1 with no flow control.
     "serial": {

@@ -30,6 +30,7 @@
     ['ai assistant',        'smart_toy'],
     ['ai providers',        'smart_toy'],
     ['knowledge base',      'description'],
+    ['alerts',              'warning'],
     ['interface',           'settings'],
     ['behavior',            'settings'],
     ['behaviour',           'settings'],

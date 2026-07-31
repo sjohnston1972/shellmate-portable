@@ -185,8 +185,11 @@ class Tray:
         webbrowser.open(f"http://localhost:{self.port}")
 
     def _quit(self, icon=None, item=None):
+        # The confirmation has to happen before the icon is destroyed, or a
+        # user who says "no" is left with a running application and no tray.
+        if not self._on_quit(confirm=True):
+            return
         self.stop()
-        self._on_quit()
 
     def stop(self):
         if self._icon is not None:
@@ -265,6 +268,8 @@ class Desktop:
         self._tray = None
         self._quit = threading.Event()
         self._warned_about_tray = False
+        # Updated as the window is dragged and resized; written on close.
+        self._geometry: dict = {}
 
     # -- public --------------------------------------------------------------
 
@@ -285,8 +290,25 @@ class Desktop:
             logger.info("No window manager and no tray; press Ctrl+C to stop.")
         self._quit.wait()
 
-    def quit(self) -> None:
-        """Shut everything down."""
+    def quit(self, confirm: bool = False) -> bool:
+        """
+        Shut everything down.
+
+        Args:
+            confirm: Ask first when devices are still connected. Quitting is
+                the one action that really does drop every session, which is
+                exactly what closing the window was so carefully stopped from
+                doing — and it used to say nothing at all.
+
+        Returns:
+            False when the user changed their mind. Otherwise it does not
+            return: the process ends.
+        """
+        if confirm and not self._confirm_quit():
+            logger.info("Quit cancelled — sessions are still open.")
+            return False
+
+        self._remember_geometry()
         logger.info("Shutting down.")
         if self._tray:
             self._tray.stop()
@@ -300,6 +322,146 @@ class Desktop:
         # shutdown. os._exit skips interpreter teardown, which otherwise hangs
         # on the GUI thread that is still unwinding underneath us.
         os._exit(0)
+
+    def _confirm_quit(self) -> bool:
+        """
+        Ask before dropping live sessions. True means go ahead.
+
+        Deliberately a native message box rather than something in the web
+        page: the tray menu is reachable when the window is hidden, and asking
+        through a window nobody can see would be no question at all.
+        """
+        try:
+            from backend.settings_store import get_settings
+            if not get_settings().get("interface", {}).get("confirm_quit", True):
+                return True
+        except Exception:
+            pass                                    # never block quitting
+
+        try:
+            from backend.app import session_manager
+            live = [s for s in session_manager.get_all_sessions()
+                    if s.get("is_connected")]
+        except Exception:
+            return True
+
+        if not live:
+            return True
+
+        names = [s.get("display_label") or s.get("hostname") or "session"
+                 for s in live]
+        listed = "\n".join(f"  · {n}" for n in names[:10])
+        if len(names) > 10:
+            listed += f"\n  · and {len(names) - 10} more"
+
+        message = (
+            f"{len(names)} session{'' if len(names) == 1 else 's'} still connected:\n\n"
+            f"{listed}\n\n"
+            "Quitting disconnects them. Closing the window instead leaves "
+            "everything running in the tray.\n\nQuit anyway?"
+        )
+
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                # MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND; IDYES == 6.
+                answer = ctypes.windll.user32.MessageBoxW(
+                    None, message, f"{WINDOW_TITLE} — quit?", 0x04 | 0x30 | 0x10000,
+                )
+                return answer == 6
+            except Exception as exc:
+                logger.warning("Could not ask before quitting (%s); quitting", exc)
+                return True
+
+        # Nowhere to ask. Say what is being lost rather than losing it quietly.
+        logger.warning("Quitting with %s session(s) still connected: %s",
+                       len(names), ", ".join(names))
+        return True
+
+    # -- window geometry -----------------------------------------------------
+
+    def _saved_geometry(self) -> dict:
+        """
+        Where and how big to open, from settings.
+
+        Clamped to the desktop that actually exists. A window last used on a
+        second monitor that has since been unplugged would otherwise open at
+        coordinates nobody can reach, with no way to drag it back.
+        """
+        geometry = {
+            "width": DEFAULT_WIDTH, "height": DEFAULT_HEIGHT,
+            "x": None, "y": None, "start_minimised": False,
+        }
+
+        try:
+            from backend.settings_store import get_settings
+            stored = get_settings().get("window", {})
+        except Exception:
+            return geometry
+
+        geometry["start_minimised"] = bool(stored.get("start_minimised"))
+
+        width, height = int(stored.get("width") or 0), int(stored.get("height") or 0)
+        if width >= MIN_WIDTH and height >= MIN_HEIGHT:
+            geometry["width"], geometry["height"] = width, height
+        else:
+            # No usable size stored: a remembered position without one would
+            # place a default-sized window somewhere arbitrary.
+            return geometry
+
+        x, y = stored.get("x"), stored.get("y")
+        if x is None or y is None:
+            return geometry
+
+        screen = self._screen_size()
+        if screen:
+            screen_w, screen_h = screen
+            # At least a strip of the title bar has to remain grabbable.
+            if not (-geometry["width"] + 120 < x < screen_w - 120
+                    and -20 < y < screen_h - 80):
+                logger.info("Stored window position is off-screen; centring instead")
+                return geometry
+
+        geometry["x"], geometry["y"] = int(x), int(y)
+        return geometry
+
+    @staticmethod
+    def _screen_size() -> tuple[int, int] | None:
+        """The primary display's size, or None when it cannot be determined."""
+        if sys.platform != "win32":
+            return None
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            # SM_CXVIRTUALSCREEN / SM_CYVIRTUALSCREEN: the whole desktop across
+            # every monitor, which is what a window position is relative to.
+            return (user32.GetSystemMetrics(78) or user32.GetSystemMetrics(0),
+                    user32.GetSystemMetrics(79) or user32.GetSystemMetrics(1))
+        except Exception:
+            return None
+
+    def _on_resized(self, width, height):
+        self._geometry.update({"width": int(width), "height": int(height)})
+
+    def _on_moved(self, x, y):
+        self._geometry.update({"x": int(x), "y": int(y)})
+
+    def _remember_geometry(self) -> None:
+        """
+        Write the window's last size and position.
+
+        Best effort throughout: this runs while the window is closing, and a
+        settings write that fails must not stop it closing.
+        """
+        if not self._geometry:
+            return
+        try:
+            from backend.settings_store import get_settings, update_settings
+            if not get_settings().get("window", {}).get("remember", True):
+                return
+            update_settings({"window": dict(self._geometry)})
+        except Exception as exc:
+            logger.debug("Could not remember the window geometry: %s", exc)
 
     # -- native window -------------------------------------------------------
 
@@ -316,17 +478,35 @@ class Desktop:
             logger.info("pywebview is not available; falling back to a browser window")
             return False
 
+        geometry = self._saved_geometry()
+
         try:
             self._window = webview.create_window(
                 WINDOW_TITLE,
                 self.url,
-                width=DEFAULT_WIDTH,
-                height=DEFAULT_HEIGHT,
+                width=geometry["width"],
+                height=geometry["height"],
+                x=geometry["x"],
+                y=geometry["y"],
                 min_size=(MIN_WIDTH, MIN_HEIGHT),
+                hidden=geometry["start_minimised"],
                 # The terminal depends on being able to select text.
                 text_select=True,
             )
             self._window.events.closing += self._on_closing
+
+            # Remember where it was left. These fire on every frame of a drag,
+            # so the handlers only record; the write happens when the window
+            # closes. Wrapped because not every pywebview build publishes both,
+            # and losing the remembered geometry is not worth failing to start.
+            try:
+                self._window.events.resized += self._on_resized
+            except Exception:
+                logger.debug("Window resize events unavailable")
+            try:
+                self._window.events.moved += self._on_moved
+            except Exception:
+                logger.debug("Window move events unavailable")
 
             # Published so the HTTP layer can raise a real OS file dialog. The
             # UI is a web page and a browser file input yields no filesystem
@@ -335,10 +515,11 @@ class Desktop:
             global _active_window
             _active_window = self._window
 
-            # private_mode=False with a storage path in the data directory:
-            # the UI keeps quick buttons, the chat pop-out position and the
-            # Tshoot/Learn choice in localStorage, and the default private mode
-            # would silently discard all of it on every launch.
+            # private_mode=False with a storage path in the data directory.
+            # Interface preferences now live in settings.json rather than in
+            # here, but the webview still keeps its own state — scroll
+            # positions, form values — and private mode discards the lot on
+            # every launch.
             storage = paths.data_dir() / "window-storage"
             storage.mkdir(parents=True, exist_ok=True)
 
@@ -361,6 +542,11 @@ class Desktop:
 
         Returning False cancels the close.
         """
+        # Written here rather than on quit: quit is os._exit, which runs no
+        # further Python, and closing the window is the moment the user has
+        # finished arranging it anyway.
+        self._remember_geometry()
+
         try:
             self._window.hide()
         except Exception:

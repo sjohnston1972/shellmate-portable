@@ -53,7 +53,6 @@
   ];
 
   const PANE_LETTERS = ['a', 'b', 'c', 'd'];
-  const STORAGE_KEY  = 'shellmate.layout';
 
   let currentId = 'single';
   /** @type {Array<string|null>} pane index → sessionId */
@@ -69,9 +68,12 @@
 
     button.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
 
-    // A saved layout is restored, but only the choice — which session sits in
-    // which pane is meaningless across a reload, since none of them survive it.
-    const saved = localStorage.getItem(STORAGE_KEY);
+    // The chosen layout is restored, but only the choice — which session sits
+    // in which pane is meaningless across a reload, since none of them survive
+    // it. Kept in settings.json rather than localStorage so it travels with
+    // the data folder; prefs.js calls set() again once those have loaded.
+    const saved = window.shellmatePrefs
+      ? window.shellmatePrefs.get('default_layout', 'single') : 'single';
     if (saved && byId(saved)) currentId = saved;
     assignment = new Array(byId(currentId).panes).fill(null);
 
@@ -324,7 +326,7 @@
     const l = byId(id);
     if (!l) return;
     currentId = id;
-    localStorage.setItem(STORAGE_KEY, id);
+    if (window.shellmatePrefs) window.shellmatePrefs.set('default_layout', id);
 
     // Shrinking drops the sessions that no longer have a pane. They are only
     // hidden — the session, its socket and its scrollback are untouched, and

@@ -5,33 +5,46 @@
  *   - "tshoot" (default): terse senior engineer focused on fixing the problem.
  *   - "learn": patient mentor who explains the why before suggesting a command.
  *
- * The active mode is persisted to localStorage and also sent to the backend
- * with every chat message (via chat.js). A chat-header pill mirrors the
- * welcome-screen toggle so the user can flip modes mid-session.
+ * The active mode is sent to the backend with every chat message (via
+ * chat.js). A chat-header pill mirrors the welcome-screen toggle so the user
+ * can flip modes mid-session.
+ *
+ * It used to be stored in localStorage *and* in settings.json under `ai.mode`,
+ * with nothing to reconcile the two — so the pill and the settings panel could
+ * disagree about which persona was active, and which one won depended on
+ * whichever was read last. settings.json is now the only home.
  */
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'shellmate:mode';
   const VALID_MODES = ['tshoot', 'learn'];
 
-  let _currentMode = _readStored();
+  let _currentMode = 'tshoot';
 
-  function _readStored() {
-    try {
-      const v = localStorage.getItem(STORAGE_KEY);
-      return VALID_MODES.includes(v) ? v : 'tshoot';
-    } catch (_) {
-      return 'tshoot';
-    }
+  function _fromSettings() {
+    const stored = ((window.shellmateSettings || {}).ai || {}).mode;
+    return VALID_MODES.includes(stored) ? stored : 'tshoot';
   }
 
   function getMode() { return _currentMode; }
 
-  function setMode(mode) {
+  function setMode(mode, options) {
     if (!VALID_MODES.includes(mode)) return;
     _currentMode = mode;
-    try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+
+    if (!(options && options.fromSettings)) {
+      fetch('/api/settings', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Partial: the store deep-merges, so this touches nothing else.
+        body:    JSON.stringify({ settings: { ai: { mode } } }),
+      }).catch((e) => console.warn('Could not save the assistant mode:', e));
+
+      window.shellmateSettings = window.shellmateSettings || {};
+      window.shellmateSettings.ai =
+        Object.assign({}, window.shellmateSettings.ai, { mode });
+    }
+
     _refreshUI();
     window.dispatchEvent(new CustomEvent('shellmate:mode-changed', { detail: { mode } }));
   }
@@ -57,6 +70,12 @@
         setMode(_currentMode === 'tshoot' ? 'learn' : 'tshoot');
       });
     }
+
+    // Settings may already have loaded, or may not have yet.
+    const adopt = () => setMode(_fromSettings(), { fromSettings: true });
+    if (window.shellmateSettings) adopt();
+    window.addEventListener('shellmate:settings-loaded', adopt);
+    window.addEventListener('shellmate:settings-changed', adopt);
 
     _refreshUI();
   });

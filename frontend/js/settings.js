@@ -272,6 +272,10 @@
       window.shellmateSettings = currentSettings;
       _applyHighlightRules(currentSettings);
       _applyUiFontSize((currentSettings.appearance || {}).ui_font_size || 14);
+      // Interface preferences — theme, layout, density — are applied by
+      // prefs.js, which may have loaded before this resolved.
+      window.dispatchEvent(new CustomEvent('shellmate:settings-loaded',
+                                           { detail: currentSettings }));
     } catch (e) {
       console.warn('Could not load settings:', e);
     }
@@ -315,6 +319,26 @@
     }
     _checked('setting-logging-enabled',   !!l.enabled);
     _checked('setting-redact-secrets',    l.redact_secrets !== false);
+
+    const al = s.alerts || {};
+    _checked('setting-alert-flash',  al.flash_tab     !== false);
+    _checked('setting-alert-sound',  al.sound         !== false);
+    _checked('setting-alert-popup',  al.popup         !== false);
+    _checked('setting-reduce-motion', !!al.reduce_motion);
+
+    const ui = s.interface || {};
+    _val('setting-theme',             ui.theme || 'dark');
+    _val('setting-density',           ui.density || 'comfortable');
+    _val('setting-tab-label-width',   ui.max_tab_label_px || 160);
+    _checked('setting-connection-dot',    ui.show_connection_dot !== false);
+    _checked('setting-confirm-close-tab', ui.confirm_close_tab !== false);
+    _checked('setting-confirm-quit',      ui.confirm_quit !== false);
+
+    const win = s.window || {};
+    _checked('setting-start-minimised', !!win.start_minimised);
+    // Remembering is expressed as "is a size stored", which is what the user
+    // means by it — there is no separate flag to fall out of step with.
+    _checked('setting-remember-window', !!win.width);
 
     const ser = s.serial || {};
     _val('setting-serial-baud',      ser.baud_rate    || 9600);
@@ -400,6 +424,28 @@
         enabled:        _gchecked('setting-logging-enabled'),
         directory:      _gval('setting-log-dir'),
         redact_secrets: _gchecked('setting-redact-secrets'),
+      },
+      alerts: {
+        flash_tab:     _gchecked('setting-alert-flash'),
+        sound:         _gchecked('setting-alert-sound'),
+        popup:         _gchecked('setting-alert-popup'),
+        reduce_motion: _gchecked('setting-reduce-motion'),
+      },
+      interface: {
+        theme:               _gval('setting-theme') || 'dark',
+        density:             _gval('setting-density') || 'comfortable',
+        max_tab_label_px:    parseInt(_gval('setting-tab-label-width'), 10) || 160,
+        show_connection_dot: _gchecked('setting-connection-dot'),
+        confirm_close_tab:   _gchecked('setting-confirm-close-tab'),
+        confirm_quit:        _gchecked('setting-confirm-quit'),
+      },
+      window: {
+        start_minimised: _gchecked('setting-start-minimised'),
+        // Unticking it clears what was stored, so the next launch uses the
+        // default size rather than silently restoring a stale one.
+        ...(_gchecked('setting-remember-window')
+          ? {}
+          : { width: 0, height: 0, x: null, y: null }),
       },
       serial: {
         baud_rate:    parseInt(_gval('setting-serial-baud'), 10) || 9600,

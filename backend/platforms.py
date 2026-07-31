@@ -54,6 +54,23 @@ class PlatformProfile:
     config_mode_markers: list[str] = field(default_factory=list)
     comment_prefix: str = "!"
 
+    # --- Things that will happen to the device unless someone intervenes ----
+    #
+    # Regular expressions, matched against both what is typed and what the
+    # device says back. Named groups give the timing: ``h`` hours, ``m``
+    # minutes, ``s`` seconds, ``at`` an absolute HH:MM.
+    #
+    # Both directions are searched because they answer different questions.
+    # The typed command says a reload was *asked for* — known immediately, and
+    # true even if the reply scrolls past. The device's own answer carries the
+    # authoritative time, which is the only one worth counting down from.
+    reload_patterns: list[str] = field(default_factory=list)
+    reload_cancel_patterns: list[str] = field(default_factory=list)
+    # Junos-style "commit confirmed": rolls itself back unless confirmed. Not
+    # a reboot, so it is tracked separately and worded differently.
+    commit_confirm_patterns: list[str] = field(default_factory=list)
+    commit_cancel_patterns: list[str] = field(default_factory=list)
+
     def as_dict(self) -> dict:
         return asdict(self)
 
@@ -121,6 +138,22 @@ BUILTIN: dict[str, PlatformProfile] = {
         ],
         config_mode_markers=["(config", "(conf-"],
         comment_prefix="!",
+        reload_patterns=[
+            # Typed: "reload in 90", "reload in 1:30", "reload at 23:00".
+            r"^\s*reload\s+in\s+(?P<h>\d+):(?P<m>\d{1,2})\b",
+            r"^\s*reload\s+in\s+(?P<m>\d+)\b",
+            r"^\s*reload\s+at\s+(?P<at>\d{1,2}:\d{2})\b",
+            # The device's own banner, repeated as the time approaches. This is
+            # the authoritative one and refines whatever was inferred above.
+            r"SHUTDOWN\s+in\s+(?P<h>\d+):(?P<m>\d{2}):(?P<s>\d{2})",
+            r"Reload\s+scheduled\s+.*?\(in\s+(?:(?P<h>\d+)\s+hours?)?"
+            r"(?:\s*and\s*)?(?:(?P<m>\d+)\s+minutes?)?\)",
+        ],
+        reload_cancel_patterns=[
+            r"^\s*reload\s+cancel\b",
+            r"SHUTDOWN\s+ABORTED",
+            r"Reload\s+cancelled",
+        ],
     ),
     "nxos": PlatformProfile(
         id="nxos",
@@ -177,6 +210,16 @@ BUILTIN: dict[str, PlatformProfile] = {
         ],
         config_mode_markers=["(config"],
         comment_prefix="!",
+        reload_patterns=[
+            r"^\s*reload\s+in\s+(?P<h>\d+):(?P<m>\d{1,2})\b",
+            r"^\s*reload\s+in\s+(?P<m>\d+)\b",
+            r"^\s*reload\s+at\s+(?P<at>\d{1,2}:\d{2})\b",
+            r"SHUTDOWN\s+in\s+(?P<h>\d+):(?P<m>\d{2}):(?P<s>\d{2})",
+        ],
+        reload_cancel_patterns=[
+            r"^\s*reload\s+cancel\b",
+            r"SHUTDOWN\s+ABORTED",
+        ],
     ),
     "asa": PlatformProfile(
         id="asa",
@@ -262,6 +305,27 @@ BUILTIN: dict[str, PlatformProfile] = {
         ],
         config_mode_markers=["[edit"],
         comment_prefix="#",
+        reload_patterns=[
+            r"^\s*request\s+system\s+reboot\s+in\s+(?P<m>\d+)\b",
+            r"^\s*request\s+system\s+reboot\s+at\s+(?P<at>\d{1,2}:\d{2})\b",
+            r"Shutdown\s+NOW|System\s+going\s+down\s+in\s+(?P<m>\d+)\s+minute",
+        ],
+        reload_cancel_patterns=[
+            r"^\s*clear\s+system\s+reboot\b",
+            r"Shutdown\s+cancell?ed",
+        ],
+        commit_confirm_patterns=[
+            # "commit confirmed" on its own is ten minutes on Junos.
+            r"^\s*commit\s+confirmed(?:\s+(?P<m>\d+))?\b",
+            r"rolled?\s+back\s+in\s+(?P<m>\d+)\s+minute",
+        ],
+        commit_cancel_patterns=[
+            # A plain commit confirms the pending one. "commit confirmed"
+            # would have matched the pattern above first.
+            r"^\s*commit\s*$",
+            r"^\s*commit\s+and-quit\b",
+            r"^\s*rollback\b",
+        ],
     ),
     "panos": PlatformProfile(
         id="panos",

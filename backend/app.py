@@ -1244,6 +1244,15 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                                 "sent":  expansion[1],
                             }))
 
+                        # Watch for anything that schedules itself: `reload in
+                        # 10`, `commit confirmed`. Known here the moment Enter
+                        # is pressed, which is a second or two before the
+                        # device says anything about it.
+                        await note_pending(
+                            session["alerts"].observe_command(command)
+                            for command in session["pipeline"].completed_commands
+                        )
+
                 elif msg_type == "resize":
                     cols = int(msg.get("cols", 80))
                     rows = int(msg.get("rows", 24))
@@ -1259,6 +1268,17 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
             pass
         except Exception as exc:
             logger.warning("read_from_client error (session %s): %s", session_id, exc)
+
+    async def note_pending(changes) -> None:
+        """
+        Tell the browser when what is pending on this device has changed.
+
+        Takes an iterable of "did something change" booleans and sends at most
+        one message, because a batch of keystrokes can produce several and the
+        interface only needs the resulting state.
+        """
+        if any(list(changes)):
+            await websocket.send_text(json.dumps(session["alerts"].payload()))
 
     async def maybe_onboard() -> None:
         """
@@ -1281,6 +1301,9 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
         summary = onboarder.run(session["transcript"].last_prompt)
         session["fingerprint"] = summary
         session["pipeline"].platform = summary["platform"]
+        # Which patterns a pending reload is recognised by depends on the
+        # platform, so the tracker is idle until the device is identified.
+        session["alerts"].platform = summary["platform"]
 
         terminal_settings = get_settings().get("terminal", {})
         session["pipeline"].expand_aliases = bool(
@@ -1313,6 +1336,13 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         await maybe_onboard()
                     except Exception as exc:
                         logger.warning("Onboarding failed for %s: %s", session_id, exc)
+                    # An idle session is exactly where a reload deadline passes
+                    # unnoticed, so retire it here rather than only when the
+                    # device happens to say something.
+                    try:
+                        await note_pending([session["alerts"].expire()])
+                    except Exception as exc:
+                        logger.warning("Alert expiry failed for %s: %s", session_id, exc)
                     continue
 
                 if not data_bytes:
@@ -1367,6 +1397,17 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     await maybe_onboard()
                 except Exception as exc:
                     logger.warning("Onboarding failed for session %s: %s", session_id, exc)
+
+                # The device's own word on what it is about to do. This is the
+                # authoritative timing and re-synchronises the countdown, so it
+                # is read from every chunk rather than only the first.
+                try:
+                    await note_pending([
+                        session["alerts"].observe_output(text),
+                        session["alerts"].expire(),
+                    ])
+                except Exception as exc:
+                    logger.warning("Alert tracking failed for %s: %s", session_id, exc)
 
                 # Name the tab after the device. Uses the shared cross-vendor
                 # prompt parser, so Junos and PAN-OS are recognised as well as

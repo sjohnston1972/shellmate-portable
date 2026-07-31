@@ -518,17 +518,17 @@
   // Quick chat buttons
   // -----------------------------------------------------------------------
 
+  // Kept in settings.json rather than localStorage, so buttons someone has
+  // curated travel with the data folder — see frontend/js/prefs.js.
   function loadQuickButtons() {
-    try {
-      const stored = localStorage.getItem(QUICK_BUTTONS_KEY);
-      return stored ? JSON.parse(stored) : [...DEFAULT_QUICK_BTNS];
-    } catch (_) {
-      return [...DEFAULT_QUICK_BTNS];
-    }
+    const stored = window.shellmatePrefs
+      ? window.shellmatePrefs.get('quick_buttons', null) : null;
+    return (Array.isArray(stored) && stored.length)
+      ? stored : [...DEFAULT_QUICK_BTNS];
   }
 
   function saveQuickButtons(btns) {
-    localStorage.setItem(QUICK_BUTTONS_KEY, JSON.stringify(btns));
+    if (window.shellmatePrefs) window.shellmatePrefs.set('quick_buttons', btns);
   }
 
   function renderQuickButtons() {
@@ -660,6 +660,14 @@
       divider.classList.remove('dragging');
       document.body.style.cursor     = '';
       document.body.style.userSelect = '';
+
+      // Remembered as a fraction rather than a pixel width, so it still makes
+      // sense when ShellMate is next opened on a different-sized screen.
+      if (window.shellmatePrefs) {
+        window.shellmatePrefs.set(
+          'chat_pane_fraction',
+          Math.round((chatPane.offsetWidth / window.innerWidth) * 1000) / 1000);
+      }
     });
   }
 
@@ -722,22 +730,19 @@
 
     function saveState() {
       const r = chatPane.getBoundingClientRect();
-      try {
-        localStorage.setItem(POPOUT_KEY, JSON.stringify({
-          popped: isPopped(),
-          top:    r.top,
-          left:   r.left,
-          width:  r.width,
-          height: r.height,
-        }));
-      } catch (_) {}
+      if (!window.shellmatePrefs) return;
+      window.shellmatePrefs.set('chat_popout', {
+        popped: isPopped(),
+        top:    r.top,
+        left:   r.left,
+        width:  r.width,
+        height: r.height,
+      });
     }
 
     function loadState() {
-      try {
-        const raw = localStorage.getItem(POPOUT_KEY);
-        return raw ? JSON.parse(raw) : null;
-      } catch (_) { return null; }
+      return window.shellmatePrefs
+        ? window.shellmatePrefs.get('chat_popout', null) : null;
     }
 
     // Restore last state on page load
