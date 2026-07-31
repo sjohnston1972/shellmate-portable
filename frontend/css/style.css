@@ -3563,6 +3563,14 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   flex-direction: column;
   gap: 8px;
   align-items: stretch;
+  /* The single-row rule above fixes this at 44px. Left in place, a second row
+     of controls overflows the header's box and #chat-messages — painted after
+     it and therefore on top — swallows every click aimed at them, so Conclude,
+     Clear and the mode toggle all appear to be dead. The header has to be as
+     tall as what is in it. */
+  height: auto;
+  min-height: 44px;
+  padding: 8px 12px;
 }
 
 #chat-header-top {
