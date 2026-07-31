@@ -5,3 +5,16 @@ pyserial>=3.5
 httpx>=0.25.0
 python-dotenv>=1.0.0
 websockets>=12.0
+
+# Multipart form parsing — required by FastAPI for the SFTP file upload
+# endpoint. FastAPI raises at import time if a route declares UploadFile
+# without it, so this is not optional.
+python-multipart>=0.0.6
+
+# Desktop window and system tray. pywebview uses the WebView2 runtime that
+# ships with Windows 11, so nothing extra is installed on the user's machine.
+# All three are optional at runtime: without them ShellMate falls back to a
+# chromeless browser window and then to the default browser.
+pywebview>=5.0
+pystray>=0.19
+pillow>=10.0

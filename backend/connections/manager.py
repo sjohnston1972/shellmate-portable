@@ -1,13 +1,16 @@
 """
-connections/manager.py — Session lifecycle manager for ShellMate.
+connections/manager.py — Session lifecycle manager.
 
 SessionManager is the single source of truth for all active terminal
-sessions.  It maintains a dictionary keyed by UUID session_id, creates
-new sessions (SSH for now, serial in Phase 4), and tears them down cleanly.
+sessions.  It maintains a dictionary keyed by UUID session_id, creates new
+sessions over whichever transport was requested, and tears them down cleanly.
 
 Every other part of the backend (WebSocket handlers, AI router, REST
-endpoints) goes through SessionManager — they never touch SSHHandler or
+endpoints) goes through SessionManager — they never touch a handler or a
 SessionBuffer directly.
+
+Transports are looked up in a registry rather than branched on with if/elif,
+so adding one means adding a subclass and a single line here.
 """
 
 import logging
@@ -15,10 +18,24 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from backend.connections.base import ConnectionError_, ConnectionHandler, ConnectionParams
+from backend.connections.serial_handler import SerialHandler
 from backend.connections.ssh_handler import SSHHandler
+from backend.connections.telnet_handler import TelnetHandler
+from backend.onboard import Onboarder
+from backend.pipeline import OutboundPipeline
 from backend.session.buffer import SessionBuffer
+from backend.session.transcript import TranscriptParser
+from backend.store import store
 
 logger = logging.getLogger(__name__)
+
+# Transport registry. The keys are what the frontend sends as connection_type.
+HANDLERS: dict[str, type[ConnectionHandler]] = {
+    "ssh":    SSHHandler,
+    "serial": SerialHandler,
+    "telnet": TelnetHandler,
+}
 
 
 class SessionManager:
@@ -32,62 +49,72 @@ class SessionManager:
     # Session creation
     # ------------------------------------------------------------------
 
-    def create_session(
-        self,
-        hostname: str,
-        port: int,
-        username: str,
-        password: str,
-        connection_type: str = "ssh",
-        display_label: str = "",
-    ) -> dict[str, Any]:
+    def create_session(self, params: ConnectionParams) -> dict[str, Any]:
         """
-        Create a new session, connect to the device, and store it.
+        Create a session, connect to the device, and store it.
+
+        Blocking — the caller runs this in a worker thread so the event loop
+        is not stalled during the handshake.
 
         Args:
-            hostname:        Target device hostname or IP.
-            port:            TCP port (SSH: 22).
-            username:        Login username.
-            password:        Login password (never stored in the returned dict).
-            connection_type: "ssh" (serial support coming in Phase 4).
-            display_label:   Human-readable tab label; defaults to hostname.
+            params: Connection details. Credentials are scrubbed by the
+                    handler once the connection is established.
 
         Returns:
-            Session metadata dict (no password field).
+            Public session metadata (no handler, no credentials).
 
         Raises:
-            Exception: Propagates any connection error from SSHHandler so
-                       the caller (REST endpoint) can return a useful error.
+            ConnectionError_: The connection failed, with a message suitable
+                for showing to the user.
         """
+        handler_class = HANDLERS.get(params.connection_type)
+        if handler_class is None:
+            supported = ", ".join(sorted(HANDLERS))
+            raise ConnectionError_(
+                f"Unknown connection type '{params.connection_type}'. "
+                f"Supported types are: {supported}."
+            )
+
         session_id = str(uuid.uuid4())
-        label = display_label.strip() or hostname
-
-        if connection_type == "ssh":
-            handler = SSHHandler(hostname, port, username, password)
-            channel = handler.connect()  # Raises on failure
-        else:
-            raise NotImplementedError(f"Connection type '{connection_type}' not yet supported")
-
-        buffer = SessionBuffer(session_id)
+        handler = handler_class(params=params)
+        handler.connect()  # Raises ConnectionError_ on failure
 
         session: dict[str, Any] = {
-            "session_id": session_id,
-            "handler": handler,
-            "channel": channel,
-            "buffer": buffer,
-            "hostname": hostname,
-            "port": port,
-            "username": username,
-            "connection_type": connection_type,
-            "display_label": label,
-            "connected_at": datetime.now(timezone.utc).isoformat(),
-            "is_connected": True,
+            "session_id":      session_id,
+            "handler":         handler,
+            "buffer":          SessionBuffer(session_id),
+            # Reconstructs commands and their output from the raw stream. Lives
+            # alongside the buffer rather than replacing it: the buffer paints
+            # the screen, the transcript answers questions about it.
+            "transcript":      TranscriptParser(),
+            # Identifies the device and applies its platform settings during
+            # the first seconds of the session.
+            "onboarder":       Onboarder(),
+            "fingerprint":     None,
+            # Chokepoint for everything the user sends. Alias expansion today,
+            # guardrails and paste throttling next.
+            "pipeline":        OutboundPipeline(),
+            "params":          params,
+            "hostname":        params.hostname or params.serial_port,
+            "port":            params.port,
+            "username":        params.username,
+            "connection_type": params.connection_type,
+            "display_label":   params.label(),
+            "target":          params.target(),
+            "connected_at":    datetime.now(timezone.utc).isoformat(),
+            "is_connected":    True,
         }
 
         self._sessions[session_id] = session
-        logger.info("Session created: %s (%s@%s:%d)", session_id, username, hostname, port)
+        logger.info("Session created: %s (%s %s)", session_id, params.connection_type, params.target())
 
-        # Return a copy without sensitive or non-serialisable fields
+        # Every session is recorded, with nothing to switch on. Failing to
+        # record must never stop someone connecting to a device.
+        try:
+            store.start_session(session_id, session)
+        except Exception as exc:
+            logger.warning("Could not start history for session %s: %s", session_id, exc)
+
         return self._public_view(session)
 
     # ------------------------------------------------------------------
@@ -95,16 +122,12 @@ class SessionManager:
     # ------------------------------------------------------------------
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
-        """
-        Return the full internal session dict (including handler/channel).
-
-        Returns None if the session_id is not found.
-        """
+        """Return the full internal session dict, or None if not found."""
         return self._sessions.get(session_id)
 
     def get_all_sessions(self) -> list[dict[str, Any]]:
         """
-        Return public metadata for all sessions (no sensitive data).
+        Return public metadata for all sessions.
 
         Used by GET /api/sessions so the frontend can rebuild the tab bar
         after a page refresh.
@@ -126,6 +149,22 @@ class SessionManager:
             logger.warning("destroy_session called for unknown id: %s", session_id)
             return
 
+        # A session usually ends mid-command — the tab is closed while output
+        # is still arriving. Flush the parser so that last command is kept
+        # rather than dropped, since it is often the interesting one.
+        try:
+            final = session["transcript"].flush()
+            if final is not None:
+                store.add_command(session_id, final)
+            store.end_session(session_id)
+        except Exception as exc:
+            logger.warning("Could not close history for session %s: %s", session_id, exc)
+
+        # Close the SFTP channel first if one was opened, so it is not left
+        # dangling on a transport that is about to go away.
+        from backend.connections.sftp import close_sftp
+        close_sftp(session)
+
         try:
             session["handler"].disconnect()
         except Exception as exc:
@@ -139,13 +178,7 @@ class SessionManager:
     # ------------------------------------------------------------------
 
     def write_to_buffer(self, session_id: str, data: str) -> None:
-        """
-        Append terminal output to the session's buffer.
-
-        Args:
-            session_id: Target session.
-            data:       Text received from the terminal channel.
-        """
+        """Append terminal output to the session's buffer."""
         session = self._sessions.get(session_id)
         if session:
             session["buffer"].write(data)
@@ -157,18 +190,20 @@ class SessionManager:
     @staticmethod
     def _public_view(session: dict[str, Any]) -> dict[str, Any]:
         """
-        Return a serialisable subset of a session dict.
+        Return the serialisable subset of a session.
 
-        Excludes the handler object, paramiko channel, SessionBuffer
-        instance, and the password (which was never stored anyway).
+        Excludes the handler, the SessionBuffer and the ConnectionParams —
+        the last of these because it is the structure credentials pass
+        through, and it must never be reachable from an API response.
         """
         return {
-            "session_id": session["session_id"],
-            "hostname": session["hostname"],
-            "port": session["port"],
-            "username": session["username"],
+            "session_id":      session["session_id"],
+            "hostname":        session["hostname"],
+            "port":            session["port"],
+            "username":        session["username"],
             "connection_type": session["connection_type"],
-            "display_label": session["display_label"],
-            "connected_at": session["connected_at"],
-            "is_connected": session["is_connected"],
+            "display_label":   session["display_label"],
+            "target":          session["target"],
+            "connected_at":    session["connected_at"],
+            "is_connected":    session["is_connected"],
         }

@@ -103,6 +103,10 @@
     const tabObj = {
       sessionId:        session_id,
       label,
+      // Transport backing this tab. The file browser needs it to explain why
+      // a serial or telnet tab cannot transfer files.
+      connectionType:   sessionData.connection_type || 'ssh',
+      hostname:         hostname || '',
       terminalInstance: termData.terminal,
       fitAddon:         termData.fitAddon,
       websocket:        termData.websocket,
@@ -116,6 +120,10 @@
 
     tabs.push(tabObj);
     const newIndex = tabs.length - 1;
+
+    // Snapshot the config and report what has changed since the last visit.
+    // Best-effort and silent when the device cannot support it.
+    if (typeof window.checkDrift === 'function') window.checkDrift(sessionData);
 
     // Wire up click events — always look up current index (drag may have moved it)
     tabEl.addEventListener('click', (e) => {
