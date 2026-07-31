@@ -66,12 +66,47 @@ None of this needs configuring, and all of it can be switched off.
 | `Ctrl+T` | New connection |
 | `Ctrl+W` | Close the current tab |
 | `Ctrl+1` … `Ctrl+9` | Switch to that tab |
+| `Ctrl+Alt+1` … `Ctrl+Alt+7` | Choose a split layout |
 | `Ctrl+Shift+B` | Broadcast a command to several devices |
 | `Ctrl+Shift+C` | Copy the selection |
 | `Ctrl+Shift+V` | Paste |
 | `Ctrl+C` | Copy if text is selected, otherwise send an interrupt |
 
 Selecting text with the mouse — dragging or double-clicking — copies it.
+
+## Seeing several devices at once
+
+The button beside **New** splits the terminal area into panes. It draws the
+current layout rather than wearing an icon, so what is on screen is legible at
+a glance.
+
+| Layout | Panes |
+|---|---|
+| Single | 1 |
+| Side by side | 2, left and right |
+| Stacked | 2, one above the other |
+| Three columns | 3 |
+| Main and two | 3 — one large, two smaller beside it |
+| Two over one | 3 — two above, one wide below |
+| Quad | 4 |
+
+Open tabs fill the panes automatically. Everything still lives in the tab
+strip; the panes decide which of those tabs are on screen together, and the
+tabs that are showing are marked.
+
+One pane has the keyboard, outlined in the accent colour, and that is the
+session the status bar describes and the assistant reads. Click into another
+pane to move the focus there.
+
+To choose which device goes where, right-click its tab and pick a pane. If
+something is already there the two swap places.
+
+Switching to a layout with fewer panes hides the extra sessions; it does not
+close them. They keep running, keep their scrollback, and come back the moment
+you make room.
+
+Each terminal is re-measured when its pane changes size and the device is told
+the new dimensions, so output stays wrapped to the width you can actually see.
 
 ## Where things are kept
 

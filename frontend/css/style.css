@@ -352,6 +352,22 @@ a {
   opacity: 1;
 }
 
+/* On screen in a pane, but not the tab holding the keyboard. Quieter than
+   .active on purpose: it says "you can see this one", not "you are typing
+   into it". */
+.tab.tiled {
+  background: var(--surface-high);
+  color: var(--on-surface);
+}
+
+.tab.tiled::before {
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--primary-container);
+  opacity: 0.45;
+}
+
 /* Disconnected — soft red outline + ribbon */
 .tab.disconnected {
   border-color: rgba(255,180,171,0.45);
@@ -4019,4 +4035,190 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   text-align: center;
   color: var(--on-surface-muted);
   font-size: 13px;
+}
+
+/* --------------------------------------------------------------------------
+   Tiled layouts
+
+   #terminals-container becomes a grid; each visible terminal is given a
+   grid-area. Nothing is reparented, so a session moving between panes keeps
+   its scrollback and its socket — see layout.js.
+   -------------------------------------------------------------------------- */
+#terminals-container.tiled {
+  display: grid;
+  gap: 1px;
+  background: var(--outline);
+}
+
+/* In the grid the cell decides the size, so the 100% that makes a single
+   terminal fill the pane would instead make it overflow its cell. */
+#terminals-container.tiled .terminal-container {
+  position: relative;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bedrock);
+}
+
+/* Which pane has the keyboard.
+   An overlay rather than a border, because a border would change the pane's
+   size and reflow the terminal every time the focus moved. An overlay rather
+   than an inset box-shadow on the pane itself, because xterm paints its own
+   background across the full pane and would cover it. */
+#terminals-container.tiled .pane-focused::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+#terminals-container.tiled .pane-empty { position: relative; }
+
+.pane-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bedrock);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pane-empty-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 12px;
+  max-width: 240px;
+  width: 100%;
+}
+
+.pane-empty-hint {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.pane-empty-tab {
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  color: var(--on-surface-dim);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-empty-tab:hover {
+  background: var(--surface);
+  color: var(--on-surface);
+  border-color: var(--primary-container);
+}
+
+/* --- The layout button and its picker ------------------------------------ */
+#btn-layout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 6px;
+  margin-right: 2px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+#btn-layout:hover { background: var(--surface-high); }
+
+/* The preview is the same grid definition the layout uses, drawn small. */
+.layout-preview {
+  display: grid;
+  gap: 1.5px;
+  width: 26px;
+  height: 18px;
+}
+
+.layout-preview-sm { width: 20px; height: 14px; }
+
+.layout-preview > span {
+  background: var(--on-surface-muted);
+  border-radius: 1px;
+}
+
+#btn-layout:hover .layout-preview > span,
+.layout-menu-item.active .layout-preview > span { background: var(--primary); }
+
+.layout-menu {
+  position: fixed;
+  z-index: 3000;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.55);
+  padding: 4px;
+  min-width: 236px;
+}
+
+.layout-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 7px 8px;
+  cursor: pointer;
+  color: var(--on-surface-dim);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  text-align: left;
+}
+
+.layout-menu-item:hover { background: var(--surface-high); color: var(--on-surface); }
+.layout-menu-item.active { color: var(--on-surface); }
+.layout-menu-name { flex: 1; }
+
+.layout-menu-key {
+  font-size: 10px;
+  color: var(--on-surface-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* --- "Move to pane" in the tab context menu ------------------------------ */
+.ctx-pane-row {
+  display: flex;
+  gap: 4px;
+  padding: 2px 10px 6px;
+}
+
+.ctx-pane {
+  flex: 1;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  color: var(--on-surface-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.ctx-pane:hover {
+  background: var(--primary-container);
+  color: var(--on-surface);
+  border-color: var(--primary);
 }

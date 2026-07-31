@@ -53,6 +53,7 @@
       });
       tabs.forEach(tab => tab.tabEl.classList.remove('active'));
       activeTabIndex = -1;
+      if (window.shellmateLayout) window.shellmateLayout.clear();
       welcomeScreen.classList.remove('hidden');
       if (typeof window.renderWelcomeProfiles === 'function') window.renderWelcomeProfiles();
     });
@@ -63,6 +64,15 @@
 
     // Keyboard shortcuts
     document.addEventListener('keydown', handleKeyboard);
+
+    // Mark the tabs that are on screen alongside the active one.
+    window.addEventListener('shellmate:layout-rendered', (e) => {
+      const shown = new Set((e.detail && e.detail.visible) || []);
+      tabs.forEach(tab => {
+        tab.tabEl.classList.toggle(
+          'tiled', shown.has(tab.sessionId) && !tab.tabEl.classList.contains('active'));
+      });
+    });
 
     // Initial status bar
     updateStatusBar();
@@ -154,6 +164,17 @@
       _showTabContextMenu(e, session_id);
     });
 
+    // Clicking into a terminal focuses it. Under a tiled layout that is the
+    // gesture people expect from every other tiling window manager, and
+    // without it typing would go to whichever pane was focused last.
+    const containerEl = document.getElementById(termData.containerId);
+    if (containerEl) {
+      containerEl.addEventListener('mousedown', () => {
+        const idx = tabs.findIndex(t => t.sessionId === session_id);
+        if (idx !== -1 && idx !== activeTabIndex) switchToTab(idx);
+      });
+    }
+
     // Drag to reorder
     _bindDrag(tabEl, session_id);
 
@@ -177,31 +198,147 @@
     // Hide welcome screen when switching to a real tab
     welcomeScreen.classList.add('hidden');
 
-    // Deactivate all tabs and hide all terminals
+    activeTabIndex = index;
+
+    // Which terminals are on screen is the layout's business, not this
+    // module's — under a tiled layout several are visible at once and the tab
+    // being switched to may already be one of them. The strip still marks
+    // exactly one tab active, because exactly one has the keyboard.
     tabs.forEach((tab, i) => {
       tab.tabEl.classList.toggle('active', i === index);
       const container = document.getElementById(tab.containerId);
-      if (container) {
-        container.classList.toggle('active', i === index);
-      }
+      if (container) container.classList.toggle('tab-current', i === index);
     });
 
-    activeTabIndex = index;
+    if (window.shellmateLayout) {
+      window.shellmateLayout.focus(tabs[index].sessionId);
+    } else {
+      tabs.forEach((tab, i) => {
+        const container = document.getElementById(tab.containerId);
+        if (container) container.classList.toggle('active', i === index);
+      });
+    }
 
     // Notify chat.js (and anything else) that the active tab changed
     window.dispatchEvent(new CustomEvent('mate:tab-switched', { detail: tabs[index] }));
 
     // Let xterm.js recalculate dimensions after becoming visible
-    const activeTab = tabs[index];
-    if (activeTab && activeTab.fitAddon) {
-      requestAnimationFrame(() => {
-        try {
-          activeTab.fitAddon.fit();
-        } catch (_) { /* ignore if terminal not ready */ }
-      });
+    refitTerminals(window.shellmateLayout
+      ? window.shellmateLayout.visible()
+      : [tabs[index].sessionId]);
+
+    // The terminal only receives keystrokes when it has the focus, and a tab
+    // switched to from the strip, a shortcut or a pane click should be ready
+    // to type into without a further click into the terminal itself.
+    const active = tabs[index];
+    if (active && active.terminalInstance) {
+      requestAnimationFrame(() => { try { active.terminalInstance.focus(); } catch (_) {} });
     }
 
     updateStatusBar();
+  }
+
+  /** sessionId → was that terminal following the tail when the refit was asked for. */
+  const _pendingRefit = new Map();
+  let _refitScheduled = false;
+
+  /**
+   * Re-measure the given terminals and tell each device its new size.
+   *
+   * A terminal that is resized without the far end being told keeps sending
+   * output wrapped for the old width, which on a device paging through a
+   * configuration produces a screen of ragged half-lines.
+   *
+   * Calls made in the same tick are collapsed into one. Switching tab under a
+   * tiled layout used to ask twice — once from the layout re-rendering, once
+   * from the switch itself — and xterm adjusts the scroll position on every
+   * resize, so the second one moved the viewport a second time and left the
+   * newest output above the fold.
+   */
+  function refitTerminals(sessionIds) {
+    // Whether a terminal was following the tail has to be read now, not in the
+    // callback. Between the two, the browser lays out the new pane geometry
+    // and clamps the scroll container to its new height, which moves the
+    // viewport — so by the time the fit runs, a terminal that was pinned to
+    // the bottom no longer looks like it was. First observation wins, since
+    // the earliest one is the only one taken before any of that has happened.
+    (sessionIds || []).forEach(id => {
+      if (_pendingRefit.has(id)) return;
+      const tab = tabs.find(t => t.sessionId === id);
+      let atBottom = true;
+      try {
+        const buf = tab.terminalInstance.buffer.active;
+        atBottom = buf.viewportY >= buf.baseY;
+      } catch (_) { /* not ready; treat as following */ }
+      _pendingRefit.set(id, atBottom);
+    });
+
+    if (_refitScheduled) return;
+    _refitScheduled = true;
+
+    requestAnimationFrame(() => {
+      _refitScheduled = false;
+      const wanted = new Map(_pendingRefit);
+      _pendingRefit.clear();
+      wanted.forEach((atBottom, id) => {
+        const tab = tabs.find(t => t.sessionId === id);
+        if (tab) _fitOne(tab, 0, atBottom);
+      });
+    });
+  }
+
+  /**
+   * Fit one terminal, retrying briefly while it has no measurable size.
+   *
+   * xterm measures its character cell on its first render. Asked before that
+   * has happened — which is the case on the frame a terminal is created —
+   * proposeDimensions() returns nothing and fit() quietly does nothing at all.
+   * The terminal then stays at the 80x24 default for the life of the session
+   * while its pane is far wider, and the device wraps its output to 80 columns
+   * in a window with room for a hundred. It fails silently, which is why it
+   * went unnoticed; hence the retry rather than a single attempt.
+   */
+  function _fitOne(tab, attempt, wasAtBottom) {
+    if (!tab.fitAddon || !tab.terminalInstance) return;
+
+    let dims;
+    try { dims = tab.fitAddon.proposeDimensions(); } catch (_) { dims = null; }
+
+    if (!dims || !dims.cols || !dims.rows) {
+      if (attempt < 6) setTimeout(() => _fitOne(tab, attempt + 1, wasAtBottom), 40);
+      return;
+    }
+
+    const term = tab.terminalInstance;
+    if (dims.cols === term.cols && dims.rows === term.rows) return;
+
+    try {
+      // Resizing reflows the buffer and moves the viewport with it, which
+      // after growing a pane can strand the newest output below the fold —
+      // the session looks stuck. Someone who had scrolled up to read something
+      // stays where they were; only a terminal already following the tail
+      // keeps following it.
+      tab.fitAddon.fit();
+
+      // Not immediately, and not once: xterm re-syncs the viewport after the
+      // reflow settles, and a scroll issued before that is overwritten by it.
+      // Re-asserting over a few frames costs nothing and is not sensitive to
+      // exactly which frame the reflow lands on.
+      if (wasAtBottom) {
+        [0, 1, 2].forEach(n => setTimeout(() => {
+          try {
+            const b = term.buffer.active;
+            if (b.viewportY < b.baseY) term.scrollToBottom();
+          } catch (_) {}
+        }, n * 60));
+      }
+
+      if (tab.websocket && tab.websocket.readyState === WebSocket.OPEN) {
+        tab.websocket.send(JSON.stringify({
+          type: 'resize', cols: term.cols, rows: term.rows,
+        }));
+      }
+    } catch (_) { /* terminal disposed mid-flight */ }
   }
 
   /**
@@ -239,6 +376,10 @@
 
     // Remove from array
     tabs.splice(index, 1);
+
+    // Free the pane it occupied before anything is asked to re-render, so a
+    // tiled layout pulls in a waiting session rather than leaving a hole.
+    if (window.shellmateLayout) window.shellmateLayout.forget(sessionId);
 
     // Decide what to show next
     if (tabs.length === 0) {
@@ -457,6 +598,32 @@
       </button>
     `;
 
+    // Only offered when there is more than one pane to choose between —
+    // "move to pane 1" on a single layout is a menu entry that does nothing.
+    const panes = window.shellmateLayout ? window.shellmateLayout.panes() : 1;
+    if (panes > 1) {
+      const sep = document.createElement('div');
+      sep.className = 'ctx-sep';
+      _ctxMenu.appendChild(sep);
+
+      const heading = document.createElement('div');
+      heading.className = 'ctx-heading';
+      heading.textContent = 'Move to pane';
+      _ctxMenu.appendChild(heading);
+
+      const row = document.createElement('div');
+      row.className = 'ctx-pane-row';
+      for (let i = 0; i < panes; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'ctx-pane';
+        btn.dataset.action = 'pane';
+        btn.dataset.pane = String(i);
+        btn.textContent = String(i + 1);
+        row.appendChild(btn);
+      }
+      _ctxMenu.appendChild(row);
+    }
+
     document.body.appendChild(_ctxMenu);
 
     // Position near cursor, clamped to viewport
@@ -475,6 +642,9 @@
           case 'clear':     _clearConsole(tab);       break;
           case 'copy':      _copyHistory(tab);        break;
           case 'duplicate': _duplicateSession(tab);   break;
+          case 'pane':
+            window.shellmateLayout.place(Number(btn.dataset.pane), tab.sessionId);
+            break;
         }
       }
       _hideTabContextMenu();
@@ -720,5 +890,6 @@
   window.updateTabLabel   = updateTabLabel;
   window.updateTabStatus  = updateTabStatus;
   window.updateStatusBar  = updateStatusBar;
+  window.refitTerminals   = refitTerminals;
 
 })();
