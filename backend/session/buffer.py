@@ -72,14 +72,25 @@ class SessionBuffer:
         """
         Return the last *n* lines stored in the buffer.
 
+        Includes the pending fragment — the text received since the last
+        newline — as a final line when there is one.
+
+        That fragment is almost always the device's prompt, or a command the
+        user is part-way through typing, because a prompt is written without a
+        trailing newline while it waits for input.  Omitting it means the
+        buffer never contains the one line that says which device you are on
+        and what mode it is in, which is exactly the context the AI needs and
+        what hostname detection reads.
+
         Args:
-            n: Number of lines to return.  Clamped to the number of lines
-               actually available.
+            n: Number of lines to return.  Clamped to what is available.
 
         Returns:
             List of strings, oldest first.
         """
         lines = list(self._lines)
+        if self._pending:
+            lines.append(self._pending)
         return lines[-n:] if n < len(lines) else lines
 
     def get_text(self, n: int = 200) -> str:
@@ -106,5 +117,10 @@ class SessionBuffer:
 
     @property
     def line_count(self) -> int:
-        """Number of complete lines currently stored."""
-        return len(self._lines)
+        """
+        Number of lines currently stored, counting the pending fragment.
+
+        Matches what get_lines() returns, so the line count shown in the
+        status bar agrees with the content the AI is given.
+        """
+        return len(self._lines) + (1 if self._pending else 0)
