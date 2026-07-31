@@ -3537,3 +3537,131 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   letter-spacing: 0.06em;
   color: var(--on-surface-muted);
 }
+
+
+/* --------------------------------------------------------------------------
+   Chat header — two rows so nothing is pushed offscreen
+   -------------------------------------------------------------------------- */
+#chat-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+#chat-header-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-header-spacer { flex: 1; }
+
+/* Wraps rather than overflowing: the divider can be dragged to any width and
+   Conclude stays reachable. */
+#chat-header-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* min-width:0 lets the picker shrink instead of forcing the row wide enough
+   to shove everything after it out of view. */
+#chat-header-tools #ai-backend-select {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+#chat-tabs-picker-wrap { position: relative; }
+
+.chat-pill-active {
+  border-color: var(--primary-container) !important;
+  color: var(--on-surface) !important;
+}
+
+#chat-tabs-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 300;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 28px -8px rgba(0,0,0,0.55);
+}
+
+#chat-tabs-menu.hidden { display: none; }
+
+.chat-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  cursor: pointer;
+}
+
+.chat-tabs-row:hover { background: var(--surface-high); }
+.chat-tabs-row input { accent-color: var(--primary); cursor: pointer; }
+.chat-tabs-follow { color: var(--on-surface); }
+
+.chat-tabs-kind {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--on-surface-muted);
+}
+
+.chat-tabs-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--outline);
+}
+
+.chat-tabs-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--on-surface-muted);
+  text-align: center;
+}
+
+/* Hiding the assistant entirely (#15). */
+#chat-pane.hidden, #split-divider.hidden { display: none; }
+
+/* --------------------------------------------------------------------------
+   Provider test results
+   -------------------------------------------------------------------------- */
+.provider-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--outline);
+}
+
+.provider-row .material-symbols-outlined { font-size: 16px; margin-top: 1px; }
+.provider-ok    .material-symbols-outlined { color: #4ade80; }
+.provider-error .material-symbols-outlined { color: var(--error); }
+.provider-muted .material-symbols-outlined { color: var(--on-surface-muted); }
+
+[data-theme="light"] .provider-ok .material-symbols-outlined { color: #15803d; }
+
+.provider-name {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.provider-detail {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--on-surface-muted);
+}

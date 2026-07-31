@@ -69,6 +69,9 @@ DEFAULT_SETTINGS: dict = {
     "ai": {
         # "learn" | "tshoot" — controls which system-prompt persona is used.
         "mode": "tshoot",
+        # The assistant is optional. On a locked-down network it may not be
+        # reachable at all, and the terminal has to stand on its own.
+        "panel_enabled": True,
     },
 }
 

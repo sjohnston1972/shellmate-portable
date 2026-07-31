@@ -304,6 +304,7 @@
     _checked('setting-copy-on-select',    !!t.copy_on_select);
     _checked('setting-expand-aliases',    t.expand_aliases  !== false);
     _checked('setting-auto-paging',       t.auto_paging_off !== false);
+    _checked('setting-ai-enabled',        (s.ai || {}).panel_enabled !== false);
 
     // Colour rules are a repeating row, so their editor owns the DOM.
     const h = s.highlight || {};
@@ -378,6 +379,9 @@
         copy_on_select:    _gchecked('setting-copy-on-select'),
         expand_aliases:    _gchecked('setting-expand-aliases'),
         auto_paging_off:   _gchecked('setting-auto-paging'),
+      },
+      ai: {
+        panel_enabled: _gchecked('setting-ai-enabled'),
       },
       highlight: {
         enabled: _gchecked('setting-highlight-enabled'),

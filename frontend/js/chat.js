@@ -201,13 +201,19 @@
     if (chatWs && chatWs.readyState === WebSocket.OPEN) {
       const openIds = typeof window.getOpenSessionIds === 'function' ? window.getOpenSessionIds() : [];
       const aiMode = typeof window.getShellmateMode === 'function' ? window.getShellmateMode() : 'tshoot';
+
+      // An explicit choice in the tab picker wins over the /context command,
+      // which stays supported for anyone already using it.
+      const picked = typeof window.getChatContextSelection === 'function'
+        ? window.getChatContextSelection() : null;
+
       chatWs.send(JSON.stringify({
         message,
         session_id:        sessionId,
-        open_session_ids:  openIds,
+        open_session_ids:  picked || openIds,
         backend:           currentBackend,
         model:             currentModel,
-        context_mode:      mode,
+        context_mode:      picked ? 'selected' : mode,
         mode:              aiMode,
       }));
     } else {

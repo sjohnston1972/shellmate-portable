@@ -691,6 +691,21 @@
   /** Return an array of all open session IDs in current tab order. */
   window.getOpenSessionIds = () => tabs.map(t => t.sessionId);
 
+  /**
+   * Open tabs as plain data, for the chat context picker.
+   *
+   * Deliberately not the tab objects themselves: those carry live xterm and
+   * WebSocket handles that nothing outside this module should be reaching
+   * into.
+   */
+  window.getOpenTabs = () => tabs.map(t => ({
+    sessionId:      t.sessionId,
+    label:          t.label,
+    hostname:       t.hostname,
+    connectionType: t.connectionType,
+    isConnected:    t.isConnected,
+  }));
+
   /** Return the tab object at 1-based tab number, or null. */
   window.getTabByNumber = (n) => tabs[n - 1] || null;
 

@@ -49,7 +49,7 @@ from backend.settings_store import (
 from backend.store import store
 from backend.vault import VaultError, vault
 from backend.ai.router import stream_chat
-from backend.ai import chroma_client
+from backend.ai import chroma_client, providers
 from backend.config import DEFAULT_AI_BACKEND, JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
 
 logger = logging.getLogger(__name__)
@@ -738,6 +738,29 @@ async def post_session_to_jira(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 # REST — Ollama model list
 # ---------------------------------------------------------------------------
+
+@app.get("/api/providers/{provider}/test")
+async def provider_test(provider: str) -> dict:
+    """
+    Test one AI provider and return the models it offers.
+
+    Listing models doubles as the connection test: it needs a valid key, costs
+    nothing, and returns something useful when it works.
+    """
+    result = await providers.check(provider)
+    return result.as_dict()
+
+
+@app.get("/api/providers/models")
+async def provider_models() -> dict:
+    """
+    Return every model available across all configured providers.
+
+    Backs the "refresh models" action, so the picker reflects what is actually
+    reachable rather than a hardcoded list.
+    """
+    return await providers.check_all()
+
 
 @app.get("/api/ollama/models")
 async def ollama_models() -> list[dict]:

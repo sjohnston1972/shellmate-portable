@@ -71,11 +71,9 @@
       <button id="tab-bar-brand" title="Home / Quick connect">ShellMate Portable</button>
       <div id="tab-list"></div>
 
-      <!-- Learn / Troubleshoot mode toggle — click to switch -->
-      <span class="mode-toggle-label">MODE</span>
-      <button id="mode-toggle-btn" class="mode-toggle-btn" data-mode="tshoot" aria-label="Toggle ShellMate mode" title="Click to switch mode">
-        <span id="mode-toggle-text">Tshoot</span>
-      </button>
+      <!-- The Tshoot/Learn toggle used to live here. It controls the
+           assistant, so it now sits in the chat header beside Conclude and
+           Clear, which is also where people look for it. -->
 
       <button id="btn-new-tab" title="New connection (Ctrl+T)">
         <span class="material-symbols-outlined">add</span>
@@ -120,14 +118,23 @@
       <!-- AI Chat pane -->
       <div id="chat-pane">
 
-        <!-- Header -->
+        <!-- Header.
+             Two rows rather than one: at a narrow panel width a single row
+             pushed Conclude and Clear off the edge and slid the title behind
+             the model picker. The tool row wraps, so nothing is ever
+             unreachable however far the divider is dragged. -->
         <div id="chat-header">
-          <div id="chat-header-left">
+          <div id="chat-header-top">
             <span class="material-symbols-outlined" style="font-size:16px;color:var(--primary)">smart_toy</span>
             <span id="chat-title">CHAT</span>
             <span id="chat-context-indicator" title="Current AI context"></span>
+            <span class="chat-header-spacer"></span>
+            <button id="chat-popout" class="icon-btn" title="Pop out chat (drag to move, drag corner to resize)">
+              <span class="material-symbols-outlined" id="chat-popout-icon">open_in_new</span>
+            </button>
           </div>
-          <div id="chat-header-right">
+
+          <div id="chat-header-tools">
             <select id="ai-backend-select" title="AI model">
               <optgroup label="☁ Cloud">
                 <option value="claude:claude-sonnet-4-6" selected>Claude Sonnet 4.6</option>
@@ -143,9 +150,24 @@
                 <option value="_loading" disabled>Loading…</option>
               </optgroup>
             </select>
-            <button id="chat-popout" class="icon-btn" title="Pop out chat (drag to move, drag corner to resize)">
-              <span class="material-symbols-outlined" id="chat-popout-icon">open_in_new</span>
+
+            <!-- Which sessions the assistant can see. Replaces the
+                 undiscoverable /context commands. -->
+            <div id="chat-tabs-picker-wrap">
+              <button id="chat-tabs-btn" class="chat-pill-btn" title="Choose which sessions the assistant can see">
+                <span class="material-symbols-outlined">list_alt</span>
+                <span id="chat-tabs-label">Active tab</span>
+              </button>
+              <div id="chat-tabs-menu" class="hidden"></div>
+            </div>
+
+            <!-- Moved here from the tab bar: it controls the assistant, so it
+                 belongs beside the assistant's other controls. -->
+            <button id="mode-toggle-btn" class="mode-toggle-btn" data-mode="tshoot"
+                    aria-label="Toggle assistant mode" title="Click to switch between Troubleshoot and Learn">
+              <span id="mode-toggle-text">Tshoot</span>
             </button>
+
             <button id="btn-conclude-session" class="chat-pill-btn" title="Conclude session — log to Jira">
               <span class="material-symbols-outlined">summarize</span>
               Conclude
@@ -638,7 +660,24 @@ GigEth0/2     unassigned    YES unset  down     down
         </section>
 
         <section class="settings-section">
+          <h3 class="settings-section-title">AI Assistant</h3>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-ai-enabled">Show the AI panel</label>
+            <input type="checkbox" id="setting-ai-enabled" class="setting-checkbox" />
+          </div>
+          <p class="settings-section-hint">Turn this off to give the terminal the full width. Useful on a network where the assistant is not reachable anyway.</p>
+        </section>
+
+        <section class="settings-section">
           <h3 class="settings-section-title">AI Providers</h3>
+          <div class="setting-row">
+            <button type="button" id="btn-test-providers" class="btn-secondary">
+              <span class="material-symbols-outlined">check_circle</span>
+              Test connections &amp; refresh models
+            </button>
+            <span id="provider-test-status" class="setting-value"></span>
+          </div>
+          <div id="provider-results"></div>
           <p class="settings-section-hint">API keys and endpoints. Keys are stored in the encrypted vault above; anything saved here overrides the matching <code>.env</code> variable. Leaving a field empty falls back to <code>.env</code>.</p>
 
           <div class="setting-row setting-row-stack">
@@ -1005,6 +1044,8 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/chat.js?v=2"></script>
   <script src="/static/js/settings.js?v=2"></script>
   <script src="/static/js/highlight.js"></script>
+  <script src="/static/js/ai_panel.js"></script>
+  <script src="/static/js/chat_context.js"></script>
   <script src="/static/js/device.js"></script>
   <script src="/static/js/highlight_settings.js"></script>
   <script src="/static/js/vault.js"></script>

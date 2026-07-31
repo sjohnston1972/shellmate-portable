@@ -102,7 +102,19 @@ async def stream_chat(
     # Extra contexts (/context all or /context N)
     extra_contexts: list[dict] = []
 
-    if context_mode == "all":
+    if context_mode == "selected":
+        # The tab picker sends exactly the sessions it wants included, so
+        # open_session_ids is the selection rather than "everything open".
+        for sid in (open_session_ids or []):
+            if sid == active_session_id:
+                continue
+            sess = session_manager.get_session(sid)
+            if sess and sess.get("buffer"):
+                extra_contexts.append({
+                    "label":  sess.get("display_label") or sess.get("hostname", sid[:8]),
+                    "buffer": _session_text(sess, 100),
+                })
+    elif context_mode == "all":
         for s in all_sessions:
             sid = s.get("session_id")
             if sid == active_session_id:
