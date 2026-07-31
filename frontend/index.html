@@ -42,6 +42,9 @@
       <a href="#" id="sidebar-link-sftp" class="sidebar-link" title="Files (SFTP)">
         <span class="material-symbols-outlined">description</span>
       </a>
+      <a href="#" id="sidebar-link-broadcast" class="sidebar-link" title="Broadcast a command (Ctrl+Shift+B)">
+        <span class="material-symbols-outlined">send</span>
+      </a>
       <a href="#" id="sidebar-link-settings" class="sidebar-link" title="Settings">
         <span class="material-symbols-outlined">settings</span>
       </a>
@@ -50,10 +53,10 @@
       <button id="btn-theme-toggle" class="sidebar-link" title="Toggle light/dark theme">
         <span class="material-symbols-outlined" id="theme-icon">light_mode</span>
       </button>
-      <a href="#" class="sidebar-link" title="Docs">
+      <a href="#" id="sidebar-link-docs" class="sidebar-link" title="Documentation">
         <span class="material-symbols-outlined">description</span>
       </a>
-      <a href="#" class="sidebar-link" title="Support">
+      <a href="#" id="sidebar-link-support" class="sidebar-link" title="Contact support">
         <span class="material-symbols-outlined">help</span>
       </a>
     </div>
@@ -902,6 +905,65 @@ GigEth0/2     unassigned    YES unset  down     down
   </div>
 
   <!-- ================================================================
+       BROADCAST PANEL
+  ================================================================ -->
+  <div id="broadcast-overlay" class="panel-overlay hidden">
+    <div id="broadcast-panel" class="side-panel side-panel-wide">
+      <div class="panel-header">
+        <h2 class="panel-title">Broadcast a command</h2>
+        <button id="broadcast-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="panel-body">
+        <p class="settings-section-hint">The command is sent once to each device you choose, and each reports back separately. Nothing is mirrored as you type.</p>
+
+        <div class="setting-row-stack">
+          <label class="setting-label" for="broadcast-command">Command</label>
+          <textarea id="broadcast-command" rows="2" spellcheck="false" placeholder="show version"></textarea>
+        </div>
+
+        <div class="broadcast-targets-head">
+          <span class="setting-label">Send to</span>
+          <button type="button" id="broadcast-all" class="btn-tertiary">All</button>
+          <button type="button" id="broadcast-none" class="btn-tertiary">None</button>
+        </div>
+        <div id="broadcast-targets"></div>
+
+        <div class="setting-row">
+          <button type="button" id="broadcast-send" class="btn-primary">
+            <span class="material-symbols-outlined">send</span>
+            Send
+          </button>
+        </div>
+
+        <div id="broadcast-results"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       DOCUMENTATION
+  ================================================================ -->
+  <div id="docs-overlay" class="panel-overlay hidden">
+    <div id="docs-panel">
+      <div class="panel-header">
+        <h2 class="panel-title">ShellMate Portable — Manual</h2>
+        <button id="docs-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div id="docs-layout">
+        <div id="docs-sidebar">
+          <input type="search" id="docs-search" placeholder="Search the manual…" autocomplete="off" />
+          <nav id="docs-nav"></nav>
+        </div>
+        <article id="docs-content"></article>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
        SESSION HISTORY PANEL
        Full-text search across every command ever run. The point of storing
        transcripts rather than flat logs: a question, not a grep.
@@ -1156,6 +1218,9 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/mode.js?v=3"></script>
   <script src="/static/js/chat.js?v=2"></script>
   <script src="/static/js/settings.js?v=2"></script>
+  <script src="/static/js/markdown.js"></script>
+  <script src="/static/js/docs.js"></script>
+  <script src="/static/js/broadcast.js"></script>
   <script src="/static/js/settings_nav.js"></script>
   <script src="/static/js/platforms_editor.js"></script>
   <script src="/static/js/highlight.js"></script>

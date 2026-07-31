@@ -742,6 +742,77 @@ async def post_session_to_jira(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
+# REST — Broadcast
+# ---------------------------------------------------------------------------
+
+
+class BroadcastRequest(BaseModel):
+    """Body for POST /api/broadcast."""
+
+    session_ids: list[str]
+    command: str
+    # Enter is pressed unless the caller says otherwise. The alternative
+    # default leaves a half-typed line sitting at the prompt on every device,
+    # which is a worse thing to do by accident than running the command.
+    execute: bool = True
+
+
+@app.post("/api/broadcast")
+async def broadcast(request: BroadcastRequest) -> dict:
+    """
+    Send one command to several sessions.
+
+    Deliberately compose-and-send rather than mirroring keystrokes into every
+    tab. Mirroring means a stray keypress — or a half-typed command answered
+    by a device that autocompletes — reaches the whole fleet, and the operator
+    never sees the finished command before it lands. Here the command is
+    written once, the targets are named, and each result comes back
+    individually so a partial failure is visible rather than assumed.
+
+    Each command still passes through that session's outbound pipeline, so
+    alias expansion and (later) guardrails apply exactly as when typed.
+    """
+    command = request.command.strip()
+    if not command:
+        raise HTTPException(status_code=400, detail="No command given.")
+    if not request.session_ids:
+        raise HTTPException(status_code=400, detail="No sessions selected.")
+
+    results = []
+    for session_id in request.session_ids:
+        session = session_manager.get_session(session_id)
+        if session is None:
+            results.append({"session_id": session_id, "ok": False,
+                            "label": "", "error": "Session not found"})
+            continue
+
+        label = session.get("display_label") or session.get("hostname") or session_id[:8]
+        handler = session["handler"]
+
+        if not handler.is_connected:
+            results.append({"session_id": session_id, "ok": False,
+                            "label": label, "error": "Not connected"})
+            continue
+
+        try:
+            outbound = session["pipeline"].process(command + ("\r" if request.execute else ""))
+            await asyncio.to_thread(handler.send, outbound.encode("utf-8", errors="replace"))
+            expansion = session["pipeline"].last_expansion
+            results.append({
+                "session_id": session_id, "ok": True, "label": label,
+                "sent": expansion[1] if expansion else command,
+            })
+        except Exception as exc:
+            logger.warning("Broadcast to %s failed: %s", label, exc)
+            results.append({"session_id": session_id, "ok": False,
+                            "label": label, "error": str(exc)})
+
+    sent = sum(1 for r in results if r["ok"])
+    logger.info("Broadcast %r to %s of %s sessions", command, sent, len(results))
+    return {"command": command, "sent": sent, "total": len(results), "results": results}
+
+
+# ---------------------------------------------------------------------------
 # REST — Platform definitions
 # ---------------------------------------------------------------------------
 
@@ -1100,7 +1171,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         ] = detected
 
                         # Name the saved connection after the device, so the
-                        # welcome screen shows "S3-R1" rather than an address.
+                        # welcome screen shows a name rather than an address.
                         # The address it dials is left alone — see
                         # record_detected_hostname.
                         try:

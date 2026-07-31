@@ -154,13 +154,14 @@ def record_detected_hostname(target: str, port: int, username: str, detected: st
     """
     Note the device's real name against the profile used to reach it.
 
-    Connecting by IP leaves a saved connection called "192.168.20.16", which
+    Connecting by IP leaves a saved connection called "10.20.30.40", which
     tells you nothing on the welcome screen. The hostname is known a second
     after connecting, so use it.
 
     The connect target is deliberately *not* rewritten. A profile named
-    "S3-R1" that still dials the IP works everywhere; one that dials "S3-R1"
-    only works where that name resolves, which on a management network is
+    "core-sw-01" that still dials the IP works everywhere; one that dials
+    "core-sw-01" only works where that name resolves, which on a management
+    network is
     frequently nowhere. So the display name changes and the address does not.
 
     The name is only filled in when the user has not chosen one — a profile

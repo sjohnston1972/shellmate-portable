@@ -3778,3 +3778,245 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   overflow-y: auto;
   padding-right: 4px;
 }
+
+
+/* --------------------------------------------------------------------------
+   Broadcast panel
+   -------------------------------------------------------------------------- */
+
+/* .panel-body carries no padding — the other panels indent their own
+   sections. This one holds plain content, so it supplies its own. */
+#broadcast-panel .panel-body { padding: 16px 24px 24px; }
+
+#broadcast-command {
+  width: 100%;
+  background: var(--surface-high);
+  border: 1px solid rgba(70,69,85,0.4);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
+#broadcast-command:focus { outline: none; border-color: var(--primary-container); }
+
+.broadcast-targets-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 6px;
+}
+
+.broadcast-targets-head .setting-label { flex: 1; }
+
+.broadcast-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Pulled out by its own padding so the names line up with the labels
+     above while the hover highlight still runs the full width. */
+  padding: 7px 8px;
+  margin: 0 -8px;
+  border-radius: var(--radius-sm);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  cursor: pointer;
+}
+
+.broadcast-target:hover { background: var(--surface-high); }
+.broadcast-target input { accent-color: var(--primary); }
+.broadcast-target-down { opacity: 0.45; cursor: not-allowed; }
+
+.broadcast-kind {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--on-surface-muted);
+}
+
+#broadcast-send { margin-top: 14px; }
+
+.broadcast-empty {
+  padding: 16px;
+  font-size: 12px;
+  color: var(--on-surface-muted);
+  text-align: center;
+}
+
+.broadcast-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.broadcast-result .material-symbols-outlined { font-size: 15px; }
+.broadcast-ok .material-symbols-outlined    { color: #4ade80; }
+.broadcast-error .material-symbols-outlined { color: var(--error); }
+.broadcast-muted { color: var(--on-surface-muted); }
+
+[data-theme="light"] .broadcast-ok .material-symbols-outlined { color: #15803d; }
+
+/* --------------------------------------------------------------------------
+   Documentation
+   -------------------------------------------------------------------------- */
+#docs-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1000px, 94vw);
+  height: min(860px, 92vh);
+  margin: auto;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 64px -12px rgba(0,0,0,0.6);
+  overflow: hidden;
+}
+
+#docs-layout { display: flex; flex: 1; min-height: 0; }
+
+#docs-sidebar {
+  flex: 0 0 230px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--outline);
+  padding: 12px 10px;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+#docs-search {
+  background: var(--surface-high);
+  border: 1px solid rgba(70,69,85,0.4);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+  color: var(--on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+}
+
+#docs-search:focus { outline: none; border-color: var(--primary-container); }
+
+#docs-nav { display: flex; flex-direction: column; gap: 2px; }
+
+.docs-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--on-surface-dim);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.docs-nav-item:hover { background: var(--surface-high); color: var(--on-surface); }
+.docs-nav-item.active { background: var(--surface-highest); color: var(--on-surface); font-weight: 600; }
+.docs-nav-item.hidden { display: none; }
+.docs-nav-item .material-symbols-outlined { font-size: 16px; }
+
+#docs-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 24px 32px 48px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--on-surface-dim);
+}
+
+#docs-content h1 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--on-surface);
+  margin: 0 0 16px;
+}
+
+#docs-content h2 {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--on-surface);
+  margin: 28px 0 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--outline);
+}
+
+#docs-content h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--on-surface);
+  margin: 20px 0 8px;
+}
+
+#docs-content p  { margin: 0 0 12px; }
+#docs-content ul, #docs-content ol { margin: 0 0 12px; padding-left: 22px; }
+#docs-content li { margin-bottom: 5px; }
+
+#docs-content code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: var(--surface-high);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--on-surface);
+}
+
+#docs-content pre.md-code {
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0 0 14px;
+}
+
+#docs-content pre.md-code code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--on-surface-dim);
+}
+
+#docs-content blockquote {
+  margin: 0 0 12px;
+  padding: 8px 14px;
+  border-left: 3px solid var(--primary-container);
+  background: var(--surface-high);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  color: var(--on-surface);
+}
+
+/* Wide tables scroll rather than stretching the page. */
+#docs-content .md-table-wrap { overflow-x: auto; margin: 0 0 14px; }
+
+#docs-content table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+
+#docs-content th, #docs-content td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--outline);
+  vertical-align: top;
+}
+
+#docs-content th { color: var(--on-surface); font-weight: 600; white-space: nowrap; }
+#docs-content hr { border: none; border-top: 1px solid var(--outline); margin: 20px 0; }
+#docs-content a { color: var(--primary); }
+
+.docs-loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--on-surface-muted);
+  font-size: 13px;
+}
