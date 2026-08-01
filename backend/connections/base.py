@@ -75,6 +75,13 @@ class ConnectionParams:
     stop_bits: float = 1                  # 1, 1.5, 2
     flow_control: str = "none"            # none | xonxoff | rtscts | dsrdtr
 
+    # --- Where the credential came from ------------------------------------
+    # Not a credential and not sent anywhere: it exists so a failure can say
+    # "the saved password was refused" rather than "check your password",
+    # which are two different next actions. "typed" | "saved" | "".
+    # Set by the API layer, which is the only part that knows.
+    credential_source: str = ""
+
     def effective_username(self) -> str:
         """
         The account to authenticate as.

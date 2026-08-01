@@ -77,6 +77,13 @@ class Section:
 # ---------------------------------------------------------------------------
 
 
+def _built() -> str:
+    """When this copy was produced. Reported by the API for the same reason."""
+    from backend.app import _build_time
+
+    return _build_time() or "unknown"
+
+
 def _about(_ctx: dict) -> str:
     from backend import __init__ as _  # noqa: F401  (package marker)
 
@@ -85,6 +92,11 @@ def _about(_ctx: dict) -> str:
         f"Collected:      {time.strftime('%Y-%m-%d %H:%M:%S %Z')}",
         "",
         f"Frozen build:   {'yes' if paths.is_frozen() else 'no (running from source)'}",
+        # The first question to ask about a bug report that says "it is still
+        # broken": a --onefile binary carries no visible clue that the source
+        # beside it has moved on, and an executable older than the fix looks
+        # exactly like the fix not working.
+        f"Built:          {_built()}",
         f"Executable:     {sys.executable}",
         f"Application at: {paths.app_dir()}",
         f"Data folder:    {paths.data_dir()}",

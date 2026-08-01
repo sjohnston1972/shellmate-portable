@@ -604,6 +604,107 @@ def test_a_password_stops_paramiko_offering_keys() -> None:
         paramiko.SSHClient = original
 
 
+def test_a_failure_says_what_actually_happened() -> None:
+    """
+    "Check the username, password or key" is three guesses and no diagnosis.
+
+    It was also actively wrong in the case that turned out to be common: a
+    device that hangs up after refusing a key never gets as far as the
+    password, so the message sent someone to retype a password that was
+    correct — three times, across three storage paths.
+
+    Everything asserted here is read from the exception paramiko raised and
+    the state of the transport when it did. None of it is guessed.
+    """
+    print("\n-- What a failed connection says --")
+
+    import paramiko
+
+    from backend.connections.ssh_handler import _explain_auth_failure
+
+    def params(**overrides) -> ConnectionParams:
+        return ConnectionParams(connection_type="ssh", hostname="10.20.30.40",
+                                username="steven", **overrides)
+
+    generic = paramiko.AuthenticationException("failed")
+
+    # The server telling us what it would have accepted. The single most
+    # useful thing available in the whole failure, and it was discarded.
+    told = _explain_auth_failure(
+        paramiko.BadAuthenticationType("no", ["publickey", "keyboard-interactive"]),
+        params(password="x"), "steven", offered_keys=True, still_connected=True)
+    check("the server's allowed types are used when it offers them",
+          "only accept" in told and "a key" in told, told)
+    check("and translated out of protocol names",
+          "publickey" not in told, told)
+
+    # The reported bug.
+    hung_up = _explain_auth_failure(generic, params(password="x"), "steven",
+                                    offered_keys=True, still_connected=False)
+    check("a device that hangs up after a key says so",
+          "closed the connection" in hung_up and "never tried" in hung_up,
+          hung_up)
+    check("and names the setting that stops it",
+          "Try keys in ~/.ssh" in hung_up, hung_up)
+
+    # Where the credential came from changes what to go and check.
+    typed = _explain_auth_failure(generic, params(password="x", credential_source="typed"),
+                                  "steven", offered_keys=False, still_connected=True)
+    saved = _explain_auth_failure(generic, params(password="x", credential_source="saved"),
+                                  "steven", offered_keys=False, still_connected=True)
+    check("a typed password is described as typed",
+          "password you typed" in typed, typed)
+    check("a saved one as saved", "saved password" in saved, saved)
+    check("which are different messages", typed != saved)
+
+    named = _explain_auth_failure(generic, params(private_key_path=r"C:\k\lab_ed25519"),
+                                  "steven", offered_keys=False, still_connected=True)
+    check("a named key is named in the failure", "lab_ed25519" in named, named)
+    check("and the path around it is not", "C:\\k" not in named,
+          "the whole path is noise in a one-line error")
+
+    nothing = _explain_auth_failure(generic, params(), "steven",
+                                    offered_keys=False, still_connected=True)
+    check("having nothing to offer is its own message",
+          "no password or key" in nothing, nothing)
+
+    # Every branch has to name the device and the account, because the message
+    # is what a tile notification shows and there is no terminal to look at.
+    for message in (told, hung_up, typed, saved, named, nothing):
+        check(f"names the device: {message[:34]}…", "10.20.30.40" in message)
+        check("and the account", "steven" in message)
+
+    check("and none of them is the old catch-all",
+          all("Check the username, password or key" not in m
+              for m in (told, hung_up, typed, saved, named, nothing)))
+
+
+def test_the_build_time_is_reportable() -> None:
+    """
+    Which copy is running.
+
+    A --onefile binary carries no visible clue that the source beside it has
+    moved on, so an executable twenty minutes older than a fix is
+    indistinguishable from the fix not working. That is exactly what happened,
+    and it cost more time than the bug did.
+    """
+    print("\n-- Which build is this --")
+
+    from backend.app import _build_time
+
+    stamp = _build_time()
+    check("a timestamp is produced", bool(stamp), "empty")
+    check("and it is readable rather than epoch seconds",
+          len(stamp) == 16 and stamp[4] == "-" and stamp[13] == ":",
+          f"got {stamp!r}")
+
+    from backend import support
+
+    about = support.collect(["about"])["about"]
+    check("the support bundle carries it", "Built:" in about,
+          "the first question to ask about a report saying it is still broken")
+
+
 def main() -> int:
     print("=" * 52)
     print("  Phase 2 transport tests")
@@ -624,6 +725,8 @@ def main() -> int:
         test_end_to_end_session,
         test_unknown_connection_type_rejected,
         test_a_password_stops_paramiko_offering_keys,
+        test_a_failure_says_what_actually_happened,
+        test_the_build_time_is_reportable,
     ):
         try:
             test()

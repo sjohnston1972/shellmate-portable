@@ -183,6 +183,7 @@
       '',
       '---',
       `Portable build: ${info.portable ? 'yes' : 'no (running from source)'}`,
+      `Built: ${info.built || 'unknown'}`,
       `Data folder: ${info.data_dir || 'unknown'}`,
       '',
       'The log is at ShellMate-Data/shellmate.log — please read it through and',

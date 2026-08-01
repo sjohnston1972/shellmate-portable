@@ -154,6 +154,75 @@ def _split(value: str) -> set[str]:
     return {part.strip() for part in str(value or "").split(",") if part.strip()}
 
 
+def _explain_auth_failure(exc: Exception, params, username: str,
+                          offered_keys: bool, still_connected: bool) -> str:
+    """
+    Say what actually happened, rather than listing what might have.
+
+    "Authentication failed. Check the username, password or key" is three
+    suggestions and no diagnosis, and it is actively wrong in the case that
+    turned out to be common: paramiko offers public keys before passwords, and
+    a good deal of network kit answers a rejected key by closing the
+    connection — so the password is never tried, and the message sends someone
+    to retype a password that was correct.
+
+    Everything below is read from the exception paramiko raised and the state
+    of the transport at the moment it did. Nothing is guessed.
+    """
+    where = f"{username}@{params.hostname}"
+
+    # The server saying what it *would* have accepted. This is the most useful
+    # thing available anywhere in the failure and it was being discarded.
+    allowed = [str(a) for a in getattr(exc, "allowed_types", []) or []]
+    if allowed:
+        readable = ", ".join(_METHOD_NAMES.get(a, a) for a in allowed)
+        return (f"{params.hostname} refused the way ShellMate tried to "
+                f"authenticate as {username}. It will only accept: {readable}.")
+
+    used_key = bool(params.private_key_path)
+    used_password = bool(params.password)
+
+    # A device that hung up rather than rejecting a credential. The tell is
+    # that the transport is gone by the time the exception surfaces.
+    if not still_connected and (used_key or offered_keys) and used_password:
+        return (
+            f"{params.hostname} closed the connection after refusing a key, "
+            f"so the password for {username} was never tried. Some platforms "
+            f"do this instead of falling back. Turn off “Try keys in "
+            f"~/.ssh” in Stockton, or name the key this device expects."
+        )
+
+    if used_key and not used_password:
+        which = Path(params.private_key_path).name
+        return (f"{params.hostname} refused the key {which} for {username}, "
+                f"and no password was given to fall back to.")
+
+    if used_password:
+        source = {"saved": "the saved password",
+                  "typed": "the password you typed"}.get(
+                      getattr(params, "credential_source", ""), "the password")
+        return (f"{params.hostname} refused {source} for {username}."
+                + (" The username may be wrong rather than the password."
+                   if not used_key else ""))
+
+    if offered_keys:
+        return (f"{params.hostname} refused every key in ~/.ssh for "
+                f"{username}, and no password was given.")
+
+    return (f"{params.hostname} would not authenticate {username}, and "
+            f"ShellMate had no password or key to offer it.")
+
+
+#: SSH method names as a person would say them.
+_METHOD_NAMES = {
+    "password":            "a password",
+    "publickey":           "a key",
+    "keyboard-interactive": "keyboard-interactive (a prompted challenge)",
+    "gssapi-with-mic":     "Kerberos",
+    "none":                "no authentication at all",
+}
+
+
 @dataclass
 class SSHHandler(ConnectionHandler):
     """Manages a single SSH connection and its interactive shell."""
@@ -244,10 +313,13 @@ class SSHHandler(ConnectionHandler):
             self._channel.settimeout(advanced("ssh.read_timeout"))
 
         except paramiko.AuthenticationException as exc:
+            transport = self._client.get_transport()
+            still_up = bool(transport and transport.is_active())
             self.disconnect()
             raise ConnectionError_(
-                f"Authentication failed for {username}@{params.hostname}. "
-                f"Check the username, password or key."
+                _explain_auth_failure(exc, params, username,
+                                      offered_keys=discover_keys,
+                                      still_connected=still_up)
             ) from exc
         except paramiko.SSHException as exc:
             self.disconnect()

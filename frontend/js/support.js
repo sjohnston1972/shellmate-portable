@@ -194,7 +194,8 @@
     try {
       const res = await fetch('/api/system/info');
       const info = await res.json();
-      build = info.portable ? 'portable build' : 'running from source';
+      build = (info.portable ? 'portable build' : 'running from source')
+            + (info.built ? `, built ${info.built}` : '');
     } catch (_) { /* the mail still opens without it */ }
 
     const body = [

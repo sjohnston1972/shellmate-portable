@@ -18,9 +18,11 @@ REST endpoints:
 """
 
 import asyncio
+import datetime
 import json
 import logging
 import re
+import sys
 from pathlib import Path
 
 from fastapi import (
@@ -212,10 +214,16 @@ async def create_session(request: CreateSessionRequest) -> dict:
     # Fill in anything the user chose to have remembered. Only fields left
     # blank are filled, so a password typed in the dialog always wins over a
     # stale stored one.
+    params.credential_source = "typed" if request.password else ""
     if request.profile_id:
         for field, value in load_credentials(request.profile_id).items():
             if not getattr(params, field, ""):
                 setattr(params, field, value)
+                # So a failure can say "the saved password was refused"
+                # rather than "check your password". Two different next
+                # actions, and this is the only layer that knows which.
+                if field == "password":
+                    params.credential_source = "saved"
 
     # Captured before connecting because the handler scrubs them from params
     # the moment authentication succeeds.
@@ -1254,7 +1262,36 @@ async def system_info() -> dict:
         "using_fallback": paths.data_dir_is_fallback(),
         "portable":       paths.is_frozen(),
         "log_dir":        str(log_directory()),
+        # When this copy was built.
+        #
+        # A --onefile binary carries no visible clue that the source beside it
+        # has moved on, so an executable twenty minutes older than a fix is
+        # indistinguishable from the fix not working. That cost real time
+        # once, so it is reported rather than left to be inferred.
+        "built":          _build_time(),
     }
+
+
+def _build_time() -> str:
+    """
+    When the running copy was produced, as a readable local timestamp.
+
+    Frozen: the executable's own modification time. From source: the newest of
+    the backend modules, which is the closest honest answer available — a
+    source run has no build step to timestamp.
+    """
+    try:
+        if paths.is_frozen():
+            stamp = Path(sys.executable).stat().st_mtime
+        else:
+            stamp = max((f.stat().st_mtime
+                         for f in Path(__file__).parent.rglob("*.py")),
+                        default=0.0)
+        if not stamp:
+            return ""
+        return datetime.datetime.fromtimestamp(stamp).strftime("%Y-%m-%d %H:%M")
+    except OSError:
+        return ""
 
 
 @app.get("/api/settings")

@@ -347,13 +347,16 @@ def test_key_authentication() -> None:
         wrong = paramiko.RSAKey.generate(2048)
         wrong_path = Path(root) / "wrong_key"
         wrong.write_private_key_file(str(wrong_path))
-        check("rejects the wrong key with an auth message",
+        # Names the key it tried, rather than the old "Authentication failed.
+        # Check the username, password or key" — which listed three things to
+        # check and told you nothing about which of them went wrong.
+        check("rejects the wrong key, and says which key",
               _raises_message(
                   lambda: manager.create_session(ConnectionParams(
                       connection_type="ssh", hostname="127.0.0.1", port=server.port,
                       username="neteng", private_key_path=str(wrong_path),
                   )),
-                  "Authentication failed",
+                  "refused the key wrong_key",
               ))
 
         check("missing key file is reported clearly",
