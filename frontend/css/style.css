@@ -6360,7 +6360,19 @@ body.resizing-panel * { cursor: ew-resize !important; }
   font-size: 12px;
 }
 
-.ctx-quick-btn {
+/* Scoped to the menu so it outranks `.tab-context-menu button`, which is
+ * (0,1,1) — a bare `.ctx-quick-btn` is (0,1,0) and loses.
+ *
+ * That rule sets width:100% because every other item here is a full-width
+ * row. These two sit side by side on one row, so each claimed the whole
+ * width: the snippet name was squeezed to 0px — present but invisible — and
+ * "All tabs" was pushed past the menu edge. Both reported as missing, one
+ * cause.
+ *
+ * flex:0 0 auto alone does not save it either: flex-basis auto resolves from
+ * the width property, so 100% was still the basis. */
+.tab-context-menu .ctx-quick-btn {
+  width: auto;
   flex: 0 0 auto;
   padding: 2px 7px;
   background: var(--surface-high);
@@ -6371,7 +6383,7 @@ body.resizing-panel * { cursor: ew-resize !important; }
   cursor: pointer;
 }
 
-.ctx-quick-btn:hover { border-color: var(--primary-container); color: var(--primary); }
+.tab-context-menu .ctx-quick-btn:hover { border-color: var(--primary-container); color: var(--primary); }
 
 .ctx-empty {
   padding: 4px 10px;
@@ -6715,4 +6727,17 @@ body.sidebar-labelled .sidebar-label {
 .highlight-test:hover {
   color: var(--primary);
   background: var(--surface-high);
+}
+
+/* The address shown on the "Copy address" entry.
+ *
+ * Right-aligned and dimmed: it is what the action will act on, not a second
+ * label. `margin-left: auto` rather than a width, so a long IPv6 address or a
+ * COM port pushes the menu wider instead of colliding with the text. */
+.tab-context-menu .ctx-value {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 10.5px;
+  color: var(--on-surface-muted);
 }

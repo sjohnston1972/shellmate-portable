@@ -131,6 +131,11 @@
       // a serial or telnet tab cannot transfer files.
       connectionType:   sessionData.connection_type || 'ssh',
       hostname:         hostname || '',
+      // What was dialled, never rewritten. `hostname` above is replaced with
+      // whatever the device calls itself the moment it says so, which is
+      // precisely when the address stops being visible anywhere — so the menu
+      // that offers to copy it needs its own copy.
+      address:          sessionData.address || hostname || '',
       // Kept so a reconnect can tell twenty saved connections on 127.0.0.1
       // apart. Hostname alone does not.
       port:             sessionData.port || 0,
@@ -961,6 +966,18 @@
   /**
    * Show the context menu near the cursor for a given session.
    */
+  /**
+   * Escape text bound for innerHTML.
+   *
+   * The address comes from the connection dialog, so it is user input on its
+   * way into markup. Everything else in this menu is a literal.
+   */
+  function _escapeHtml(value) {
+    const box = document.createElement('div');
+    box.textContent = value == null ? '' : String(value);
+    return box.innerHTML;
+  }
+
   function _showTabContextMenu(e, sessionId) {
     e.preventDefault();
     _hideTabContextMenu();
@@ -968,6 +985,17 @@
 
     const tab = tabs.find(t => t.sessionId === sessionId);
     const disconnected = tab && !tab.isConnected;
+
+    // Shown on the entry itself. "Copy address" tells you the action; it does
+    // not tell you *which* address you are about to copy, and on a tab named
+    // after the device that is the one thing you cannot see anywhere else.
+    // Escaped: it reaches innerHTML, and it originates from the connection
+    // dialog rather than from us.
+    const address = tab ? (tab.address || tab.hostname || '') : '';
+    const addressLabel = _escapeHtml(
+      address && tab && tab.port && tab.port !== 22 && tab.connectionType === 'ssh'
+        ? `${address}:${tab.port}`
+        : address);
 
     _ctxMenu = document.createElement('div');
     _ctxMenu.className = 'tab-context-menu';
@@ -992,6 +1020,7 @@
       <button data-action="copy-address">
         <span class="material-symbols-outlined">lan</span>
         Copy address
+        ${addressLabel ? `<span class="ctx-value">${addressLabel}</span>` : ''}
       </button>
       <div class="ctx-sep"></div>
       <!-- An ad-hoc connection could not be kept: the only way was to retype
@@ -1475,7 +1504,7 @@
    * not an address at all.
    */
   async function _copyAddress(tab) {
-    let address = tab.hostname || '';
+    let address = tab.address || tab.hostname || '';
     let port = tab.port;
     try {
       const res = await fetch('/api/sessions');
