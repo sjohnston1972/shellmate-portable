@@ -14,9 +14,11 @@
     { file: 'connecting.md',        title: 'Connecting',           icon: 'add_circle' },
     { file: 'device-awareness.md',  title: 'Device awareness',     icon: 'smart_toy' },
     { file: 'history-and-drift.md', title: 'History and drift',    icon: 'search' },
+    { file: 'alerts.md',            title: 'Alerts',               icon: 'warning' },
     { file: 'credentials.md',       title: 'Credentials',          icon: 'bookmark_add' },
     { file: 'assistant.md',         title: 'AI assistant',         icon: 'smart_toy' },
     { file: 'automation.md',        title: 'Broadcast and the API', icon: 'list_alt' },
+    { file: 'settings.md',          title: 'Settings',             icon: 'settings' },
     { file: 'troubleshooting.md',   title: 'Troubleshooting',      icon: 'help' },
   ];
 

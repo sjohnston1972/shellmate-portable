@@ -142,6 +142,12 @@
     tabs.push(tabObj);
     const newIndex = tabs.length - 1;
 
+    // The session clock. connected_at is stamped by the backend, so the count
+    // is from when the device answered rather than from when this ran.
+    if (window.shellmateUptime) {
+      window.shellmateUptime.start(session_id, sessionData.connected_at);
+    }
+
     // Snapshot the config and report what has changed since the last visit.
     // Best-effort and silent when the device cannot support it.
     if (typeof window.checkDrift === 'function') window.checkDrift(sessionData);
@@ -348,9 +354,14 @@
    * xterm.js terminal, removes the DOM element, and switches to an adjacent
    * tab (or shows the welcome screen if none remain).
    *
+   * Async because the confirmation is ShellMate's own dialog rather than the
+   * browser's blocking one. Every caller fires and forgets, which is what
+   * they did before — the difference is that the rest of the interface keeps
+   * running while the question is on screen.
+   *
    * @param {number} index
    */
-  function closeTab(index, options) {
+  async function closeTab(index, options) {
     if (index < 0 || index >= tabs.length) return;
 
     const tab = tabs[index];
@@ -361,14 +372,20 @@
     const settings = (window.shellmateSettings || {}).interface || {};
     const ask = settings.confirm_close_tab !== false;
     if (ask && tab.isConnected && !(options && options.force)) {
-      if (!window.confirm(
-        `Close ${tab.label}?\n\nThe session is still connected and will be ` +
-        `disconnected.`)) {
-        return;
-      }
+      const ok = await window.shellmateDialog.confirm({
+        title: `Close ${tab.label}?`,
+        body: 'The session is still connected and will be disconnected. ' +
+              'Anything already scheduled on the device — a pending reload — ' +
+              'carries on regardless.',
+        confirmLabel: 'Close tab',
+      });
+      if (!ok) return;
     }
 
     const { sessionId, websocket, terminalInstance, containerId, tabEl } = tab;
+
+    // The clock goes with the tab, so a closed session stops costing a tick.
+    if (window.shellmateUptime) window.shellmateUptime.forget(sessionId);
 
     // Tell the backend to tear down the session
     fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' }).catch(() => {
@@ -443,6 +460,12 @@
     tab.tabEl.classList.toggle('disconnected', !isConnected);
     if (!isConnected) {
       tab.labelEl.textContent = tab.label + ' (disconnected)';
+    }
+    // Freeze the clock rather than let it run on: a tab counting up on a dead
+    // session states something untrue.
+    if (window.shellmateUptime) {
+      isConnected ? window.shellmateUptime.restart(sessionId)
+                  : window.shellmateUptime.stop(sessionId);
     }
     updateStatusBar();
   }
@@ -833,7 +856,11 @@
         });
         if (res.ok) {
           const data = await res.json();
-          if (index !== -1) closeTab(index);
+          // force: the tab being replaced is the dead one the user asked to
+          // reconnect. It would not be asked about today — a disconnected tab
+          // closes without a word — but saying so keeps this correct if that
+          // ever changes, now that closing is asynchronous.
+          if (index !== -1) await closeTab(index, { force: true });
           createTab(data);
           return;
         }

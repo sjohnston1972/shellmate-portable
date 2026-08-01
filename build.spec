@@ -12,6 +12,9 @@
 #     starts instantly and is far less likely to be quarantined by corporate
 #     antivirus. Worth doing if the single file gets blocked in the field.
 
+import sys
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_submodules
 
 # ---------------------------------------------------------------------------
@@ -20,6 +23,29 @@ from PyInstaller.utils.hooks import collect_submodules
 
 ONEFILE = True
 APP_NAME = "ShellMate-Portable"
+
+# ---------------------------------------------------------------------------
+# Application icon
+#
+# Generated here, before Analysis collects frontend/, from the same source and
+# the same code the tray icon uses at runtime — so the tray, the taskbar and
+# the window show one mark instead of three near-misses. A checked-in .ico
+# beside a checked-in .png is two files someone has to remember to regenerate
+# together, which is how they drift apart.
+#
+# Never fatal: an icon that cannot be generated produces a build with the
+# default one, not no build.
+# ---------------------------------------------------------------------------
+
+sys.path.insert(0, str(Path(SPECPATH).resolve()))
+
+try:
+    from backend import branding
+    ICON = branding.write_ico()
+    ICON = str(ICON) if ICON else None
+except Exception as exc:                          # pragma: no cover - build only
+    print(f"build.spec: could not generate the application icon ({exc})")
+    ICON = None
 
 # ---------------------------------------------------------------------------
 # Bundled data — everything the frontend serves at runtime.
@@ -155,6 +181,8 @@ if ONEFILE:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
+        # What Explorer, the taskbar and the window title bar all read from.
+        icon=ICON,
     )
 else:
     exe = EXE(
@@ -173,6 +201,7 @@ else:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
+        icon=ICON,
     )
 
     coll = COLLECT(

@@ -308,7 +308,13 @@
     _checked('setting-copy-on-select',    !!t.copy_on_select);
     _checked('setting-expand-aliases',    t.expand_aliases  !== false);
     _checked('setting-auto-paging',       t.auto_paging_off !== false);
-    _checked('setting-ai-enabled',        (s.ai || {}).panel_enabled !== false);
+    // Off unless explicitly on — the assistant is opt-in on a fresh install.
+    // The row lives under Interface now, but the value stays under `ai` where
+    // ai_panel.js and LEGACY_DEFAULTS already read it: moving a control is not
+    // a reason to migrate everyone's settings file.
+    _checked('setting-ai-enabled',        (s.ai || {}).panel_enabled === true);
+    _checked('setting-suggest-commands',  (s.ai || {}).suggest_commands !== false);
+    _checked('setting-confirm-dangerous', (s.ai || {}).confirm_dangerous !== false);
 
     // Colour rules are a repeating row, so their editor owns the DOM.
     const h = s.highlight || {};
@@ -319,6 +325,18 @@
     }
     _checked('setting-logging-enabled',   !!l.enabled);
     _checked('setting-redact-secrets',    l.redact_secrets !== false);
+
+    // Configuration capture. Capture and the diff have always happened, so
+    // they default on; writing files to somewhere of the user's choosing is
+    // the part that waits to be asked for.
+    _checked('setting-capture-configs',   l.capture_configs !== false);
+    _checked('setting-diff-on-connect',   l.diff_on_connect !== false);
+    _checked('setting-save-config-files', !!l.save_config_files);
+    _val('setting-config-dir',   l.config_directory      || 'configs');
+    _val('setting-config-keep',  l.config_keep_per_device ?? 20);
+    _val('setting-config-age',   l.config_max_age_days    ?? 365);
+    _val('setting-config-size',  l.config_max_total_mb    ?? 200);
+    describeArchive();
 
     const al = s.alerts || {};
     _checked('setting-alert-flash',  al.flash_tab     !== false);
@@ -413,7 +431,9 @@
         auto_paging_off:   _gchecked('setting-auto-paging'),
       },
       ai: {
-        panel_enabled: _gchecked('setting-ai-enabled'),
+        panel_enabled:     _gchecked('setting-ai-enabled'),
+        suggest_commands:  _gchecked('setting-suggest-commands'),
+        confirm_dangerous: _gchecked('setting-confirm-dangerous'),
       },
       highlight: {
         enabled: _gchecked('setting-highlight-enabled'),
@@ -424,6 +444,16 @@
         enabled:        _gchecked('setting-logging-enabled'),
         directory:      _gval('setting-log-dir'),
         redact_secrets: _gchecked('setting-redact-secrets'),
+
+        capture_configs:        _gchecked('setting-capture-configs'),
+        diff_on_connect:        _gchecked('setting-diff-on-connect'),
+        save_config_files:      _gchecked('setting-save-config-files'),
+        config_directory:       _gval('setting-config-dir') || 'configs',
+        // Zero is a meaningful answer for all three — "no limit" — so an
+        // empty box must not silently become the default instead.
+        config_keep_per_device: _int('setting-config-keep', 20),
+        config_max_age_days:    _int('setting-config-age', 365),
+        config_max_total_mb:    _int('setting-config-size', 200),
       },
       alerts: {
         flash_tab:     _gchecked('setting-alert-flash'),
@@ -516,6 +546,39 @@
       out[key] = v;
     });
     return out;
+  }
+
+  /**
+   * Say where captures are going and what is already there.
+   *
+   * "configs" in a text box tells nobody where their files actually are —
+   * it resolves against the data folder, which itself moves depending on
+   * whether the portable location was writable.
+   */
+  async function describeArchive() {
+    const el = document.getElementById('config-archive-status');
+    if (!el) return;
+    try {
+      const res = await fetch('/api/configs/archive');
+      if (!res.ok) return;
+      const info = await res.json();
+      if (!info.exists || !info.captures) {
+        el.textContent = `Nothing saved yet. Files will go to ${info.path}`;
+        return;
+      }
+      const mb = (info.bytes / (1024 * 1024)).toFixed(1);
+      el.textContent =
+        `${info.captures} capture${info.captures === 1 ? '' : 's'} from ` +
+        `${info.devices} device${info.devices === 1 ? '' : 's'}, ${mb} MB, in ${info.path}`;
+    } catch (e) {
+      /* the folder is a nicety to describe, not a reason to fail */
+    }
+  }
+
+  function _int(id, fallback) {
+    const raw = _gval(id);
+    const value = parseInt(raw, 10);
+    return raw === '' || Number.isNaN(value) ? fallback : Math.max(0, value);
   }
 
   function _val(id, v)     { const el = document.getElementById(id); if (el) el.value = v; }

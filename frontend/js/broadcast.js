@@ -47,8 +47,10 @@
       .addEventListener('click', (e) => { e.preventDefault(); open(); });
     document.getElementById('broadcast-close').addEventListener('click', close);
     document.getElementById('broadcast-send').addEventListener('click', send);
-    document.getElementById('broadcast-all').addEventListener('click', () => setAll(true));
-    document.getElementById('broadcast-none').addEventListener('click', () => setAll(false));
+    // One control for one axis. "None" was a second button doing half of
+    // what this one now does, and two controls for one thing is how people
+    // end up unsure which they pressed.
+    document.getElementById('broadcast-all').addEventListener('click', toggleAll);
     document.getElementById('broadcast-save').addEventListener('click', saveToLibrary);
 
     searchEl.addEventListener('input', renderLibrary);
@@ -89,6 +91,7 @@
     overlay.classList.remove('hidden');
     await loadLibrary();
     updateSummary();
+    updateSelectAll();
     setTimeout(() => input.focus(), 50);
   }
 
@@ -129,6 +132,7 @@
       box.addEventListener('change', () => {
         box.checked ? selected.add(tab.sessionId) : selected.delete(tab.sessionId);
         updateSummary();
+        updateSelectAll();
       });
 
       const num = document.createElement('span');
@@ -150,12 +154,52 @@
     });
   }
 
+  /** The boxes that can actually be ticked — disconnected sessions cannot. */
+  function selectableBoxes() {
+    return [...targets.querySelectorAll('input[type=checkbox]:not(:disabled)')];
+  }
+
   function setAll(state) {
-    targets.querySelectorAll('input[type=checkbox]:not(:disabled)').forEach(box => {
+    selectableBoxes().forEach(box => {
       box.checked = state;
       state ? selected.add(box.dataset.sessionId) : selected.delete(box.dataset.sessionId);
     });
     updateSummary();
+    updateSelectAll();
+  }
+
+  /**
+   * "All" toggles rather than only selecting.
+   *
+   * Pressing a select-all twice and getting nothing back is a small
+   * surprise, but it is a surprise in the one panel where the selection
+   * decides which devices receive a command.
+   *
+   * Compared against the *selectable* boxes, not all of them: one
+   * disconnected session in the list would otherwise mean the panel never
+   * counted as fully selected, and the toggle would never flip.
+   */
+  function toggleAll() {
+    const boxes = selectableBoxes();
+    if (!boxes.length) return;
+    setAll(!boxes.every(box => box.checked));
+  }
+
+  /** Keep the button saying what pressing it will do. */
+  function updateSelectAll() {
+    const button = document.getElementById('broadcast-all');
+    if (!button) return;
+
+    const boxes = selectableBoxes();
+    const allOn = boxes.length > 0 && boxes.every(box => box.checked);
+
+    button.textContent = allOn ? 'None' : 'All';
+    button.title = boxes.length
+      ? (allOn ? 'Clear every selected device' : 'Select every connected device')
+      : 'No connected sessions to select';
+    // Nothing to select and nothing to clear is not two states worth
+    // toggling between.
+    button.disabled = !boxes.length;
   }
 
   function selectedIds() {
@@ -245,7 +289,13 @@
       del.title = 'Remove from the library';
       del.innerHTML = '<span class="material-symbols-outlined">close</span>';
       del.addEventListener('click', async () => {
-        if (!window.confirm(`Remove "${snippet.name}" from the library?`)) return;
+        const ok = await window.shellmateDialog.confirm({
+          title: `Remove "${snippet.name}" from the library?`,
+          body: 'Removing a built-in keeps it removed. Reset the library to bring it back.',
+          confirmLabel: 'Remove',
+          danger: true,
+        });
+        if (!ok) return;
         await fetch(`/api/snippets/${encodeURIComponent(snippet.id)}`, { method: 'DELETE' });
         await loadLibrary();
       });
@@ -259,7 +309,13 @@
     const commands = commandList();
     if (!commands.length) { report('error', 'Type a command before saving it.'); return; }
 
-    const name = window.prompt('Save these commands as:', commands[0].slice(0, 40));
+    const name = await window.shellmateDialog.prompt({
+      title: 'Save to the library',
+      label: 'Call it',
+      value: commands[0].slice(0, 40),
+      list: commands.map(c => ({ text: c, mono: true })),
+      confirmLabel: 'Save',
+    });
     if (!name) return;
 
     try {
@@ -328,14 +384,29 @@
     // regretted afterwards, so show all of it — every command, every device —
     // and ask. The same names are reused in the results, so what is confirmed
     // and what is reported cannot disagree.
-    const preview =
-      `Send ${commands.length} command${commands.length === 1 ? '' : 's'} to ` +
-      `${ids.length} device${ids.length === 1 ? '' : 's'}?\n\n` +
-      commands.map((c, i) => `  ${i + 1}. ${c}`).join('\n') +
-      `\n\nTo:\n` + ids.map(id => `  · ${names[id]}`).join('\n') +
-      (commands.length > 1 ? `\n\nWaiting ${waitMs()}ms between commands.` : '');
-
-    if (!window.confirm(preview)) return;
+    //
+    // This is the safety mechanism the whole feature is built on, which is
+    // why it is no longer a native confirm(): that could only render the list
+    // as newlines and two spaces, and could not be styled to look like it
+    // mattered.
+    const writes = commands.some(looksLikeAWrite);
+    const ok = await window.shellmateDialog.confirm({
+      title: `Send ${commands.length} command${commands.length === 1 ? '' : 's'} to ` +
+             `${ids.length} device${ids.length === 1 ? '' : 's'}?`,
+      list: [
+        ...commands.map((c, i) => ({ text: c, detail: `${i + 1}`, mono: true })),
+        ...ids.map(id => ({ text: names[id], detail: 'device' })),
+      ],
+      body: commands.length > 1
+        ? `Sent in order on each device, ${waitMs()}ms apart. Devices run at the same time.`
+        : '',
+      note: writes
+        ? 'One of these changes the device rather than only reading from it.'
+        : '',
+      confirmLabel: 'Send',
+      danger: writes,
+    });
+    if (!ok) return;
 
     const button = document.getElementById('broadcast-send');
     button.disabled = true;

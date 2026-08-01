@@ -187,9 +187,14 @@
   }
 
   async function resetAll() {
-    if (!window.confirm(
-      'Discard every platform edit and restore the built-in definitions?\n\n' +
-      'Any platform you added yourself will be removed.')) return;
+    const ok = await window.shellmateDialog.confirm({
+      title: 'Discard every platform edit?',
+      body: 'The built-in definitions are restored. Any platform you added ' +
+            'yourself is removed, along with every alias and command you have changed.',
+      confirmLabel: 'Reset all',
+      danger: true,
+    });
+    if (!ok) return;
 
     const status = document.getElementById('platform-status');
     try {

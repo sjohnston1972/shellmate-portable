@@ -120,11 +120,17 @@
       }
       // No recovery path exists by design — the key is derived from the
       // password and nothing else — so say so before it is too late.
-      if (!window.confirm(
-        'If you forget this master password your saved keys cannot be recovered.\n\n' +
-        'There is no reset and no backdoor. Continue?')) {
-        return;
-      }
+      const ok = await window.shellmateDialog.confirm({
+        title: 'There is no way to recover this password',
+        body: 'The key is derived from the password and nothing else, so ' +
+              'forgetting it means the stored keys and device passwords are ' +
+              'gone. There is no reset and no backdoor.',
+        note: 'ShellMate still starts without it and you can still reach every ' +
+              'device — you would type your credentials by hand instead.',
+        confirmLabel: 'Use a master password',
+        danger: true,
+      });
+      if (!ok) return;
     }
 
     showResult(result, 'Re-encrypting…', false);

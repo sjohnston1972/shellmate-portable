@@ -69,15 +69,18 @@ mate/
 ├── backend/
 │   ├── __init__.py
 │   ├── paths.py               # ALL filesystem locations resolve here
+│   ├── branding.py            # The application icon — one source for tray, taskbar, window
 │   ├── desktop.py             # Native window + system tray
 │   ├── server.py              # Port selection and single-instance lock
 │   ├── app.py                 # FastAPI application, routes, WebSocket handlers
 │   ├── platforms.py           # Per-platform commands, aliases (user-editable)
 │   ├── fingerprint.py         # Identify vendor/OS/version on connect
 │   ├── onboard.py             # Once-per-session identify-and-configure
+│   ├── alerts.py              # Pending reloads and commit-confirms, per session
 │   ├── pipeline.py            # Outbound chokepoint (aliases; guardrails next)
 │   ├── store.py               # SQLite session history + FTS5 search
 │   ├── configs.py             # Config capture, diff, drift-on-connect
+│   ├── config_archive.py      # Captures kept as files: redaction and retention
 │   ├── vault.py               # Encrypted credential storage
 │   ├── session/
 │   │   ├── ansi.py            # Escape/backspace/CR handling
@@ -229,6 +232,19 @@ command, aliases, dangerous commands. These are **data, not code** — written t
 `platforms.json` in the data dir on first run and read back in preference to
 the built-ins, so a new platform is a text edit rather than a rebuild.
 
+`onboard.summarise()` is the single answer to "what was sent, and if not, why
+not". Both gates — the confidence threshold and the user's setting — resolve
+there, so the interface has one thing to believe rather than re-deriving the
+decision and getting it subtly wrong. The reason codes (`unconfident`,
+`unidentified`, `off`, `no-command`) are not interchangeable and the UI states
+each differently: "identified Cisco IOS" while paging stayed on reads as
+success, which is exactly the bug that produced this.
+
+The threshold is met less often than it looks. `hostname(config)#` is printed
+identically by IOS, NX-OS, ASA and EOS, and the command belongs to the
+platform, not the family — so prompt-only identification stays below the bar
+and `onboard.as_chosen()` is the way out, not a higher score.
+
 `pipeline.py` is the chokepoint every keystroke passes through on its way out.
 It assembles keystrokes into lines and can rewrite one before it reaches the
 device. Alias expansion lives there today; Phase 6's guardrails and paste
@@ -264,6 +280,32 @@ Rules that keep it that way:
   undetected.
 - **A locked vault degrades to "no value"** rather than raising, so a forgotten
   master password never blocks reaching a device.
+- **Redaction is one switch, not two.** `logging.redact_secrets` covers session
+  logs *and* archived configurations. A running config carries hashes, keys and
+  community strings, and the archive folder may be a share — two switches for
+  one guarantee is a guarantee nobody can rely on.
+
+## Themes
+
+`style.css` carries a dark and a light theme. The rule that keeps them honest:
+**a colour that changes with the theme must come from a token.** Six floating
+surfaces once hardcoded `rgba(32,32,32,0.9x)` while their text colour followed
+the theme, so in the light theme they rendered dark grey on near-black. Three
+had light-theme overrides bolted on and three did not.
+
+They now take `--overlay` / `--overlay-solid`. `test_contrast.py` asserts both
+halves of this by measurement: that no floating surface hardcodes a background,
+and that every resolved pair clears WCAG AA in both themes. Checking by eye is
+unreliable here anyway — the theme transition is animated, so a reading taken
+mid-transition measures a blend.
+
+## Changing a default
+
+`DEFAULT_SETTINGS` applies to an installation that has never been configured.
+Changing one reaches into every existing setup, which is why
+`LEGACY_DEFAULTS` in `settings_store.py` exists: a settings file that predates
+a key keeps that key's old value, written in explicitly, and only a first run —
+no file at all — sees the new one. `ai.panel_enabled` is the worked example.
 
 ## Configuration (.env)
 

@@ -48,6 +48,14 @@
       cols: '2fr 1fr',     rows: '1fr 1fr', areas: ['a b', 'a c'] },
     { id: 'twoRow', name: 'Two over one',  panes: 3,
       cols: '1fr 1fr',     rows: '1fr 1fr', areas: ['a b', 'c c'] },
+    // The mirror of the one above, and the commoner arrangement of the two:
+    // the device being worked on across the top, the ones it depends on
+    // beneath it. Placed beside its twin rather than appended, which shifts
+    // Quad's shortcut from Ctrl+Alt+7 to Ctrl+Alt+8 — worth it, since the
+    // menu lists them in this order and a mirrored pair split across the
+    // list reads as two unrelated options.
+    { id: 'oneRow', name: 'One over two',  panes: 3,
+      cols: '1fr 1fr',     rows: '1fr 1fr', areas: ['a a', 'b c'] },
     { id: 'quad',   name: 'Quad',          panes: 4,
       cols: '1fr 1fr',     rows: '1fr 1fr', areas: ['a b', 'c d'] },
   ];
@@ -254,8 +262,9 @@
    *
    * Drawn rather than iconised because the whole question the user is asking —
    * what will the screen look like — is answered by a picture of it, and
-   * because it keeps the seven asymmetric options honest: the preview cannot
-   * disagree with the layout when both come from one definition.
+   * because it keeps the asymmetric options honest: the preview cannot
+   * disagree with the layout when both come from one definition, and adding
+   * one is an entry in LAYOUTS and nothing else.
    */
   function preview(l, small) {
     const el = document.createElement('span');

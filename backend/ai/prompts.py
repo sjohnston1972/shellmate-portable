@@ -24,7 +24,7 @@ _COMMAND_FORMAT_RULES = """\
 # ---------------------------------------------------------------------------
 # Troubleshoot persona (default)
 # ---------------------------------------------------------------------------
-TSHOOT_SYSTEM_PROMPT = f"""You are an expert network engineer and AI copilot embedded in ShellMate, operating in TROUBLESHOOT mode. You are assisting a network engineer who is logged into one or more network devices via SSH.
+_TSHOOT_BODY = """You are an expert network engineer and AI copilot embedded in ShellMate, operating in TROUBLESHOOT mode. You are assisting a network engineer who is logged into one or more network devices via SSH.
 
 Mode: TROUBLESHOOT
 - Solve the problem in front of you. Lead with the answer, then a short explanation.
@@ -42,7 +42,7 @@ Your capabilities:
 
 Your behaviour:
 - Reference specific output from the terminal — be concrete, not generic.
-{_COMMAND_FORMAT_RULES}
+{command_rules}
 
 Context format you will receive:
 - A summary of all open sessions (tab number, device name, connection type)
@@ -57,7 +57,7 @@ You must not make up device output or invent configurations you cannot see. If y
 # ---------------------------------------------------------------------------
 # Learn persona
 # ---------------------------------------------------------------------------
-LEARN_SYSTEM_PROMPT = f"""You are an expert network engineer and AI copilot embedded in ShellMate, operating in LEARN mode. You are mentoring a network engineer who is logged into one or more network devices via SSH and wants to deepen their understanding while they work.
+_LEARN_BODY = """You are an expert network engineer and AI copilot embedded in ShellMate, operating in LEARN mode. You are mentoring a network engineer who is logged into one or more network devices via SSH and wants to deepen their understanding while they work.
 
 Mode: LEARN
 - You are a patient, generous teacher. Explain *why* before *what*.
@@ -77,7 +77,7 @@ Your capabilities:
 Your behaviour:
 - Reference specific output from the terminal when explaining — be concrete, not generic.
 - Lead with the concept, then the command, then what to expect.
-{_COMMAND_FORMAT_RULES}
+{command_rules}
 
 Context format you will receive:
 - A summary of all open sessions (tab number, device name, connection type)
@@ -90,17 +90,61 @@ You must not make up device output or invent configurations you cannot see. If y
 
 
 # ---------------------------------------------------------------------------
-# Backwards-compat: existing summarise/jira code imports SYSTEM_PROMPT.
-# Default to the troubleshoot persona for those one-shot uses.
+# Assembly
+#
+# The persona bodies above are *defaults*. The user can edit them (see
+# ``prompt_store``), which is why the command-suggestion rules are referenced
+# by a marker rather than written into the text.
+#
+# The marker matters. Those rules are what make [SUGGEST_CMD] blocks render as
+# clickable commands instead of appearing as literal tags in the reply, and an
+# editable prompt is an editable prompt — somebody will delete them. Holding
+# them separate means the worst an edit can do is *move* them.
 # ---------------------------------------------------------------------------
+
+RULES_MARKER = "{command_rules}"
+
+#: Mode -> the shipped persona body. What "Reset to defaults" restores.
+DEFAULT_BODIES: dict[str, str] = {
+    "tshoot": _TSHOOT_BODY,
+    "learn":  _LEARN_BODY,
+}
+
+MODES = tuple(DEFAULT_BODIES)
+
+
+def render(body: str) -> str:
+    """
+    Put the command-suggestion rules into a persona body.
+
+    A body that has lost its marker still gets them, appended at the end. That
+    is a slightly worse prompt than one where they sit in context — and vastly
+    better than silently losing command suggestions with nothing on screen to
+    explain why the assistant stopped offering them.
+    """
+    if RULES_MARKER in body:
+        return body.replace(RULES_MARKER, _COMMAND_FORMAT_RULES)
+    return f"{body.rstrip()}\n\n{_COMMAND_FORMAT_RULES}"
+
+
+TSHOOT_SYSTEM_PROMPT = render(_TSHOOT_BODY)
+LEARN_SYSTEM_PROMPT = render(_LEARN_BODY)
+
+# Backwards-compat: the summary and Jira paths import SYSTEM_PROMPT. They are
+# one-shot uses with no mode toggle, so they get the troubleshoot persona.
 SYSTEM_PROMPT = TSHOOT_SYSTEM_PROMPT
 
 
 def get_system_prompt(mode: str | None) -> str:
-    """Return the system prompt for the requested mode. Falls back to tshoot."""
-    if (mode or "").lower() == "learn":
-        return LEARN_SYSTEM_PROMPT
-    return TSHOOT_SYSTEM_PROMPT
+    """
+    Return the system prompt for the requested mode, honouring any edit.
+
+    Imported inside the function because ``prompt_store`` reads its defaults
+    from this module — the alternative is a circular import at load time.
+    """
+    from backend.ai import prompt_store
+
+    return prompt_store.rendered(mode)
 
 
 def build_context_prompt(

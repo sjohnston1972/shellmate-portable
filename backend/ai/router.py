@@ -11,7 +11,7 @@ from backend.ai import chroma_client
 from backend.connections.manager import SessionManager
 from backend.settings_store import get_settings
 
-from backend.session.ansi import clean
+from backend.session import outbound
 from backend.session.transcript import match_prompt
 
 logger = logging.getLogger(__name__)
@@ -35,17 +35,14 @@ def _extract_commands(buffer_text: str) -> list[str]:
 
 def _session_text(session: dict, lines: int) -> str:
     """
-    Return a session's recent output as the engineer would see it.
+    Return a session's recent output, ready to send to a provider.
 
-    Escape sequences, backspaces and pager artefacts are removed first.
-    Sending the raw stream wastes tokens on invisible control codes and, worse,
-    splits words the model needs to read — a coloured interface name arrives
-    with escape codes buried in the middle of it.
+    Thin wrapper over :func:`backend.session.outbound.session_text`, which is
+    the single place terminal content is prepared to leave the machine — it
+    strips escape sequences and masks credentials. Kept as a local name because
+    this module calls it from several places.
     """
-    buffer = session.get("buffer")
-    if buffer is None:
-        return ""
-    return clean(buffer.get_text(lines))
+    return outbound.session_text(session, lines)
 
 
 async def stream_chat(

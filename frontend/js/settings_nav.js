@@ -27,10 +27,11 @@
     ['platform',            'list_alt'],
     ['serial',              'cable'],
     ['credentials vault',   'bookmark_add'],
-    ['ai assistant',        'smart_toy'],
+    ['ai prompts',          'description'],
     ['ai providers',        'smart_toy'],
     ['knowledge base',      'description'],
     ['alerts',              'warning'],
+    ['configuration capture', 'save'],
     ['interface',           'settings'],
     ['behavior',            'settings'],
     ['behaviour',           'settings'],
@@ -164,7 +165,12 @@
       let anyVisible = false;
 
       rows.forEach(row => {
-        const text = (row.textContent || '').toLowerCase();
+        // Tooltip text counts as part of the row. It is where the consequence
+        // of a setting is written — searching for "clipboard" ought to find
+        // Copy on Select, and only the tooltip says the word.
+        const tips = [...row.querySelectorAll('[data-tip]')]
+          .map(el => el.getAttribute('data-tip')).join(' ');
+        const text = ((row.textContent || '') + ' ' + tips).toLowerCase();
         const matches = titleMatches || text.includes(query);
         row.classList.toggle('settings-hidden-by-search', !matches);
         if (matches) anyVisible = true;

@@ -33,11 +33,46 @@ that session.
 
 ## Remembering a device password
 
-Tick **Remember these credentials** when connecting. The password goes into
-the vault, filed against that saved connection.
+Tick **Remember these credentials in the encrypted vault** when connecting.
+The password goes into the vault, filed against that saved connection.
 
 Next time, leave the password field blank — the dialog shows a **saved in
 vault** badge so you know one is stored, and offers to forget it.
+
+### Or in plain text
+
+The second checkbox, **Remember these credentials in plain text**, writes the
+password as readable text to `credentials-plaintext.json` in your data folder.
+No encryption, no master password, nothing to forget.
+
+Anyone who can open that folder can read the password. That includes anyone
+who picks up the USB stick ShellMate is running from, and every backup the
+folder is swept into. The dialog says so, in as many words, whenever the box
+is ticked.
+
+It exists because a vault you are locked out of is worse than no vault at all,
+and because not every device password is worth protecting — a lab you rebuild
+weekly is not the production estate. It is a deliberate choice, offered
+plainly rather than hidden.
+
+Ticking one checkbox unticks the other. A credential lives in one place; two
+independent boxes would imply otherwise.
+
+## Keys
+
+Point the connection dialog at your private key file with **Browse**, which
+opens the platform's own file dialog when ShellMate is running in its desktop
+window, and its own file browser when you have opened it in a browser instead
+— where the platform dialog does not exist at all. Typing a path still works.
+
+A key can have its **own username**, separate from the one in the main form.
+They are frequently different: a jump host that takes your personal key under
+your own account, fronting devices that take a shared service account.
+
+The key never leaves your machine. Only the signature it produces is sent, as
+with any SSH client. Its passphrase is treated exactly like a password: kept
+only if you ask, in whichever of the two places you chose, and never written
+into `profiles.json`.
 
 Saved passwords never reach the browser. The interface sends a connection id
 and the server fills the credential in on its own side, so the secret exists
@@ -75,10 +110,15 @@ credentials appearing in session logs you hand to a colleague.
 Windows to decrypt the vault exactly as ShellMate does. Full-disk encryption
 remains worth having, and this is not a substitute for it.
 
-## What is never stored
+## What is never stored in a saved connection
 
-- Passwords in saved connections — the file is plain JSON by design, so it can
-  be read, diffed and shared.
-- Key passphrases, in either place.
-- Anything sensitive in a response from ShellMate's own API. Connection
-  listings carry a "has a saved password" flag, never the password.
+`profiles.json` is plain JSON by design, so it can be read, diffed and shared.
+Four fields are stripped before anything is written, whatever the caller
+passes: the password and key passphrase for the device, and the same two for
+any jump host. They go to the vault, or to the plaintext file if you chose
+that, or nowhere. A path to a key file is fine to store; the passphrase for it
+is not.
+
+Nothing sensitive comes back out of ShellMate's own API either. Connection
+listings carry a "has a saved password" flag, never the password. That holds
+for scripts exactly as it does for the interface.

@@ -59,6 +59,36 @@
 
     _applySelection(backendSelect.value || 'claude:claude-sonnet-4-6');
 
+    /**
+     * Restore the saved model.
+     *
+     * This used to live only in `currentModel`, so choosing DeepSeek and
+     * reloading the page put you back on Claude Sonnet. The quick buttons
+     * moved out of localStorage into settings.json precisely so a preference
+     * would survive a reload and travel with the data folder; this never
+     * followed.
+     *
+     * Only applied when the option still exists — a key that has stopped
+     * working, or Ollama not running, should not leave the picker showing a
+     * model that cannot answer.
+     */
+    function applySavedModel() {
+      const saved = ((window.shellmateSettings || {}).ai || {}).default_model;
+      if (!saved) return;
+      if (![...backendSelect.options].some(o => o.value === saved)) {
+        console.info('Saved model %s is not available; keeping the current one', saved);
+        return;
+      }
+      backendSelect.value = saved;
+      _applySelection(saved);
+    }
+
+    applySavedModel();
+    // The picker is rebuilt from the providers' own model lists after a
+    // connection test, so the saved choice has to be re-applied afterwards.
+    window.addEventListener('shellmate:settings-loaded', applySavedModel);
+    window.addEventListener('shellmate:models-refreshed', applySavedModel);
+
     // Dynamically populate local Ollama models
     fetch('/api/ollama/models').then(r => r.json()).then(models => {
       const group = document.getElementById('local-models-group');
@@ -96,6 +126,7 @@
     backendSelect.addEventListener('change', () => {
       _applySelection(backendSelect.value);
       updateContextIndicator();
+      saveModelChoice(backendSelect.value);
     });
 
     document.getElementById('chat-clear').addEventListener('click', clearChat);
@@ -835,6 +866,28 @@
 
     // Fixed overhead: system prompt + per-request framing (~900 tokens)
     return 900 + Math.round((chatChars + bufChars) / 4);
+  }
+
+  /**
+   * Remember the chosen model.
+   *
+   * Written to settings.json rather than held in the page, so it survives a
+   * reload and moves with the data folder. Failure is logged and otherwise
+   * ignored — losing the preference must not stop the conversation.
+   */
+  function saveModelChoice(value) {
+    if (!value || value.startsWith('_')) return;   // "None found", "unavailable"
+
+    if (window.shellmateSettings) {
+      window.shellmateSettings.ai =
+        Object.assign({}, window.shellmateSettings.ai, { default_model: value });
+    }
+
+    fetch('/api/settings', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ settings: { ai: { default_model: value } } }),
+    }).catch((e) => console.warn('Could not save the model choice:', e));
   }
 
   function updateContextIndicator(tab) {

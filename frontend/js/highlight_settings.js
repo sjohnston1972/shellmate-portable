@@ -41,10 +41,14 @@
       });
 
     document.getElementById('highlight-reset')
-      .addEventListener('click', () => {
-        if (window.confirm('Replace your colour rules with the defaults?')) {
-          render(DEFAULT_RULES);
-        }
+      .addEventListener('click', async () => {
+        const ok = await window.shellmateDialog.confirm({
+          title: 'Replace your colour rules with the defaults?',
+          body: 'Every rule you have written is discarded. Nothing is saved until you press Save Settings, so this can still be abandoned by closing Settings.',
+          confirmLabel: 'Replace',
+          danger: true,
+        });
+        if (ok) render(DEFAULT_RULES);
       });
   });
 

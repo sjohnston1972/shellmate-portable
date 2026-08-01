@@ -135,11 +135,26 @@
         }
       }
 
-      // Blockquote
+      // Blockquote. Consecutive lines are one quote, not one per line —
+      // rendered separately, an example of what ShellMate says on screen came
+      // out as three stacked boxes rather than the thing being quoted.
       const quote = line.match(/^>\s?(.*)$/);
       if (quote) {
         closeAll();
-        out.push(`<blockquote>${inline(escapeHtml(quote[1]))}</blockquote>`);
+        const quoted = [quote[1]];
+        while (i + 1 < lines.length) {
+          const next = (lines[i + 1] || '').match(/^>\s?(.*)$/);
+          if (!next) break;
+          quoted.push(next[1]);
+          i++;
+        }
+        // Blank quoted lines separate paragraphs within the quote.
+        const paragraphs = quoted.join('\n').split(/\n\s*\n/)
+          .map(p => p.split('\n').join(' ').trim())
+          .filter(Boolean);
+        out.push('<blockquote>' +
+          paragraphs.map(p => `<p>${inline(escapeHtml(p))}</p>`).join('') +
+          '</blockquote>');
         continue;
       }
 

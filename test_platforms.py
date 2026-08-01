@@ -24,6 +24,7 @@ from backend import platforms as platforms_module          # noqa: E402
 from backend.fingerprint import (                          # noqa: E402
     identify, refine_with_version_output,
 )
+from backend.onboard import as_chosen, summarise            # noqa: E402
 from backend.platforms import (                            # noqa: E402
     GENERIC, get_profile, load_profiles, resolve_alias,
 )
@@ -148,6 +149,65 @@ def test_unknown_device() -> None:
     check("the generic profile sends no paging command",
           get_profile(GENERIC).paging_off == "",
           f"got {get_profile(GENERIC).paging_off!r}")
+
+
+def test_onboarding_explains_itself() -> None:
+    """
+    Every reason for sending nothing is distinguishable.
+
+    The bug this guards (#47): paging-off fires only above the confidence
+    threshold, which a prompt-only identification almost never clears, and the
+    interface said "identified Cisco IOS" and stopped — reading as success
+    while paging was still on. The summary now carries *why*, and there is one
+    answer rather than the interface re-deriving the decision itself.
+    """
+    print("\n-- Onboarding says what it did not do --")
+
+    confident = summarise(identify(banner=BANNERS["ios"]))
+    check("a banner match is acted on",
+          confident["paging_command"] == "terminal length 0"
+          and confident["paging_skipped"] == "",
+          f"got {confident['paging_command']!r} / {confident['paging_skipped']!r}")
+
+    unsure = summarise(identify(banner="", prompt="switch01(config)#"))
+    check("a prompt-only guess sends nothing", unsure["paging_command"] == "",
+          f"got {unsure['paging_command']!r}")
+    check("and says it was not confident enough",
+          unsure["paging_skipped"] == "unconfident",
+          f"got {unsure['paging_skipped']!r}")
+    check("while still naming the command it declined to send",
+          unsure["paging_available"] == "terminal length 0",
+          f"got {unsure['paging_available']!r}")
+
+    unknown = summarise(identify(banner="Authorised access only.\r\n"))
+    check("an unidentified device is distinguishable from an unsure one",
+          unknown["paging_skipped"] == "unidentified",
+          f"got {unknown['paging_skipped']!r}")
+
+    off = summarise(identify(banner=BANNERS["ios"]), auto_paging=False)
+    check("the setting being off is its own reason",
+          off["paging_skipped"] == "off" and off["paging_command"] == "",
+          f"got {off['paging_skipped']!r} / {off['paging_command']!r}")
+
+    shell = summarise(identify(banner="", prompt="neteng@jump:~$"))
+    check("a shell is identified confidently", shell["confident"],
+          f"confidence {shell['confidence']}")
+    check("but has no paging command to send",
+          shell["paging_skipped"] == "no-command",
+          f"got {shell['paging_skipped']!r}")
+
+    chosen = summarise(as_chosen("asa"))
+    check("naming the platform yourself is acted on",
+          chosen["paging_command"] == "terminal pager 0",
+          f"got {chosen['paging_command']!r}")
+    check("and is recorded as coming from you", chosen["source"] == "you",
+          f"got {chosen['source']!r}")
+
+    try:
+        as_chosen("not-a-platform")
+        check("an unknown platform is rejected", False, "no error raised")
+    except ValueError:
+        check("an unknown platform is rejected", True)
 
 
 def test_refinement() -> None:
@@ -332,6 +392,7 @@ def main() -> int:
         test_version_and_model_extraction,
         test_nxos_not_mistaken_for_ios,
         test_prompt_fallback,
+        test_onboarding_explains_itself,
         test_unknown_device,
         test_refinement,
         test_profiles_and_aliases,

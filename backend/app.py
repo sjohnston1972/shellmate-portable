@@ -32,7 +32,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from backend import desktop, paths
+from backend import config_archive, desktop, paths
 from backend.configs import capture_config, diff_snapshots, drift_report
 from backend.connections.base import ConnectionError_, ConnectionParams
 from backend.connections import sftp
@@ -45,6 +45,8 @@ from backend.profiles import (
 )
 from backend import platforms as platforms_module
 from backend import snippets
+from backend.onboard import as_chosen, summarise
+from backend.session import outbound
 from backend.session.redact import redact
 from backend.session.transcript import detect_hostname
 from backend.settings_store import (
@@ -53,6 +55,7 @@ from backend.settings_store import (
 )
 from backend.store import store
 from backend.vault import VaultError, vault
+from backend.ai import prompt_store
 from backend.ai.router import stream_chat
 from backend.ai import chroma_client, providers
 from backend.config import DEFAULT_AI_BACKEND, JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
@@ -307,6 +310,18 @@ async def history_stats() -> dict:
 # ---------------------------------------------------------------------------
 
 
+@app.get("/api/configs/archive")
+async def config_archive_summary() -> dict:
+    """
+    Describe the configuration archive: where it is and what is in it.
+
+    Declared before ``/api/configs/{hostname}``, which would otherwise match
+    "archive" as a device name and return an empty list — a bug that would
+    look like an empty archive rather than a routing mistake.
+    """
+    return await asyncio.to_thread(config_archive.summary)
+
+
 @app.get("/api/configs/{hostname}")
 async def config_list(hostname: str, limit: int = 50) -> list[dict]:
     """List stored configuration snapshots for a device, newest first."""
@@ -357,6 +372,65 @@ async def session_drift(session_id: str) -> dict:
     """
     session = _require_session(session_id)
     return await asyncio.to_thread(drift_report, session)
+
+
+# ---------------------------------------------------------------------------
+# REST — Telling ShellMate what a device is
+# ---------------------------------------------------------------------------
+
+
+class IdentifyRequest(BaseModel):
+    """Body for POST /api/sessions/{session_id}/platform."""
+
+    platform: str
+
+
+@app.post("/api/sessions/{session_id}/platform")
+async def set_session_platform(session_id: str, request: IdentifyRequest) -> dict:
+    """
+    Identify this session's device as a platform the user has named.
+
+    Automatic identification is deliberately cautious, and there are two
+    common devices it cannot win against: one whose banner is a legal warning
+    rather than a version string, and anything behind a terminal server.  Both
+    are identified from the prompt alone, score below the acting threshold and
+    are correctly sent nothing — which leaves paging-off switched on and doing
+    nothing at all.  This is the way out of that.
+
+    Applies immediately: aliases and reload patterns switch to the chosen
+    platform, and the paging command is sent if the setting allows it.  What
+    was sent comes back in the response so the interface can say so — a
+    command typed into someone's live session is never silent here.
+    """
+    session = _require_session(session_id)
+
+    try:
+        fingerprint = as_chosen(request.platform)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    terminal_settings = get_settings().get("terminal", {})
+    summary = summarise(
+        fingerprint, auto_paging=bool(terminal_settings.get("auto_paging_off", True))
+    )
+
+    session["fingerprint"] = summary
+    session["pipeline"].platform = summary["platform"]
+    session["alerts"].platform = summary["platform"]
+    # Onboarding is now moot; stop it overwriting a decision the user made.
+    session["onboarder"].stand_down()
+
+    handler = session["handler"]
+    if summary["paging_command"] and handler.is_connected:
+        await asyncio.to_thread(
+            handler.send, (summary["paging_command"] + "\r").encode()
+        )
+
+    logger.info("Session %s identified as %s by the user%s", session_id[:8],
+                summary["profile_name"],
+                f"; sent '{summary['paging_command']}'" if summary["paging_command"]
+                else "")
+    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -556,12 +630,14 @@ class PickFileRequest(BaseModel):
     # ("Key files (*.pem;*.ppk)", "All files (*.*)") — the platform dialog's
     # own format, passed through untouched.
     file_types: list[str] = []
+    # A folder rather than a file: where captured configurations are archived.
+    folder: bool = False
 
 
 @app.post("/api/pick-file")
 async def pick_file(request: PickFileRequest) -> dict:
     """
-    Raise the platform's file dialog.
+    Raise the platform's file or folder dialog.
 
     ``available`` is false when there is no native window, which is not an
     error — it tells the interface to open its own browser instead. Reporting
@@ -570,6 +646,12 @@ async def pick_file(request: PickFileRequest) -> dict:
     """
     if not desktop.has_native_window():
         return {"available": False, "path": ""}
+
+    if request.folder:
+        chosen = await asyncio.to_thread(
+            desktop.pick_directory, request.title, request.directory,
+        )
+        return {"available": True, "path": chosen or "", "cancelled": not chosen}
 
     path = await asyncio.to_thread(
         desktop.pick_file, request.title, request.directory, tuple(request.file_types),
@@ -810,19 +892,31 @@ async def post_session_to_jira(request: Request) -> dict:
     chat_messages    = body.get("chat_messages") or []
     existing_key     = (body.get("existing_issue_key") or "").strip().upper()
 
-    # Collect terminal buffers from the session manager
+    # Collect terminal buffers from the session manager.
+    #
+    # Through the outbound helper, which masks credentials. This is the path
+    # that most needs it: a Jira ticket persists, colleagues read it, and on
+    # most instances it is searchable across the whole organisation — more
+    # "handed to someone else" than a session log on disk ever is.
     sessions = []
     for sid in open_session_ids:
         sess = session_manager.get_session(sid)
         if not sess:
             continue
-        buf = sess.get("buffer")
         sessions.append({
             "label":           sess.get("display_label") or sess.get("hostname", sid[:8]),
             "hostname":        sess.get("hostname", ""),
             "connection_type": sess.get("connection_type", "ssh"),
-            "buffer_text":     buf.get_text(500) if buf else "",
+            "buffer_text":     outbound.session_text(sess, 500),
         })
+
+    # The conversation goes into the ticket too, and the assistant quotes
+    # device output back at you constantly.
+    chat_messages = [
+        {**m, "content": outbound.redact_text(m.get("content", ""))}
+        if isinstance(m, dict) else m
+        for m in chat_messages
+    ]
 
     from backend.jira_client import build_adf, create_issue, add_comment
     adf = build_adf(description, sessions, chat_messages)
@@ -1053,6 +1147,48 @@ class PlatformRequest(BaseModel):
     dangerous_commands: list[str] = []
     config_mode_markers: list[str] = []
     comment_prefix: str = "!"
+
+
+# ---------------------------------------------------------------------------
+# REST — The assistant's system prompts
+# ---------------------------------------------------------------------------
+
+
+class PromptRequest(BaseModel):
+    """Body for PUT /api/prompts/{mode}."""
+
+    body: str
+
+
+@app.get("/api/prompts")
+async def prompts_list() -> dict:
+    """
+    Return every persona, its shipped default, and whether it has been edited.
+
+    The command-suggestion rules come back too, so the editor can show what
+    the ``{command_rules}`` marker expands to rather than describing it.
+    """
+    return await asyncio.to_thread(prompt_store.state)
+
+
+@app.put("/api/prompts/{mode}")
+async def prompt_save(mode: str, request: PromptRequest) -> dict:
+    """Persist an edited persona."""
+    try:
+        await asyncio.to_thread(prompt_store.save, mode, request.body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await asyncio.to_thread(prompt_store.state)
+
+
+@app.post("/api/prompts/reset")
+async def prompt_reset(mode: str = "") -> dict:
+    """Restore one persona, or every one of them, to the shipped text."""
+    try:
+        await asyncio.to_thread(prompt_store.reset, mode or None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await asyncio.to_thread(prompt_store.state)
 
 
 @app.get("/api/platforms")
@@ -1298,14 +1434,23 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
         if not onboarder.ready(at_prompt):
             return
 
-        summary = onboarder.run(session["transcript"].last_prompt)
+        terminal_settings = get_settings().get("terminal", {})
+
+        # The setting is resolved before the summary is built, not after, so
+        # "paging_command" means "this was sent" everywhere. It previously
+        # reported the platform's command regardless, and the note in the
+        # corner claimed to have sent something to a user who had turned the
+        # feature off.
+        summary = onboarder.run(
+            session["transcript"].last_prompt,
+            auto_paging=bool(terminal_settings.get("auto_paging_off", True)),
+        )
         session["fingerprint"] = summary
         session["pipeline"].platform = summary["platform"]
         # Which patterns a pending reload is recognised by depends on the
         # platform, so the tracker is idle until the device is identified.
         session["alerts"].platform = summary["platform"]
 
-        terminal_settings = get_settings().get("terminal", {})
         session["pipeline"].expand_aliases = bool(
             terminal_settings.get("expand_aliases", True)
         )
@@ -1314,9 +1459,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
             json.dumps({"type": "device_identified", **summary})
         )
 
-        if (summary["paging_command"]
-                and terminal_settings.get("auto_paging_off", True)
-                and handler.is_connected):
+        if summary["paging_command"] and handler.is_connected:
             await asyncio.to_thread(
                 handler.send, (summary["paging_command"] + "\r").encode()
             )

@@ -456,6 +456,20 @@ def test_end_to_end_session() -> None:
                   not any(k in session for k in ("password", "params", "handler")),
                   f"keys: {sorted(session)}")
 
+            # The session clock is counted in the browser from this one value,
+            # so it has to be present and it has to be a timestamp JavaScript's
+            # Date.parse understands. A string it cannot read would leave every
+            # tab silently counting from the moment the page loaded instead.
+            from datetime import datetime
+            check("the response carries when the session connected",
+                  bool(session.get("connected_at")), f"got {session.get('connected_at')!r}")
+            try:
+                stamp = datetime.fromisoformat(session["connected_at"])
+                check("and it is ISO 8601 with a timezone",
+                      stamp.tzinfo is not None, f"naive: {session['connected_at']}")
+            except (ValueError, KeyError, TypeError) as exc:
+                check("and it is ISO 8601 with a timezone", False, str(exc))
+
             listed = client.get("/api/sessions").json()
             check("session appears in the session list",
                   any(s["session_id"] == session_id for s in listed))

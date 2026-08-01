@@ -34,17 +34,28 @@
     const test = document.getElementById('btn-test-providers');
     if (test) test.addEventListener('click', testProviders);
 
+    const toggle = document.getElementById('sidebar-link-ai');
+    if (toggle) {
+      toggle.addEventListener('click', (e) => { e.preventDefault(); togglePanel(); });
+    }
+
     applyPanelVisibility();
     window.addEventListener('shellmate:settings-changed', applyPanelVisibility);
+    window.addEventListener('shellmate:settings-loaded',  applyPanelVisibility);
   });
 
   // -------------------------------------------------------------------------
-  // #15  Hiding the assistant
+  // #15, #44  Showing and hiding the assistant
   // -------------------------------------------------------------------------
 
+  function panelEnabled() {
+    // Defaults to off: a fresh install should not open with a third of the
+    // window given to a pane that cannot answer anything yet.
+    return ((window.shellmateSettings || {}).ai || {}).panel_enabled === true;
+  }
+
   function applyPanelVisibility() {
-    const settings = window.shellmateSettings || {};
-    const enabled = ((settings.ai || {}).panel_enabled) !== false;
+    const enabled = panelEnabled();
 
     const pane    = document.getElementById('chat-pane');
     const divider = document.getElementById('split-divider');
@@ -53,9 +64,50 @@
     pane.classList.toggle('hidden', !enabled);
     divider.classList.toggle('hidden', !enabled);
 
+    const toggle = document.getElementById('sidebar-link-ai');
+    if (toggle) {
+      toggle.classList.toggle('active', enabled);
+      toggle.title = enabled ? 'Hide the AI assistant' : 'Show the AI assistant';
+    }
+
     // The terminal has to be told its size changed, or xterm keeps rendering
     // at the old width and the extra space stays blank.
     setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+  }
+
+  /**
+   * Turn the assistant on or off from the sidebar.
+   *
+   * Saved rather than held in the page, so the answer survives a reload — and
+   * because it is the same setting the Settings panel edits, not a second one
+   * that could disagree with it.
+   */
+  async function togglePanel() {
+    const wanted = !panelEnabled();
+
+    // Applied optimistically: the pane should move when the icon is clicked,
+    // not a round trip later.
+    window.shellmateSettings = window.shellmateSettings || {};
+    window.shellmateSettings.ai = { ...(window.shellmateSettings.ai || {}),
+                                    panel_enabled: wanted };
+    applyPanelVisibility();
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings: { ai: { panel_enabled: wanted } } }),
+      });
+      if (res.ok && typeof window.reloadSettings === 'function') {
+        // Re-read rather than patching the global: settings.js keeps its own
+        // copy for the form, and a stale one there would quietly undo this
+        // the next time someone pressed Save.
+        await window.reloadSettings();
+        applyPanelVisibility();
+      }
+    } catch (e) {
+      console.warn('Could not save the assistant panel setting:', e);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -176,7 +228,11 @@
       select.value = previous;
     }
     select.dispatchEvent(new Event('change'));
+    // The list has just been rebuilt from what the providers actually offer,
+    // so the saved default may only now have become selectable.
+    window.dispatchEvent(new Event('shellmate:models-refreshed'));
   }
 
   window.refreshProviderModels = testProviders;
+  window.toggleAiPanel = togglePanel;
 })();

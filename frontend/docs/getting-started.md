@@ -52,12 +52,31 @@ Several things, in the first second or two:
   appear in the status bar.
 - **Paging is turned off** using whichever command that platform needs, so
   `show run` does not stop every 24 lines. This is visible in the terminal;
-  nothing is typed into your session without telling you.
-- The **running configuration is snapshotted** and compared with your last
-  visit, so you are told if anything has changed since.
+  nothing is typed into your session without telling you. It happens only when
+  the device was identified *confidently* — see
+  [Device awareness](#device-awareness) for why that gate exists and what to do
+  when it stops you.
+- The **running configuration is captured** on a second channel and compared
+  with your last visit, so you are told if anything has changed since.
 - The session starts **recording**, so you can search it later.
 
-None of this needs configuring, and all of it can be switched off.
+A note appears briefly in the bottom-right corner saying what was done and, if
+nothing was, why not. None of this needs configuring, and all of it can be
+switched off.
+
+The AI panel is **not** shown until you ask for it — the robot icon in the
+sidebar turns it on.
+
+## How long a session has been up
+
+The status bar shows the active session's age — *connected 02:14:32* — counted
+from the moment the device answered. Hovering any tab gives the same for that
+session, which is how you find the one that has been up longest without
+crowding the tab strip.
+
+A session that drops stops counting and says what it reached — *disconnected
+after 02:11:04*. A clock still running on a dead session would be telling you
+something untrue. Reconnecting starts a fresh one rather than resuming.
 
 ## Keyboard shortcuts
 
@@ -66,7 +85,7 @@ None of this needs configuring, and all of it can be switched off.
 | `Ctrl+T` | New connection |
 | `Ctrl+W` | Close the current tab |
 | `Ctrl+1` … `Ctrl+9` | Switch to that tab |
-| `Ctrl+Alt+1` … `Ctrl+Alt+7` | Choose a split layout |
+| `Ctrl+Alt+1` … `Ctrl+Alt+8` | Choose a split layout |
 | `Ctrl+Shift+B` | Broadcast a command to several devices |
 | `Ctrl+Shift+C` | Copy the selection |
 | `Ctrl+Shift+V` | Paste |
@@ -88,6 +107,7 @@ a glance.
 | Three columns | 3 |
 | Main and two | 3 — one large, two smaller beside it |
 | Two over one | 3 — two above, one wide below |
+| One over two | 3 — one wide above, two below |
 | Quad | 4 |
 
 Open tabs fill the panes automatically. Everything still lives in the tab
@@ -120,5 +140,15 @@ Everything lives in `ShellMate-Data` beside the executable.
 | `shellmate.db` | Session history and configuration snapshots |
 | `platforms.json` | What ShellMate knows about each device type |
 | `snippets.json` | The saved command library used by Broadcast |
+| `prompts.json` | The assistant's system prompts, editable |
 | `logs/` | Session logs, if you turn them on |
+| `configs/` | Captured device configurations, if you ask for them as files |
+| `window-storage/` | The desktop window's own state — scroll positions and the like |
 | `shellmate.log` | What the application itself did, for troubleshooting |
+
+`platforms.json` and `snippets.json` are both plain, commented JSON meant to
+be edited, kept in version control, or handed to a colleague. Delete either
+and the shipped defaults come back.
+
+`configs/` can be pointed anywhere, including a network share — see
+[History and drift](#history-and-drift).

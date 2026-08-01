@@ -18,10 +18,12 @@
 (function () {
   'use strict';
 
-  let overlay, listEl, pathEl, upBtn, chooseBtn;
+  let overlay, listEl, pathEl, upBtn, chooseBtn, titleEl;
   let currentPath = '';
   let selected = '';
   let onChoose = null;
+  /** "file" or "folder" — a folder is chosen by standing in it. */
+  let mode = 'file';
 
   document.addEventListener('DOMContentLoaded', () => {
     // Delegated: the Browse buttons live inside a modal that is built before
@@ -30,26 +32,33 @@
       const btn = e.target.closest('.btn-browse');
       if (!btn) return;
       e.preventDefault();
-      browseFor(btn.dataset.target);
+      browseFor(btn.dataset.target, btn.dataset.pick || 'file');
     });
 
     build();
   });
 
   /**
-   * Ask for a file for the given input, native dialog first.
+   * Ask for a file or a folder for the given input, native dialog first.
+   *
+   * @param targetId  id of the input to fill in
+   * @param wanted    "file" (an SSH key) or "folder" (where captures go)
    */
-  async function browseFor(targetId) {
+  async function browseFor(targetId, wanted) {
     const input = document.getElementById(targetId);
     if (!input) return;
+
+    const folder = wanted === 'folder';
 
     try {
       const res = await fetch('/api/pick-file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: 'Select a private key file',
-          directory: directoryOf(input.value),
+          title: folder ? 'Choose a folder' : 'Select a private key file',
+          // A folder field already holds a folder; a file field holds a file.
+          directory: folder ? input.value : directoryOf(input.value),
+          folder,
         }),
       });
       const data = await res.json();
@@ -61,7 +70,7 @@
       }
     } catch (_) { /* fall through to the in-app browser */ }
 
-    open(input);
+    open(input, wanted);
   }
 
   function directoryOf(value) {
@@ -90,7 +99,7 @@
     overlay.innerHTML = `
       <div id="filepicker-modal">
         <div class="panel-header">
-          <h2 class="panel-title">Choose a file</h2>
+          <h2 class="panel-title" id="filepicker-title">Choose a file</h2>
           <button type="button" class="icon-btn" id="filepicker-close" aria-label="Close">
             <span class="material-symbols-outlined">close</span>
           </button>
@@ -115,6 +124,7 @@
     pathEl    = overlay.querySelector('#filepicker-path');
     upBtn     = overlay.querySelector('#filepicker-up');
     chooseBtn = overlay.querySelector('#filepicker-choose');
+    titleEl   = overlay.querySelector('#filepicker-title');
 
     overlay.querySelector('#filepicker-close').addEventListener('click', close);
     overlay.querySelector('#filepicker-cancel').addEventListener('click', close);
@@ -130,12 +140,17 @@
     });
   }
 
-  function open(input) {
+  function open(input, wanted) {
+    mode = wanted === 'folder' ? 'folder' : 'file';
     selected = '';
-    chooseBtn.disabled = true;
+    // In folder mode the current folder is always a valid answer, so Choose
+    // starts enabled: "the one I am looking at" is how people pick a folder.
+    chooseBtn.disabled = mode === 'file';
+    chooseBtn.textContent = mode === 'folder' ? 'Use this folder' : 'Choose';
+    titleEl.textContent = mode === 'folder' ? 'Choose a folder' : 'Choose a file';
     onChoose = (path) => setValue(input, path);
     overlay.classList.remove('hidden');
-    load(directoryOf(input.value));
+    load(mode === 'folder' ? input.value : directoryOf(input.value));
   }
 
   function close() {
@@ -163,6 +178,12 @@
     pathEl.textContent = data.path;
     upBtn.dataset.parent = data.parent || '';
     upBtn.disabled = !data.parent;
+
+    // Walking into a folder is how it gets picked.
+    if (mode === 'folder') {
+      selected = data.path;
+      chooseBtn.disabled = !data.path;
+    }
 
     listEl.innerHTML = '';
     if (!data.entries.length) {
@@ -199,6 +220,7 @@
 
       row.addEventListener('click', () => {
         if (entry.is_dir) { load(entry.path); return; }
+        if (mode === 'folder') return;   // files are not answers here
         selected = entry.path;
         chooseBtn.disabled = false;
         listEl.querySelectorAll('.filepicker-row').forEach(r =>
@@ -206,7 +228,7 @@
       });
 
       row.addEventListener('dblclick', () => {
-        if (entry.is_dir) return;
+        if (entry.is_dir || mode === 'folder') return;
         selected = entry.path;
         if (onChoose) onChoose(selected);
         close();

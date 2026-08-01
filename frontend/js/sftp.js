@@ -227,9 +227,14 @@
   async function handleDelete(entry) {
     // Deleting a file off a live device is not undoable, so make the target
     // explicit rather than asking a generic "are you sure?".
-    if (!window.confirm(`Delete ${entry.path} from the device?\n\nThis cannot be undone.`)) {
-      return;
-    }
+    const ok = await window.shellmateDialog.confirm({
+      title: 'Delete this file from the device?',
+      list: [{ text: entry.path, mono: true }],
+      note: 'This cannot be undone. There is no recycle bin on a switch.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
 
     const sessionId = activeSessionId();
     try {

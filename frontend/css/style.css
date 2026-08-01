@@ -29,6 +29,18 @@
   --error:    #FFB4AB;
   --secondary: #B7C8E1;
 
+  /* Floating surfaces — dialogs, side panels and the notes that hover over
+     the terminal. Translucent, because they sit on a blurred backdrop.
+     These exist as tokens rather than literals for a specific reason: six
+     rules used to hardcode rgba(32,32,32,0.9x) while their text colour
+     followed the theme, so in the light theme they rendered dark grey on
+     near-black. Three had light overrides bolted on and three did not, and
+     a hardcoded colour beside a themed one will always drift apart again. */
+  --overlay:       rgba(32,32,32,0.96);
+  /* Opaque twin of --overlay, for anything that has to fully hide what
+     scrolls underneath it — a sticky action bar at 96% leaves a ghost. */
+  --overlay-solid: #202020;
+
   /* Layout dimensions */
   --sidebar-width:     56px;
   --tab-bar-height:    44px;
@@ -62,6 +74,8 @@
   --outline:  rgba(100,99,120,0.2);
   --error:    #B3261E;
   --secondary: #1B6CA8;
+  --overlay:       rgba(236,236,240,0.97);
+  --overlay-solid: #ECECF0;
 }
 
 /* Elements that use hardcoded light-on-dark rgba values need explicit overrides */
@@ -79,9 +93,11 @@
 [data-theme="light"] .chat-welcome               { color: rgba(28,27,34,0.75); }
 [data-theme="light"] .chat-welcome-hint          { color: rgba(28,27,34,0.55); }
 [data-theme="light"] #chat-input::placeholder    { color: rgba(28,27,34,0.3); }
-[data-theme="light"] #modal-dialog               { --modal-bg: rgba(235,235,238,0.97); --modal-bg-solid: #EBEBEE; box-shadow: 0 24px 64px rgba(0,0,0,0.2); }
-[data-theme="light"] #paste-dialog               { background: rgba(235,235,238,0.97); box-shadow: 0 24px 48px -12px rgba(0,0,100,0.15); }
-[data-theme="light"] .side-panel                 { background: rgba(238,238,241,0.98); }
+/* Backgrounds now come from --overlay, so only the shadows — which are
+   light-on-dark by nature — need overriding here. */
+[data-theme="light"] #modal-dialog               { box-shadow: 0 24px 64px rgba(0,0,0,0.2); }
+[data-theme="light"] #paste-dialog,
+[data-theme="light"] #vault-dialog               { box-shadow: 0 24px 48px -12px rgba(0,0,100,0.15); }
 [data-theme="light"] #btn-new-tab                { color: #fff; }
 [data-theme="light"] #btn-new-tab:hover          { color: #fff; opacity: 0.88; }
 [data-theme="light"] .chat-pill-btn              { color: #fff; }
@@ -1325,6 +1341,162 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   transform: translateY(0);
 }
 
+/* The button on an answer that cannot be taken back — deleting a file from a
+   device, discarding every platform edit, choosing a master password with no
+   recovery. Reading the label is what people skip when they are in a hurry,
+   and being in a hurry is exactly when these are answered. */
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  background: #B3261E;
+  color: #fff;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+.btn-danger:hover  { opacity: 0.9; transform: translateY(-1px); }
+.btn-danger:active { transform: translateY(0); }
+
+/* --------------------------------------------------------------------------
+   ShellMate's own confirm / prompt / alert (#49)
+   -------------------------------------------------------------------------- */
+
+.sm-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+}
+
+.sm-dialog {
+  width: 460px;
+  max-width: 100%;
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 22px 24px 18px;
+  background: var(--overlay);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 48px -12px rgba(0,0,0,0.55);
+  font-family: 'Inter', system-ui, sans-serif;
+  animation: sm-dialog-in 0.14s ease-out;
+}
+
+@keyframes sm-dialog-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sm-dialog { animation: none; }
+}
+
+.sm-dialog-title {
+  margin: 0 0 8px;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--on-surface);
+}
+
+.sm-dialog-body {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--on-surface-dim);
+}
+
+/* What the native dialog had to fake with "\n" and two spaces. */
+.sm-dialog-list {
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  max-height: 34vh;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+.sm-dialog-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.sm-dialog-list-mono .sm-dialog-list-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+}
+
+.sm-dialog-list-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sm-dialog-list-detail {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--on-surface-dim);
+}
+
+.sm-dialog-label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.sm-dialog-input {
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.sm-dialog-input:focus {
+  outline: none;
+  border-color: var(--primary-container);
+}
+
+.sm-dialog-note {
+  margin: 0 0 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--error);
+}
+
+.sm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .btn-primary:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -1366,14 +1538,10 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #modal-dialog {
-  /* Held in a variable so the sticky action bar below can match whichever
-     theme is active without repeating the colour. */
-  --modal-bg: rgba(32,32,32,0.92);
-  /* Opaque twin of --modal-bg. The dialog itself is translucent over a
-     blurred backdrop, which looks good — but the sticky action bar has to
-     fully hide the form scrolling underneath it, and 92% opacity leaves a
-     ghost of the text showing through. */
-  --modal-bg-solid: #202020;
+  /* Aliases of the shared overlay tokens, kept because the sticky action bar
+     below refers to them by name. */
+  --modal-bg:       var(--overlay);
+  --modal-bg-solid: var(--overlay-solid);
   background: var(--modal-bg);
   display: flex;
   flex-direction: column;
@@ -1802,7 +1970,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .side-panel {
   width: 420px;
   max-width: 95vw;
-  background: rgba(32,32,32,0.97);
+  background: var(--overlay);
   backdrop-filter: blur(20px);
   display: flex;
   flex-direction: column;
@@ -1921,6 +2089,16 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* A path and its Browse button, filling the row. */
+.setting-input-group-full {
+  width: 100%;
+}
+
+.setting-input-group-full .setting-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .setting-unit {
@@ -2307,13 +2485,16 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   align-items: center;
   gap: 8px;
   padding: 7px 12px;
-  background: rgba(32,32,32,0.96);
+  background: var(--overlay);
   backdrop-filter: blur(12px);
   border: 1px solid var(--outline);
   border-radius: var(--radius-md);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 11px;
-  color: var(--on-surface-muted);
+  /* --dim rather than --muted: this is the only on-screen account of what
+     ShellMate sent to the device on the user's behalf, so it has to clear
+     the AA ratio in both themes, not merely be present. */
+  color: var(--on-surface-dim);
   transition: opacity 0.6s;
   pointer-events: none;
 }
@@ -2327,17 +2508,124 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   font-family: 'JetBrains Mono', monospace;
 }
 
+/* A note carrying a button has to be clickable; the rest stay transparent to
+   the mouse so they never swallow a click aimed at the terminal beneath. */
+.device-note-interactive {
+  pointer-events: auto;
+  max-width: 520px;
+  line-height: 1.4;
+}
+
+.device-note-action {
+  flex-shrink: 0;
+  margin-left: 4px;
+  padding: 3px 9px;
+  background: transparent;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  color: var(--primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.device-note-action:hover {
+  background: var(--surface-high);
+}
+
 .device-note-fade {
   opacity: 0;
+}
+
+/* How long the active session has been up. Monospace so the digits do not
+   shuffle sideways every second as their widths change. */
+#status-uptime {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--on-surface-muted);
 }
 
 /* Device identity shown in the status bar once the device is fingerprinted. */
 #status-device {
   color: var(--on-surface-muted);
+  cursor: pointer;
+}
+
+#status-device:hover {
+  color: var(--on-surface);
 }
 
 #status-device.status-device-known {
   color: var(--primary);
+}
+
+/* Identified, but not confidently enough for ShellMate to send anything.
+   Deliberately not the "known" colour: the difference between these two is
+   the difference between a feature working and a feature doing nothing. */
+#status-device.status-device-unsure {
+  color: var(--secondary);
+}
+
+/* --------------------------------------------------------------------------
+   "This device is a…" — naming a platform ShellMate could not be sure of
+   -------------------------------------------------------------------------- */
+
+.device-chooser {
+  position: fixed;
+  z-index: 300;
+  width: 340px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px;
+  background: var(--overlay);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 40px -12px rgba(0,0,0,0.55);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.device-chooser-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-surface);
+  margin-bottom: 4px;
+}
+
+.device-chooser-hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--on-surface-dim);
+  margin: 0 0 8px;
+}
+
+.device-chooser-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--on-surface);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.device-chooser-row:hover {
+  background: var(--surface-high);
+}
+
+/* The command that will be sent, shown before it is chosen rather than
+   afterwards. Nothing here should be a surprise. */
+.device-chooser-cmd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--on-surface-dim);
 }
 
 /* ---------------------------------------------------------------------------
@@ -2356,7 +2644,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: rgba(32,32,32,0.96);
+  background: var(--overlay);
   backdrop-filter: blur(12px);
   border: 1px solid var(--outline);
   border-radius: var(--radius-md);
@@ -2372,9 +2660,23 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* A changed config is the one worth noticing. */
+/* A changed config is the one worth noticing, and the old treatment — a
+   one-pixel border in a slightly different colour — was easy to miss on a
+   screen already full of text. */
 .drift-banner-changed {
   border-color: var(--primary-container);
+  border-left: 3px solid var(--primary-container);
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.7);
+}
+
+/* The question, then the numbers behind it. */
+.drift-lead {
+  color: var(--on-surface);
+  font-weight: 600;
+}
+
+.drift-detail {
+  color: var(--on-surface-dim);
 }
 
 .drift-icon {
@@ -2461,6 +2763,66 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 
 .diff-file {
   color: var(--on-surface-muted);
+}
+
+/* --------------------------------------------------------------------------
+   A diff read as blocks rather than as one wall (#42)
+   -------------------------------------------------------------------------- */
+
+.diff-hunk-block {
+  margin: 0 16px 12px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.diff-hunk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface-high);
+  border-bottom: 1px solid var(--outline);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--on-surface-dim);
+}
+
+.diff-hunk-where {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Copy is the point of the block, so the button is on it rather than in a
+   toolbar somewhere that applies to whichever part you last clicked. */
+.diff-copy {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  background: transparent;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  color: var(--on-surface-dim);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.diff-copy:hover {
+  color: var(--on-surface);
+  background: var(--surface-highest);
+}
+
+.diff-hunk-lines {
+  padding: 6px 0;
+}
+
+.diff-hunk-lines .diff-line {
+  padding: 0 10px;
+}
+
+#diff-copy-all {
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 /* ---------------------------------------------------------------------------
@@ -2813,7 +3175,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #vault-dialog {
-  background: rgba(32,32,32,0.97);
+  background: var(--overlay);
   backdrop-filter: blur(20px);
   border: 1px solid var(--outline);
   border-radius: var(--radius-lg);
@@ -2849,7 +3211,9 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .vault-hint {
   font-size: 11px;
   line-height: 1.45;
-  color: var(--on-surface-muted);
+  /* Explains what a master password does and what happens if it is lost.
+     Not decoration — held to the same AA ratio as the rest. */
+  color: var(--on-surface-dim);
   margin: 0;
 }
 
@@ -2906,7 +3270,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #paste-dialog {
-  background: rgba(32,32,32,0.97);
+  background: var(--overlay);
   backdrop-filter: blur(20px);
   border: 1px solid var(--outline);
   border-radius: var(--radius-lg);
@@ -3448,6 +3812,72 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   line-height: 1.4;
 }
 
+/* --------------------------------------------------------------------------
+   Tooltips on the settings rows that need one
+   -------------------------------------------------------------------------- */
+
+.tip-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  margin-left: 6px;
+  padding: 0;
+  width: 16px;
+  height: 16px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-full);
+  color: var(--on-surface-muted);
+  cursor: help;
+}
+
+.tip-badge .material-symbols-outlined {
+  font-size: 15px;
+}
+
+.tip-badge:hover,
+.tip-badge:focus-visible {
+  color: var(--primary);
+  outline: none;
+}
+
+.tip-bubble {
+  position: fixed;
+  z-index: 400;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  padding: 11px 13px;
+  background: var(--overlay);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 36px -12px rgba(0,0,0,0.55);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--on-surface-dim);
+  pointer-events: none;
+}
+
+.tip-bubble p {
+  margin: 0 0 8px;
+}
+
+.tip-bubble p:last-child {
+  margin-bottom: 0;
+}
+
+.tip-bubble code {
+  padding: 1px 4px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--on-surface);
+}
+
 .settings-section-hint code {
   background: var(--surface-high);
   border: 1px solid var(--outline);
@@ -3530,6 +3960,12 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .saved-badge.hidden { display: none; }
+
+/* An unencrypted password is worth noticing every time the dialog opens, not
+   only on the day it was chosen. */
+.saved-badge-plain {
+  color: var(--error);
+}
 
 .saved-badge .material-symbols-outlined { font-size: 13px; }
 
@@ -4031,6 +4467,10 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   color: var(--on-surface);
 }
+
+/* A quote now holds paragraphs rather than being one itself. */
+#docs-content blockquote p { margin: 0 0 8px; }
+#docs-content blockquote p:last-child { margin-bottom: 0; }
 
 /* Wide tables scroll rather than stretching the page. */
 #docs-content .md-table-wrap { overflow-x: auto; margin: 0 0 14px; }
@@ -4696,3 +5136,32 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 :root[data-density="compact"] .panel-header { padding: 12px 16px 10px; }
 :root[data-density="compact"] #status-bar { height: 20px; font-size: 10px; }
 :root[data-density="compact"] .settings-nav-item { padding: 5px 8px; }
+
+/* --------------------------------------------------------------------------
+   The system-prompt editor (#56)
+   -------------------------------------------------------------------------- */
+
+#prompt-body {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+#prompt-body:focus {
+  outline: none;
+  border-color: var(--primary-container);
+}
+
+/* "edited" beside the mode picker, so a prompt changed months ago is
+   visibly not the shipped one. */
+.setting-value-modified {
+  color: var(--primary);
+  font-weight: 600;
+}

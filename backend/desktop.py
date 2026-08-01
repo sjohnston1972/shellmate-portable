@@ -86,6 +86,36 @@ def pick_file(title: str = "Select a file",
     return result[0] if isinstance(result, (list, tuple)) else str(result)
 
 
+def pick_directory(title: str = "Select a folder", directory: str = "") -> str | None:
+    """
+    Raise the platform's own folder dialog and return the chosen path.
+
+    Same contract as :func:`pick_file`: None means either "cancelled" or "no
+    native window", and the caller distinguishes them with
+    :func:`has_native_window` before asking.
+
+    A separate call rather than a flag on ``pick_file`` because the underlying
+    dialog is a different one — a file dialog pointed at a folder returns
+    nothing when the user clicks a folder rather than opening it.
+    """
+    window = _active_window
+    if window is None:
+        return None
+    try:
+        import webview
+        result = window.create_file_dialog(
+            webview.FOLDER_DIALOG,
+            directory=directory or "",
+        )
+    except Exception as exc:
+        logger.info("Native folder dialog failed (%s)", exc)
+        return None
+
+    if not result:
+        return None
+    return result[0] if isinstance(result, (list, tuple)) else str(result)
+
+
 def wait_until_serving(port: int, timeout: float = 15.0) -> bool:
     """
     Block until the server answers, or the timeout expires.
@@ -112,26 +142,30 @@ def wait_until_serving(port: int, timeout: float = 15.0) -> bool:
 
 def _tray_image():
     """
-    Load the application logo for the tray, or draw a fallback.
+    The application icon, for the tray.
 
-    A missing or unreadable logo must not stop the app starting, so anything
-    that goes wrong here produces a plain coloured square instead.
+    Built by :mod:`backend.branding`, which is also what the executable's
+    ``.ico`` is generated from — so the tray, the taskbar and the window all
+    show the same mark rather than three near-misses.
     """
-    from PIL import Image, ImageDraw
+    from backend import branding
 
-    logo = paths.frontend_dir() / "Untitled-removebg-preview.png"
-    try:
-        if logo.exists():
-            image = Image.open(logo).convert("RGBA")
-            return image.resize((64, 64), Image.LANCZOS)
-    except Exception as exc:
-        logger.info("Could not load the tray logo (%s); drawing a fallback", exc)
+    return branding.app_image(branding.TRAY_SIZE)
 
-    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((4, 4, 60, 60), radius=12, fill=(108, 99, 255, 255))
-    draw.text((18, 20), ">_", fill=(255, 255, 255, 255))
-    return image
+
+def _window_icon():
+    """
+    The ``.ico`` for the window, generating it if the build did not.
+
+    Running from source there is no build step to have produced it, and a
+    developer should see the same icon a user does.
+    """
+    from backend import branding
+
+    path = branding.icon_path()
+    if path.exists():
+        return path
+    return branding.write_ico(path)
 
 
 class Tray:
@@ -523,7 +557,23 @@ class Desktop:
             storage = paths.data_dir() / "window-storage"
             storage.mkdir(parents=True, exist_ok=True)
 
-            webview.start(private_mode=False, storage_path=str(storage))
+            # On Windows the window and taskbar icons come from the
+            # executable, which build.spec now sets — so this only takes
+            # effect under GTK/Qt, where pywebview honours it. Passed anyway
+            # rather than branching: the point of one icon in three places is
+            # that nothing has to remember which platform reads which.
+            start_args = {"private_mode": False, "storage_path": str(storage)}
+            icon = _window_icon()
+            if icon:
+                start_args["icon"] = str(icon)
+
+            try:
+                webview.start(**start_args)
+            except TypeError:
+                # An older pywebview without the icon argument. Losing the
+                # icon is not a reason to lose the window.
+                start_args.pop("icon", None)
+                webview.start(**start_args)
             return True
 
         except Exception as exc:

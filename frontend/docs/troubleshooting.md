@@ -59,20 +59,35 @@ answers everything it understands and refuses the rest, but very old
 equipment occasionally expects otherwise. Try a serial console if one is to
 hand.
 
-## The device was not identified
+## Paging is still on, or aliases are not working
 
-The status bar says *unidentified* when the banner and prompt were not enough
-to be confident. This is deliberate: paging-off and aliases stay disabled
-rather than risk sending the wrong command.
+Both depend on the device having been identified **confidently**, and there
+are two distinct states that look similar in passing:
 
-Common causes:
+**The status bar says `unidentified`.** Neither the banner nor the prompt
+matched anything.
+
+**The status bar names a platform, followed by `(unconfirmed)`.** It was
+recognised, but only from its prompt — which narrows the field without picking
+the platform, so nothing is sent. The note in the corner of the terminal says
+this when you connect, and names the command it declined to send.
+
+Either way the causes are the same:
 
 - A legal banner replacing the version string. Very common.
 - A terminal server sitting in front of the device.
 - A platform ShellMate does not know.
 
-The fix for the last is **Settings → Platform Definitions** — add the text
-that identifies it. See [Device awareness](#device-awareness).
+**For this session:** click the device name in the status bar and say what it
+is. Aliases apply at once and the paging command is sent.
+
+**For good:** **Settings → Platform Definitions** — add something from the
+device's banner to that platform's *Identify by* list. See
+[Device awareness](#device-awareness).
+
+If the status bar shows the platform with no qualifier and paging is still on,
+check the setting itself is on under **Settings → Device Awareness** — the
+note in the corner says so explicitly when that is the reason.
 
 ## The configuration snapshot is skipped
 
@@ -87,6 +102,14 @@ available:
 It is skipped rather than falling back to typing into your live session,
 which would scroll a page of configuration under your cursor.
 
+A fourth possibility: capture is switched off under **Settings →
+Configuration Capture**, which also stops the drift check.
+
+If captures are being taken but no files appear, **Also save each capture as a
+file** is the separate switch for that — and only a configuration that has
+actually *changed* is written, so a device nobody has touched produces one
+file and then nothing.
+
 ## Aliases are not expanding
 
 Three things must all hold:
@@ -95,6 +118,11 @@ Three things must all hold:
 2. Alias expansion is on under **Settings → Device Awareness**.
 3. You typed the alias **on its own**. `ints` expands; `show ints` does not,
    deliberately.
+
+## The AI panel is not there
+
+It is off until you ask for it — the terminal takes the full width on a fresh
+install. The robot icon in the sidebar turns it on.
 
 ## The AI panel is not working
 

@@ -12,6 +12,10 @@ Disconnected sessions start unticked and cannot be selected — they would fail
 anyway, and a checkbox that does nothing is worse than one that is absent. The
 tab you were looking at starts ticked.
 
+**All** is a toggle: it selects every connected device, and pressing it again
+clears them. The label follows what pressing it will do, so it is never
+ambiguous which half you are about to get.
+
 ### The library
 
 The commands worth broadcasting are usually the ones you send often, and a
@@ -91,7 +95,18 @@ taken. `GET /api/system/info` confirms which.
 | `GET` | `/api/sessions` | List open sessions |
 | `POST` | `/api/sessions` | Open a connection |
 | `DELETE` | `/api/sessions/{id}` | Close one |
+| `POST` | `/api/sessions/{id}/platform` | Say what the device is, when ShellMate could not be sure |
 | `POST` | `/api/broadcast` | Send commands to several sessions |
+
+Naming a platform yourself applies it immediately — aliases, reload patterns
+and the paging command, if that setting is on. The response says what was
+actually sent:
+
+```
+curl -X POST http://127.0.0.1:8765/api/sessions/{id}/platform \
+  -H "Content-Type: application/json" \
+  -d '{"platform":"nxos"}'
+```
 
 Opening an SSH session:
 
@@ -142,7 +157,9 @@ open indefinitely.
 | `GET` | `/api/history/sessions` | List recorded sessions |
 | `GET` | `/api/history/sessions/{id}` | One session with all its commands |
 | `GET` | `/api/configs/{hostname}` | Configuration snapshots for a device |
+| `GET` | `/api/configs/snapshot/{id}` | One snapshot in full |
 | `GET` | `/api/configs/diff/{old}/{new}` | Diff two snapshots |
+| `GET` | `/api/configs/archive` | Where captures are filed, and what is there |
 | `POST` | `/api/sessions/{id}/snapshot` | Capture the running config now |
 | `GET` | `/api/sessions/{id}/drift` | What changed since the last visit |
 
@@ -156,10 +173,28 @@ curl "http://127.0.0.1:8765/api/history/search?hostname=core-sw-01&q=interface"
 
 | Method | Path | Purpose |
 |---|---|---|
+On the device, over SFTP:
+
+| Method | Path | Purpose |
+|---|---|---|
 | `GET` | `/api/sftp/{id}/list?path=` | List a remote directory |
 | `GET` | `/api/sftp/{id}/download?path=` | Download a file |
 | `POST` | `/api/sftp/{id}/upload?path=` | Upload one |
 | `DELETE` | `/api/sftp/{id}/file?path=` | Delete one |
+
+On this machine, for the fields that need a local path — a private key, or
+where captured configurations are filed:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/pick-file` | Raise the platform's own file or folder dialog |
+| `GET` | `/api/local/browse?path=` | List a local directory, for the in-app browser |
+
+`/api/pick-file` answers `{"available": false}` when there is no desktop
+window to raise a dialog from, which is not a failure — it is how the
+interface knows to open its own browser instead. Neither endpoint reads file
+*contents*; a browser deliberately withholds the path of a file you choose,
+and these exist only to get one back.
 
 ### Configuration
 
@@ -168,6 +203,9 @@ curl "http://127.0.0.1:8765/api/history/search?hostname=core-sw-01&q=interface"
 | `GET` `POST` | `/api/settings` | Read and write settings |
 | `GET` | `/api/platforms` | Platform definitions |
 | `PUT` | `/api/platforms/{id}` | Update one |
+| `GET` | `/api/prompts` | The assistant's prompts, with their defaults |
+| `PUT` | `/api/prompts/{mode}` | Replace one (`tshoot` or `learn`) |
+| `POST` | `/api/prompts/reset` | Restore one, or both with no `mode` |
 | `GET` | `/api/profiles` | Saved connections |
 | `GET` | `/api/serial/ports` | Serial ports on this machine |
 | `GET` | `/api/providers/models` | Test AI providers and list models |

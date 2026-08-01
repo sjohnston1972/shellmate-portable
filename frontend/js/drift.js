@@ -1,5 +1,5 @@
 /**
- * drift.js — "You were last here 12 days ago, 4 lines have changed."
+ * drift.js — "This device has changed since you were last here. Want to see?"
  *
  * Every SSH connection quietly snapshots the device's running configuration
  * and compares it against the previous visit. Logging in becomes a free drift
@@ -12,6 +12,17 @@
  * platform — so this is strictly best-effort and stays silent when it cannot
  * run. An unavailable drift check is a missing nicety, not an error worth
  * interrupting anyone for.
+ *
+ * On presentation, two decisions worth stating (#42):
+ *
+ * **One announcement, not two.** The obvious way to "offer a diff rather than
+ * interrupt" is to add a prompt — and then a banner and a prompt both announce
+ * the same change, which is worse than either alone. So the banner *is* the
+ * prompt: it asks a question and carries the button that answers it.
+ *
+ * **A prompt waits; it does not seize.** Nothing opens over the terminal by
+ * itself. Someone arriving at a device mid-incident is not there to read a
+ * diff, and a window they have to close first is a tax on every login.
  */
 (function () {
   'use strict';
@@ -22,6 +33,9 @@
 
   /** Sessions already checked, so switching tabs does not re-run it. */
   const checked = new Set();
+
+  /** The report currently open in the diff window, for the copy buttons. */
+  let openReport = null;
 
   /**
    * Kick off a drift check for a newly connected session.
@@ -36,6 +50,11 @@
     setTimeout(() => runCheck(id, sessionData), START_DELAY_MS);
   }
 
+  function setting(name, fallback) {
+    const logging = (window.shellmateSettings || {}).logging || {};
+    return logging[name] === undefined ? fallback : logging[name];
+  }
+
   async function runCheck(sessionId, sessionData) {
     try {
       const res = await fetch(`/api/sessions/${sessionId}/drift`);
@@ -44,7 +63,14 @@
 
       // Not available on this device: stay quiet rather than explaining
       // ourselves unprompted every time someone opens a serial console.
-      if (!report.available || !report.summary) return;
+      if (!report.available) return;
+
+      // The capture itself is meant to be invisible, so the one thing said
+      // about it is that a copy was written where the user asked for it.
+      confirmArchive(report, sessionData);
+
+      if (!report.summary) return;
+      if (setting('diff_on_connect', true) === false) return;
 
       showBanner(sessionId, report, sessionData);
     } catch (e) {
@@ -52,8 +78,23 @@
     }
   }
 
+  /** The small confirmation that a capture reached the archive. */
+  function confirmArchive(report, sessionData) {
+    const archive = report.archive || {};
+    if (!archive.written) return;
+    if (!window.shellmateAlerts || !window.shellmateAlerts.notify) return;
+
+    const name = archive.path.split(/[\\/]/).pop();
+    window.shellmateAlerts.notify({
+      title: `Configuration saved — ${report.hostname || sessionData.display_label || 'device'}`,
+      body: `${archive.lines.toLocaleString()} lines to ${name}` +
+            (archive.redacted ? ', secrets masked' : ''),
+      sessionId: sessionData.session_id,
+    });
+  }
+
   // -------------------------------------------------------------------------
-  // Banner
+  // The prompt
   // -------------------------------------------------------------------------
 
   function showBanner(sessionId, report, sessionData) {
@@ -70,11 +111,31 @@
 
     const icon = document.createElement('span');
     icon.className = 'material-symbols-outlined drift-icon';
-    icon.textContent = report.changed ? 'summarize' : 'check_circle';
+    icon.textContent = report.changed ? 'difference' : 'check_circle';
 
     const text = document.createElement('span');
     text.className = 'drift-text';
-    text.textContent = report.summary;
+
+    if (report.changed) {
+      // Phrased as the question it is. "4 lines have changed" states a fact
+      // and leaves the reader to work out that something can be done about
+      // it; this says what is on offer.
+      const lead = document.createElement('strong');
+      lead.className = 'drift-lead';
+      lead.textContent =
+        `${report.hostname || sessionData.display_label || 'This device'} has changed ` +
+        `since you last logged in.`;
+      const detail = document.createElement('span');
+      detail.className = 'drift-detail';
+      detail.textContent =
+        ` ${report.changed} line${report.changed === 1 ? '' : 's'} ` +
+        `(${report.added} added, ${report.removed} removed)` +
+        (report.days_since ? `, ${report.days_since} day${report.days_since === 1 ? '' : 's'} ago` : '') +
+        '. Would you like to see the difference?';
+      text.append(lead, detail);
+    } else {
+      text.textContent = report.summary;
+    }
 
     banner.appendChild(icon);
     banner.appendChild(text);
@@ -82,7 +143,7 @@
     if (report.diff) {
       const view = document.createElement('button');
       view.className = 'drift-action';
-      view.textContent = 'View diff';
+      view.textContent = 'Show me';
       view.addEventListener('click', () => showDiff(report, sessionData));
       banner.appendChild(view);
     }
@@ -103,9 +164,15 @@
     }
   }
 
+  // -------------------------------------------------------------------------
+  // The diff window
+  // -------------------------------------------------------------------------
+
   function showDiff(report, sessionData) {
     const overlay = document.getElementById('diff-overlay');
     if (!overlay) return;
+
+    openReport = report;
 
     document.getElementById('diff-title').textContent =
       `${report.hostname || sessionData.display_label || 'Device'} — configuration changes`;
@@ -117,21 +184,120 @@
 
     const body = document.getElementById('diff-body');
     body.innerHTML = '';
+    hunksOf(report.diff).forEach(hunk => body.appendChild(renderHunk(hunk)));
+
+    overlay.classList.remove('hidden');
+  }
+
+  /**
+   * Split a unified diff into its hunks.
+   *
+   * A configuration diff is rarely one change: a VLAN added here, an ACL line
+   * removed there. Rendered as one long block they run together, and there is
+   * no way to take one of them anywhere. Split, each becomes a thing that can
+   * be read on its own and copied on its own.
+   */
+  function hunksOf(diff) {
+    const hunks = [];
+    let current = null;
+
+    (diff || '').split('\n').forEach(line => {
+      // The +++/--- file headers name the two snapshots; the summary above
+      // already says all of that in prose.
+      if (line.startsWith('+++') || line.startsWith('---')) return;
+
+      if (line.startsWith('@@')) {
+        current = { header: line, lines: [] };
+        hunks.push(current);
+        return;
+      }
+      if (!current) {
+        current = { header: '', lines: [] };
+        hunks.push(current);
+      }
+      current.lines.push(line);
+    });
+
+    return hunks.filter(h => h.lines.length || h.header);
+  }
+
+  function renderHunk(hunk) {
+    const block = document.createElement('div');
+    block.className = 'diff-hunk-block';
+
+    const head = document.createElement('div');
+    head.className = 'diff-hunk-head';
+
+    const where = document.createElement('span');
+    where.className = 'diff-hunk-where';
+    where.textContent = describeHunk(hunk);
+    head.appendChild(where);
+
+    const added = hunk.lines.filter(l => l.startsWith('+')).map(l => l.slice(1));
+    if (added.length) {
+      // The lines without their "+" — what you would actually paste into a
+      // device, which is the reason anyone copies a config hunk.
+      head.appendChild(copyButton(
+        'Copy added', added.join('\n'),
+        `${added.length} added line${added.length === 1 ? '' : 's'}, without the + markers`));
+    }
+    head.appendChild(copyButton(
+      'Copy hunk', [hunk.header, ...hunk.lines].filter(Boolean).join('\n'),
+      'The block exactly as shown, markers and context included'));
+
+    block.appendChild(head);
+
+    const lines = document.createElement('div');
+    lines.className = 'diff-hunk-lines';
 
     // Rendered line by line so additions and removals can be coloured. Using
     // textContent per line keeps device output out of the HTML parser.
-    report.diff.split('\n').forEach(line => {
+    hunk.lines.forEach(line => {
       const row = document.createElement('div');
       row.className = 'diff-line';
-      if (line.startsWith('+++') || line.startsWith('---')) row.className += ' diff-file';
-      else if (line.startsWith('@@')) row.className += ' diff-hunk';
-      else if (line.startsWith('+')) row.className += ' diff-add';
+      if (line.startsWith('+')) row.className += ' diff-add';
       else if (line.startsWith('-')) row.className += ' diff-remove';
       row.textContent = line;
-      body.appendChild(row);
+      lines.appendChild(row);
     });
 
-    overlay.classList.remove('hidden');
+    block.appendChild(lines);
+    return block;
+  }
+
+  /** "Around line 412" reads better than "@@ -412,7 +412,9 @@". */
+  function describeHunk(hunk) {
+    const match = /^@@\s*-(\d+)/.exec(hunk.header || '');
+    return match ? `Around line ${match[1]}` : 'Change';
+  }
+
+  function copyButton(label, text, title) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'diff-copy';
+    button.textContent = label;
+    button.title = title || '';
+    button.addEventListener('click', () => copy(text));
+    return button;
+  }
+
+  async function copy(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      // Clipboard access can be refused; a textarea and execCommand still
+      // works, and a copy button that silently does nothing is worse than an
+      // old API.
+      const scratch = document.createElement('textarea');
+      scratch.value = text;
+      scratch.style.position = 'fixed';
+      scratch.style.opacity = '0';
+      document.body.appendChild(scratch);
+      scratch.select();
+      try { document.execCommand('copy'); } catch (_) { /* nothing left to try */ }
+      scratch.remove();
+    }
+    if (typeof window._showCopyToast === 'function') window._showCopyToast();
   }
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -143,6 +309,14 @@
         if (e.target === overlay) overlay.classList.add('hidden');
       });
     }
+
+    const copyAll = document.getElementById('diff-copy-all');
+    if (copyAll) {
+      copyAll.addEventListener('click', () => {
+        if (openReport && openReport.diff) copy(openReport.diff);
+      });
+    }
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && overlay && !overlay.classList.contains('hidden')) {
         overlay.classList.add('hidden');
@@ -151,4 +325,5 @@
   });
 
   window.checkDrift = checkSession;
+  window.showConfigDiff = showDiff;
 })();

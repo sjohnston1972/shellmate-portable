@@ -11,9 +11,19 @@ jump host.
 
 ### Key authentication
 
-Put the path to your private key in **Key authentication and jump host** in
-the connection dialog. Ed25519, ECDSA, RSA and DSA keys all work, including
-encrypted ones — you will be asked for the passphrase.
+Open **Key authentication and jump host** in the connection dialog and point
+it at your private key. **Browse** raises the platform's own file dialog when
+ShellMate is running in its desktop window; opened in a browser instead, where
+that dialog does not exist, it opens ShellMate's own file browser. Typing a
+path still works.
+
+Ed25519, ECDSA, RSA and DSA keys all work, including encrypted ones — you will
+be asked for the passphrase.
+
+**Username for this key** is separate from the one in the main form, and left
+blank it reuses it. They are frequently different: a jump host that takes your
+personal key under your own account, fronting devices that take a shared
+service account.
 
 The key never leaves your machine. Only the signature it produces is sent, as
 with any SSH client.
@@ -100,12 +110,18 @@ a management network is frequently nowhere.
 
 ## Remembering passwords
 
-Tick **Remember these credentials** and the password goes into the encrypted
-vault, filed against that connection. Next time, leave the password blank.
+Tick **Remember these credentials in the encrypted vault** and the password
+goes into the vault, filed against that connection. Next time, leave the
+password blank.
 
-The dialog shows a **saved in vault** badge when a password is stored, and
-offers to forget it. See [Credentials](#credentials) for how the encryption
-works.
+There is a second option, **in plain text**, which writes it readable to your
+data folder — no encryption and nothing to forget, at the obvious cost. The
+dialog says exactly what that means when you tick it. Ticking either box
+unticks the other.
+
+The dialog shows a badge when a password is stored, saying which of the two it
+is, and offers to forget it. See [Credentials](#credentials) for how the
+encryption works and when plain text is a reasonable choice.
 
 Saved passwords are never sent to the browser. The interface passes a
 connection id and the server fills the credential in on its own side.

@@ -6,15 +6,37 @@
  * silently would be unacceptable in a tool whose output people have to account
  * for afterwards.
  *
- *   - The identified platform and version, in the status bar.
+ *   - The identified platform, its confidence, and whether that was enough to
+ *     act on — in the status bar.
  *   - A one-line note in the terminal when a command was sent on the user's
- *     behalf or an alias was expanded.
+ *     behalf, an alias was expanded, or — the case this used to get wrong — a
+ *     command was deliberately *not* sent.
+ *
+ * That last case is the common one and it used to read as success. Paging-off
+ * only fires when the device was identified confidently, and a device whose
+ * banner is a legal warning rather than a version string is identified from
+ * its prompt alone and scores below the bar. The note said "identified Cisco
+ * IOS" and stopped: the status bar claimed the device was known, the setting
+ * was ticked, and paging was still on. Now it says what it did not do and why,
+ * and offers the way out.
  */
 (function () {
   'use strict';
 
   /** sessionId -> fingerprint, so switching tabs shows the right device. */
   const identified = new Map();
+
+  /** Platform list for the override menu, fetched once and reused. */
+  let platformsPromise = null;
+
+  /** How each identification source reads in prose. */
+  const SOURCE = {
+    'banner':          'its login banner',
+    'prompt':          'its prompt alone',
+    'version-command': 'a version command',
+    'you':             'you',
+    'none':            'nothing it could match',
+  };
 
   document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('shellmate:device-identified', (e) => {
@@ -34,38 +56,96 @@
       const tab = e.detail || (typeof window.getActiveTab === 'function' ? window.getActiveTab() : null);
       updateStatus(tab ? tab.sessionId : null);
     });
+
+    const status = document.getElementById('status-device');
+    if (status) status.addEventListener('click', () => openChooser());
   });
+
+  // ---------------------------------------------------------------------------
+  // Status bar
+  // ---------------------------------------------------------------------------
 
   function updateStatus(sessionId) {
     const el = document.getElementById('status-device');
     if (!el) return;
 
     const info = sessionId ? identified.get(sessionId) : null;
+    el.classList.remove('status-device-known', 'status-device-unsure');
+
     if (!info || info.platform === 'generic') {
       el.textContent = 'Device: unidentified';
-      el.classList.remove('status-device-known');
       el.title = info
-        ? 'ShellMate could not identify this device, so no platform commands are sent to it.'
+        ? 'ShellMate could not identify this device, so no platform commands ' +
+          'are sent to it. Click to say what it is.'
         : 'Detected device platform';
       return;
     }
 
     const version = info.version ? ` ${info.version}` : '';
-    el.textContent = `Device: ${info.profile_name}${version}`;
-    el.classList.add('status-device-known');
+
+    // The consequence, not just the identity. "Identified but not acted on" is
+    // the state people were being left in without being told, so it gets its
+    // own wording in the bar itself rather than only in the tooltip.
+    if (info.confident) {
+      el.textContent = `Device: ${info.profile_name}${version}`;
+      el.classList.add('status-device-known');
+    } else {
+      el.textContent = `Device: ${info.profile_name}${version} (unconfirmed)`;
+      el.classList.add('status-device-unsure');
+    }
+
     el.title =
-      `Identified from the ${info.source} (confidence ${info.confidence}).` +
-      (info.model ? ` Model ${info.model}.` : '');
+      `Identified from ${SOURCE[info.source] || info.source} ` +
+      `(confidence ${info.confidence} of 1.0).` +
+      (info.model ? ` Model ${info.model}.` : '') +
+      (info.confident
+        ? ''
+        : ` Below the ${info.act_threshold ?? 0.6} needed before ShellMate ` +
+          `sends anything, so paging-off and aliases are inactive.`) +
+      ' Click to set it yourself.';
   }
 
-  /** Say what was sent on the user's behalf, if anything was. */
+  // ---------------------------------------------------------------------------
+  // Saying what was done — and what was not
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Say what was sent on the user's behalf, or why nothing was.
+   *
+   * Every branch names the command at stake. "No commands sent" leaves the
+   * reader wondering which commands; "not confident enough to send
+   * `terminal length 0`" tells them what they are missing and lets them
+   * decide whether they care.
+   */
   function announce(info) {
+    const from = SOURCE[info.source] || info.source;
+
     if (info.paging_command) {
-      note(`identified ${info.profile_name} — sent "${info.paging_command}"`, 'device');
-    } else if (info.platform === 'generic') {
-      note('device not recognised — no commands sent, aliases off', 'device');
-    } else {
-      note(`identified ${info.profile_name}`, 'device');
+      note(`identified ${info.profile_name} from ${from} — sent "${info.paging_command}"`,
+           'device');
+      return;
+    }
+
+    switch (info.paging_skipped) {
+      case 'unconfident':
+        note(`identified ${info.profile_name} from ${from} — not confident enough ` +
+             `to send "${info.paging_available}", so paging is still on`,
+             'device', { offerOverride: true });
+        break;
+      case 'unidentified':
+        note('device not recognised — no commands sent, aliases off',
+             'device', { offerOverride: true });
+        break;
+      case 'off':
+        note(`identified ${info.profile_name} from ${from} — paging-off is ` +
+             `switched off in Settings, so nothing was sent`, 'device');
+        break;
+      case 'no-command':
+        note(`identified ${info.profile_name} from ${from} — nothing to send, ` +
+             `aliases are active`, 'device');
+        break;
+      default:
+        note(`identified ${info.profile_name} from ${from}`, 'device');
     }
   }
 
@@ -76,9 +156,11 @@
    * record of what the device said, and injecting our own commentary into it
    * would corrupt the very transcript the evidence pack depends on.
    */
-  function note(text, kind) {
+  function note(text, kind, opts) {
     const host = document.getElementById('terminals-container');
     if (!host) return;
+
+    opts = opts || {};
 
     const el = document.createElement('div');
     el.className = `device-note device-note-${kind}`;
@@ -92,11 +174,133 @@
 
     el.appendChild(icon);
     el.appendChild(label);
+
+    // A note that explains a feature did nothing should carry the fix, not
+    // leave the reader to go looking for it.
+    if (opts.offerOverride) {
+      const fix = document.createElement('button');
+      fix.type = 'button';
+      fix.className = 'device-note-action';
+      fix.textContent = 'Set platform';
+      fix.addEventListener('click', (e) => { e.stopPropagation(); openChooser(); });
+      el.appendChild(fix);
+      el.classList.add('device-note-interactive');
+    }
+
     host.appendChild(el);
 
-    setTimeout(() => el.classList.add('device-note-fade'), 3500);
-    setTimeout(() => el.remove(), 4200);
+    // Interactive notes wait to be used; the rest fade.
+    if (!opts.offerOverride) {
+      setTimeout(() => el.classList.add('device-note-fade'), 3500);
+      setTimeout(() => el.remove(), 4200);
+    } else {
+      setTimeout(() => el.classList.add('device-note-fade'), 14000);
+      setTimeout(() => el.remove(), 14700);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // "This is a…" — the manual override
+  // ---------------------------------------------------------------------------
+
+  function loadPlatforms() {
+    if (!platformsPromise) {
+      platformsPromise = fetch('/api/platforms')
+        .then(r => r.ok ? r.json() : [])
+        .catch(() => []);
+    }
+    return platformsPromise;
+  }
+
+  async function openChooser() {
+    const tab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+    if (!tab || !tab.sessionId) return;
+
+    document.querySelectorAll('.device-chooser').forEach(m => m.remove());
+
+    // /api/platforms returns them keyed by id, including "generic" — which is
+    // the one thing there is no point choosing deliberately.
+    const platforms = await loadPlatforms();
+    const list = Object.values(platforms.platforms || {})
+      .filter(p => p && p.id && p.id !== 'generic')
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+    if (!list.length) return;
+
+    const menu = document.createElement('div');
+    menu.className = 'device-chooser';
+
+    const heading = document.createElement('div');
+    heading.className = 'device-chooser-title';
+    heading.textContent = 'This device is a…';
+    menu.appendChild(heading);
+
+    const hint = document.createElement('p');
+    hint.className = 'device-chooser-hint';
+    hint.textContent =
+      'Applies the platform’s aliases straight away, and sends its paging ' +
+      'command if that setting is on. Use it when a legal banner or a ' +
+      'terminal server hides what the device is.';
+    menu.appendChild(hint);
+
+    list.forEach(profile => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'device-chooser-row';
+      row.textContent = profile.name || profile.id;
+      if (profile.paging_off) {
+        const cmd = document.createElement('span');
+        cmd.className = 'device-chooser-cmd';
+        cmd.textContent = profile.paging_off;
+        row.appendChild(cmd);
+      }
+      row.addEventListener('click', () => {
+        menu.remove();
+        choose(tab.sessionId, profile.id);
+      });
+      menu.appendChild(row);
+    });
+
+    document.body.appendChild(menu);
+
+    // Anchored to the status-bar entry it belongs to, opening upwards since
+    // the status bar is the last row on screen.
+    const anchor = document.getElementById('status-device');
+    if (anchor) {
+      const box = anchor.getBoundingClientRect();
+      menu.style.left = `${Math.max(8, box.left)}px`;
+      menu.style.bottom = `${window.innerHeight - box.top + 6}px`;
+    }
+
+    const dismiss = (e) => {
+      if (menu.contains(e.target)) return;
+      menu.remove();
+      document.removeEventListener('mousedown', dismiss);
+    };
+    setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
+  }
+
+  async function choose(sessionId, platform) {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/platform`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform }),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        note(detail.detail || 'Could not set the platform', 'device');
+        return;
+      }
+      const summary = await res.json();
+      summary.sessionId = sessionId;
+      identified.set(sessionId, summary);
+      updateStatus(sessionId);
+      announce(summary);
+    } catch (e) {
+      note('Could not reach ShellMate to set the platform', 'device');
+    }
   }
 
   window.getDeviceInfo = (sessionId) => identified.get(sessionId) || null;
+  window.chooseDevicePlatform = openChooser;
 })();

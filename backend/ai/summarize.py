@@ -11,6 +11,7 @@ import logging
 from typing import Iterable
 
 from backend.connections.manager import SessionManager
+from backend.session import outbound
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,9 @@ async def summarize_session(
         transcripts.append({
             "label":    sess.get("display_label") or sess.get("hostname", sid[:8]),
             "hostname": sess.get("hostname", "?"),
-            "buffer":   sess["buffer"].get_text(400),
+            # Through the outbound helper rather than straight off the
+            # buffer: this text goes to a third-party API, and devices echo.
+            "buffer":   outbound.session_text(sess, 400),
         })
 
     user_prompt = _build_user_prompt(transcripts, chat_messages)

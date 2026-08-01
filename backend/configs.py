@@ -27,6 +27,7 @@ import logging
 import re
 import time
 
+from backend import config_archive
 from backend.connections.base import ConnectionError_
 from backend.connections.ssh_handler import SSHHandler
 from backend.fingerprint import identify
@@ -166,9 +167,21 @@ def capture_config(session: dict) -> dict:
     result = store.add_snapshot(hostname, config, session.get("session_id", ""))
     result["platform"] = platform
     result["line_count"] = config.count("\n") + 1
+
+    # A copy as a file, where the user asked for it. Redacted, capped, and
+    # never allowed to turn a successful capture into a failed one — the
+    # snapshot above is already stored and the drift check depends on it.
+    try:
+        result["archive"] = config_archive.archive(
+            hostname, config, changed=bool(result.get("stored")))
+    except Exception as exc:                                # pragma: no cover
+        logger.warning("Could not archive the capture from %s: %s", hostname, exc)
+        result["archive"] = {"written": False, "reason": str(exc)}
+
     logger.info(
-        "Captured %s lines of config from %s (%s)",
+        "Captured %s lines of config from %s (%s)%s",
         result["line_count"], hostname, "changed" if result["stored"] else "unchanged",
+        f"; saved to {result['archive']['path']}" if result["archive"].get("written") else "",
     )
     return result
 
@@ -248,6 +261,14 @@ def drift_report(session: dict) -> dict:
     explanation, not an error banner on an otherwise fine session.
     """
     hostname = session.get("hostname") or ""
+
+    if not config_archive.capture_enabled():
+        return {
+            "available": False, "hostname": hostname,
+            "reason": "Configuration capture is switched off under "
+                      "Settings → Session Logging.",
+        }
+
     previous = store.latest_snapshot(hostname)
 
     try:
@@ -255,9 +276,14 @@ def drift_report(session: dict) -> dict:
     except ConnectionError_ as exc:
         return {"available": False, "reason": str(exc), "hostname": hostname}
 
+    # What was saved as a file, if anything — the confirmation the user gets
+    # for a capture that is otherwise entirely invisible to them.
+    archive = result.get("archive") or {}
+
     if previous is None:
         return {
             "available": True, "first_visit": True, "hostname": hostname,
+            "archive": archive,
             "summary": f"First configuration snapshot of {hostname} stored "
                        f"({result['line_count']:,} lines).",
         }
@@ -266,6 +292,7 @@ def drift_report(session: dict) -> dict:
         return {
             "available": True, "first_visit": False, "changed": 0,
             "hostname": hostname,
+            "archive": archive,
             "days_since": _days_since(previous.get("captured_at")),
             "summary": _unchanged_summary(hostname, previous.get("captured_at")),
         }
@@ -277,6 +304,7 @@ def drift_report(session: dict) -> dict:
         "available":   True,
         "first_visit": False,
         "hostname":    hostname,
+        "archive":     archive,
         "days_since":  _days_since(previous.get("captured_at")),
         "changed":     comparison["changed"],
         "added":       comparison["added"],

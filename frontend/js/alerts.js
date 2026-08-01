@@ -291,6 +291,20 @@
     if (alert.sound && enabled('sound', true)) beep(alert.severity);
   }
 
+  /**
+   * A quiet confirmation that something finished — a configuration captured,
+   * a file written.
+   *
+   * Deliberately not routed through raise(). The switches in Settings → Alerts
+   * govern how loudly ShellMate interrupts you about *a device that is about
+   * to do something*, and borrowing them to also suppress "your capture was
+   * saved" would make one of them mean two things. This never beeps and never
+   * lingers.
+   */
+  function notify(what) {
+    toast({ severity: 'info', icon: 'check_circle', ...what });
+  }
+
   function toast(alert) {
     if (!toastHost) return;
 
@@ -299,8 +313,9 @@
 
     const icon = document.createElement('span');
     icon.className = 'material-symbols-outlined';
-    icon.textContent = alert.severity === 'critical' ? 'error'
-                     : alert.severity === 'warning' ? 'warning' : 'help';
+    icon.textContent = alert.icon
+                     || (alert.severity === 'critical' ? 'error'
+                       : alert.severity === 'warning' ? 'warning' : 'help');
 
     const text = document.createElement('div');
     text.className = 'alert-toast-text';
@@ -388,6 +403,7 @@
   // Exposed so other producers can raise alerts, and for testing.
   window.shellmateAlerts = {
     raise,
+    notify,
     pending: () => [...tracked.entries()].map(([sessionId, e]) => ({
       sessionId, ...e.pending, seconds_left: secondsLeft(e.pending),
     })),

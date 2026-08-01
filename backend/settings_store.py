@@ -54,6 +54,27 @@ DEFAULT_SETTINGS: dict = {
         # Mask credentials in written logs. On by default: a session log is
         # meant to be handed to someone else, and devices echo.
         "redact_secrets": True,
+
+        # --- Configuration capture -------------------------------------
+        #
+        # On connect, fetch the device's running configuration on a second
+        # channel — invisibly, never in the user's own session — and store it.
+        # On by default because it is what the drift check on connect is built
+        # from, and that has always run.
+        "capture_configs": True,
+        # Keeping a copy as a *file* is the part that writes to somewhere the
+        # user chose, so it waits to be asked for.
+        "save_config_files": False,
+        # Separate from the session-log directory: these are artefacts, not a
+        # transcript, and mixing them makes both harder to search.
+        "config_directory": "configs",
+        # Retention. A capture per login on a fleet of switches is unbounded
+        # otherwise, and the folder may well be a network share.
+        "config_keep_per_device": 20,
+        "config_max_age_days": 365,
+        "config_max_total_mb": 200,
+        # Offer the diff when the configuration has changed since last time.
+        "diff_on_connect": True,
     },
     "appearance": {
         "color_scheme": "deep_space",
@@ -131,11 +152,40 @@ DEFAULT_SETTINGS: dict = {
     },
     "ai": {
         # "learn" | "tshoot" — controls which system-prompt persona is used.
+        # Now a starting value rather than only a record of the last toggle:
+        # somebody who always wants Learn should be able to say so once.
         "mode": "tshoot",
-        # The assistant is optional. On a locked-down network it may not be
-        # reachable at all, and the terminal has to stand on its own.
-        "panel_enabled": True,
+        # "backend:model", as the picker in the chat header spells it. Held
+        # here rather than in the page, so it survives a reload and travels
+        # with the data folder — which is why the quick buttons moved out of
+        # localStorage, and this never followed.
+        "default_model": "",
+        # The assistant may propose commands the user can click into a live
+        # device. Some people want an explainer and nothing clickable.
+        "suggest_commands": True,
+        # Dangerous suggestions get a confirmation step. Which commands count
+        # is per-platform in platforms.json; this is only the switch.
+        "confirm_dangerous": True,
+        # The assistant is optional, and off until asked for. A fresh install
+        # otherwise opens with a third of the window given to a pane that
+        # cannot answer anything until a provider is configured — and on a
+        # locked-down network there may be no provider to configure. The
+        # terminal has to stand on its own, which is the whole reason the
+        # panel is optional. The assistant icon in the sidebar turns it on.
+        "panel_enabled": False,
     },
+}
+
+# Defaults that have changed since release, and what they used to be.
+#
+# A default is only a default for an installation that has never been
+# configured. Deep-merging a new default over an existing settings.json would
+# reach into working setups and change them — someone who has been using the
+# assistant for months would find it gone after an update, with no action of
+# theirs to explain it. So an existing file keeps the old value, written in
+# explicitly, and only a genuinely first run sees the new one.
+LEGACY_DEFAULTS: dict[tuple[str, str], object] = {
+    ("ai", "panel_enabled"): True,
 }
 
 # Which env-var name backs each provider field, for the "preconfigured by env"
@@ -156,15 +206,43 @@ SECRET_FIELDS = {
 
 
 def get_settings() -> dict:
-    """Return raw stored settings deep-merged over the defaults."""
+    """
+    Return raw stored settings deep-merged over the defaults.
+
+    A settings file that exists but predates a setting keeps that setting's
+    old default — see :data:`LEGACY_DEFAULTS`. Only a first run, where there
+    is no file at all, gets the current one.
+    """
     settings_file = paths.settings_file()
     if not settings_file.exists():
         return _deep_merge(DEFAULT_SETTINGS, {})
     try:
         stored = json.loads(settings_file.read_text(encoding="utf-8"))
-        return _deep_merge(DEFAULT_SETTINGS, stored)
+        return _deep_merge(DEFAULT_SETTINGS, _honour_legacy_defaults(stored))
     except Exception:
         return _deep_merge(DEFAULT_SETTINGS, {})
+
+
+def _honour_legacy_defaults(stored: dict) -> dict:
+    """
+    Fill in what an older settings file could not have said.
+
+    A missing key in an existing file means "this predates the setting", which
+    is not the same as "the user wants whatever the default is now".
+    """
+    if not isinstance(stored, dict):
+        return {}
+
+    patched = dict(stored)
+    for (section, key), legacy in LEGACY_DEFAULTS.items():
+        values = patched.get(section)
+        if not isinstance(values, dict):
+            # The whole section is missing, so the file certainly predates it.
+            patched[section] = {**(values if isinstance(values, dict) else {}),
+                                key: legacy}
+        elif key not in values:
+            patched[section] = {**values, key: legacy}
+    return patched
 
 
 def get_settings_for_ui() -> dict:
@@ -255,6 +333,25 @@ def log_directory() -> Path:
     """
     configured = (get_settings().get("logging", {}) or {}).get("directory", "logs")
     candidate = Path(configured)
+    return candidate if candidate.is_absolute() else paths.data_dir() / candidate
+
+
+def config_directory() -> Path:
+    """
+    Resolve the configuration-archive directory to an absolute path.
+
+    Deliberately not under the session-log directory. A captured configuration
+    is an artefact — a thing as it was at a moment — while a session log is a
+    transcript of what someone did. Filed together, neither is easy to find,
+    and the retention rules that make sense for one are wrong for the other.
+
+    Absolute paths are honoured as-is, so captures can go straight to a share.
+    A relative one resolves against the portable data directory, never the
+    working directory — which for a double-clicked executable is wherever
+    Explorer happened to leave us.
+    """
+    configured = (get_settings().get("logging", {}) or {}).get("config_directory", "configs")
+    candidate = Path(configured or "configs")
     return candidate if candidate.is_absolute() else paths.data_dir() / candidate
 
 

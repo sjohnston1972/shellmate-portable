@@ -48,7 +48,7 @@ class Fingerprint:
     version: str = ""
     model: str = ""
     confidence: float = 0.0
-    source: str = "none"          # banner | prompt | version-command
+    source: str = "none"          # banner | prompt | version-command | you
 
     @property
     def certain_enough_to_act(self) -> bool:
@@ -116,14 +116,30 @@ def _from_prompt(prompt: str) -> tuple[str, float]:
     """
     Guess from the shape of the prompt alone.
 
-    Weak evidence, and treated as such: enough to pick sensible aliases, not
-    enough on its own to start sending commands.
+    Weak evidence, and mostly treated as such: enough to pick sensible
+    aliases, rarely enough on its own to start sending commands.
+
+    It is tempting to score these higher — ``hostname(config)#`` really is
+    distinctive, and nothing else prints it.  But distinctive *of what?*  It
+    says the device is Cisco-shaped, and IOS, NX-OS, ASA and EOS all print it
+    identically.  The command we would act on belongs to the platform, not the
+    family: ``terminal length 0`` is right on three of those four and wrong on
+    an ASA, which wants ``terminal pager 0``.  A prompt that narrows the field
+    to four vendorsis not the same as one that picks the platform, so these
+    stay below :data:`ACT_THRESHOLD` and the user gets an explicit override
+    instead (see ``onboard.as_chosen``).
+
+    ``:~`` is the exception, and only because it fails safely: a shell prompt
+    is unmistakable, and the Linux profile has no paging command to get wrong.
+    Raising it buys the aliases and costs nothing.
     """
     if not prompt:
         return GENERIC, 0.0
 
-    if prompt.rstrip().endswith("$") or ":~" in prompt:
-        return "linux", 0.5
+    if ":~" in prompt:
+        return "linux", 0.7          # unmistakable, and nothing is sent anyway
+    if prompt.rstrip().endswith("$"):
+        return "linux", 0.5          # probably a shell; could be a prompt style
     if re.search(r"\((?:active|passive|suspended)\)\s*[>#]", prompt, re.IGNORECASE):
         return "panos", 0.5
     if "@" in prompt:
@@ -131,7 +147,7 @@ def _from_prompt(prompt: str) -> tuple[str, float]:
     if "/pri/" in prompt or "/sec/" in prompt:
         return "asa", 0.6            # failover context is distinctive
     if re.search(r"\(config[^)]*\)\s*#", prompt):
-        return "ios", 0.5
+        return "ios", 0.5            # Cisco-shaped — but so are NX-OS and ASA
     if prompt.rstrip().endswith(("#", ">")):
         return "ios", 0.35           # the commonest, but barely evidence
     return GENERIC, 0.0

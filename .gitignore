@@ -21,6 +21,11 @@ settings.json
 build/
 dist/
 
+# Generated from frontend/Untitled-removebg-preview.png by backend/branding.py,
+# on every build and on first run from source. Checking it in would let it fall
+# out of step with the mark it is derived from.
+frontend/shellmate.ico
+
 # Test artifacts
 test_ui.py
 

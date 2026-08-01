@@ -486,6 +486,12 @@
       const plaintext = activeProfileStorage === 'plaintext';
       box.checked   = !plaintext;
       if (plain) plain.checked = plaintext;
+
+      // And say which it is. The badge used to read "saved in vault"
+      // regardless, which claimed encryption over a password that had none.
+      const where = document.getElementById('saved-credential-where');
+      if (where) where.textContent = plaintext ? 'saved in plain text' : 'saved in vault';
+      if (badge) badge.classList.toggle('saved-badge-plain', plaintext);
       const field = document.getElementById('field-password');
       if (field) field.placeholder = 'Using saved password';
     } else {

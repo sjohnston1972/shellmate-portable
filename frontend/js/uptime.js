@@ -1,0 +1,149 @@
+/**
+ * uptime.js — How long each session has been up.
+ *
+ * Worth more here than in an ordinary terminal. It is the first thing you want
+ * after a device comes back, and the thing you check when a session feels like
+ * it may have been idled out by an ACL somewhere in the middle.
+ *
+ * Three decisions behind the implementation:
+ *
+ * **Counted in the browser from an absolute timestamp.** The backend stamps
+ * `connected_at` when the session is created and sends it once. Nothing ticks
+ * over the WebSocket: a per-second message per session would be noise, and a
+ * clock driven by message arrival stutters whenever the device goes quiet.
+ *
+ * **One interval for every tab, not one per tab.** Twenty sessions should cost
+ * one timer, and it stops entirely when there is nothing to count.
+ *
+ * **A disconnected session stops and says what it reached.** "Disconnected
+ * after 02:11:04" is the useful form. A tab still counting up on a dead
+ * session is telling you something untrue, which is worse than telling you
+ * nothing.
+ */
+(function () {
+  'use strict';
+
+  /** sessionId -> { startedMs, endedMs|null } */
+  const sessions = new Map();
+
+  let ticker = null;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // Redraw when the active tab changes, so the status bar is right
+    // immediately rather than up to a second later.
+    window.addEventListener('mate:tab-switched', render);
+  });
+
+  /**
+   * Start counting for a session.
+   *
+   * @param {string} sessionId
+   * @param {string} connectedAt ISO 8601 from the backend. Falling back to
+   *        "now" is deliberate: a missing timestamp should cost a few seconds
+   *        of accuracy, not the whole feature.
+   */
+  function start(sessionId, connectedAt) {
+    if (!sessionId) return;
+    const parsed = connectedAt ? Date.parse(connectedAt) : NaN;
+    sessions.set(sessionId, {
+      startedMs: Number.isNaN(parsed) ? Date.now() : parsed,
+      endedMs:   null,
+    });
+    startTicker();
+    render();
+  }
+
+  /** Freeze a session's timer at the moment it dropped. */
+  function stop(sessionId) {
+    const entry = sessions.get(sessionId);
+    if (!entry || entry.endedMs !== null) return;
+    entry.endedMs = Date.now();
+    render();
+  }
+
+  /** Resume counting — a reconnect gets a fresh clock, not the old one. */
+  function restart(sessionId, connectedAt) {
+    sessions.delete(sessionId);
+    start(sessionId, connectedAt);
+  }
+
+  function forget(sessionId) {
+    sessions.delete(sessionId);
+    if (!sessions.size) stopTicker();
+    render();
+  }
+
+  function startTicker() {
+    if (ticker) return;
+    ticker = setInterval(render, 1000);
+  }
+
+  function stopTicker() {
+    if (ticker) { clearInterval(ticker); ticker = null; }
+  }
+
+  /**
+   * Seconds a session has been up, or was up for.
+   * @returns {number|null} null if the session is unknown.
+   */
+  function secondsFor(sessionId) {
+    const entry = sessions.get(sessionId);
+    if (!entry) return null;
+    return Math.max(0, Math.round(((entry.endedMs ?? Date.now()) - entry.startedMs) / 1000));
+  }
+
+  /** hh:mm:ss, with days spelled out once a session has run that long. */
+  function format(seconds) {
+    if (seconds === null || seconds === undefined) return '';
+    const days = Math.floor(seconds / 86400);
+    const h = Math.floor((seconds % 86400) / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    const clock = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:` +
+                  `${String(s).padStart(2, '0')}`;
+    return days ? `${days}d ${clock}` : clock;
+  }
+
+  function label(sessionId) {
+    const entry = sessions.get(sessionId);
+    if (!entry) return '';
+    const text = format(secondsFor(sessionId));
+    return entry.endedMs === null
+      ? `connected ${text}`
+      : `disconnected after ${text}`;
+  }
+
+  function render() {
+    const el = document.getElementById('status-uptime');
+    const active = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+
+    if (el) {
+      const text = active ? label(active.sessionId) : '';
+      el.textContent = text;
+      // Hidden rather than blank, so the separator beside it does not sit on
+      // its own in an empty status bar.
+      el.classList.toggle('hidden', !text);
+      const sep = document.getElementById('status-uptime-sep');
+      if (sep) sep.classList.toggle('hidden', !text);
+    }
+
+    // Every tab's tooltip, which is where "which of these has been up
+    // longest" gets answered without crowding the tab strip. The reload
+    // countdown already owns the badge there, and it is the one that must
+    // never be mistaken for something else.
+    sessions.forEach((_entry, sessionId) => {
+      const tabEl = document.querySelector(`.tab[data-session-id="${CSS.escape(sessionId)}"]`);
+      if (!tabEl) return;
+      const labelEl = tabEl.querySelector('.tab-label');
+      if (!labelEl) return;
+      const name = labelEl.textContent.replace(/ \(disconnected\)$/, '');
+      labelEl.title = `${name} — ${label(sessionId)}`;
+    });
+  }
+
+  window.shellmateUptime = {
+    start, stop, restart, forget, render,
+    secondsFor, label,
+    _test: { format },
+  };
+})();
