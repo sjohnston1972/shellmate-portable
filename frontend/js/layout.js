@@ -138,8 +138,15 @@
   function render() {
     const l = layout();
 
-    container.classList.toggle('tiled', l.panes > 1);
-    if (l.panes > 1) {
+    // With nothing open there is nothing to tile, and the welcome screen is
+    // already offering a connection — better than a grid of empty boxes drawn
+    // over the top of it. The layout is still *chosen*: it is remembered in
+    // settings.json and takes effect the moment a tab opens.
+    const anySessions = (window.getOpenSessionIds ? window.getOpenSessionIds() : []).length > 0;
+    const tiled = l.panes > 1 && anySessions;
+
+    container.classList.toggle('tiled', tiled);
+    if (tiled) {
       container.style.gridTemplateColumns = l.cols;
       container.style.gridTemplateRows    = l.rows;
       container.style.gridTemplateAreas   = l.areas.map(r => `"${r}"`).join(' ');
@@ -158,11 +165,11 @@
       const sessionId = el.id.replace('terminal-', '');
       const pane = paneOf(sessionId);
       el.classList.toggle('active', shown.has(sessionId));
-      el.classList.toggle('pane-focused', l.panes > 1 && pane === focusedPane);
-      el.style.gridArea = (l.panes > 1 && pane >= 0) ? PANE_LETTERS[pane] : '';
+      el.classList.toggle('pane-focused', tiled && pane === focusedPane);
+      el.style.gridArea = (tiled && pane >= 0) ? PANE_LETTERS[pane] : '';
     });
 
-    if (l.panes > 1) {
+    if (tiled) {
       assignment.forEach((sessionId, i) => {
         if (!sessionId) container.appendChild(placeholder(i));
       });
@@ -175,7 +182,7 @@
     // implies the rest are hidden when they are not.
     window.dispatchEvent(new CustomEvent('shellmate:layout-rendered', {
       detail: {
-        visible: l.panes > 1 ? visible() : [],
+        visible: tiled ? visible() : [],
         focused: assignment[focusedPane] || null,
       },
     }));
