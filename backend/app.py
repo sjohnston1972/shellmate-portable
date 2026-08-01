@@ -1743,10 +1743,11 @@ class BroadcastRequest(BaseModel):
         return out
 
 
-# A whole sequence runs inside one request, so it needs a ceiling. Long enough
-# for a real save-and-verify across a rack, short enough that a mistyped wait
-# cannot hold a connection open all afternoon.
-BROADCAST_MAX_SECONDS = 180
+# The ceiling on a whole sequence now lives in Stockton as
+# `broadcast.max_seconds`. The constant it replaced stayed behind and went on
+# being quoted in the timeout message, so a sequence abandoned at 600s
+# reported 180 — a number that matched nothing the user had set, on the one
+# message telling them how long their devices had been running commands.
 
 
 @app.post("/api/broadcast")
@@ -1837,8 +1838,9 @@ async def broadcast(request: BroadcastRequest) -> dict:
     except asyncio.TimeoutError:
         raise HTTPException(
             status_code=504,
-            detail=(f"The sequence was still running after {BROADCAST_MAX_SECONDS}s "
-                    f"and was abandoned. Some commands will already have been sent — "
+            detail=(f"The sequence was still running after "
+                    f"{int(advanced_setting('broadcast.max_seconds'))}s and was "
+                    f"abandoned. Some commands will already have been sent — "
                     f"check the tabs."),
         ) from None
 

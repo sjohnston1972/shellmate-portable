@@ -250,12 +250,30 @@
             websocket.send(JSON.stringify({ type: 'input', data: text }));
             return;
           }
-          const delay = A('terminal.paste_chunk_delay', 0);
+          // A delay of zero makes chunking inert: `index * 0` schedules every
+          // chunk at timeout 0, they all fire in one macrotask batch, and the
+          // paste reaches the device exactly as fast as it did unchunked —
+          // which is the one thing the setting exists to prevent. So setting
+          // a chunk size and leaving the delay alone now paces anyway.
+          const delay = Math.max(A('terminal.paste_chunk_delay', 20), 1);
+
+          // Split on *bytes*, not characters. The setting is named for bytes
+          // and a device's input buffer is measured in them, so a paste of
+          // box-drawing or accented text was sending up to three times the
+          // intended amount per chunk — on the kit that needs this, that is
+          // the difference between working and dropping characters.
+          const encoder = new TextEncoder();
+          const decoder = new TextDecoder();
+          const bytes = encoder.encode(text);
           const chunks = [];
-          for (let at = 0; at < text.length; at += size) {
-            chunks.push(text.slice(at, at + size));
+          for (let at = 0; at < bytes.length; at += size) {
+            // stream: true keeps a multi-byte character split across a chunk
+            // boundary from being decoded as a replacement character.
+            chunks.push(decoder.decode(bytes.slice(at, at + size), { stream: true }));
           }
-          chunks.forEach((chunk, index) => {
+          chunks.push(decoder.decode());     // flush anything held back
+
+          chunks.filter(Boolean).forEach((chunk, index) => {
             setTimeout(() => {
               if (websocket.readyState === WebSocket.OPEN) {
                 websocket.send(JSON.stringify({ type: 'input', data: chunk }));
@@ -310,6 +328,14 @@
     // mouse happened to be part-way through.
     container.addEventListener('mouseup', (e) => {
       if (e.button !== 0) return;            // left button only
+      // The setting was passed to xterm as `copyOnSelect` and then ignored
+      // here, so this handler copied whatever was selected regardless — the
+      // switch appeared to do nothing because the code below did the copying
+      // itself. Somebody turning it off is usually protecting a clipboard
+      // they are pasting somewhere else.
+      const prefs = (window.shellmateSettings || {}).terminal || {};
+      if (prefs.copy_on_select === false) return;
+
       // Let xterm commit the selection before reading it.
       setTimeout(() => {
         if (!terminal.hasSelection()) return;

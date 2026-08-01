@@ -218,6 +218,11 @@ class SessionStore:
         """Record the start of a session, unless recording is switched off."""
         if not _recording_enabled():
             return
+
+        # Once per session is the right cadence: often enough that a long-lived
+        # installation stays bounded, rare enough that it never competes with a
+        # live session for the lock.
+        self.prune()
         with self._lock:
             connection = self.connect()
             connection.execute(
@@ -263,15 +268,67 @@ class SessionStore:
             )
             connection.commit()
 
+    def prune(self) -> int:
+        """
+        Delete history older than the retention setting. Returns rows removed.
+
+        `history.retention_days` was declared, given a reader, and never
+        called — so a row labelled "Discard history after" accepted a number,
+        wrote it to settings.json and discarded nothing. Somebody running from
+        a stick, which is the stated reason for the setting, would believe the
+        disk problem was handled.
+
+        Zero means keep forever and is the default, so this is a no-op until
+        somebody asks for it.
+
+        Sessions are removed only once they have no commands left, rather than
+        by their own start time: a session opened last month and still running
+        would otherwise take its recent commands with it.
+        """
+        days = _retention_days()
+        if days <= 0:
+            return 0
+
+        cutoff = time.time() - (days * 86400)
+        try:
+            with self._lock:
+                connection = self.connect()
+                cursor = connection.execute(
+                    "DELETE FROM commands WHERE ran_at < ?", (cutoff,))
+                removed = cursor.rowcount or 0
+                connection.execute(
+                    """
+                    DELETE FROM sessions
+                     WHERE id NOT IN (SELECT DISTINCT session_id FROM commands)
+                       AND started_at < ?
+                    """, (cutoff,))
+                connection.commit()
+        except sqlite3.Error as exc:
+            # Never worth breaking a session over.
+            logger.warning("Could not prune history: %s", exc)
+            return 0
+
+        if removed:
+            logger.info("Pruned %d command(s) older than %d days", removed, days)
+        return removed
+
     def add_command(self, session_id: str, record: Any) -> int:
         """
         Store one command and its output.
 
         Returns:
-            The new row id, or -1 if the write failed. History is valuable but
-            never worth breaking a live session over, so failures are logged
-            and swallowed.
+            The new row id, or -1 if nothing was written. History is valuable
+            but never worth breaking a live session over, so failures are
+            logged and swallowed.
         """
+        # Checked here as well as in start_session(). Guarding only the parent
+        # row meant switching recording off skipped the `sessions` entry and
+        # went on writing every command and every byte of output — which is
+        # the opposite of what the setting says, and the people who turn it
+        # off are the ones who most need it to be true.
+        if not _recording_enabled():
+            return -1
+
         output = record.output or ""
         cap = _max_output_chars()
         if len(output) > cap:

@@ -297,9 +297,12 @@ SETTINGS: tuple[Setting, ...] = (
             "Some devices drop characters when a paste arrives faster than "
             "their input buffer drains.",
             minimum=0, maximum=65536, unit="bytes"),
-    Setting("terminal.paste_chunk_delay", "Delay between paste chunks", 0, "int",
+    Setting("terminal.paste_chunk_delay", "Delay between paste chunks", 20, "int",
             "Wait this long between pieces.",
-            "Only does anything when a chunk size is set.",
+            "Only does anything when a chunk size is set — but then it does "
+            "the actual work. At zero the chunks all fire at once and the "
+            "paste arrives just as fast as it did unsplit, which is the one "
+            "outcome chunking exists to prevent, so it is floored at 1ms.",
             minimum=0, maximum=2000, unit="ms"),
 
     # --- History -----------------------------------------------------------

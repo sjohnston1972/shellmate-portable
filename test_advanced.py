@@ -392,6 +392,59 @@ def test_describe_is_renderable() -> None:
           any(s["restart"] for s in described["settings"]))
 
 
+def test_a_setting_that_says_it_does_something_does_it() -> None:
+    """
+    Four settings that were declared, exposed, and read by nothing.
+
+    This is the failure mode the registry was built to prevent — the
+    declaration *is* the default the code reads, so a setting and its
+    behaviour cannot drift. These drifted anyway, by being read in one place
+    and ignored in another, or by being read into a variable nobody used.
+
+    Each is checked against the code that has to honour it rather than against
+    the registry, because the registry was never the half that was wrong.
+    """
+    print(chr(10) + "-- Settings that have to mean something --")
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).parent
+
+    store = (root / "backend" / "store.py").read_text(encoding="utf-8")
+    # history.record: start_session() checked it and add_command() did not, so
+    # switching recording off skipped the session row and stored every command.
+    add_command = store[store.index("def add_command"):store.index("def search")]
+    check("history.record is checked before a command is stored",
+          "_recording_enabled()" in add_command,
+          "recording off still wrote every command and its output")
+
+    # history.retention_days: a reader with no caller.
+    check("history.retention_days is actually applied",
+          "_retention_days()" in store and store.count("_retention_days") >= 2,
+          "declared, given a reader, and never called — so 'Discard history "
+          "after' discarded nothing")
+    check("and there is something that deletes",
+          "DELETE FROM commands WHERE ran_at" in store)
+
+    terminal = (root / "frontend" / "js" / "terminal.js").read_text(encoding="utf-8")
+    mouseup = terminal[terminal.index("addEventListener('mouseup'"):]
+    check("copy_on_select is checked where the copying happens",
+          "copy_on_select" in mouseup[:900],
+          "xterm was told the setting and this handler copied anyway")
+
+    check("paste chunking cannot be scheduled with a zero delay",
+          "Math.max(A('terminal.paste_chunk_delay'" in terminal,
+          "index * 0 fires every chunk at once, which is the one outcome "
+          "chunking exists to prevent")
+    check("and chunks are split on bytes, as the setting is named",
+          "TextEncoder" in terminal,
+          "splitting by character sent up to 3x the intended bytes per chunk")
+
+    app = (root / "backend" / "app.py").read_text(encoding="utf-8")
+    check("the broadcast timeout message quotes the configured limit",
+          "BROADCAST_MAX_SECONDS" not in app,
+          "a sequence abandoned at 600s reported 180")
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Stockton — advanced settings")
@@ -409,6 +462,7 @@ def main() -> int:
         test_every_setting_is_actually_read,
         test_what_is_deliberately_absent,
         test_describe_is_renderable,
+        test_a_setting_that_says_it_does_something_does_it,
     ):
         try:
             test()
