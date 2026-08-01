@@ -113,6 +113,11 @@ DEFAULT_SETTINGS: dict = {
         # joke one: over Remote Desktop an animation that drops frames is
         # worse than no animation.
         "panel_transition": "slide",
+        # Per-panel widths, keyed by element id, set by dragging the handle.
+        # Alongside chat_pane_fraction for the same reason: a layout
+        # preference should travel with the data folder rather than live in
+        # one browser's local storage.
+        "panel_widths": {},
     },
     # Remembered so it opens where it was left rather than at a fixed size in
     # the middle of whichever monitor Windows picks.

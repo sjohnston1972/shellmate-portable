@@ -60,6 +60,15 @@
 
   /* Layout dimensions */
   --sidebar-width:     56px;
+
+  /* One height for a control that sits beside another control.
+     Inputs took their height from their own padding and font size, buttons
+     from theirs, and neither declared one — so a Browse button beside a path
+     field agreed with it only by coincidence, and mostly did not: one row
+     measured 28, 18 and 15 pixels across its three controls. Density is
+     switchable, so this is a token with a compact variant rather than a
+     fixed number. */
+  --control-height:    34px;
   --tab-bar-height:    44px;
   --status-bar-height: 26px;
 
@@ -2311,6 +2320,28 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Everything in one of these rows agrees on a height, whatever it is.
+   Applied to the wrapper rather than to each control, so a new field or a new
+   button inherits it instead of having to remember. */
+.setting-input-group > input,
+.setting-input-group > select,
+.setting-input-group > button,
+.field-with-button > input,
+.field-with-button > select,
+.field-with-button > button {
+  height: var(--control-height);
+  box-sizing: border-box;
+}
+
+/* Line height rather than vertical padding, or the label sits off-centre once
+   the box has a fixed height. */
+.setting-input-group > button,
+.field-with-button > button {
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1;
 }
 
 /* A path and its Browse button, filling the row. */
@@ -5448,6 +5479,8 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 
 /* Compact density. Scoped to the chrome — the terminal has its own font size
    and line height, and squeezing that from here would fight with them. */
+:root[data-density="compact"] { --control-height: 28px; }
+
 :root[data-density="compact"] #tab-bar { height: 32px; padding: 0 6px; }
 :root[data-density="compact"] .tab { height: 24px; padding: 0 6px 0 8px; font-size: 11px; }
 :root[data-density="compact"] .sidebar-link { padding: 6px; }
@@ -6332,3 +6365,45 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   color: var(--error);
   font-size: 12px;
 }
+
+
+/* The assistant toggle, now beside the layout picker rather than in the
+   sidebar rail — it is half of the split screen, not a panel that opens over
+   it. Shaped like its neighbours in the tab bar. */
+#btn-ai-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  background: none;
+  border: 0;
+  color: var(--on-surface-dim);
+  cursor: pointer;
+}
+
+#btn-ai-toggle:hover  { color: var(--on-surface); }
+#btn-ai-toggle.active { color: var(--primary); }
+#btn-ai-toggle .material-symbols-outlined { font-size: 18px; }
+
+
+/* Dragging a side panel wider (#122).
+   On the left edge, because every panel is anchored right — so dragging left
+   makes it bigger, which is the direction the pointer expects. */
+.panel-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 2;
+}
+
+.panel-resize-handle:hover { background: var(--primary-container); }
+
+.side-panel { position: relative; }
+
+/* While dragging, stop the pointer selecting text in whatever it passes over
+   and keep the resize cursor whatever it is currently above. */
+body.resizing-panel { user-select: none; cursor: ew-resize; }
+body.resizing-panel * { cursor: ew-resize !important; }

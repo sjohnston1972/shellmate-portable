@@ -33,6 +33,8 @@
   let subnetHintEl;
 
   let scanId = null;
+  /** The last scan started, so Discard can reach it after it finishes. */
+  let lastScanId = '';
   let poller = null;
   let lastResults = [];
   const chosen = new Set();
@@ -66,6 +68,8 @@
     document.getElementById('discovery-save').addEventListener('click', save);
     document.getElementById('discovery-select-all')
       .addEventListener('click', selectAll);
+    document.getElementById('discovery-discard')
+      .addEventListener('click', discardScan);
 
     // From the connection dialog. The dialog stays open behind it: somebody
     // who finds the address wants to carry on filling the form in, not start
@@ -157,6 +161,7 @@
       if (!res.ok) { setStatus(state.detail || 'Could not start the scan.', true); return; }
 
       scanId = state.id;
+      lastScanId = state.id;
       chosen.clear();
       running(true);
       render(state);
@@ -430,6 +435,39 @@
     const set = await res.json();
     return { username: created.username || answer.username || '',
              credential_ref: set.id };
+  }
+
+  /**
+   * Throw the results away, here and on the server.
+   *
+   * No confirmation. The results are re-derivable by scanning again, and a
+   * confirmation on a tidy-up action is the sort of thing people learn to
+   * click through — which then costs them on the ones that matter.
+   *
+   * The target and port fields are left alone: the next scan is usually a
+   * variation on the last, and clearing them would be a different action.
+   */
+  async function discardScan() {
+    const id = scanId || lastScanId;
+    if (id) {
+      try {
+        await fetch(`/api/discovery/scans/${id}`, { method: 'DELETE' });
+      } catch (e) { /* the view still clears */ }
+    }
+
+    clearInterval(poller);
+    poller = null;
+    scanId = null;
+    lastScanId = '';
+    lastResults = [];
+    chosen.clear();
+
+    resultsEl.innerHTML = '';
+    resultsHintEl.classList.remove('hidden');
+    saveRowEl.classList.add('hidden');
+    saveStatusEl.textContent = '';
+    running(false);
+    setStatus('');
   }
 
   function setStatus(text, isError) {

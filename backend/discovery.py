@@ -264,6 +264,25 @@ def cancel(scan_id: str) -> bool:
     return True
 
 
+def forget(scan_id: str) -> bool:
+    """
+    Drop a scan entirely, cancelling it first if it is still going.
+
+    Results are an inventory of somebody's network — addresses, banners, page
+    titles, certificate names — and until now they stayed in memory until the
+    application closed, with no way to say "I am finished with this". On a
+    customer site that is a small disclosure with no undo.
+    """
+    scan = _scans.get(scan_id)
+    if scan is None:
+        return False
+    if scan.running:
+        cancel(scan_id)
+    _scans.pop(scan_id, None)
+    logger.info("Discarded scan %s", scan_id[:8])
+    return True
+
+
 def _forget_old() -> None:
     """Keep the last few finished scans and drop the rest."""
     done = sorted((s for s in _scans.values() if not s.running),

@@ -649,6 +649,13 @@
         <span class="material-symbols-outlined">content_copy</span>
         Copy history
       </button>
+      <!-- The address is what you need somewhere else: a ticket, a chat, a
+           firewall rule. The tab shows the device's *name* once it announces
+           itself, which is exactly when the address stops being on screen. -->
+      <button data-action="copy-address">
+        <span class="material-symbols-outlined">lan</span>
+        Copy address
+      </button>
       <div class="ctx-sep"></div>
       <button data-action="duplicate">
         <span class="material-symbols-outlined">tab_duplicate</span>
@@ -699,6 +706,7 @@
           case 'reconnect': _reconnectSession(tab);   break;
           case 'clear':     _clearConsole(tab);       break;
           case 'copy':      _copyHistory(tab);        break;
+          case 'copy-address': _copyAddress(tab);      break;
           case 'duplicate': _duplicateSession(tab);   break;
           case 'pane':
             window.shellmateLayout.place(Number(btn.dataset.pane), tab.sessionId);
@@ -1106,6 +1114,36 @@
    * is the same rule as clicking a ready tile: a dialog showing nothing but
    * filled-in fields and a Connect button is a wasted step.
    */
+  /**
+   * Put the device's address on the clipboard.
+   *
+   * `address` rather than `hostname`: the latter is overwritten with whatever
+   * the device calls itself, so on the tabs where this is most useful it is
+   * not an address at all.
+   */
+  async function _copyAddress(tab) {
+    let address = tab.hostname || '';
+    let port = tab.port;
+    try {
+      const res = await fetch('/api/sessions');
+      if (res.ok) {
+        const session = (await res.json())
+          .find(s => s.session_id === tab.sessionId);
+        if (session) {
+          address = session.address || session.hostname || address;
+          port = session.port || port;
+        }
+      }
+    } catch (_) { /* the tab's own copy is a reasonable fallback */ }
+
+    if (!address) return;
+    const text = (port && port !== 22) ? `${address}:${port}` : address;
+    try {
+      await navigator.clipboard.writeText(text);
+      if (window._showCopyToast) window._showCopyToast(text);
+    } catch (_) { /* clipboard refused; nothing useful to say */ }
+  }
+
   async function _duplicateSession(tab) {
     let session = null;
     try {

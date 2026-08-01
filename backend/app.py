@@ -1204,6 +1204,18 @@ async def discovery_cancel(scan_id: str) -> dict:
     return {"status": "ok"}
 
 
+@app.delete("/api/discovery/scans/{scan_id}")
+async def discovery_forget(scan_id: str) -> dict:
+    """
+    Discard a scan and its results.
+
+    Reaching the server matters: the last few finished scans are held in
+    memory, so blanking the view alone would tidy the display and leave the
+    data exactly where it was.
+    """
+    return {"status": "ok", "discarded": discovery.forget(scan_id)}
+
+
 @app.post("/api/discovery/save")
 async def discovery_save(request: DiscoverySaveRequest) -> dict:
     """

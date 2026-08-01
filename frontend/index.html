@@ -57,9 +57,6 @@
       <!-- The assistant is off until asked for, so it needs somewhere to be
            asked for from. An empty third of the window is a poor
            advertisement; no hint at all means nobody finds the feature. -->
-      <a href="#" id="sidebar-link-ai" class="sidebar-link" title="Show the AI assistant">
-        <span class="material-symbols-outlined">smart_toy</span>
-      </a>
       <a href="#" id="sidebar-link-discovery" class="sidebar-link" title="Find devices on the network">
         <span class="material-symbols-outlined">radar</span>
       </a>
@@ -111,6 +108,14 @@
       <!-- Split view. The button draws the current layout rather than wearing
            a generic icon, so what is on screen is legible at a glance. -->
       <button id="btn-layout" title="Layout"></button>
+
+      <!-- The assistant is half of the split screen rather than a panel that
+           opens over it, so it belongs with the layout picker — the two
+           controls that decide what the window is showing — and not in the
+           rail of things that open on top. -->
+      <button id="btn-ai-toggle" title="Show the AI assistant">
+        <span class="material-symbols-outlined">smart_toy</span>
+      </button>
 
       <button id="btn-new-tab" title="New connection (Ctrl+T)">
         <span class="material-symbols-outlined">add</span>
@@ -1641,6 +1646,12 @@ GigEth0/2     unassigned    YES unset  down     down
               <span class="material-symbols-outlined">bookmark_add</span>
               Save as connections
             </button>
+            <!-- Results are an inventory of somebody's network and used to
+                 stay until the application closed. -->
+            <button type="button" id="discovery-discard" class="btn-secondary">
+              <span class="material-symbols-outlined">backspace</span>
+              Discard
+            </button>
             <span id="discovery-save-status" class="setting-value"></span>
           </div>
         </section>
@@ -1998,6 +2009,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/credentials.js"></script>
   <script src="/static/js/discovery.js"></script>
+  <script src="/static/js/panel_resize.js"></script>
   <script src="/static/js/markdown.js"></script>
   <script src="/static/js/docs.js"></script>
   <script src="/static/js/support.js"></script>

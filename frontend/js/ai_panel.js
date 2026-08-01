@@ -34,7 +34,7 @@
     const test = document.getElementById('btn-test-providers');
     if (test) test.addEventListener('click', testProviders);
 
-    const toggle = document.getElementById('sidebar-link-ai');
+    const toggle = document.getElementById('btn-ai-toggle');
     if (toggle) {
       toggle.addEventListener('click', (e) => { e.preventDefault(); togglePanel(); });
     }
@@ -64,7 +64,7 @@
     pane.classList.toggle('hidden', !enabled);
     divider.classList.toggle('hidden', !enabled);
 
-    const toggle = document.getElementById('sidebar-link-ai');
+    const toggle = document.getElementById('btn-ai-toggle');
     if (toggle) {
       toggle.classList.toggle('active', enabled);
       toggle.title = enabled ? 'Hide the AI assistant' : 'Show the AI assistant';
