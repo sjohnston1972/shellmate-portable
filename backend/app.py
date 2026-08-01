@@ -739,8 +739,56 @@ async def delete_session(session_id: str) -> dict:
 
 @app.get("/api/profiles")
 async def list_profiles() -> list[dict]:
-    """Return all saved connection profiles."""
-    return get_profiles()
+    """
+    Return all saved connection profiles.
+
+    Each carries ``ready_to_connect``: whether clicking its tile can open a
+    session outright, or has to open the dialog and ask for something first.
+    Decided here rather than in the browser because two of the three reasons
+    to say no — a locked vault, a COM port that is no longer plugged in — are
+    only knowable on this side.
+    """
+    profiles = await asyncio.to_thread(get_profiles)
+
+    # Enumerated once, and only when something needs it: listing serial ports
+    # touches the registry on Windows and is not free.
+    serial_ports: set[str] | None = None
+
+    for profile in profiles:
+        kind = (profile.get("connection_type") or "ssh").lower()
+
+        if kind == "serial":
+            if serial_ports is None:
+                try:
+                    serial_ports = {
+                        (port.get("device") or "").upper()
+                        for port in await asyncio.to_thread(available_ports)
+                    }
+                except Exception:
+                    serial_ports = set()
+            ready = (profile.get("serial_port") or "").upper() in serial_ports
+            profile["reason_not_ready"] = "" if ready else "The COM port is not connected."
+
+        elif kind == "telnet":
+            # Telnet devices commonly prompt for credentials in-band, so having
+            # none saved is normal rather than a reason to ask.
+            ready = True
+            profile["reason_not_ready"] = ""
+
+        else:
+            if not profile.get("has_saved_credentials"):
+                ready = False
+                profile["reason_not_ready"] = "No saved password."
+            elif profile.get("credential_storage") == "vault" and vault.is_locked():
+                ready = False
+                profile["reason_not_ready"] = "The vault is locked."
+            else:
+                ready = True
+                profile["reason_not_ready"] = ""
+
+        profile["ready_to_connect"] = ready
+
+    return profiles
 
 
 @app.post("/api/profiles")

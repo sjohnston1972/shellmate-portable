@@ -249,6 +249,7 @@
     try {
       const res = await fetch('/api/profiles');
       const profiles = await res.json();
+      failedRecently.clear();
       grid.innerHTML = '';
       profiles.forEach(p => {
         const wrap = document.createElement('div');
@@ -269,7 +270,19 @@
         card.querySelector('.welcome-profile-name').textContent = p.name || '';
         card.querySelector('.welcome-profile-host').textContent =
           p.connection_type === 'serial' ? (p.serial_port || '') : (p.hostname || '');
-        card.addEventListener('click', () => openProfile(p));
+        card.addEventListener('click', () => openProfile(p, card));
+
+        // Editing a saved connection needs its own route once clicking
+        // connects. Right-click is the one people try first.
+        card.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          showConnectionDialog(p);
+        });
+        if (!p.ready_to_connect && p.reason_not_ready) {
+          card.title += ` — ${p.reason_not_ready} Click to fill in the rest.`;
+        } else if (p.ready_to_connect) {
+          card.title += ' — click to connect, right-click to edit';
+        }
 
         const del = document.createElement('button');
         del.className = 'welcome-profile-delete';
@@ -333,7 +346,7 @@
    * opening a second session to the same device. Otherwise open the dialog
    * pre-filled.
    */
-  async function openProfile(p) {
+  async function openProfile(p, card) {
     try {
       const openIds = (typeof window.getOpenSessionIds === 'function')
         ? window.getOpenSessionIds() : [];
@@ -351,7 +364,89 @@
       }
     } catch (_) { /* fall through to dialog */ }
 
+    // Everything it needs is already saved, so connect. The dialog would only
+    // be showing filled-in fields and a Connect button.
+    if (p.ready_to_connect && !failedRecently.has(p.id)) {
+      connectFromTile(p, card);
+      return;
+    }
+
     showConnectionDialog(p);
+  }
+
+  /**
+   * Profiles whose last click failed.
+   *
+   * A second click after a failure opens the dialog instead of repeating the
+   * attempt — the password may have changed, or the address may be wrong, and
+   * silently trying the same thing again is the one response that cannot
+   * help. Cleared on a success, and when the list is next rebuilt.
+   */
+  const failedRecently = new Set();
+
+  /**
+   * Connect straight from a tile.
+   *
+   * The credentials are never sent from here: `POST /api/sessions` takes the
+   * profile id and fills them in server-side, which is the whole reason a
+   * saved password can stay out of the browser.
+   */
+  async function connectFromTile(p, card) {
+    if (card) card.classList.add('connecting');
+    clearTileError(card);
+
+    try {
+      const response = await fetch('/api/sessions', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          profile_id:      p.id,
+          connection_type: p.connection_type || 'ssh',
+          hostname:        p.hostname || '',
+          port:            p.port || DEFAULT_PORTS[p.connection_type] || 22,
+          username:        p.username || '',
+          label:           p.name || '',
+          serial_port:     p.serial_port || '',
+          baudrate:        p.baudrate || 9600,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `Server error ${response.status}`);
+
+      failedRecently.delete(p.id);
+      if (typeof window.createTab === 'function') window.createTab(data);
+
+    } catch (err) {
+      // Surfaced on the tile, not in the terminal pane — the click happened
+      // here, and there is no terminal to look at yet.
+      failedRecently.add(p.id);
+      showTileError(card, err.message || 'Could not connect.');
+    } finally {
+      if (card) card.classList.remove('connecting');
+    }
+  }
+
+  function showTileError(card, message) {
+    if (!card) return;
+    card.classList.add('tile-failed');
+    card.title = `${message} Click again to check the details.`;
+    let note = card.parentElement &&
+               card.parentElement.querySelector('.welcome-profile-error');
+    if (!note) {
+      note = document.createElement('span');
+      note.className = 'welcome-profile-error';
+      (card.parentElement || card).appendChild(note);
+    }
+    note.textContent = message;
+  }
+
+  function clearTileError(card) {
+    if (!card) return;
+    card.classList.remove('tile-failed');
+    const note = card.parentElement &&
+                 card.parentElement.querySelector('.welcome-profile-error');
+    if (note) note.remove();
   }
 
   /** True when a live session and a profile point at the same device. */

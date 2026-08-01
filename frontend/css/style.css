@@ -1211,6 +1211,54 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   transform: translateY(0);
 }
 
+/* Connecting.
+   SSH to an unreachable device takes the full connect timeout, and a tile
+   that looks inert for fifteen seconds reads as a click that did not
+   register. The sweep runs along the top edge for the whole wait. */
+.welcome-profile-card.connecting {
+  border-color: var(--primary);
+  cursor: progress;
+  pointer-events: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.welcome-profile-card.connecting::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto auto 0;
+  height: 2px;
+  width: 40%;
+  background: var(--primary);
+  animation: tile-connecting 1.1s ease-in-out infinite;
+}
+
+@keyframes tile-connecting {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-profile-card.connecting::after { animation: none; width: 100%; opacity: 0.5; }
+}
+
+.welcome-profile-card.tile-failed {
+  border-color: var(--error);
+}
+
+/* The failure belongs where the click happened. There is no terminal pane to
+   look at yet — the session was never created. */
+.welcome-profile-error {
+  display: block;
+  max-width: 110px;
+  margin: 4px auto 0;
+  color: var(--error);
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: center;
+  word-break: break-word;
+}
+
 .welcome-profile-icon {
   font-size: 26px;
   color: var(--primary);
