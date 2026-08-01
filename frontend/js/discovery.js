@@ -303,12 +303,18 @@
       return;
     }
 
+    // Ask once and apply to all of them. A scan cannot know the username and
+    // the person running it does — otherwise they are about to type it, and
+    // the password, once per device.
+    const details = await askForLogin(devices.length);
+    if (details === null) return;
+
     saveStatusEl.textContent = 'Saving…';
     try {
       const res = await fetch('/api/discovery/save', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ devices }),
+        body:    JSON.stringify({ devices, ...details }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Could not save them.');
@@ -318,6 +324,7 @@
       const bits = [];
       if (data.saved) bits.push(`${data.saved} saved`);
       if (data.already_saved) bits.push(`${data.already_saved} already known`);
+      if (data.attached) bits.push('credential attached');
       saveStatusEl.textContent = bits.join(', ') + '.';
 
       if (typeof window.renderWelcomeProfiles === 'function') {
@@ -326,6 +333,111 @@
     } catch (e) {
       saveStatusEl.textContent = e.message;
     }
+  }
+
+  /**
+   * The username and credential to give every device being saved.
+   *
+   * Returns { username, credential_ref } or null if cancelled. A *reference*
+   * rather than a password: forty copies of one lab login is forty entries to
+   * update the day it changes, with nothing recording that they were ever the
+   * same credential.
+   */
+  async function askForLogin(count) {
+    let sets = [];
+    let locked = false;
+    try {
+      const res = await fetch('/api/credential-sets');
+      if (res.ok) {
+        const data = await res.json();
+        sets = data.sets || [];
+        locked = Boolean(data.vault_locked);
+      }
+    } catch (e) { /* saving without one is still a valid answer */ }
+
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.id = 'discovery-login-overlay';
+
+      const box = document.createElement('div');
+      box.className = 'sm-dialog';
+
+      const title = document.createElement('h3');
+      title.className = 'sm-dialog-title';
+      title.textContent = `Save ${count} connection${count === 1 ? '' : 's'}`;
+
+      const body = document.createElement('p');
+      body.className = 'sm-dialog-body';
+      body.textContent = 'These apply to all of them. Leave the credential '
+        + 'as None to be asked on first connect.';
+
+      const userLabel = document.createElement('label');
+      userLabel.className = 'sm-dialog-label';
+      userLabel.textContent = 'Username';
+      const user = document.createElement('input');
+      user.className = 'sm-dialog-input';
+      user.autocomplete = 'off';
+      user.spellcheck = false;
+
+      const credLabel = document.createElement('label');
+      credLabel.className = 'sm-dialog-label';
+      credLabel.textContent = 'Credential';
+      const cred = document.createElement('select');
+      cred.className = 'sm-dialog-input';
+
+      const none = document.createElement('option');
+      none.value = '';
+      none.textContent = 'None — ask me on first connect';
+      cred.appendChild(none);
+
+      sets.filter(s => s.has_credentials).forEach(s => {
+        const option = document.createElement('option');
+        option.value = s.id;
+        option.textContent = s.username ? `${s.name} (${s.username})` : s.name;
+        cred.appendChild(option);
+      });
+
+      const note = document.createElement('p');
+      note.className = 'sm-dialog-note';
+      if (locked) {
+        note.textContent = 'The vault is locked, so saved credentials cannot '
+          + 'be listed. Unlock it to pick one.';
+      } else if (!sets.some(s => s.has_credentials)) {
+        note.textContent = 'No shared credentials saved yet. Create one under '
+          + 'Settings → Credentials Vault and it will be offered here.';
+      } else {
+        note.textContent = 'The connections point at the credential rather '
+          + 'than copying it, so changing it later fixes all of them at once.';
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'sm-dialog-actions';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn-secondary';
+      cancel.textContent = 'Cancel';
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'btn-primary';
+      confirm.textContent = 'Save';
+      actions.append(cancel, confirm);
+
+      box.append(title, body, userLabel, user, credLabel, cred, note, actions);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      user.focus();
+
+      const finish = (value) => { overlay.remove(); resolve(value); };
+      cancel.addEventListener('click', () => finish(null));
+      confirm.addEventListener('click', () => finish({
+        username: user.value.trim(), credential_ref: cred.value }));
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) finish(null); });
+      user.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') confirm.click();
+        if (e.key === 'Escape') finish(null);
+      });
+    });
   }
 
   function setStatus(text, isError) {

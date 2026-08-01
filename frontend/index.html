@@ -989,6 +989,20 @@ GigEth0/2     unassigned    YES unset  down     down
             <span id="vault-mode-result" class="setting-value"></span>
           </div>
 
+          <!-- Credentials several connections share.
+               A credential used to belong to exactly one profile, so "use the
+               login I already have" could not be expressed at all — which is
+               fine for one device and wrong for the forty a scan finds. -->
+          <h4 class="settings-subsection-title">Shared credentials</h4>
+          <p class="settings-section-hint">A login several connections use. They point at it rather than each keeping a copy, so changing it here fixes every device using it.</p>
+          <div id="credential-sets" class="credentials-list"></div>
+          <div class="setting-row">
+            <button type="button" id="credential-set-add" class="btn-secondary">
+              <span class="material-symbols-outlined">add_circle</span>
+              New shared credential
+            </button>
+          </div>
+
           <!-- What is actually saved.
                Until this existed, a remembered password was invisible from the
                moment it was saved: nothing listed them, nothing changed one,

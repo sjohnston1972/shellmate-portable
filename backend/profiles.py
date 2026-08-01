@@ -49,9 +49,173 @@ CREDENTIAL_FIELDS = (
 )
 
 
-def _credential_key(profile_id: str, field: str) -> str:
-    """Vault key for one credential belonging to one profile."""
-    return f"profile:{profile_id}:{field}"
+def _credential_key(owner: str, field: str) -> str:
+    """
+    Vault key for one credential.
+
+    ``owner`` is a profile id, or ``set:<id>`` for a named credential shared
+    by several connections. One namespace for both, so everything that reads
+    or clears a credential works the same whichever it is.
+    """
+    return f"profile:{owner}:{field}"
+
+
+# ---------------------------------------------------------------------------
+# Named credentials
+#
+# A credential used to belong to exactly one profile, so "use the login I
+# already have" could not be expressed at all. That is fine for one device and
+# wrong for forty: a scan of a lab finds forty switches that share one login,
+# and attaching a copy of the password to each would leave forty entries to
+# update the day it changes, with nothing recording that they were ever the
+# same credential.
+#
+# So a credential can have a name and an identity of its own, and a profile
+# references it. Change it once and every device using it is fixed.
+#
+# The names live in their own file because they are not secret and the values
+# are not in it — a set is a name and a username, and the password for it goes
+# to the vault (or the plaintext file) under the set's id, through exactly the
+# same functions a per-profile credential uses.
+# ---------------------------------------------------------------------------
+
+
+def _sets_file():
+    return paths.data_dir() / "credential-sets.json"
+
+
+def _load_sets() -> list[dict]:
+    path = _sets_file()
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _save_sets(sets: list[dict]) -> None:
+    path = _sets_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(sets, indent=2), encoding="utf-8")
+
+
+def set_owner(set_id: str) -> str:
+    """The credential-store owner key for a named set."""
+    return f"set:{set_id}"
+
+
+def credential_sets() -> list[dict]:
+    """
+    Every named credential, with no values.
+
+    ``in_use`` is how the interface can warn before deleting one that forty
+    connections are relying on.
+    """
+    profiles = _load()
+    out = []
+    for entry in _load_sets():
+        owner = set_owner(entry.get("id", ""))
+        out.append({
+            "id":       entry.get("id", ""),
+            "name":     entry.get("name", ""),
+            "username": entry.get("username", ""),
+            "storage":  credential_storage(owner),
+            "has_credentials": has_credentials(owner),
+            "in_use":   sum(1 for p in profiles
+                            if p.get("credential_ref") == entry.get("id")),
+        })
+    return out
+
+
+def save_credential_set(name: str, username: str, password: str,
+                        storage: str = "vault", set_id: str = "") -> dict:
+    """
+    Create or update a named credential.
+
+    Raises:
+        ValueError: No name, or the vault refused it. A set with no name is
+            unusable — the name is the whole point of it being shared.
+    """
+    if not (name or "").strip():
+        raise ValueError("A shared credential needs a name — that is how you "
+                         "pick it later.")
+
+    sets = _load_sets()
+    entry = next((s for s in sets if s.get("id") == set_id), None) if set_id else None
+
+    if entry is None:
+        entry = {"id": str(uuid.uuid4()), "name": name.strip(),
+                 "username": (username or "").strip()}
+        sets.append(entry)
+    else:
+        entry["name"] = name.strip()
+        entry["username"] = (username or "").strip()
+
+    _save_sets(sets)
+
+    if password:
+        set_credential(set_owner(entry["id"]), "password", password, storage)
+
+    return {**entry, "storage": credential_storage(set_owner(entry["id"]))}
+
+
+def delete_credential_set(set_id: str) -> int:
+    """
+    Forget a named credential, and detach it from anything using it.
+
+    Returns how many profiles were left without a credential. Leaving a
+    dangling reference behind would make those connections look ready when
+    there is nothing for them to use.
+    """
+    sets = [s for s in _load_sets() if s.get("id") != set_id]
+    _save_sets(sets)
+    forget_credentials(set_owner(set_id))
+
+    profiles = _load()
+    detached = 0
+    for profile in profiles:
+        if profile.get("credential_ref") == set_id:
+            profile.pop("credential_ref", None)
+            detached += 1
+    if detached:
+        _save(profiles)
+    return detached
+
+
+def attach_credential_set(profile_id: str, set_id: str) -> bool:
+    """Point a profile at a named credential, or at nothing when set_id is ""."""
+    profiles = _load()
+    for profile in profiles:
+        if profile.get("id") != profile_id:
+            continue
+        if set_id:
+            profile["credential_ref"] = set_id
+        else:
+            profile.pop("credential_ref", None)
+        _save(profiles)
+        return True
+    return False
+
+
+def _resolve_owner(profile_id: str) -> str:
+    """
+    Whose credentials a profile actually uses.
+
+    A profile's own credentials win over a shared one. Somebody who set a
+    password on this specific device meant it for this specific device — most
+    obviously the one switch in the lab whose password was changed.
+    """
+    for profile in _load():
+        if profile.get("id") != profile_id:
+            continue
+        own = any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS)
+        if own or _load_plaintext().get(profile_id):
+            return profile_id
+        reference = profile.get("credential_ref") or ""
+        return set_owner(reference) if reference else profile_id
+    return profile_id
 
 
 def save_credentials(profile_id: str, values: dict) -> bool:
@@ -81,27 +245,51 @@ def save_credentials(profile_id: str, values: dict) -> bool:
 
 
 def load_credentials(profile_id: str) -> dict:
-    """Return a profile's remembered credentials, or an empty dict."""
+    """
+    Return a profile's remembered credentials, or an empty dict.
+
+    Resolves a shared credential when the profile references one, so nothing
+    above this has to know whether the password belongs to this device alone
+    or to the forty that came off the same scan.
+    """
+    return _read_credentials(_resolve_owner(profile_id))
+
+
+def _read_credentials(owner: str) -> dict:
+    """Read one owner's credentials directly, without resolving a reference."""
     out = {}
     for field in CREDENTIAL_FIELDS:
-        value = vault.get(_credential_key(profile_id, field))
+        value = vault.get(_credential_key(owner, field))
         if value:
             out[field] = value
-    return out or _load_plaintext().get(profile_id, {})
+    return out or _load_plaintext().get(owner, {})
 
 
-def has_credentials(profile_id: str) -> bool:
-    """True when any credential is remembered for this profile, either way."""
-    if any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS):
+def has_credentials(owner: str) -> bool:
+    """
+    True when any credential is remembered, either way.
+
+    Takes a profile id or a set owner key. A profile id resolves through any
+    shared credential it references, which is what makes a device saved from
+    a scan report itself as ready to connect.
+    """
+    if owner.startswith("set:"):
+        return _has_directly(owner)
+    return _has_directly(_resolve_owner(owner))
+
+
+def _has_directly(owner: str) -> bool:
+    if any(vault.has(_credential_key(owner, f)) for f in CREDENTIAL_FIELDS):
         return True
-    return bool(_load_plaintext().get(profile_id))
+    return bool(_load_plaintext().get(owner))
 
 
-def credential_storage(profile_id: str) -> str:
-    """Where this profile's credentials are kept: "vault", "plaintext" or ""."""
-    if any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS):
+def credential_storage(owner: str) -> str:
+    """Where the credentials are kept: "vault", "plaintext" or ""."""
+    resolved = owner if owner.startswith("set:") else _resolve_owner(owner)
+    if any(vault.has(_credential_key(resolved, f)) for f in CREDENTIAL_FIELDS):
         return "vault"
-    if _load_plaintext().get(profile_id):
+    if _load_plaintext().get(resolved):
         return "plaintext"
     return ""
 

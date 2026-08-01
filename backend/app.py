@@ -706,6 +706,58 @@ async def encrypt_credentials(profile_id: str) -> dict:
     return await asyncio.to_thread(_move)
 
 
+class CredentialSetRequest(BaseModel):
+    """Body for POST /api/credential-sets."""
+
+    name: str = ""
+    username: str = ""
+    password: str = ""
+    storage: str = "vault"
+    #: Given, this updates an existing set rather than creating one.
+    id: str = ""
+
+
+@app.get("/api/credential-sets")
+async def list_credential_sets() -> dict:
+    """
+    Named credentials, and how many connections use each. No values.
+
+    Same promise as every other listing: this says a credential exists and
+    where it is kept, and nothing anywhere returns the credential itself
+    except the one reveal endpoint, which refuses for anything encrypted.
+    """
+    return {"sets": await asyncio.to_thread(profiles_module.credential_sets),
+            "vault_locked": vault.is_locked()}
+
+
+@app.post("/api/credential-sets")
+async def save_credential_set(request: CredentialSetRequest) -> dict:
+    """Create or update a credential that several connections can share."""
+    def _save() -> dict:
+        try:
+            return profiles_module.save_credential_set(
+                request.name, request.username, request.password,
+                request.storage, request.id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return await asyncio.to_thread(_save)
+
+
+@app.delete("/api/credential-sets/{set_id}")
+async def delete_credential_set(set_id: str) -> dict:
+    """
+    Forget a named credential and detach every connection using it.
+
+    Detaching matters: a profile left pointing at a credential that no longer
+    exists would keep reporting itself ready to connect with nothing to
+    connect with.
+    """
+    detached = await asyncio.to_thread(
+        profiles_module.delete_credential_set, set_id)
+    return {"status": "ok", "detached": detached}
+
+
 @app.delete("/api/credentials/plaintext")
 async def forget_plaintext_credentials() -> dict:
     """Empty the plaintext credential store entirely."""
@@ -795,6 +847,12 @@ class DiscoverySaveRequest(BaseModel):
 
     #: Rows from a scan result, each with at least an address.
     devices: list[dict] = []
+    #: Applied to every device saved. A scan cannot know the username; the
+    #: person running it does, and is otherwise about to type it forty times.
+    username: str = ""
+    #: A named credential to attach to all of them. Forty devices found on one
+    #: subnet almost always share one login.
+    credential_ref: str = ""
 
 
 def _discovery_settings() -> dict:
@@ -903,16 +961,25 @@ async def discovery_save(request: DiscoverySaveRequest) -> dict:
                 "name": (device.get("hostname") or address).split(".")[0],
                 "hostname": address,
                 "port": 22 if kind == "ssh" else 23,
-                "username": "",
+                "username": request.username,
                 "connection_type": kind,
                 # What the scan worked out, carried across so the profile
                 # arrives knowing its platform rather than rediscovering it.
                 "platform": device.get("platform") or "",
                 "discovered": True,
             })
+
+            # A reference, never a copy. Forty copies of one lab password is
+            # forty entries to update the day it changes, with nothing
+            # recording that they were ever the same credential.
+            if request.credential_ref:
+                profiles_module.attach_credential_set(
+                    profile["id"], request.credential_ref)
+
             (existing if profile.get("already_saved") else saved).append(profile)
 
         return {"saved": len(saved), "already_saved": len(existing),
+                "attached": bool(request.credential_ref),
                 "profiles": saved + existing}
 
     result = await asyncio.to_thread(_save)

@@ -64,6 +64,13 @@ def reset(entries: list[dict] | None = None) -> None:
     for existing in profiles._load() + (entries or []):
         profiles.forget_credentials(existing.get("id", ""))
 
+    # Named credentials outlive profiles.json too, and their values are keyed
+    # under the set id rather than a profile — so one left behind by an
+    # earlier test is a credential the next test can neither see nor account
+    # for.
+    for entry in profiles.credential_sets():
+        profiles.delete_credential_set(entry["id"])
+
     profiles._save(entries or [])
     plaintext = _temp / "credentials-plaintext.json"
     if plaintext.exists():
@@ -509,6 +516,134 @@ def test_the_api_still_keeps_its_promise() -> None:
           missing.status_code == 404, missing.text)
 
 
+def test_a_credential_can_belong_to_more_than_one_connection() -> None:
+    """
+    Forty switches off one scan share one login.
+
+    A credential used to be keyed to a single profile, so "use the login I
+    already have" could not be expressed at all. Copying it to each device
+    would work right up until the password changed, at which point there are
+    forty entries to update and nothing recording that they were ever the same
+    credential.
+    """
+    print("\n-- One credential, many connections --")
+    reset([
+        {"id": "sw1", "hostname": "10.10.0.1", "port": 22, "username": "neteng",
+         "connection_type": "ssh"},
+        {"id": "sw2", "hostname": "10.10.0.2", "port": 22, "username": "neteng",
+         "connection_type": "ssh"},
+    ])
+
+    entry = profiles.save_credential_set("Lab admin", "neteng", "labpass", "vault")
+    check("a named credential is created", bool(entry.get("id")))
+    check("and it knows where it is stored", entry.get("storage") == "vault",
+          str(entry.get("storage")))
+
+    profiles.attach_credential_set("sw1", entry["id"])
+    profiles.attach_credential_set("sw2", entry["id"])
+
+    for profile_id in ("sw1", "sw2"):
+        resolved = profiles.load_credentials(profile_id)
+        check(f"{profile_id} resolves the shared password",
+              resolved.get("password") == "labpass", str(resolved))
+        check(f"{profile_id} reports itself as having credentials",
+              profiles.has_credentials(profile_id))
+        check(f"{profile_id} reports where they are kept",
+              profiles.credential_storage(profile_id) == "vault",
+              profiles.credential_storage(profile_id))
+
+    # The point of a reference rather than a copy.
+    profiles.save_credential_set("Lab admin", "neteng", "changed-once",
+                                 "vault", entry["id"])
+    check("changing it once changes it for both",
+          profiles.load_credentials("sw1").get("password") == "changed-once"
+          and profiles.load_credentials("sw2").get("password") == "changed-once")
+
+    listed = profiles.credential_sets()
+    check("the listing counts what uses it",
+          listed and listed[0]["in_use"] == 2, str(listed))
+    check("and carries no value", "changed-once" not in json.dumps(listed),
+          "a credential reached a listing")
+
+
+def test_a_devices_own_password_wins() -> None:
+    """
+    The one switch in the lab whose password was changed.
+
+    Somebody who sets a password on a specific device meant it for that
+    device. A shared credential is a fallback, not an override.
+    """
+    print("\n-- When a device has its own --")
+    reset([
+        {"id": "odd", "hostname": "10.10.0.9", "port": 22, "username": "neteng",
+         "connection_type": "ssh"},
+    ])
+    entry = profiles.save_credential_set("Lab admin", "neteng", "shared", "vault")
+    profiles.attach_credential_set("odd", entry["id"])
+    check("it uses the shared one to begin with",
+          profiles.load_credentials("odd").get("password") == "shared")
+
+    profiles.set_credential("odd", "password", "just-this-one", "vault")
+    check("its own password takes over",
+          profiles.load_credentials("odd").get("password") == "just-this-one",
+          str(profiles.load_credentials("odd")))
+
+    profiles.forget_credential("odd", "password")
+    check("and removing it falls back to the shared one again",
+          profiles.load_credentials("odd").get("password") == "shared",
+          "a profile that forgets its own credential should not be left with "
+          "nothing when it references a shared one")
+
+
+def test_deleting_a_shared_credential_detaches_what_used_it() -> None:
+    """
+    A reference to something that no longer exists is worse than no reference.
+
+    Left behind, those connections keep reporting themselves ready to connect
+    with nothing to connect with — and the failure arrives at the device
+    rather than in the interface.
+    """
+    print("\n-- Deleting one that is in use --")
+    reset([
+        {"id": "a", "hostname": "10.11.0.1", "port": 22, "username": "u",
+         "connection_type": "ssh"},
+        {"id": "b", "hostname": "10.11.0.2", "port": 22, "username": "u",
+         "connection_type": "ssh"},
+    ])
+    entry = profiles.save_credential_set("Shared", "u", "pw", "vault")
+    profiles.attach_credential_set("a", entry["id"])
+    profiles.attach_credential_set("b", entry["id"])
+
+    detached = profiles.delete_credential_set(entry["id"])
+    check("it reports how many were relying on it", detached == 2, str(detached))
+    check("the set is gone", not profiles.credential_sets())
+
+    for profile_id in ("a", "b"):
+        check(f"{profile_id} no longer claims to have credentials",
+              not profiles.has_credentials(profile_id))
+    check("and no dangling reference is left in the file",
+          all("credential_ref" not in p for p in profiles._load()),
+          str(profiles._load()))
+
+
+def test_a_set_needs_a_name_and_holds_no_secret() -> None:
+    print("\n-- What the set file may contain --")
+    reset()
+
+    raised = ""
+    try:
+        profiles.save_credential_set("   ", "u", "pw")
+    except ValueError as exc:
+        raised = str(exc)
+    check("an unnamed set is refused", bool(raised), "the name is how it is picked")
+
+    profiles.save_credential_set("Named", "neteng", "SECRET-SET-VALUE", "vault")
+    body = (_temp / "credential-sets.json").read_text(encoding="utf-8")
+    check("the set file holds the name", "Named" in body)
+    check("and the username", "neteng" in body)
+    check("and no password at all", "SECRET-SET-VALUE" not in body, body)
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Connection profiles")
@@ -526,7 +661,11 @@ def main() -> int:
                  test_changing_one_does_not_leave_the_old_copy,
                  test_encrypting_never_loses_the_password,
                  test_forgetting,
-                 test_the_api_still_keeps_its_promise):
+                 test_the_api_still_keeps_its_promise,
+                 test_a_credential_can_belong_to_more_than_one_connection,
+                 test_a_devices_own_password_wins,
+                 test_deleting_a_shared_credential_detaches_what_used_it,
+                 test_a_set_needs_a_name_and_holds_no_secret):
         try:
             test()
         except Exception as exc:

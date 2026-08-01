@@ -166,3 +166,36 @@ is not.
 Nothing sensitive comes back out of ShellMate's own API either. Connection
 listings carry a "has a saved password" flag, never the password. That holds
 for scripts exactly as it does for the interface.
+
+## Shared credentials
+
+A password normally belongs to one saved connection. That is right for one
+device and wrong for forty: a lab, a stack, or everything a subnet scan turns
+up usually shares a single login, and keeping a copy of it against each one
+means forty entries to update the day it changes — with nothing recording that
+they were ever the same password.
+
+**Settings → Credentials Vault → Shared credentials** lets you name one. Give
+it a name you will recognise later — *Lab admin*, *Core switches* — a username,
+and a password. Connections then **point at it** rather than copying it, so
+changing it here fixes every device using it at once.
+
+Each one shows how many connections rely on it, which is what you want to know
+before deleting it. Deleting a shared credential detaches everything using it,
+so those connections ask for a password on next connect rather than silently
+looking ready when there is nothing left to use.
+
+**A device's own password always wins.** If one switch in the lab has had its
+password changed, save that password against that connection and it takes
+precedence over the shared one. Forget it again and the connection falls back
+to the shared credential.
+
+### Saving a scan with a credential attached
+
+**Find Devices → Save as connections** asks once for a username and a
+credential, and applies both to everything you ticked. Pick a shared credential
+and the devices arrive ready to connect — clicking a tile opens a session
+without asking for anything.
+
+Choosing **None** is the right answer for somebody else's estate: the
+connections are saved and each asks for a password the first time.
