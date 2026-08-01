@@ -127,18 +127,17 @@
       if (sep) sep.classList.toggle('hidden', !text);
     }
 
-    // Every tab's tooltip, which is where "which of these has been up
-    // longest" gets answered without crowding the tab strip. The reload
-    // countdown already owns the badge there, and it is the one that must
-    // never be mistaken for something else.
-    sessions.forEach((_entry, sessionId) => {
-      const tabEl = document.querySelector(`.tab[data-session-id="${CSS.escape(sessionId)}"]`);
-      if (!tabEl) return;
-      const labelEl = tabEl.querySelector('.tab-label');
-      if (!labelEl) return;
-      const name = labelEl.textContent.replace(/ \(disconnected\)$/, '');
-      labelEl.title = `${name} — ${label(sessionId)}`;
-    });
+    // The tab tooltips are deliberately *not* touched here any more.
+    //
+    // A native tooltip cannot be updated in place: rewriting `title` while it
+    // is showing makes the browser tear it down and rebuild it, so a value
+    // that changes once a second flickers under the pointer for as long as
+    // you hover. Nothing about that is fixable with styling — anything
+    // changing every second simply cannot live in a `title`.
+    //
+    // The status bar above answers the same question for the session you are
+    // looking at, in ordinary text that updates without flicker, which is
+    // where a clock belonged in the first place.
   }
 
   window.shellmateUptime = {

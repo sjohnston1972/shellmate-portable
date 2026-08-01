@@ -696,7 +696,11 @@ async def set_session_platform(session_id: str, request: IdentifyRequest) -> dic
     # on disconnect while every guess stayed in the database.
     remembered = await asyncio.to_thread(
         profiles_module.remember_platform,
-        session.get("hostname", ""), session.get("port", 0),
+        # The address, not the name. The device has already announced itself
+        # by the time anybody sets a platform by hand, so `hostname` is
+        # "S3-R1" and no profile is filed under that.
+        session.get("address") or session.get("hostname", ""),
+        session.get("port", 0),
         session.get("username", ""), summary["platform"],
     )
     summary["remembered_saved"] = remembered
@@ -2668,6 +2672,19 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                             for command in session["pipeline"].completed_commands
                         )
 
+                elif msg_type == "logging_changed":
+                    # Sent by the browser when session logging is saved. One
+                    # round trip on a deliberate action, rather than reading
+                    # settings.json for every chunk of device output — which
+                    # is what this replaced.
+                    handle = session.pop("_log_handle", None)
+                    if handle is not None:
+                        try:
+                            handle.close()
+                        except Exception:
+                            pass
+                    session["_log_recheck"] = True
+
                 elif msg_type == "guardrail_answer":
                     # The answer to a held command. Confirmed, it goes now;
                     # refused, it is dropped and the terminal says so.
@@ -2752,7 +2769,8 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
         # which was stored and read by nothing.
         remembered = await asyncio.to_thread(
             profiles_module.remembered_platform,
-            session.get("hostname", ""), session.get("port", 0),
+            session.get("address") or session.get("hostname", ""),
+            session.get("port", 0),
             session.get("username", ""),
         )
 
@@ -2838,11 +2856,18 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 # that every other session's terminal shares. A `show
                 # tech-support` on one tab made the others stutter.
                 #
-                # The handle is opened once per session and the settings are
-                # read once per session. Changing the setting mid-session
-                # applies to the next one, which is what "tabs" means
-                # everywhere else in the application.
-                if session.get("_log_handle") is None and session.get("_log_checked") is None:
+                # The handle is opened once per session, not once per chunk —
+                # and re-evaluated when the setting changes, which is signalled
+                # rather than polled.
+                #
+                # "Applies to the next tab" was the wrong call here. That is
+                # right for a font size, which is a property of how the
+                # terminal was built. Logging is a decision about what to
+                # record, and it is usually made in the middle of something:
+                # ten minutes into a change you decide you want a record of
+                # it, and it has to start now.
+                if session.get("_log_recheck") or session.get("_log_checked") is None:
+                    session.pop("_log_recheck", None)
                     session["_log_checked"] = True
                     await asyncio.to_thread(_open_session_log, session, session_id)
 

@@ -629,6 +629,17 @@
 
   document.addEventListener('DOMContentLoaded', initSearchBar);
 
+  // Session logging is a decision people make mid-change — "I want a record
+  // of this" arrives ten minutes in, not at connect. Tell every open session
+  // so it can start or stop now rather than at the next tab.
+  window.addEventListener('shellmate:settings-changed', () => {
+    Object.values(_instances).forEach(({ websocket }) => {
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        websocket.send(JSON.stringify({ type: 'logging_changed' }));
+      }
+    });
+  });
+
   window.initTerminal = initTerminal;
   window.forgetTerminal = forgetTerminal;
 

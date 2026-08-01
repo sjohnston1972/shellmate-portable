@@ -112,7 +112,19 @@ class SessionManager:
             # yet — a pending reload, a commit waiting to be confirmed.
             "alerts":          AlertTracker(),
             "params":          params,
+            # What the device calls itself. Overwritten with the detected
+            # hostname once it says — deliberately, because config snapshots
+            # are keyed by it and the same device should file under one name
+            # however it was reached.
             "hostname":        params.hostname or params.serial_port,
+            # What ShellMate dialled, and never rewritten.
+            #
+            # These were one field, which meant anything reading it after the
+            # device announced itself got a *name* where it wanted an address:
+            # a manually set platform was filed against a profile that does
+            # not exist, and Duplicate prefilled the dialog with "S3-R1"
+            # instead of 192.168.20.16 and could not connect.
+            "address":         params.hostname or params.serial_port,
             "port":            params.port,
             "username":        params.username,
             "connection_type": params.connection_type,
@@ -216,6 +228,9 @@ class SessionManager:
         return {
             "session_id":      session["session_id"],
             "hostname":        session["hostname"],
+            # Both, because they answer different questions and callers have
+            # been getting the wrong one.
+            "address":         session.get("address", session["hostname"]),
             "port":            session["port"],
             "username":        session["username"],
             "connection_type": session["connection_type"],

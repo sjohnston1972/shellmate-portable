@@ -1092,22 +1092,72 @@
     }
   }
 
+  /**
+   * Open a second session to the same device.
+   *
+   * Two things were wrong with this. It prefilled `s.hostname`, which is
+   * overwritten with the *detected* device name once the device announces
+   * itself — so duplicating a connection dialled by address put "S3-R1" in
+   * the hostname box, which on a management network resolves nowhere. And it
+   * passed no profile id, so the saved password could not be resolved
+   * server-side and had to be typed again.
+   *
+   * Where the credentials do resolve it now simply opens the session, which
+   * is the same rule as clicking a ready tile: a dialog showing nothing but
+   * filled-in fields and a Connect button is a wasted step.
+   */
   async function _duplicateSession(tab) {
+    let session = null;
     try {
       const res      = await fetch('/api/sessions');
       const sessions = await res.json();
-      const s        = sessions.find(s => s.session_id === tab.sessionId);
-      if (s && typeof window.showConnectionDialog === 'function') {
-        window.showConnectionDialog({
-          label:           s.display_label || '',
-          hostname:        s.hostname      || '',
-          port:            s.port          || 22,
-          username:        s.username      || '',
-          connection_type: s.connection_type || 'ssh',
-        });
-      }
+      session = sessions.find(s => s.session_id === tab.sessionId) || null;
     } catch (err) {
       console.error('Could not get session for duplicate:', err);
+    }
+    if (!session) return;
+
+    // `address` is what was dialled and is never rewritten; `hostname` is
+    // what the device calls itself.
+    const address = session.address || session.hostname || '';
+    const profile = await _profileFor({
+      connectionType: session.connection_type || 'ssh',
+      hostname:       address,
+      port:           session.port,
+      username:       session.username,
+      label:          session.display_label,
+    });
+
+    if (profile && profile.has_saved_credentials) {
+      try {
+        const res = await fetch('/api/sessions', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            connection_type: profile.connection_type || 'ssh',
+            hostname:        profile.hostname || address,
+            port:            profile.port || session.port || 22,
+            username:        profile.username || session.username || '',
+            serial_port:     profile.serial_port || '',
+            display_label:   profile.name || session.display_label || '',
+            profile_id:      profile.id,
+          }),
+        });
+        if (res.ok) {
+          createTab(await res.json());
+          return;
+        }
+      } catch (_) { /* fall through to the dialog */ }
+    }
+
+    if (typeof window.showConnectionDialog === 'function') {
+      window.showConnectionDialog(profile || {
+        name:            session.display_label || '',
+        hostname:        address,
+        port:            session.port || 22,
+        username:        session.username || '',
+        connection_type: session.connection_type || 'ssh',
+      });
     }
   }
 
