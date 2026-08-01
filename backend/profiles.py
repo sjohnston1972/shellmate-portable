@@ -184,6 +184,177 @@ def _forget_plaintext(profile_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Managing what is saved
+#
+# Until now a remembered credential was invisible from the moment it was
+# saved: nothing listed them, nothing changed one, and the only way to remove
+# one was to find the connection it belonged to and reconnect with the box
+# unticked. These are the pieces the Credentials Vault panel is built on.
+#
+# The grain is one *field*, not one profile. CREDENTIAL_FIELDS is four things —
+# a password, a key passphrase, and the same two for a jump host — and a
+# listing that showed only "password" would be lying about what is stored.
+# ---------------------------------------------------------------------------
+
+#: What each credential field is called on screen.
+FIELD_LABELS = {
+    "password":                    "Password",
+    "private_key_passphrase":      "Key passphrase",
+    "jump_password":               "Jump host password",
+    "jump_private_key_passphrase": "Jump host key passphrase",
+}
+
+
+def credential_fields(profile_id: str) -> dict[str, str]:
+    """
+    Which credentials are saved for a profile, and where each one lives.
+
+    Returns field -> "vault" or "plaintext". A locked vault reports only the
+    plaintext ones — see ``vault.is_locked()``; the caller has to say so on
+    screen rather than presenting a short list as a complete one.
+    """
+    found: dict[str, str] = {}
+    plaintext = _load_plaintext().get(profile_id, {})
+
+    for field in CREDENTIAL_FIELDS:
+        if vault.has(_credential_key(profile_id, field)):
+            found[field] = "vault"
+        elif plaintext.get(field):
+            found[field] = "plaintext"
+    return found
+
+
+def read_plaintext_credential(profile_id: str, field: str) -> str:
+    """
+    Return one credential that was saved unencrypted.
+
+    Deliberately narrow. This is the only route by which a stored secret
+    leaves the backend, and it reads the plaintext file and nothing else — a
+    vault-backed credential is not readable here at any price, because a vault
+    that decrypts on demand for the interface is most of the way to not being
+    a vault.
+
+    Showing a plaintext one protects nothing that is not already lost: the
+    value is sitting in a JSON file the user can open. Refusing would only
+    send them to the text editor.
+    """
+    if field not in CREDENTIAL_FIELDS:
+        raise ValueError(f"'{field}' is not a credential ShellMate stores.")
+    return _load_plaintext().get(profile_id, {}).get(field, "")
+
+
+def set_credential(profile_id: str, field: str, value: str, storage: str) -> str:
+    """
+    Save or change one credential, in the store named.
+
+    Writes to one store and clears the other, so changing where a credential
+    lives cannot leave a stale copy behind in the place it moved out of —
+    which for the plaintext file would mean a password the user believes they
+    have encrypted still sitting readable on disk.
+
+    Returns where it ended up, or "" if it was cleared.
+    """
+    if field not in CREDENTIAL_FIELDS:
+        raise ValueError(f"'{field}' is not a credential ShellMate stores.")
+
+    if not value:
+        forget_credential(profile_id, field)
+        return ""
+
+    if storage == "plaintext":
+        data = _load_plaintext()
+        data.setdefault(profile_id, {})[field] = value
+        _write_plaintext(data)
+        _clear_vault_credential(profile_id, field)
+        return "plaintext"
+
+    try:
+        vault.set_many({_credential_key(profile_id, field): value})
+    except VaultError as exc:
+        raise ValueError(
+            "The vault is locked, so the credential could not be saved."
+        ) from exc
+
+    data = _load_plaintext()
+    if data.get(profile_id, {}).pop(field, None) is not None:
+        if not data[profile_id]:
+            data.pop(profile_id)
+        _write_plaintext(data)
+    return "vault"
+
+
+def forget_credential(profile_id: str, field: str) -> bool:
+    """Remove one credential from wherever it is. True if anything went."""
+    if field not in CREDENTIAL_FIELDS:
+        raise ValueError(f"'{field}' is not a credential ShellMate stores.")
+
+    removed = _clear_vault_credential(profile_id, field)
+
+    data = _load_plaintext()
+    if data.get(profile_id, {}).pop(field, None) is not None:
+        if not data[profile_id]:
+            data.pop(profile_id)
+        _write_plaintext(data)
+        removed = True
+
+    return removed
+
+
+def _clear_vault_credential(profile_id: str, field: str) -> bool:
+    """Blank one vault entry. A locked vault silently does nothing."""
+    key = _credential_key(profile_id, field)
+    try:
+        if not vault.has(key):
+            return False
+        vault.set_many({key: ""})
+        return True
+    except VaultError:
+        return False
+
+
+def move_to_vault(profile_id: str) -> list[str]:
+    """
+    Encrypt every plaintext credential belonging to a profile.
+
+    The one action here that improves matters rather than merely exposing it.
+    The reverse is deliberately not offered: there is no case where moving a
+    credential *out* of encryption is the thing somebody needed a button for.
+
+    Returns the fields moved. Empty when the vault is locked — the plaintext
+    copy is left exactly where it was, because deleting it before the
+    encrypted copy exists would lose the password outright.
+    """
+    stored = _load_plaintext().get(profile_id, {})
+    if not stored:
+        return []
+
+    entries = {_credential_key(profile_id, f): v for f, v in stored.items()
+               if f in CREDENTIAL_FIELDS and v}
+    if not entries:
+        return []
+
+    try:
+        vault.set_many(entries)
+    except VaultError:
+        return []
+
+    # Only now that the encrypted copy is written.
+    data = _load_plaintext()
+    data.pop(profile_id, None)
+    _write_plaintext(data)
+    return [f for f in stored if f in CREDENTIAL_FIELDS and stored[f]]
+
+
+def forget_all_plaintext() -> int:
+    """Empty the plaintext store. Returns how many profiles it held."""
+    data = _load_plaintext()
+    count = len(data)
+    if count:
+        _write_plaintext({})
+    return count
+
+
+# ---------------------------------------------------------------------------
 # Identity — what makes two saved connections the same connection
 #
 # The frontend compared hostname, port and username exactly, which meant

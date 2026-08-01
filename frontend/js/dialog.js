@@ -59,6 +59,8 @@
   /**
    * Ask for a line of text.
    *
+   * @param {object} opts
+   * @param {boolean} [opts.password] Mask what is typed.
    * @returns {Promise<string|null>} null if cancelled, so "" stays a
    *          distinguishable answer from "no answer".
    */
@@ -128,7 +130,9 @@
       label.htmlFor = 'sm-dialog-input';
 
       input = document.createElement('input');
-      input.type = 'text';
+      // A password is masked here for the same reason it is masked in a form:
+      // the person typing it is not always the only person in the room.
+      input.type = opts.password ? 'password' : 'text';
       input.id = 'sm-dialog-input';
       input.className = 'sm-dialog-input';
       input.value = opts.value || '';

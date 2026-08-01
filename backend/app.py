@@ -38,6 +38,7 @@ from backend.connections.base import ConnectionError_, ConnectionParams
 from backend.connections import sftp
 from backend.connections.manager import SessionManager
 from backend.connections.serial_handler import available_ports
+from backend import profiles as profiles_module
 from backend.profiles import (
     CREDENTIAL_FIELDS, delete_profile, forget_credentials, get_profiles,
     load_credentials, record_detected_hostname, save_credentials,
@@ -548,6 +549,163 @@ async def forget_profile_credentials(profile_id: str) -> dict:
     """Forget the credentials remembered for a profile."""
     forget_credentials(profile_id)
     return {"status": "ok", "profile_id": profile_id}
+
+
+# ---------------------------------------------------------------------------
+# Managing saved credentials
+#
+# A remembered password used to be invisible from the moment it was saved.
+# Nothing listed them, nothing changed one, and removing one meant finding the
+# connection it belonged to and reconnecting with the box unticked.
+#
+# One rule governs everything below: the *listing* never carries a secret, and
+# exactly one endpoint returns one — the reveal, which reads the plaintext file
+# and refuses for anything encrypted. That asymmetry is not an oversight to be
+# tidied up later. A vault that decrypts on demand for the interface is most of
+# the way to not being a vault; a plaintext credential is already readable in a
+# text file, so refusing to show it in the interface protects nothing and only
+# sends people to a text editor.
+# ---------------------------------------------------------------------------
+
+
+class CredentialWriteRequest(BaseModel):
+    """Body for PUT /api/credentials/{profile_id}/{field}."""
+
+    value: str = ""
+    #: "vault" or "plaintext". Where it should end up.
+    storage: str = "vault"
+
+
+def _credential_rows() -> dict:
+    """Every saved credential, described but never disclosed."""
+    locked = vault.is_locked()
+    entries = []
+
+    for profile in get_profiles():
+        profile_id = profile.get("id", "")
+        for field, storage in profiles_module.credential_fields(profile_id).items():
+            entries.append({
+                "profile_id":      profile_id,
+                "profile_name":    profile.get("name") or profile.get("hostname") or "",
+                "target": (profile.get("serial_port")
+                           if profile.get("connection_type") == "serial"
+                           else profile.get("hostname")) or "",
+                "username":        profile.get("username") or "",
+                "connection_type": profile.get("connection_type") or "ssh",
+                "field":           field,
+                "field_label":     profiles_module.FIELD_LABELS.get(field, field),
+                "storage":         storage,
+                # The interface shows a Reveal button on exactly these.
+                "can_reveal":      storage == "plaintext",
+            })
+
+    return {
+        "entries": entries,
+        "vault_locked": locked,
+        "vault_mode": vault.status().get("mode", ""),
+        # Said plainly, because a locked vault can only report the plaintext
+        # ones — and a short list that looks complete is worse than a warning.
+        "note": ("The vault is locked, so credentials kept in it are not "
+                 "listed. Unlock it to see the full picture.") if locked else "",
+    }
+
+
+@app.get("/api/credentials")
+async def list_credentials() -> dict:
+    """List saved device credentials — which, and in which store. No values."""
+    return await asyncio.to_thread(_credential_rows)
+
+
+@app.post("/api/credentials/{profile_id}/{field}/reveal")
+async def reveal_credential(profile_id: str, field: str) -> dict:
+    """
+    Show one credential that was saved unencrypted.
+
+    Refuses for anything in the vault rather than decrypting it. POST rather
+    than GET so it cannot be reached by a link, a prefetch or a cache.
+    """
+    def _read() -> dict:
+        if field not in CREDENTIAL_FIELDS:
+            raise HTTPException(status_code=404, detail=f"No such credential: {field}")
+
+        where = profiles_module.credential_fields(profile_id).get(field, "")
+        if where == "vault":
+            raise HTTPException(
+                status_code=400,
+                detail="That credential is encrypted and cannot be displayed. "
+                       "Delete it and save a new one if you no longer know it.")
+        if where != "plaintext":
+            raise HTTPException(status_code=404, detail="Nothing is saved there.")
+
+        logger.warning("Revealing the plaintext %s for profile %s at the "
+                       "user's request", field, profile_id)
+        return {"field": field,
+                "value": profiles_module.read_plaintext_credential(profile_id, field)}
+
+    return await asyncio.to_thread(_read)
+
+
+@app.put("/api/credentials/{profile_id}/{field}")
+async def write_credential(profile_id: str, field: str,
+                           request: CredentialWriteRequest) -> dict:
+    """Save or change one credential without reconnecting to the device."""
+    def _write() -> dict:
+        try:
+            where = profiles_module.set_credential(
+                profile_id, field, request.value, request.storage)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if request.storage == "plaintext" and where == "plaintext":
+            logger.warning("Saving the %s for profile %s in PLAIN TEXT at the "
+                           "user's request", field, profile_id)
+        return {"status": "ok", "storage": where}
+
+    return await asyncio.to_thread(_write)
+
+
+@app.delete("/api/credentials/{profile_id}/{field}")
+async def delete_credential(profile_id: str, field: str) -> dict:
+    """Forget one credential, from whichever store holds it."""
+    def _delete() -> dict:
+        try:
+            return {"status": "ok",
+                    "removed": profiles_module.forget_credential(profile_id, field)}
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return await asyncio.to_thread(_delete)
+
+
+@app.post("/api/credentials/{profile_id}/encrypt")
+async def encrypt_credentials(profile_id: str) -> dict:
+    """
+    Move a profile's plaintext credentials into the vault.
+
+    Offered in one direction only. There is no case where moving a credential
+    *out* of encryption is something somebody needed a button for.
+    """
+    def _move() -> dict:
+        moved = profiles_module.move_to_vault(profile_id)
+        if not moved and vault.is_locked():
+            raise HTTPException(
+                status_code=400,
+                detail="The vault is locked, so nothing was moved. The "
+                       "plaintext copy has been left where it is.")
+        return {"status": "ok", "moved": moved}
+
+    return await asyncio.to_thread(_move)
+
+
+@app.delete("/api/credentials/plaintext")
+async def forget_plaintext_credentials() -> dict:
+    """Empty the plaintext credential store entirely."""
+    def _forget() -> dict:
+        count = profiles_module.forget_all_plaintext()
+        logger.warning("Forgot every plaintext credential (%d profiles)", count)
+        return {"status": "ok", "profiles": count}
+
+    return await asyncio.to_thread(_forget)
 
 
 @app.get("/api/sftp/{session_id}/list")

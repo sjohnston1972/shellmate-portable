@@ -938,7 +938,7 @@ GigEth0/2     unassigned    YES unset  down     down
         <!-- Credentials vault -->
         <section class="settings-section">
           <h3 class="settings-section-title">Credentials Vault</h3>
-          <p class="settings-section-hint">API keys and remembered device passwords are encrypted on disk. Nothing sensitive is ever written in plain text.</p>
+          <p class="settings-section-hint">API keys and remembered device passwords are encrypted on disk — unless you asked for a particular one to be kept as readable text, which the list below marks and lets you undo.</p>
 
           <div class="setting-row">
             <span class="setting-label">Status</span>
@@ -964,6 +964,25 @@ GigEth0/2     unassigned    YES unset  down     down
           <div class="setting-row">
             <button type="button" id="vault-apply-mode" class="btn-secondary">Apply</button>
             <span id="vault-mode-result" class="setting-value"></span>
+          </div>
+
+          <!-- What is actually saved.
+               Until this existed, a remembered password was invisible from the
+               moment it was saved: nothing listed them, nothing changed one,
+               and removing one meant reconnecting to the device with the box
+               unticked. -->
+          <h4 class="settings-subsection-title">Saved device credentials</h4>
+          <p class="settings-section-hint" id="credentials-note"></p>
+          <div id="credentials-list" class="credentials-list"></div>
+          <div class="setting-row">
+            <button type="button" id="credentials-refresh" class="btn-secondary">
+              <span class="material-symbols-outlined">refresh</span>
+              Refresh
+            </button>
+            <button type="button" id="credentials-forget-plain" class="btn-danger">
+              <span class="material-symbols-outlined">delete_forever</span>
+              Forget everything in plain text
+            </button>
           </div>
         </section>
 
@@ -1773,6 +1792,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/mode.js?v=3"></script>
   <script src="/static/js/chat.js?v=2"></script>
   <script src="/static/js/settings.js?v=2"></script>
+  <script src="/static/js/credentials.js"></script>
   <script src="/static/js/markdown.js"></script>
   <script src="/static/js/docs.js"></script>
   <script src="/static/js/support.js"></script>

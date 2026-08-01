@@ -52,7 +52,18 @@ from backend import profiles  # noqa: E402
 
 
 def reset(entries: list[dict] | None = None) -> None:
-    """Start from a known profiles.json."""
+    """
+    Start from a known profiles.json, with no credentials attached.
+
+    Both stores are cleared, not just the file. Vault entries are keyed by
+    profile id and survive profiles.json being rewritten, so reusing an id
+    between tests would otherwise carry a credential across — which is exactly
+    the orphaning `delete_profile()` exists to prevent, showing up here as a
+    test that passes or fails depending on what ran before it.
+    """
+    for existing in profiles._load() + (entries or []):
+        profiles.forget_credentials(existing.get("id", ""))
+
     profiles._save(entries or [])
     plaintext = _temp / "credentials-plaintext.json"
     if plaintext.exists():
@@ -301,6 +312,203 @@ def test_a_secret_still_cannot_reach_the_file() -> None:
           str(set(stored[0]) & profiles.SECRET_FIELDS))
 
 
+def test_what_is_saved_can_be_listed() -> None:
+    """
+    Which credentials exist, and where each one lives.
+
+    The grain is one *field*, not one profile. CREDENTIAL_FIELDS is four
+    things — a password, a key passphrase, and the same two for a jump host —
+    and a listing that showed only "password" would be lying about what is
+    stored.
+    """
+    print("\n-- What is saved --")
+    reset([
+        {"id": "p1", "hostname": "10.5.5.5", "port": 22, "username": "u",
+         "connection_type": "ssh", "name": "core"},
+    ])
+    profiles.save_plaintext_credentials(
+        "p1", {"password": "shown", "jump_password": "also-shown"})
+
+    found = profiles.credential_fields("p1")
+    check("both saved fields are listed", set(found) == {"password", "jump_password"},
+          str(found))
+    check("and each says where it lives",
+          set(found.values()) == {"plaintext"}, str(found))
+    check("a field with nothing saved is absent",
+          "private_key_passphrase" not in found)
+    check("every field has a name for the screen",
+          all(f in profiles.FIELD_LABELS for f in profiles.CREDENTIAL_FIELDS),
+          "a row would be labelled with its internal field name")
+
+
+def test_a_plaintext_credential_can_be_read_back() -> None:
+    """
+    The narrow, deliberate exception to "no endpoint returns a secret".
+
+    The value is already sitting in a JSON file the user can open, so refusing
+    to show it in the interface protects nothing and only sends them to a text
+    editor. It reads the plaintext file and nothing else.
+    """
+    print("\n-- Showing one that was never encrypted --")
+    reset([{"id": "p1", "hostname": "10.5.5.5", "port": 22, "username": "u",
+            "connection_type": "ssh"}])
+    profiles.save_plaintext_credentials("p1", {"password": "readable"})
+
+    check("it comes back", profiles.read_plaintext_credential("p1", "password")
+          == "readable")
+    check("a field with nothing saved returns empty, not an error",
+          profiles.read_plaintext_credential("p1", "jump_password") == "")
+
+    raised = False
+    try:
+        profiles.read_plaintext_credential("p1", "not_a_field")
+    except ValueError:
+        raised = True
+    check("an unknown field is refused", raised,
+          "otherwise a typo silently reads nothing and looks like an empty store")
+
+
+def test_changing_one_does_not_leave_the_old_copy() -> None:
+    """
+    Saving into one store clears the other.
+
+    This is the part that matters. A credential moved from plaintext into the
+    vault, with the plaintext copy left behind, is a password the user
+    believes is encrypted sitting readable on disk — worse than never having
+    offered the move.
+    """
+    print("\n-- Changing where one lives --")
+    reset([{"id": "p1", "hostname": "10.6.6.6", "port": 22, "username": "u",
+            "connection_type": "ssh"}])
+    profiles.save_plaintext_credentials("p1", {"password": "in-the-open"})
+
+    where = profiles.set_credential("p1", "password", "now-encrypted", "vault")
+    if where != "vault":
+        check("the vault accepted it", False, "vault unavailable in this environment")
+        return
+
+    check("it is recorded as encrypted",
+          profiles.credential_fields("p1").get("password") == "vault")
+    raw = (_temp / "credentials-plaintext.json")
+    body = raw.read_text(encoding="utf-8") if raw.exists() else ""
+    check("and the readable copy is gone", "in-the-open" not in body, body[:200])
+    check("as is the new value", "now-encrypted" not in body, body[:200])
+
+    # And back the other way, which the panel does not offer but the store
+    # must still handle correctly if anything ever asks.
+    profiles.set_credential("p1", "password", "back-in-the-open", "plaintext")
+    check("moving the other way clears the encrypted copy",
+          profiles.credential_fields("p1").get("password") == "plaintext",
+          str(profiles.credential_fields("p1")))
+
+
+def test_encrypting_never_loses_the_password() -> None:
+    """
+    Move to the vault, and the ordering that makes it safe.
+
+    The plaintext copy is deleted only once the encrypted one is written. The
+    other order loses the password outright whenever the vault refuses.
+    """
+    print("\n-- Encrypting what was in the open --")
+    reset([{"id": "p1", "hostname": "10.7.7.7", "port": 22, "username": "u",
+            "connection_type": "ssh"}])
+    profiles.save_plaintext_credentials(
+        "p1", {"password": "one", "private_key_passphrase": "two"})
+
+    moved = profiles.move_to_vault("p1")
+    if not moved:
+        check("the vault accepted them", False, "vault unavailable in this environment")
+        return
+
+    check("every field moves, not just the password",
+          set(moved) == {"password", "private_key_passphrase"}, str(moved))
+    check("they are now encrypted",
+          set(profiles.credential_fields("p1").values()) == {"vault"},
+          str(profiles.credential_fields("p1")))
+
+    raw = _temp / "credentials-plaintext.json"
+    body = raw.read_text(encoding="utf-8") if raw.exists() else ""
+    check("and nothing readable is left behind",
+          "one" not in body and "two" not in body, body[:200])
+
+    check("a profile with nothing in the open is a no-op",
+          profiles.move_to_vault("p1") == [])
+
+
+def test_forgetting() -> None:
+    print("\n-- Forgetting --")
+    reset([{"id": "p1", "hostname": "10.8.8.8", "port": 22, "username": "u",
+            "connection_type": "ssh"},
+           {"id": "p2", "hostname": "10.8.8.9", "port": 22, "username": "u",
+            "connection_type": "ssh"}])
+    profiles.save_plaintext_credentials("p1", {"password": "a", "jump_password": "b"})
+    profiles.save_plaintext_credentials("p2", {"password": "c"})
+
+    check("one field goes on its own",
+          profiles.forget_credential("p1", "password") is True)
+    check("and the others are untouched",
+          profiles.credential_fields("p1") == {"jump_password": "plaintext"},
+          str(profiles.credential_fields("p1")))
+    check("forgetting nothing is not an error",
+          profiles.forget_credential("p1", "password") is False)
+
+    check("and the lot can go at once", profiles.forget_all_plaintext() == 2)
+    check("leaving none", not profiles.credential_fields("p1")
+          and not profiles.credential_fields("p2"))
+
+
+def test_the_api_still_keeps_its_promise() -> None:
+    """
+    The listing describes; exactly one endpoint discloses.
+
+    Adding a way to read a stored secret is the sort of change that quietly
+    grows a second one. This checks the boundary rather than trusting it.
+    """
+    print("\n-- What the API gives out --")
+    from fastapi.testclient import TestClient
+
+    from backend.app import app
+
+    reset([{"id": "plain1", "hostname": "10.9.9.9", "port": 22, "username": "u",
+            "connection_type": "ssh", "name": "lab-sw"}])
+    profiles.save_plaintext_credentials("plain1", {"password": "TOP-SECRET-VALUE"})
+
+    client = TestClient(app)
+
+    listing = client.get("/api/credentials")
+    check("the listing answers", listing.status_code == 200, listing.text)
+    check("and carries no secret at all", "TOP-SECRET-VALUE" not in listing.text,
+          "a credential reached a listing endpoint")
+
+    rows = listing.json()["entries"]
+    row = next((r for r in rows if r["profile_id"] == "plain1"), None)
+    check("the row is there", row is not None)
+    check("it says which store", row and row["storage"] == "plaintext")
+    check("and that this one can be shown", row and row["can_reveal"] is True)
+
+    shown = client.post("/api/credentials/plain1/password/reveal")
+    check("revealing a plaintext credential works",
+          shown.status_code == 200 and shown.json()["value"] == "TOP-SECRET-VALUE",
+          shown.text)
+
+    # And the half that must never work.
+    if profiles.set_credential("plain1", "password", "ENCRYPTED-VALUE", "vault") == "vault":
+        refused = client.post("/api/credentials/plain1/password/reveal")
+        check("revealing an encrypted one is refused", refused.status_code == 400,
+              refused.text)
+        check("and the value is not in the refusal either",
+              "ENCRYPTED-VALUE" not in refused.text, refused.text)
+
+        again = client.get("/api/credentials")
+        check("the listing marks it as not showable",
+              not next(r["can_reveal"] for r in again.json()["entries"]
+                       if r["profile_id"] == "plain1"))
+
+    missing = client.post("/api/credentials/plain1/not_a_field/reveal")
+    check("an unknown field is a 404, not a blank success",
+          missing.status_code == 404, missing.text)
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Connection profiles")
@@ -312,7 +520,13 @@ def main() -> int:
                  test_merge_keeps_what_the_discarded_entry_knew,
                  test_orphaned_credentials_are_not_left_behind,
                  test_listing_tidies_up,
-                 test_a_secret_still_cannot_reach_the_file):
+                 test_a_secret_still_cannot_reach_the_file,
+                 test_what_is_saved_can_be_listed,
+                 test_a_plaintext_credential_can_be_read_back,
+                 test_changing_one_does_not_leave_the_old_copy,
+                 test_encrypting_never_loses_the_password,
+                 test_forgetting,
+                 test_the_api_still_keeps_its_promise):
         try:
             test()
         except Exception as exc:
