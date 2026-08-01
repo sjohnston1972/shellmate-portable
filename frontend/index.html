@@ -47,6 +47,9 @@
       <a href="#" id="sidebar-link-sftp" class="sidebar-link" title="Files (SFTP)">
         <span class="material-symbols-outlined">description</span>
       </a>
+      <a href="#" id="sidebar-link-keys" class="sidebar-link" title="SSH keys">
+        <span class="material-symbols-outlined">key</span>
+      </a>
       <a href="#" id="sidebar-link-broadcast" class="sidebar-link" title="Broadcast a command (Ctrl+Shift+B)">
         <span class="material-symbols-outlined">send</span>
       </a>
@@ -1276,6 +1279,111 @@ GigEth0/2     unassigned    YES unset  down     down
 
 
   <!-- ================================================================
+       SSH KEYS (#55)
+  ================================================================ -->
+  <div id="keys-overlay" class="panel-overlay hidden">
+    <div id="keys-panel" class="side-panel side-panel-wide">
+      <div class="panel-header">
+        <h2 class="panel-title">SSH keys</h2>
+        <button id="keys-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="panel-body">
+        <p class="settings-section-hint">Keys ShellMate is looking after, in <code id="keys-folder"></code>. The private half never leaves this machine — not to a device, and not into the interface.</p>
+
+        <div class="broadcast-targets-head">
+          <span class="setting-label">Create a key</span>
+        </div>
+
+        <div class="setting-row setting-row-stack">
+          <label class="setting-label" for="key-name"
+                 data-tip="Becomes the file name. `id_ed25519` is the usual convention; anything that tells you a year from now what this key was for is better.">Called</label>
+          <input type="text" id="key-name" class="setting-input setting-input-full"
+                 placeholder="id_shellmate" autocomplete="off" />
+        </div>
+
+        <div class="setting-row setting-row-stack">
+          <label class="setting-label" for="key-passphrase"
+                 data-tip="Encrypts the private key file itself.||Without one, anyone who can read your data folder can use the key — including anyone who picks up the USB stick ShellMate is running from.||With one, you type it on each connection, or save it to the vault so you do not have to.">Passphrase</label>
+          <input type="password" id="key-passphrase" class="setting-input setting-input-full"
+                 autocomplete="new-password" placeholder="Optional, but see the note" />
+        </div>
+
+        <div class="setting-row setting-row-stack">
+          <label class="setting-label" for="key-comment"
+                 data-tip="Ends up in the public key, and therefore in the device's configuration.||`you@laptop` is the convention. Make it something you would recognise a year from now on a switch you did not set up.">Comment</label>
+          <input type="text" id="key-comment" class="setting-input setting-input-full"
+                 placeholder="neteng@laptop" autocomplete="off" />
+        </div>
+
+        <details class="key-advanced">
+          <summary>Advanced</summary>
+
+          <div class="setting-row">
+            <label class="setting-label" for="key-kind"
+                   data-tip="Ed25519 is smaller, faster and the modern default. Choose it unless something refuses it.||RSA is what to pick when the device is too old to accept anything else — plenty of network kit is.||ECDSA sits between the two and is worth choosing only if a standard you have to meet asks for it.">Type</label>
+            <select id="key-kind" class="setting-input">
+              <option value="ed25519">Ed25519 (recommended)</option>
+              <option value="ecdsa">ECDSA</option>
+              <option value="rsa">RSA</option>
+            </select>
+          </div>
+
+          <div class="setting-row hidden" id="key-bits-row">
+            <label class="setting-label" for="key-bits"
+                   data-tip="2048 is still perfectly adequate. 4096 is slower for the device to verify on every connection and is rarely required.||Anything below 2048 is not offered.">RSA size</label>
+            <select id="key-bits" class="setting-input">
+              <option value="2048">2048</option>
+              <option value="3072" selected>3072</option>
+              <option value="4096">4096</option>
+            </select>
+          </div>
+
+          <div class="setting-row hidden" id="key-curve-row">
+            <label class="setting-label" for="key-curve"
+                   data-tip="P-256 is the widely supported one. The larger curves are slower and no device in normal use requires them.">Curve</label>
+            <select id="key-curve" class="setting-input">
+              <option value="p256" selected>P-256</option>
+              <option value="p384">P-384</option>
+              <option value="p521">P-521</option>
+            </select>
+          </div>
+        </details>
+
+        <div class="setting-row">
+          <button type="button" id="key-generate" class="btn-primary">
+            <span class="material-symbols-outlined">key</span>
+            Create
+          </button>
+        </div>
+        <p id="keys-status" class="settings-section-hint"></p>
+
+        <div class="broadcast-targets-head">
+          <span class="setting-label">Already have one?</span>
+        </div>
+        <div class="setting-row setting-row-stack">
+          <div class="setting-input-group setting-input-group-full">
+            <input type="text" id="key-import-path" class="setting-input setting-input-full"
+                   placeholder="C:\Users\you\.ssh\id_ed25519" autocomplete="off" />
+            <button type="button" class="btn-secondary btn-browse" data-target="key-import-path">
+              <span class="material-symbols-outlined">folder_open</span>
+              Browse
+            </button>
+            <button type="button" id="key-import" class="btn-secondary">Import</button>
+          </div>
+          <p class="settings-section-hint">Copied in rather than referenced, so the list means one thing and the permissions can be tightened. A key left where it is still works through the connection dialog.</p>
+        </div>
+
+        <div class="broadcast-targets-head">
+          <span class="setting-label">Your keys</span>
+        </div>
+        <div id="keys-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
        SUPPORT — assembling a diagnostic bundle (#53)
   ================================================================ -->
   <div id="support-overlay" class="panel-overlay hidden">
@@ -1607,6 +1715,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/markdown.js"></script>
   <script src="/static/js/docs.js"></script>
   <script src="/static/js/support.js"></script>
+  <script src="/static/js/keys.js"></script>
   <script src="/static/js/broadcast.js"></script>
   <script src="/static/js/settings_nav.js"></script>
   <script src="/static/js/tooltips.js"></script>

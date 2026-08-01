@@ -231,6 +231,11 @@ and these exist only to get one back.
 | `GET` `POST` | `/api/settings` | Read and write settings |
 | `GET` | `/api/platforms` | Platform definitions |
 | `PUT` | `/api/platforms/{id}` | Update one |
+| `GET` | `/api/keys` | SSH keys ShellMate is looking after |
+| `POST` | `/api/keys` | Generate one |
+| `POST` | `/api/keys/import` | Copy an existing key in |
+| `POST` | `/api/keys/passphrase` | Add, change or remove one |
+| `POST` | `/api/keys/delete` | Remove a key |
 | `GET` | `/api/support/sections` | What can go in a diagnostic bundle |
 | `POST` | `/api/support/preview` | Gather sections without writing anything |
 | `POST` | `/api/support/bundle` | Write the chosen sections as one zip |
@@ -247,6 +252,7 @@ from the code, so it cannot drift from what the server actually does.
 
 ### What the API will not give you
 
-No endpoint returns a stored password or API key. Connection listings carry a
+No endpoint returns a stored password, an API key, or the private half of an
+SSH key. Connection listings carry a
 flag saying whether a password is saved, never the password itself. This
 holds for scripts exactly as it does for the interface.

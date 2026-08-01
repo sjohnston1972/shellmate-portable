@@ -60,6 +60,46 @@ independent boxes would imply otherwise.
 
 ## Keys
 
+### Making one
+
+The **key** icon in the sidebar creates SSH keys, so nobody has to find
+`ssh-keygen` or PuTTYgen first. Name it, press Create — Ed25519, which is the
+right answer unless something refuses it.
+
+**Advanced** holds the rest: RSA when the device is too old to accept anything
+else, which plenty of network kit is, and ECDSA if a standard you have to meet
+asks for it.
+
+A **passphrase** encrypts the private key file itself. Without one, anyone who
+can read your data folder can use the key — including anyone who picks up the
+stick ShellMate is running from. ShellMate asks before making one without.
+
+The **comment** ends up in the public key, and therefore in the device's
+configuration. `you@laptop` is the convention; make it something you would
+recognise a year from now on a switch you did not set up.
+
+Keys live in `ShellMate-Data/keys/`, so they travel with the data folder. On
+Windows the file's permissions are tightened as it is written — OpenSSH refuses
+a private key other accounts can read, so a key made here works with `ssh.exe`
+as well.
+
+### Using one
+
+Each key shows both fingerprints: **SHA256**, which modern OpenSSH prints, and
+**MD5**, which a great deal of network kit still shows. Comparing what the
+device says against what you hold is the whole point of a fingerprint, so both
+are there with copy buttons.
+
+**Copy public key** gives you the line to paste into the device.
+**Use for a connection** fills it straight into the connection dialog.
+
+You can also **change or remove a passphrase** on a key, or **import** one you
+already have — copied in rather than referenced, so the list means one thing
+and the permissions can be tightened. A key left where it is still works
+through the connection dialog's path field.
+
+### Pointing at one directly
+
 Point the connection dialog at your private key file with **Browse**, which
 opens the platform's own file dialog when ShellMate is running in its desktop
 window, and its own file browser when you have opened it in a browser instead

@@ -46,6 +46,7 @@ from backend.profiles import (
 from backend import platforms as platforms_module
 from backend import snippets
 from backend import support
+from backend import keys as ssh_keys
 from backend.onboard import as_chosen, summarise
 from backend.session import outbound
 from backend.session.redact import redact
@@ -1148,6 +1149,100 @@ class PlatformRequest(BaseModel):
     dangerous_commands: list[str] = []
     config_mode_markers: list[str] = []
     comment_prefix: str = "!"
+
+
+# ---------------------------------------------------------------------------
+# REST — SSH keys
+#
+# No endpoint here returns private key material, in the same way none returns
+# a password. The interface sees the public half, the fingerprints and the
+# metadata; the private key exists on disk and nowhere else.
+# ---------------------------------------------------------------------------
+
+
+class GenerateKeyRequest(BaseModel):
+    """Body for POST /api/keys."""
+
+    name: str = "id_shellmate"
+    kind: str = "ed25519"
+    bits: int = 3072
+    curve: str = "p256"
+    passphrase: str = ""
+    comment: str = ""
+
+
+class KeyPathRequest(BaseModel):
+    """Body for the endpoints that act on an existing key."""
+
+    path: str
+    # Only used by the passphrase change.
+    old_passphrase: str = ""
+    new_passphrase: str = ""
+    name: str = ""
+
+
+@app.get("/api/keys")
+async def keys_list() -> dict:
+    """Every key ShellMate is looking after."""
+    return {
+        "keys":   await asyncio.to_thread(ssh_keys.listing),
+        "folder": str(ssh_keys.keys_dir()),
+        "types":  list(ssh_keys.KEY_TYPES),
+        "rsa_sizes": list(ssh_keys.RSA_SIZES),
+        "curves": sorted(ssh_keys.CURVES),
+    }
+
+
+@app.post("/api/keys")
+async def key_generate(request: GenerateKeyRequest) -> dict:
+    """Create a key pair."""
+    try:
+        info = await asyncio.to_thread(
+            ssh_keys.generate, request.name, request.kind, request.bits,
+            request.curve, request.passphrase, request.comment,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return info.as_dict()
+
+
+@app.post("/api/keys/import")
+async def key_import(request: KeyPathRequest) -> dict:
+    """Copy an existing key into ShellMate's keys folder."""
+    try:
+        info = await asyncio.to_thread(ssh_keys.import_key, request.path, request.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return info.as_dict()
+
+
+@app.post("/api/keys/passphrase")
+async def key_passphrase(request: KeyPathRequest) -> dict:
+    """Add, change or remove a key's passphrase."""
+    try:
+        info = await asyncio.to_thread(
+            ssh_keys.change_passphrase, request.path,
+            request.old_passphrase, request.new_passphrase,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return info.as_dict()
+
+
+@app.post("/api/keys/delete")
+async def key_delete(request: KeyPathRequest) -> dict:
+    """
+    Remove a key and its public half.
+
+    A POST rather than a DELETE with the path in the URL: a Windows path
+    carries backslashes and colons, and round-tripping one through a URL
+    segment is a source of bugs nobody needs here.
+    """
+    try:
+        removed = await asyncio.to_thread(ssh_keys.delete, request.path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"removed": removed}
 
 
 # ---------------------------------------------------------------------------
