@@ -29,6 +29,23 @@
   --error:    #FFB4AB;
   --secondary: #B7C8E1;
 
+  /* Status, the other two thirds of it.
+     --error existed and --warn/--ok did not, so every amber and green in the
+     application was written as a literal — chosen against a near-black
+     background and invisible on a near-white one. The discovery panel's
+     information icon was #f9e2af, which in the light theme is barely there.
+     Each has a text colour, a tint to sit on and an edge, because a status
+     badge needs all three and hardcoding two of them is how the last one
+     drifted. Measured in test_contrast.py, in both themes. */
+  --warn:       #F9E2AF;
+  --warn-tint:  rgba(249,226,175,0.12);
+  --warn-edge:  rgba(249,226,175,0.45);
+  --ok:         #A6E3A1;
+  --ok-tint:    rgba(166,227,161,0.12);
+  --ok-edge:    rgba(166,227,161,0.40);
+  --primary-tint: rgba(195,192,255,0.12);
+  --primary-edge: rgba(195,192,255,0.40);
+
   /* Floating surfaces — dialogs, side panels and the notes that hover over
      the terminal. Translucent, because they sit on a blurred backdrop.
      These exist as tokens rather than literals for a specific reason: six
@@ -74,6 +91,17 @@
   --outline:  rgba(100,99,120,0.2);
   --error:    #B3261E;
   --secondary: #1B6CA8;
+  /* Dark enough to read on a near-white panel, which is the whole point of
+     these being tokens. Both clear AA against overlay, panel and
+     surface-high. */
+  --warn:       #6B4400;
+  --warn-tint:  rgba(154,101,0,0.12);
+  --warn-edge:  rgba(154,101,0,0.35);
+  --ok:         #0F5C26;
+  --ok-tint:    rgba(20,108,46,0.10);
+  --ok-edge:    rgba(20,108,46,0.30);
+  --primary-tint: rgba(79,70,229,0.10);
+  --primary-edge: rgba(79,70,229,0.30);
   --overlay:       rgba(236,236,240,0.97);
   --overlay-solid: #ECECF0;
 }
@@ -1815,9 +1843,9 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 /* The same box, saying something went right rather than wrong. Sharing the
    element keeps the dialog from shifting as one replaces the other. */
 .form-error.form-note {
-  background: rgba(166,227,161,0.08);
-  border-color: rgba(166,227,161,0.4);
-  color: var(--success, #a6e3a1);
+  background: var(--ok-tint);
+  border-color: var(--ok-edge);
+  color: var(--ok);
 }
 
 /* Modal action buttons */
@@ -3875,12 +3903,30 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 /* --------------------------------------------------------------------------
    Settings — AI provider keys + Chroma section helpers
    -------------------------------------------------------------------------- */
+/* A hint explains the thing above it, and how close it should sit depends on
+   what that thing is.
+   The negative top margin below was written for a hint directly under a
+   section title, where it should hug the heading. Every other use inherited
+   it — after an input, after a checkbox, after a button — and pulled the note
+   4px *into* the control, so it read as part of the field rather than as a
+   note about it. Four stacked under four inputs in the discovery panel is
+   what made it obvious. */
 .settings-section-hint {
   font-family: 'Inter', sans-serif;
   font-size: 12px;
   color: var(--on-surface-dim);
-  margin: -4px 0 12px;
+  margin: 8px 0 12px;
   line-height: 1.4;
+}
+
+/* The case it was written for. */
+.settings-section-title + .settings-section-hint {
+  margin-top: -4px;
+}
+
+/* Two hints in a row are one explanation in two paragraphs. */
+.settings-section-hint + .settings-section-hint {
+  margin-top: -6px;
 }
 
 /* --------------------------------------------------------------------------
@@ -5681,7 +5727,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   border: 1px solid rgba(255,180,171,0.32);
   border-radius: var(--radius-md);
   font-size: 12px;
-  color: var(--on-surface-variant);
+  color: var(--on-surface-dim);
   word-break: break-all;
 }
 
@@ -5741,7 +5787,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 
 .credential-detail {
   font-size: 11px;
-  color: var(--on-surface-variant);
+  color: var(--on-surface-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5759,22 +5805,22 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .credential-encrypted {
-  background: rgba(166,227,161,0.12);
-  border: 1px solid rgba(166,227,161,0.4);
-  color: #a6e3a1;
+  background: var(--ok-tint);
+  border: 1px solid var(--ok-edge);
+  color: var(--ok);
 }
 
 /* Not an error, but not something to pass over either. */
 .credential-plain {
-  background: rgba(249,226,175,0.12);
-  border: 1px solid rgba(249,226,175,0.45);
-  color: #f9e2af;
+  background: var(--warn-tint);
+  border: 1px solid var(--warn-edge);
+  color: var(--warn);
 }
 
 .credential-value {
   font-family: var(--font-mono, monospace);
   font-size: 12px;
-  color: var(--on-surface-variant);
+  color: var(--on-surface-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5815,18 +5861,22 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   gap: 10px;
   margin: 0 0 18px;
   padding: 12px 14px;
-  background: rgba(249,226,175,0.08);
-  border: 1px solid rgba(249,226,175,0.35);
+  background: var(--warn-tint);
+  border: 1px solid var(--warn-edge);
   border-radius: var(--radius-md);
   font-size: 12px;
   line-height: 1.5;
-  color: var(--on-surface-variant);
+  /* Full strength, not the dim variant. This is a permanent notice somebody
+     is meant to read before scanning a network, and dimmed on its own amber
+     tint it measured 4.45:1 — under AA by a hair, which is exactly the sort
+     of margin an eye does not catch. */
+  color: var(--on-surface);
 }
 
 .discovery-notice .material-symbols-outlined {
   flex: 0 0 auto;
   font-size: 18px;
-  color: #f9e2af;
+  color: var(--warn);
 }
 
 .discovery-progress { margin-top: 10px; }
@@ -5882,7 +5932,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
    a banner. All of it attacker-supplied, all of it set with textContent. */
 .discovery-what {
   font-size: 11px;
-  color: var(--on-surface-variant);
+  color: var(--on-surface-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5892,8 +5942,8 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   flex: 0 0 auto;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(195,192,255,0.12);
-  border: 1px solid rgba(195,192,255,0.4);
+  background: var(--primary-tint);
+  border: 1px solid var(--primary-edge);
   color: var(--primary);
   font-size: 10px;
   font-weight: 600;
@@ -5903,7 +5953,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .discovery-ports {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  color: var(--on-surface-variant);
+  color: var(--on-surface-dim);
   white-space: nowrap;
 }
 

@@ -217,6 +217,98 @@ def test_overlay_text_meets_aa() -> None:
             )
 
 
+#: Status text and icons, which is the half of this that was missing.
+#:
+#: The background check below catches a floating surface that hardcodes its
+#: colour. It says nothing about a *foreground* written as a literal, and that
+#: is how `color: #f9e2af` reached the discovery panel's information icon: a
+#: dark-theme amber, chosen against near-black, invisible on near-white. Three
+#: more like it were in the credential badges and the save confirmation.
+#:
+#: Each entry is (rule, what it is, text token, the tint it sits on). The tint
+#: matters — a status badge is coloured text on a coloured background, and
+#: measuring against the plain panel would flatter it.
+STATUS = [
+    (".discovery-notice .material-symbols-outlined",
+     "the information icon on the scan warning", "--warn", "--warn-tint"),
+    (".discovery-notice", "the scan warning itself", "--on-surface", "--warn-tint"),
+    (".credential-plain", 'the "plain text" credential badge', "--warn", "--warn-tint"),
+    (".credential-encrypted", 'the "encrypted" credential badge', "--ok", "--ok-tint"),
+    (".form-error.form-note", "the connection-saved confirmation", "--ok", "--ok-tint"),
+    (".discovery-badge", "the identified-platform badge", "--primary", "--primary-tint"),
+]
+
+
+def test_status_colours_read_in_both_themes() -> None:
+    """
+    Amber and green, measured rather than eyeballed.
+
+    --error existed as a token and --warn/--ok did not, which is exactly why
+    error text was the one status colour that already worked in both themes
+    and the others did not.
+    """
+    text = CSS.read_text(encoding="utf-8")
+    parsed = rules(text)
+
+    dark = tokens(parsed, ":root")
+    light = dict(dark)
+    light.update(tokens(parsed, '[data-theme="light"]'))
+
+    for theme_name, table in (("dark", dark), ("light", light)):
+        page = parse_colour(resolve(table["--bedrock"], table))[:3]
+        panel = over(resolve(table["--overlay"], table), page)
+
+        for selector, label, token, tint in STATUS:
+            missing = [name for name in (token, tint) if name not in table]
+            if missing:
+                check(f"{theme_name}: {selector} — {label}", False,
+                      f"undefined token(s): {', '.join(missing)} — an "
+                      f"undefined var() falls through to whatever follows it")
+                continue
+
+            background = over(resolve(table[tint], table), panel)
+            colour = resolve(table[token], table)
+            ratio = contrast(over(colour, background), background)
+            check(
+                f"{theme_name}: {selector} — {label}",
+                ratio >= AA,
+                f"{ratio:.2f}:1 on its own tint, below the {AA}:1 AA ratio "
+                f"({token} = {colour})",
+            )
+
+
+def test_no_status_colour_is_written_as_a_literal() -> None:
+    """
+    The rule that should have stopped this, applied to foregrounds.
+
+    A literal hex is legitimate in plenty of places — #fff on a filled button,
+    the ANSI palette, the terminal preview — so this checks the rules that are
+    *about* status rather than every colour in the file.
+    """
+    # Comments stripped first: this file explains why these values are tokens
+    # now, and a check that counts the explanation as a violation is a check
+    # that punishes writing one down.
+    text = re.sub(r"/\*.*?\*/", "", CSS.read_text(encoding="utf-8"), flags=re.S)
+
+    # The dark-theme values that used to be pasted around, and the light-theme
+    # ones, so a fix in the wrong direction is caught too.
+    literals = ("#f9e2af", "#a6e3a1", "#6b4400", "#0f5c26")
+    lowered = text.lower()
+
+    for literal in literals:
+        occurrences = lowered.count(literal)
+        # One each: the token definitions themselves.
+        check(f"{literal} appears only where the token is defined",
+              occurrences <= 1,
+              f"{occurrences} occurrences — a status colour pasted into a rule "
+              f"cannot follow the theme")
+
+    check("there is no var(--success), which was never defined",
+          "--success" not in lowered,
+          "a var() with no definition falls through to its fallback, so the "
+          "fallback was always what rendered")
+
+
 def test_the_application_icon() -> None:
     """
     The tray icon, measured against the taskbar it sits on.
@@ -270,6 +362,8 @@ def main() -> int:
     print("=" * 52)
 
     for test in (test_no_hardcoded_overlay_backgrounds, test_overlay_text_meets_aa,
+                 test_status_colours_read_in_both_themes,
+                 test_no_status_colour_is_written_as_a_literal,
                  test_the_application_icon):
         try:
             test()
