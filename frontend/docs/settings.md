@@ -78,11 +78,11 @@ because that is what it means. Unticking it clears what was stored, so the
 next launch opens at the default size rather than silently restoring a stale
 one.
 
-## Stockton
+## Stockton — settings for the tinkerer
 
-The **tune** icon in the sidebar opens the advanced settings: fifty-odd values
-that govern how ShellMate behaves and were, until now, constants in the source.
-Timeouts, thresholds, buffer sizes, retry counts.
+The **tune** icon in the sidebar opens fifty-odd values that govern how
+ShellMate behaves and were, until now, constants in the source. Timeouts,
+thresholds, buffer sizes, retry counts.
 
 Every one has a sensible default and a range it is held to, checked on the
 server rather than by the input box — so nothing there can stop ShellMate

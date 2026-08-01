@@ -64,7 +64,7 @@
       </a>
       <!-- Stockton. Not explained by name on purpose: the notice on the panel
            says what it is, which is all a user needs. -->
-      <a href="#" id="sidebar-link-stockton" class="sidebar-link" title="Stockton — advanced settings">
+      <a href="#" id="sidebar-link-stockton" class="sidebar-link" title="Stockton — settings for the tinkerer">
         <span class="material-symbols-outlined">tune</span>
       </a>
     </nav>
@@ -1293,14 +1293,17 @@ GigEth0/2     unassigned    YES unset  down     down
   <div id="stockton-overlay" class="panel-overlay hidden">
     <div id="stockton-panel" class="side-panel settings-like">
       <div class="panel-header">
-        <h2 class="panel-title">Stockton</h2>
+        <div class="panel-title-group">
+          <h2 class="panel-title">Stockton</h2>
+          <span class="panel-subtitle">Settings for the tinkerer</span>
+        </div>
         <button id="stockton-close" class="icon-btn" aria-label="Close">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
 
       <p id="stockton-notice">
-        <strong>Advanced settings.</strong> Everything here was a constant in the source until now. Each has a sensible default and a range it is held to, so the worst you can do is make ShellMate work less well — never stop it starting. Stuck? Run once with <code>--reset-advanced</code>.
+        Everything here was a constant in the source until now. Each has a sensible default and a range it is held to, so the worst you can do is make ShellMate work less well — never stop it starting. Stuck? Run once with <code>--reset-advanced</code>.
       </p>
 
       <div class="settings-search-wrap">
