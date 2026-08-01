@@ -94,9 +94,14 @@ FRONTEND_DIR = paths.frontend_dir()
 # matched anything.
 # ---------------------------------------------------------------------------
 
+#: What counts as one of our own pages. Used by the CORS middleware *and* by
+#: the WebSocket handshake check below — CORS does not cover WebSockets, and
+#: two definitions of the same thing is how one of them ends up wrong.
+ALLOWED_ORIGIN = re.compile(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_origin_regex=ALLOWED_ORIGIN.pattern,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2231,6 +2236,41 @@ async def download_log(filename: str) -> FileResponse:
 # WebSocket — terminal I/O
 # ---------------------------------------------------------------------------
 
+async def _origin_allowed(websocket: WebSocket) -> bool:
+    """
+    Whether a WebSocket handshake came from a page we serve.
+
+    CORSMiddleware does not apply to WebSockets. The browser sends an `Origin`
+    header on the handshake and the server is expected to reject unknown ones
+    itself; Starlette does not do it for anybody.
+
+    This matters because of what the security model actually promises.
+    Binding to 127.0.0.1 with no authentication is defensible against other
+    programs on the machine — they would need to be running here already. It
+    is *not* defensible against a web page the user merely visits, because
+    their browser is on this machine and will open a socket to loopback on the
+    page's behalf. `/ws/chat` needs no secret at all, and `context_mode: all`
+    builds a prompt from every open session's buffer, so an accepted socket
+    there reads what is on every screen and streams it back to the caller.
+    The port is not a secret either: the scan walks upward from 8765.
+
+    A missing Origin is allowed. Non-browser clients — a script, curl, a test —
+    send none, and they have no ambient authority to borrow: nothing is
+    attaching the user's cookies or their loopback access on their behalf. It
+    is the *browser* case that needs the check, and browsers always send it.
+    """
+    origin = websocket.headers.get("origin")
+    if origin is None:
+        return True
+    if ALLOWED_ORIGIN.match(origin):
+        return True
+
+    logger.warning("Refused a WebSocket handshake from origin %r on %s",
+                   origin, websocket.url.path)
+    await websocket.close(code=1008)   # policy violation
+    return False
+
+
 @app.websocket("/ws/terminal/{session_id}")
 async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
     """
@@ -2240,7 +2280,12 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
     Each session_id gets its own WebSocket connection.  Multiple tabs in
     the browser each connect here with their own session_id — they are
     completely independent.
+
+    An accepted socket here can type into a live device, so the handshake is
+    checked before it is accepted rather than after.
     """
+    if not await _origin_allowed(websocket):
+        return
     await websocket.accept()
 
     session = session_manager.get_session(session_id)
@@ -2540,7 +2585,12 @@ async def chat_websocket(websocket: WebSocket) -> None:
       {"type": "chunk",  "data": "..."}    — one per token
       {"type": "done"}                     — stream complete
       {"type": "error",  "message": "..."}  — on failure
+
+    Checked before accepting: this endpoint needs no session id and no secret
+    of any kind, and `context_mode: all` reads every open session.
     """
+    if not await _origin_allowed(websocket):
+        return
     await websocket.accept()
     try:
         while True:
