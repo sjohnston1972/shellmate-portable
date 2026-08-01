@@ -213,14 +213,6 @@ def main() -> int:
     return 0
 
 
-if __name__ == "__main__":
-    # Required before any threading when frozen: without it, a PyInstaller
-    # build that spawns a subprocess would re-run this entry point and
-    # fork-bomb itself.
-    multiprocessing.freeze_support()
-    sys.exit(main())
-
-
 def _apply_log_level() -> None:
     """
     Honour the Stockton log level.
@@ -240,3 +232,11 @@ def _apply_log_level() -> None:
                 logger.info("Log level set to %s", level)
     except Exception as exc:                              # pragma: no cover
         logger.info("Could not apply the configured log level: %s", exc)
+
+
+if __name__ == "__main__":
+    # Required before any threading when frozen: without it, a PyInstaller
+    # build that spawns a subprocess would re-run this entry point and
+    # fork-bomb itself.
+    multiprocessing.freeze_support()
+    sys.exit(main())
