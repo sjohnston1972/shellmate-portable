@@ -90,6 +90,22 @@ def summarise(fingerprint: Fingerprint, auto_paging: bool = True) -> dict:
     summary["paging_skipped"] = skipped
     summary["confident"] = fingerprint.certain_enough_to_act
     summary["act_threshold"] = ACT_THRESHOLD
+
+    # How many aliases the identification just brought into force.
+    #
+    # Identifying the platform is what makes alias expansion work at all —
+    # pipeline.platform is set from this same summary, and expansion is keyed
+    # on it — so the two are one event to the user even though they are two
+    # things in the code. The count only ever appeared in the branches where
+    # *nothing* was sent ("nothing to send, aliases are active"), which is the
+    # rarest case; the ordinary one announced the paging command and said
+    # nothing about the aliases it had just switched on.
+    #
+    # Note this is what the *platform* offers, not what the user's setting
+    # allows. `terminal.expand_aliases` can be off, and only the frontend
+    # knows that — so it decides whether to mention them, and this stays a
+    # plain fact about the profile.
+    summary["alias_count"] = len(profile.aliases)
     return summary
 
 

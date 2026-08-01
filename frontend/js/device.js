@@ -105,8 +105,20 @@
       (info.model ? ` Model ${info.model}.` : '') +
       (info.confident
         ? ''
+        // "and aliases are inactive" was wrong. The confidence gate covers
+        // exactly one thing — the paging command — because that is what gets
+        // *sent to the device* unasked. pipeline.platform is set regardless,
+        // so alias expansion is live here, and telling somebody it is not is
+        // how they end up surprised by a rewrite they were told could not
+        // happen. Expansion is always announced ("typed → sent"), which is
+        // what makes it acceptable on a device we are unsure of.
         : ` Below the ${info.act_threshold ?? 0.6} needed before ShellMate ` +
-          `sends anything, so paging-off and aliases are inactive.`) +
+          `sends anything to a device, so paging-off was withheld. Aliases ` +
+          `still expand — every expansion is shown as it happens.`) +
+      (info.alias_count
+        ? ` ${info.alias_count} alias${info.alias_count === 1 ? '' : 'es'} ` +
+          `for this platform.`
+        : '') +
       ' Click to set it yourself.';
   }
 
@@ -122,6 +134,34 @@
    * `terminal length 0`" tells them what they are missing and lets them
    * decide whether they care.
    */
+  /**
+   * ", 14 aliases active" — or nothing at all.
+   *
+   * Identifying the platform is what switches alias expansion on, so it is
+   * part of what just happened and belongs in the same sentence. It was only
+   * ever mentioned in the branch where nothing was sent, which is the rarest
+   * one.
+   *
+   * Silent in three cases, each for its own reason:
+   *
+   * - The platform has no aliases. Nothing happened, so nothing is claimed.
+   * - `terminal.expand_aliases` is off. The profile still carries them and
+   *   the backend still reports them, but none will expand — and announcing
+   *   a feature the user has switched off is how a setting comes to look
+   *   broken.
+   * - The device was not recognised. That branch says "aliases off" already,
+   *   which is the accurate thing to say when the generic profile is in use.
+   */
+  function aliasSuffix(info) {
+    const count = Number(info.alias_count) || 0;
+    if (!count) return '';
+
+    const terminal = (window.shellmateSettings || {}).terminal || {};
+    if (terminal.expand_aliases === false) return '';
+
+    return `, ${count} alias${count === 1 ? '' : 'es'} active`;
+  }
+
   function announce(info) {
     // A remembered answer is not "you" in the present tense — it is a
     // decision made on some earlier connection, and somebody has to be able
@@ -142,15 +182,21 @@
     }
 
     if (info.paging_command) {
-      note(`identified ${info.profile_name} from ${from} — sent "${info.paging_command}"`,
-           'device');
+      note(`identified ${info.profile_name} from ${from} — sent `
+           + `"${info.paging_command}"${aliasSuffix(info)}`, 'device');
       return;
     }
 
     switch (info.paging_skipped) {
       case 'unconfident':
+        // Aliases are not gated on confidence — only the paging command is,
+        // because that is the one thing sent to the device. So this branch
+        // has aliases even though it sent nothing, and saying so is the
+        // difference between "identification half worked" and "it did
+        // nothing".
         note(`identified ${info.profile_name} from ${from} — not confident enough ` +
-             `to send "${info.paging_available}", so paging is still on`,
+             `to send "${info.paging_available}", so paging is still on` +
+             `${aliasSuffix(info)}`,
              'device', { offerOverride: true });
         break;
       case 'unidentified':
@@ -159,14 +205,16 @@
         break;
       case 'off':
         note(`identified ${info.profile_name} from ${from} — paging-off is ` +
-             `switched off in Settings, so nothing was sent`, 'device');
+             `switched off in Settings, so nothing was sent` +
+             `${aliasSuffix(info)}`, 'device');
         break;
       case 'no-command':
-        note(`identified ${info.profile_name} from ${from} — nothing to send, ` +
-             `aliases are active`, 'device');
+        note(`identified ${info.profile_name} from ${from} — nothing to send` +
+             `${aliasSuffix(info) || ', and no aliases for it'}`, 'device');
         break;
       default:
-        note(`identified ${info.profile_name} from ${from}`, 'device');
+        note(`identified ${info.profile_name} from ${from}${aliasSuffix(info)}`,
+             'device');
     }
   }
 
