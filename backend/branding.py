@@ -17,11 +17,11 @@ Three things happen to the source mark:
 silhouette with an alpha channel, so this is exact — the alpha is kept and
 only the colour replaced.
 
-**It is trimmed.**  The source has a wide transparent margin, roughly a third
-of the canvas on each side.  Scaled into a 16-pixel tray slot that margin is
-most of the icon, and the mark inside it is unreadable.  Cropping to the
-actual glyph and re-padding to a small, deliberate margin makes it visibly
-larger at every size without changing anything else.
+**It is trimmed and filled.**  The source has a wide transparent margin,
+roughly a third of the canvas on each side.  Scaled into a 16-pixel tray slot
+that margin *is* most of the icon, and the mark inside it is unreadable.
+Cropping to the actual glyph and scaling it to the full width of the square
+makes it visibly larger at every size without changing anything else.
 
 **It is rendered large.**  128 px rather than 64.  Windows draws the tray at
 16, 24 or 32 px whatever it is given, so this buys sharpness on a high-DPI
@@ -38,13 +38,30 @@ from backend import paths
 
 logger = logging.getLogger(__name__)
 
-# --primary-container from style.css. The accent the interface already uses
-# for anything that belongs to ShellMate rather than to the device.
-ACCENT = (79, 70, 229, 255)
+# --primary from style.css: the lighter lavender the interface uses for accents
+# *on dark surfaces*, which is what a taskbar is by default.
+#
+# The obvious choice was --primary-container (#4F46E5), the indigo of the
+# buttons — and at 2.59:1 against a dark taskbar it was present without being
+# legible. This measures 9.55:1 on the same background.
+#
+# The trade-off is deliberate: on a *light* taskbar this is 1.54:1, effectively
+# invisible. Windows does not report the taskbar theme in any way worth relying
+# on and a tray icon is a single bitmap, so one of the two has to be chosen
+# rather than adapted to. Dark is the one to optimise for here.
+ACCENT = (195, 192, 255, 255)
 
-# What the source mark is scaled to inside its square, leaving a margin so it
-# does not touch the edge of the tray slot.
-FILL = 0.86
+# What the source mark is scaled to inside its square.
+#
+# 1.0 is the ceiling, not a round number picked for tidiness: the mark's
+# longest side becomes the full width of the canvas. Anything above it crops
+# the outline, and the mark is line art — clipping is immediately visible
+# rather than a subtle trim.
+#
+# The source is landscape (322x270), so even at 1.0 there is vertical
+# whitespace in the square. That is a property of the artwork, not something
+# this can fix.
+FILL = 1.0
 
 # Every size Windows may ask for, embedded rather than downscaled on demand.
 ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
@@ -104,18 +121,25 @@ def app_image(size: int = TRAY_SIZE):
         if box:
             source = source.crop(box)
 
-        # Recolour: keep the alpha, replace everything else. Exact for a flat
-        # silhouette, which is what the source is.
-        tint = Image.new("RGBA", source.size, ACCENT)
-        tint.putalpha(source.getchannel("A"))
+        # Resize the *alpha* alone, then colour it, rather than resizing an
+        # already-tinted RGBA image.
+        #
+        # LANCZOS resamples the colour channels alongside alpha, and near an
+        # edge — where alpha varies — that overshoots: pixels come out lighter
+        # than the colour they were given. The mark is a flat silhouette, so
+        # its shape lives entirely in the alpha channel and tinting afterwards
+        # is both exact and simpler than premultiplying to work around it.
+        mask = source.getchannel("A")
 
-        # Fit inside the square without distorting it, then centre.
         target = max(1, int(size * FILL))
-        scale = min(target / tint.width, target / tint.height)
-        tint = tint.resize(
-            (max(1, round(tint.width * scale)), max(1, round(tint.height * scale))),
+        scale = min(target / mask.width, target / mask.height)
+        mask = mask.resize(
+            (max(1, round(mask.width * scale)), max(1, round(mask.height * scale))),
             Image.LANCZOS,
         )
+
+        tint = Image.new("RGBA", mask.size, ACCENT)
+        tint.putalpha(mask)
 
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         canvas.paste(tint, ((size - tint.width) // 2, (size - tint.height) // 2), tint)

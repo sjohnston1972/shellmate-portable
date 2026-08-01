@@ -217,12 +217,60 @@ def test_overlay_text_meets_aa() -> None:
             )
 
 
+def test_the_application_icon() -> None:
+    """
+    The tray icon, measured against the taskbar it sits on.
+
+    Same principle as everything above and the same failure mode: the icon was
+    drawn in the interface's button indigo, which is 2.59:1 on a dark taskbar —
+    present, and hard to pick out. Nothing raises over an icon nobody can see.
+
+    Dark is what is optimised for, deliberately. Windows does not report the
+    taskbar theme in any way worth relying on, and a tray icon is one bitmap,
+    so one of the two backgrounds has to be chosen rather than adapted to.
+    """
+    try:
+        from backend import branding
+    except Exception as exc:                     # pragma: no cover
+        check("the icon module imports", False, str(exc))
+        return
+
+    accent = branding.ACCENT[:3]
+    # A dark Windows taskbar. Not #000: it is a dark grey with transparency
+    # over the wallpaper, and #202020 is the usual result.
+    ratio = contrast(accent, (32, 32, 32))
+    check("the icon reads on a dark taskbar", ratio >= AA,
+          f"{ratio:.2f}:1 — the mark is there but hard to pick out")
+
+    check("the mark fills its square", branding.FILL >= 0.95,
+          f"FILL is {branding.FILL}, leaving a margin that is mostly wasted "
+          f"at 16 pixels")
+    check("without being cropped", branding.FILL <= 1.0,
+          f"FILL of {branding.FILL} scales the mark past the canvas, which "
+          f"clips line art visibly")
+
+    # And the rendered image really is the colour claimed, rather than the
+    # constant having been changed in one place and not the other.
+    try:
+        image = branding.app_image(64)
+        opaque = [p for p in image.getdata() if p[3] > 200]
+        check("the rendered icon uses that colour",
+              opaque and max(abs(a - b) for a, b in zip(opaque[len(opaque) // 2][:3], accent)) <= 12,
+              f"rendered {opaque[len(opaque) // 2] if opaque else None}, expected {accent}")
+        box = image.getbbox()
+        check("and occupies the full width of its canvas",
+              box and (box[2] - box[0]) >= 62, f"bounding box {box}")
+    except Exception as exc:
+        check("the icon renders", False, str(exc))
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Colour contrast")
     print("=" * 52)
 
-    for test in (test_no_hardcoded_overlay_backgrounds, test_overlay_text_meets_aa):
+    for test in (test_no_hardcoded_overlay_backgrounds, test_overlay_text_meets_aa,
+                 test_the_application_icon):
         try:
             test()
         except Exception as exc:
