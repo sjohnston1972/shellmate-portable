@@ -297,19 +297,21 @@ def drift_report(session: dict) -> dict:
                        f"({result['line_count']:,} lines).",
         }
 
+    current = store.latest_snapshot(hostname)
+
     if result.get("unchanged"):
-        return {
+        report = {
             "available": True, "first_visit": False, "changed": 0,
             "hostname": hostname,
             "archive": archive,
             "days_since": _days_since(previous.get("captured_at")),
             "summary": _unchanged_summary(hostname, previous.get("captured_at")),
         }
+        return _with_baseline(report, hostname, current or previous)
 
-    current = store.latest_snapshot(hostname)
     comparison = diff_snapshots(previous, current or {})
 
-    return {
+    report = {
         "available":   True,
         "first_visit": False,
         "hostname":    hostname,
@@ -323,6 +325,54 @@ def drift_report(session: dict) -> dict:
             previous.get("captured_at"), comparison["changed"],
         ),
     }
+    return _with_baseline(report, hostname, current or {})
+
+
+def _with_baseline(report: dict, hostname: str, current: dict) -> dict:
+    """
+    Add the comparison against a pinned baseline, when there is one.
+
+    "Since your last visit" is an accident of when somebody happened to log
+    in, and looking at a device consumes it: connect, see four lines changed,
+    reconnect an hour later to investigate, and you are told nothing has
+    changed — the evidence is one row further back with no way to reach it.
+
+    A baseline is a moment somebody chose, so it survives being looked at.
+    Reported *alongside* the last-visit number rather than instead of it: they
+    answer different questions and the honest thing is to give both.
+    """
+    from backend.advanced import get as advanced
+
+    mode = advanced("capture.baseline_mode")
+    if mode == "last-visit":
+        return report
+
+    baseline = store.get_baseline(hostname)
+    if not baseline or not current:
+        return report
+
+    if int(baseline.get("id", 0)) == int(current.get("id", 0)):
+        report["baseline"] = {
+            "set_at": baseline.get("baseline_set_at"),
+            "note":   baseline.get("baseline_note", ""),
+            "changed": 0,
+            "summary": "Identical to the pinned baseline.",
+        }
+        return report
+
+    against = diff_snapshots(baseline, current)
+    report["baseline"] = {
+        "set_at":   baseline.get("baseline_set_at"),
+        "note":     baseline.get("baseline_note", ""),
+        "changed":  against["changed"],
+        "added":    against["added"],
+        "removed":  against["removed"],
+        "diff":     against["diff"],
+        "summary":  (f"{against['changed']} line"
+                     f"{'' if against['changed'] == 1 else 's'} differ from the "
+                     f"baseline set {_when(baseline.get('baseline_set_at'))}."),
+    }
+    return report
 
 
 def _days_since(timestamp: float | None) -> int | None:

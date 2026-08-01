@@ -169,6 +169,21 @@ class SessionStore:
             CREATE INDEX IF NOT EXISTS idx_snapshots_host
                 ON config_snapshots(hostname, captured_at DESC);
 
+            -- A configuration somebody chose as the thing to measure against.
+            --
+            -- "Since your last visit" is an accident of when you happened to
+            -- log in, and simply *looking* at a device consumes that baseline:
+            -- connect, see four lines changed, reconnect an hour later to
+            -- investigate, and you are told nothing has changed. One row per
+            -- device, because the question is "against what" and there is one
+            -- answer at a time.
+            CREATE TABLE IF NOT EXISTS config_baselines (
+                hostname    TEXT PRIMARY KEY,
+                snapshot_id INTEGER NOT NULL,
+                set_at      REAL NOT NULL,
+                note        TEXT NOT NULL DEFAULT ''
+            );
+
             CREATE TABLE IF NOT EXISTS meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -296,6 +311,19 @@ class SessionStore:
             return 0
 
         cutoff = time.time() - (days * 86400)
+
+        # A pinned baseline is exempt when the setting says so. Pruning is
+        # oldest-first, so without this the baseline is the *first* thing
+        # discarded — which is precisely backwards, since being old is what
+        # makes it a baseline.
+        protected: set[int] = set()
+        try:
+            from backend.advanced import get as _advanced
+            if _advanced("capture.keep_baseline"):
+                protected = self.baseline_snapshot_ids()
+        except Exception:
+            protected = self.baseline_snapshot_ids()
+
         try:
             with self._lock:
                 connection = self.connect()
@@ -308,6 +336,18 @@ class SessionStore:
                      WHERE id NOT IN (SELECT DISTINCT session_id FROM commands)
                        AND started_at < ?
                     """, (cutoff,))
+
+                # Configuration snapshots were never pruned by anything, so
+                # they grew without limit — and they are the largest rows in
+                # the database by a wide margin.
+                keep = ",".join(str(int(i)) for i in protected) or "-1"
+                snapshots = connection.execute(
+                    f"""
+                    DELETE FROM config_snapshots
+                     WHERE captured_at < ?
+                       AND id NOT IN ({keep})
+                    """, (cutoff,))
+                removed += snapshots.rowcount or 0
                 connection.commit()
         except sqlite3.Error as exc:
             # Never worth breaking a session over.
@@ -317,6 +357,67 @@ class SessionStore:
         if removed:
             logger.info("Pruned %d command(s) older than %d days", removed, days)
         return removed
+
+    # ------------------------------------------------------------------
+    # Baselines
+    # ------------------------------------------------------------------
+
+    def set_baseline(self, hostname: str, snapshot_id: int, note: str = "") -> dict:
+        """Pin a snapshot as what this device should be measured against."""
+        with self._lock:
+            connection = self.connect()
+            connection.execute(
+                """
+                INSERT INTO config_baselines (hostname, snapshot_id, set_at, note)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(hostname) DO UPDATE SET
+                    snapshot_id = excluded.snapshot_id,
+                    set_at      = excluded.set_at,
+                    note        = excluded.note
+                """,
+                (hostname, int(snapshot_id), time.time(), note or ""),
+            )
+            connection.commit()
+        logger.info("Baseline for %s pinned to snapshot %s", hostname, snapshot_id)
+        return self.get_baseline(hostname) or {}
+
+    def get_baseline(self, hostname: str) -> dict | None:
+        """The pinned snapshot for a device, with its content, or None."""
+        with self._lock:
+            connection = self.connect()
+            row = connection.execute(
+                """
+                SELECT s.*, b.set_at AS baseline_set_at, b.note AS baseline_note
+                  FROM config_baselines b
+                  JOIN config_snapshots s ON s.id = b.snapshot_id
+                 WHERE b.hostname = ?
+                """,
+                (hostname,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def clear_baseline(self, hostname: str) -> bool:
+        """Unpin. Returns whether there was one."""
+        with self._lock:
+            connection = self.connect()
+            cursor = connection.execute(
+                "DELETE FROM config_baselines WHERE hostname = ?", (hostname,))
+            connection.commit()
+        return bool(cursor.rowcount)
+
+    def baseline_snapshot_ids(self) -> set[int]:
+        """
+        Every pinned snapshot id.
+
+        Used by the prune paths. `prune()` deletes oldest-first, so without
+        this a pinned baseline is the *first* thing discarded — which is
+        precisely backwards, since being old is what makes it a baseline.
+        """
+        with self._lock:
+            connection = self.connect()
+            rows = connection.execute(
+                "SELECT snapshot_id FROM config_baselines").fetchall()
+        return {int(r[0]) for r in rows}
 
     def add_command(self, session_id: str, record: Any) -> int:
         """

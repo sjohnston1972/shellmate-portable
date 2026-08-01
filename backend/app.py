@@ -540,6 +540,65 @@ async def config_get(snapshot_id: int) -> dict:
     return snapshot
 
 
+class BaselineRequest(BaseModel):
+    """Body for POST /api/configs/baseline."""
+
+    hostname: str = ""
+    snapshot_id: int = 0
+    note: str = ""
+
+
+@app.get("/api/configs/baseline/{hostname}")
+async def config_baseline_get(hostname: str) -> dict:
+    """
+    The pinned baseline for a device, or an empty object.
+
+    Content is not returned: the list already carries what the interface needs
+    to mark which row is pinned, and the configuration itself is available
+    through the snapshot endpoint like any other.
+    """
+    baseline = await asyncio.to_thread(store.get_baseline, hostname)
+    if not baseline:
+        return {}
+    return {
+        "snapshot_id": baseline.get("id"),
+        "captured_at": baseline.get("captured_at"),
+        "set_at":      baseline.get("baseline_set_at"),
+        "note":        baseline.get("baseline_note", ""),
+        "line_count":  baseline.get("line_count"),
+    }
+
+
+@app.post("/api/configs/baseline")
+async def config_baseline_set(request: BaselineRequest) -> dict:
+    """
+    Pin a snapshot as what this device should be measured against.
+
+    "Since your last visit" is an accident of when somebody logged in, and
+    looking at a device consumes it. A baseline is a moment somebody chose.
+    """
+    snapshot = await asyncio.to_thread(store.get_snapshot, request.snapshot_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="No such snapshot")
+
+    hostname = request.hostname or snapshot.get("hostname", "")
+    if not hostname:
+        raise HTTPException(status_code=400,
+                            detail="That snapshot has no device to pin it to.")
+
+    await asyncio.to_thread(store.set_baseline, hostname,
+                            request.snapshot_id, request.note)
+    return {"status": "ok", "hostname": hostname,
+            "snapshot_id": request.snapshot_id}
+
+
+@app.delete("/api/configs/baseline/{hostname}")
+async def config_baseline_clear(hostname: str) -> dict:
+    """Unpin, going back to comparing against the last visit."""
+    return {"status": "ok",
+            "cleared": await asyncio.to_thread(store.clear_baseline, hostname)}
+
+
 @app.get("/api/configs/diff/{old_id}/{new_id}")
 async def config_diff_endpoint(old_id: int, new_id: int) -> dict:
     """Return a unified diff between two stored snapshots."""

@@ -153,3 +153,37 @@ recognised will go through untouched — this reduces exposure rather than
 guaranteeing its absence. And it applies only to what is written to disk; the
 terminal always shows the truth, because hiding things from the person at the
 keyboard would be worse than useless.
+
+## Pinning a baseline
+
+"Has anything changed since my last visit?" is the wrong question more often
+than it looks, because *your last visit* is an accident of when you happened to
+log in. Worse, simply looking consumes it: connect, see four lines changed,
+reconnect an hour later to investigate, and you are told nothing has changed —
+the evidence is one snapshot further back.
+
+**Pin as baseline**, in the configuration-changes window, fixes a moment you
+chose. Drift then reports both numbers:
+
+> You were last here 12 days ago and 4 lines have changed.
+> *(2 lines differ from the baseline set on 3 March.)*
+
+They answer different questions, so you get both rather than one replacing the
+other. **Stockton → Configuration capture → Compare a config against** switches
+to one or the other if you would rather.
+
+A pinned baseline is exempt from retention. Pruning is oldest-first, so
+without that the baseline would be the first thing discarded — which is
+backwards, since being old is what makes it a baseline.
+
+## Comparing any two snapshots
+
+The same window lists every snapshot held for the device. Tick two and
+**Compare selected** to diff them directly — useful when the interesting
+change is between two visits rather than between now and the last one.
+
+Comparing *across* devices — a switch against a known-good sibling — works at
+the data layer but is not offered, because a raw diff of two devices is
+dominated by hostnames, addresses and interface counts. That needs a
+normalisation step to be worth anything, and it is a real piece of work rather
+than a checkbox.

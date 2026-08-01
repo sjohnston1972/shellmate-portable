@@ -6217,3 +6217,29 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #term-search .icon-btn { padding: 2px; }
+
+/* Snapshot history in the diff window (#100) */
+.diff-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 10px 0 12px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.diff-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.diff-history-row:hover { border-color: var(--primary-container); }
+.diff-history-when { flex: 1; font-family: var(--font-mono, monospace); }
+.diff-history-size { color: var(--on-surface-dim); font-size: 11px; }

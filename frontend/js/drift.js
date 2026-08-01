@@ -189,11 +189,181 @@
       `${report.removed} removed, since ${report.days_since ?? 0} day` +
       `${report.days_since === 1 ? '' : 's'} ago.`;
 
+    renderBaselineLine(report);
+
     const body = document.getElementById('diff-body');
     body.innerHTML = '';
     hunksOf(report.diff).forEach(hunk => body.appendChild(renderHunk(hunk)));
 
+    // The history is a second round trip, so it fills in behind the diff
+    // rather than delaying it.
+    renderHistory(report.hostname || sessionData.display_label || '');
+
     overlay.classList.remove('hidden');
+  }
+
+
+  // -------------------------------------------------------------------------
+  // Baselines and comparing any two snapshots
+  //
+  // "Since your last visit" is an accident of when you happened to log in,
+  // and looking at a device consumes it: connect, see four lines changed,
+  // reconnect an hour later to investigate, and you are told nothing has
+  // changed — the evidence is one row further back with nothing to reach it
+  // with. Everything needed was already in the database and in the API; only
+  // the last-visit comparison was wired to anything a user could click.
+  // -------------------------------------------------------------------------
+
+  /**
+   * The extra line under the summary, when a baseline is pinned.
+   *
+   * Shown *alongside* the last-visit number rather than instead of it. They
+   * answer different questions and the honest thing is to give both.
+   */
+  function renderBaselineLine(report) {
+    const existing = document.getElementById('diff-baseline-line');
+    if (existing) existing.remove();
+    if (!report.baseline) return;
+
+    const line = document.createElement('p');
+    line.id = 'diff-baseline-line';
+    line.className = 'settings-section-hint';
+    line.textContent = report.baseline.summary
+      + (report.baseline.note ? ` (${report.baseline.note})` : '');
+
+    const summary = document.getElementById('diff-summary');
+    if (summary && summary.parentNode) {
+      summary.parentNode.insertBefore(line, summary.nextSibling);
+    }
+  }
+
+  /**
+   * The snapshot history for a device, with a way to pin one and to compare
+   * any two.
+   *
+   * The endpoints for all of this already existed —
+   * `/api/configs/{hostname}` and `/api/configs/diff/{old}/{new}` — and
+   * nothing called them with anything but the newest pair.
+   */
+  async function renderHistory(hostname) {
+    const host = document.getElementById('diff-history');
+    if (!host || !hostname) return;
+    host.innerHTML = '';
+
+    let snapshots = [];
+    let baseline = null;
+    try {
+      const [listRes, baseRes] = await Promise.all([
+        fetch(`/api/configs/${encodeURIComponent(hostname)}?limit=40`),
+        fetch(`/api/configs/baseline/${encodeURIComponent(hostname)}`),
+      ]);
+      snapshots = listRes.ok ? await listRes.json() : [];
+      baseline = baseRes.ok ? await baseRes.json() : null;
+    } catch (_) { return; }
+
+    if (snapshots.length < 2) return;
+
+    const heading = document.createElement('h4');
+    heading.className = 'settings-subsection-title';
+    heading.textContent = 'Compare any two';
+    host.appendChild(heading);
+
+    const hint = document.createElement('p');
+    hint.className = 'settings-section-hint';
+    hint.textContent = 'Pick two and compare, or pin one as the baseline this '
+      + 'device is measured against from now on.';
+    host.appendChild(hint);
+
+    const list = document.createElement('div');
+    list.className = 'diff-history-list';
+
+    snapshots.forEach((snap) => {
+      const row = document.createElement('label');
+      row.className = 'diff-history-row';
+
+      const tick = document.createElement('input');
+      tick.type = 'checkbox';
+      tick.dataset.id = String(snap.id);
+
+      const when = document.createElement('span');
+      when.className = 'diff-history-when';
+      when.textContent = new Date(snap.captured_at * 1000).toLocaleString();
+
+      const size = document.createElement('span');
+      size.className = 'diff-history-size';
+      size.textContent = `${snap.line_count} lines`;
+
+      row.append(tick, when, size);
+
+      if (baseline && Number(baseline.snapshot_id) === Number(snap.id)) {
+        const badge = document.createElement('span');
+        badge.className = 'credential-badge credential-encrypted';
+        badge.textContent = 'baseline';
+        row.appendChild(badge);
+      }
+
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = 'btn-secondary btn-tiny';
+      pin.textContent = 'Pin as baseline';
+      pin.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await fetch('/api/configs/baseline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hostname, snapshot_id: snap.id }),
+        });
+        renderHistory(hostname);
+      });
+      row.appendChild(pin);
+
+      list.appendChild(row);
+    });
+
+    host.appendChild(list);
+
+    const actions = document.createElement('div');
+    actions.className = 'setting-row';
+
+    const compare = document.createElement('button');
+    compare.type = 'button';
+    compare.className = 'btn-primary';
+    compare.textContent = 'Compare selected';
+    compare.addEventListener('click', async () => {
+      const picked = [...list.querySelectorAll('input:checked')]
+        .map(i => Number(i.dataset.id)).sort((a, b) => a - b);
+      if (picked.length !== 2) {
+        note.textContent = 'Pick exactly two.';
+        return;
+      }
+      note.textContent = '';
+      const res = await fetch(`/api/configs/diff/${picked[0]}/${picked[1]}`);
+      if (!res.ok) { note.textContent = 'Could not compare those.'; return; }
+      const comparison = await res.json();
+
+      document.getElementById('diff-summary').textContent =
+        `${comparison.added} line${comparison.added === 1 ? '' : 's'} added, `
+        + `${comparison.removed} removed, between the two you picked.`;
+      const body = document.getElementById('diff-body');
+      body.innerHTML = '';
+      hunksOf(comparison.diff).forEach(h => body.appendChild(renderHunk(h)));
+    });
+
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'btn-secondary';
+    clear.textContent = 'Unpin baseline';
+    clear.addEventListener('click', async () => {
+      await fetch(`/api/configs/baseline/${encodeURIComponent(hostname)}`,
+                  { method: 'DELETE' });
+      renderHistory(hostname);
+    });
+
+    const note = document.createElement('span');
+    note.className = 'setting-value';
+
+    actions.append(compare, clear, note);
+    host.appendChild(actions);
   }
 
   /**

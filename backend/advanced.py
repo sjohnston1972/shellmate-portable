@@ -428,6 +428,19 @@ SETTINGS: tuple[Setting, ...] = (
             "More context makes a change easier to place and the diff longer.",
             minimum=0, maximum=20, unit="lines"),
 
+    Setting("capture.baseline_mode", "Compare a config against", "both", "choice",
+            "What the drift check on connect measures against.",
+            "`last-visit` is the older behaviour and answers \"has anything "
+            "changed since I was last here\" — which is an accident of when "
+            "you happened to log in, and is consumed by simply looking.||"
+            "`pinned` measures against a snapshot you chose. `both` reports "
+            "the two numbers, because they answer different questions.",
+            choices=("last-visit", "pinned", "both")),
+    Setting("capture.keep_baseline", "Never discard a pinned baseline", True, "bool",
+            "Exempts it from retention and from the archive sweep.",
+            "Pruning removes oldest-first, so without this the baseline is "
+            "the *first* thing discarded — which is precisely backwards, "
+            "since being old is what makes it a baseline."),
     Setting("capture.channel_width", "Capture terminal width", 200, "int",
             "The PTY width requested when capturing a configuration.",
             "A wide PTY is what stops a captured config wrapping. Some "
