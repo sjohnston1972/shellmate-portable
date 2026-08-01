@@ -290,6 +290,30 @@ SETTINGS: tuple[Setting, ...] = (
             "Not the same as the terminal read timeout, which is why tuning "
             "that one never changed config capture — the second channel kept "
             "its own copy of the number.", minimum=0.1, maximum=10, unit="s"),
+    Setting("ssh.auto_reconnect", "Reconnect a dropped session by itself", False, "bool",
+            "Only for a drop ShellMate did not cause.",
+            "Off by default: silently re-authenticating to a device is not "
+            "something to do without being asked.||It works only where the "
+            "credentials can be resolved without holding them — a saved "
+            "connection with a remembered password, or a key that needs no "
+            "passphrase. Anywhere else the tab says why it is not retrying, "
+            "because a tab that silently does nothing is not actionable."),
+    Setting("ssh.auto_reconnect_attempts", "How many times to try", 10, "int",
+            "Then it stops and waits for you.",
+            "Bounded so a device that is never coming back does not have "
+            "something retrying at it all afternoon.", minimum=1, maximum=100),
+    Setting("ssh.auto_reconnect_backoff", "Wait before the first retry", 5, "int",
+            "Doubling each time, to a minute.",
+            "A device coming back from a reload takes minutes, so hammering "
+            "it for the first two is pointless — and looks like an attack to "
+            "anything watching the management network.",
+            minimum=1, maximum=120, unit="s"),
+    Setting("ssh.auto_reconnect_after_reload", "Keep trying longer after a reload",
+            True, "bool",
+            "Triples the attempts when a reload was pending on that session.",
+            "This is the case worth being patient for: ShellMate saw the "
+            "`reload` go in, so it knows why the session dropped and roughly "
+            "how long the device will be away."),
     Setting("ssh.telnet_autologin_deadline", "Telnet auto-login window", 30, "int",
             "Stop answering login prompts after this long. Zero disables it.",
             "The guard exists so that a prompt-shaped line arriving an hour "

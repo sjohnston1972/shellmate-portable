@@ -128,6 +128,10 @@
       // a serial or telnet tab cannot transfer files.
       connectionType:   sessionData.connection_type || 'ssh',
       hostname:         hostname || '',
+      // Kept so a reconnect can tell twenty saved connections on 127.0.0.1
+      // apart. Hostname alone does not.
+      port:             sessionData.port || 0,
+      username:         sessionData.username || '',
       terminalInstance: termData.terminal,
       fitAddon:         termData.fitAddon,
       websocket:        termData.websocket,
@@ -365,6 +369,10 @@
     if (index < 0 || index >= tabs.length) return;
 
     const tab = tabs[index];
+    // Whatever happens next, this drop is ours. Set before the confirmation
+    // rather than after: the socket can close while the dialog is open.
+    tab.closingDeliberately = true;
+    _stopRetrying(tab, '');
 
     // Closing a tab tears down the session on the other end of it. A
     // disconnected one has nothing left to lose and closes without a word —
@@ -466,6 +474,13 @@
     tab.tabEl.classList.toggle('disconnected', !isConnected);
     if (!isConnected) {
       tab.labelEl.textContent = tab.label + ' (disconnected)';
+      // Decide whether to start retrying. Everything about *whether* lives in
+      // there — this is simply the one place that hears about every drop,
+      // however it happened.
+      _maybeAutoReconnect(tab);
+    } else {
+      _stopRetrying(tab, '');
+      tab.labelEl.title = '';
     }
     // Freeze the clock rather than let it run on: a tab counting up on a dead
     // session states something untrue.
@@ -832,17 +847,203 @@
    * The old tab is closed only once the new one is up — a failed reconnect
    * must not also lose the buffer you were reading.
    */
-  async function _reconnectSession(tab) {
-    const index = tabs.findIndex(t => t.sessionId === tab.sessionId);
 
-    let profile = null;
+  // -------------------------------------------------------------------------
+  // Coming back on its own
+  //
+  // _reconnectSession() was well built and nothing ever called it: a dropped
+  // session greyed out and waited to be noticed. The reload case is the point
+  // — schedule it, watch the countdown, lose the session, then sit clicking
+  // Reconnect until the device answers. That last part is the tool making a
+  // person do polling, at the one moment they most want their hands free.
+  //
+  // Three rules, all of them about not surprising anybody:
+  //
+  // Only a drop ShellMate did not cause. Never after closeTab(), never after
+  // a deliberate disconnect, never for serial — the COM port did not go
+  // anywhere and reopening it would fight whatever else took it.
+  //
+  // Only where credentials resolve without being held.
+  // ConnectionParams.scrub_secrets() clears the password the moment
+  // authentication succeeds, on purpose, and this must not weaken that. So it
+  // works from a saved connection whose password the backend can fetch
+  // itself, and nowhere else — and says so when it cannot.
+  //
+  // Backing off. A device coming back from a reload takes minutes; retrying
+  // every second for the first two is pointless and looks like an attack to
+  // anything watching the management network.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Printed when a session comes back on its own.
+   *
+   * A session that silently reappears leaves you unsure whether the
+   * scrollback above the line is from the same boot of the device — which
+   * matters a great deal when you are about to reason about what changed.
+   */
+  const RECONNECTED_NOTE =
+    '\r\n\x1b[32m[reconnected — a new session; anything above this line '
+    + 'is from before the drop]\x1b[0m\r\n';
+
+  /** Sessions currently being retried: sessionId -> { timer, attempt, cancel }. */
+  const _retrying = {};
+
+  function _advanced(key, fallback) {
+    return window.shellmateAdvanced ? window.shellmateAdvanced(key, fallback) : fallback;
+  }
+
+  /**
+   * Decide whether to start retrying, and start if so.
+   *
+   * Called from updateTabStatus when a session goes down, which is the one
+   * place that learns about every drop however it happened.
+   */
+  async function _maybeAutoReconnect(tab) {
+    if (!_advanced('ssh.auto_reconnect', false)) return;
+    if (tab.closingDeliberately) return;
+    if ((tab.connectionType || 'ssh') === 'serial') return;
+    if (_retrying[tab.sessionId]) return;
+
+    // Whether it *can* work is a question about credentials, and the honest
+    // answer is available before the first attempt rather than after it.
+    const profile = await _profileFor(tab);
+    if (!profile || !profile.has_saved_credentials) {
+      _sayWhyNot(tab, profile);
+      return;
+    }
+
+    // A reload is the case worth waiting out, and ShellMate saw it go in.
+    let attempts = Number(_advanced('ssh.auto_reconnect_attempts', 10));
+    if (_advanced('ssh.auto_reconnect_after_reload', true) && tab.hadPendingReload) {
+      attempts *= 3;
+    }
+
+    _retrying[tab.sessionId] = { attempt: 0, attempts, timer: null };
+    _scheduleRetry(tab, profile);
+  }
+
+  function _scheduleRetry(tab, profile) {
+    const state = _retrying[tab.sessionId];
+    if (!state) return;
+
+    state.attempt += 1;
+    if (state.attempt > state.attempts) {
+      _stopRetrying(tab, `gave up after ${state.attempts} attempts`);
+      return;
+    }
+
+    // Doubling, capped at a minute. The cap matters more than the growth:
+    // unbounded backoff means the one that would have worked never runs.
+    const base = Number(_advanced('ssh.auto_reconnect_backoff', 5)) * 1000;
+    const wait = Math.min(base * Math.pow(2, state.attempt - 1), 60000);
+
+    _setRetryLabel(tab, `reconnecting… (${state.attempt}/${state.attempts})`);
+
+    state.timer = setTimeout(async () => {
+      if (!_retrying[tab.sessionId]) return;          // cancelled meanwhile
+      const ok = await _reconnectSession(tab, { silent: true, profile });
+      if (ok) {
+        delete _retrying[tab.sessionId];
+        return;
+      }
+      _scheduleRetry(tab, profile);
+    }, wait);
+  }
+
+  function _stopRetrying(tab, why) {
+    const state = _retrying[tab.sessionId];
+    if (state && state.timer) clearTimeout(state.timer);
+    delete _retrying[tab.sessionId];
+    if (why) _setRetryLabel(tab, why);
+  }
+
+  /** One click on the tab cancels it — no modal for something this small. */
+  function _setRetryLabel(tab, text) {
+    if (!tab.labelEl) return;
+    tab.labelEl.textContent = `${tab.label} (${text})`;
+    tab.labelEl.title = 'Click the tab to stop trying';
+  }
+
+  /**
+   * The saved connection a tab came from.
+   *
+   * Scored rather than found. The original matched on hostname *or* label and
+   * took the first hit, which on a lab where twenty saved connections share
+   * 127.0.0.1 returned whichever happened to be saved first — so reconnecting
+   * used the wrong profile's credentials, or none at all, and reported "no
+   * saved password" while the right profile sat further down the list.
+   *
+   * Port and username are what actually distinguish them, and a profile that
+   * can supply credentials beats one that cannot when everything else ties.
+   */
+  async function _profileFor(tab) {
+    let profiles = [];
     try {
       const res = await fetch('/api/profiles');
-      const profiles = res.ok ? await res.json() : [];
-      profile = profiles.find(p =>
-        (p.connection_type || 'ssh') === (tab.connectionType || 'ssh') &&
-        (p.hostname === tab.hostname || p.name === tab.label)) || null;
-    } catch (_) { /* fall through to the dialog */ }
+      profiles = res.ok ? await res.json() : [];
+    } catch (_) {
+      return null;
+    }
+
+    const type = tab.connectionType || 'ssh';
+    const score = (p) => {
+      if ((p.connection_type || 'ssh') !== type) return -1;
+      let points = 0;
+      if (p.hostname && p.hostname === tab.hostname) points += 4;
+      if (tab.port && Number(p.port) === Number(tab.port)) points += 3;
+      if (tab.username && p.username === tab.username) points += 2;
+      if (p.name && p.name === tab.label) points += 1;
+      // Only a tie-breaker: a profile that matches less well is still the
+      // wrong device however good its credentials are.
+      if (points > 0 && p.has_saved_credentials) points += 0.5;
+      return points;
+    };
+
+    let best = null;
+    let bestScore = 0;
+    profiles.forEach(p => {
+      const points = score(p);
+      if (points > bestScore) { best = p; bestScore = points; }
+    });
+    return best;
+  }
+
+  /**
+   * Say why it is not retrying.
+   *
+   * "Reconnect needs a saved password for this device" is something somebody
+   * can act on. A tab that silently does not retry is not.
+   */
+  function _sayWhyNot(tab, profile) {
+    if (!tab.labelEl) return;
+    const reason = profile
+      ? 'no saved password'
+      : 'not a saved connection';
+    tab.labelEl.textContent = `${tab.label} (disconnected — ${reason})`;
+    tab.labelEl.title =
+      'Automatic reconnect needs credentials the server can fetch itself. '
+      + 'Save this connection with its password, or reconnect by hand.';
+  }
+
+  /**
+   * Stand a dropped session back up.
+   *
+   * @param {object}  tab
+   * @param {object} [opts]
+   * @param {boolean} [opts.silent]  Do not open the dialog on failure — an
+   *   automatic retry that pops a modal is worse than one that waits.
+   * @param {object} [opts.profile]  Already looked up, to save a round trip
+   *   on every attempt.
+   * @returns {Promise<boolean>} whether a session was established.
+   */
+  async function _reconnectSession(tab, opts) {
+    const options = opts || {};
+    const index = tabs.findIndex(t => t.sessionId === tab.sessionId);
+
+    let profile = options.profile || null;
+    if (!profile) {
+      profile = await _profileFor(tab);
+    }
 
     if (profile && profile.has_saved_credentials) {
       try {
@@ -867,11 +1068,20 @@
           // closes without a word — but saying so keeps this correct if that
           // ever changes, now that closing is asynchronous.
           if (index !== -1) await closeTab(index, { force: true });
-          createTab(data);
-          return;
+          const fresh = createTab(data);
+          // Say so in the terminal. A session that silently reappears leaves
+          // you unsure whether the scrollback above the line is from the same
+          // boot of the device — which matters a great deal when you are
+          // about to reason about what changed.
+          if (options.silent && fresh && fresh.terminal) {
+            fresh.terminal.write(RECONNECTED_NOTE);
+          }
+          return true;
         }
       } catch (_) { /* fall through to the dialog */ }
     }
+
+    if (options.silent) return false;
 
     if (typeof window.showConnectionDialog === 'function') {
       window.showConnectionDialog(profile || {
@@ -935,6 +1145,18 @@
   window.closeTab         = closeTab;
   window.getActiveTab     = getActiveTab;
   window.updateTabLabel   = updateTabLabel;
+  // ShellMate saw the `reload` go in, so when the session drops it knows why
+  // and roughly how long the device will be away. That is what justifies
+  // waiting minutes rather than giving up after thirty seconds.
+  window.addEventListener('shellmate:pending-action', (e) => {
+    const detail = e.detail || {};
+    const tab = tabs.find(t => t.sessionId === detail.sessionId);
+    if (!tab) return;
+    const kind = (detail.pending && detail.pending.kind) || '';
+    // alerts.py uses RELOAD / COMMIT_CONFIRM.
+    if (kind) tab.hadPendingReload = kind.toUpperCase().includes('RELOAD');
+  });
+
   window.updateTabStatus  = updateTabStatus;
   window.updateStatusBar  = updateStatusBar;
   window.refitTerminals   = refitTerminals;

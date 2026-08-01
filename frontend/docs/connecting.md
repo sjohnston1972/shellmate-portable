@@ -241,3 +241,28 @@ On a device ShellMate could not identify confidently there is no platform
 list, so the generic one is used — the commands that are destructive on
 anything. **Stockton → Terminal → On devices ShellMate could not identify**
 turns that off if you would rather.
+
+## Coming back after a drop
+
+**Stockton → SSH → Reconnect a dropped session by itself** is off by default,
+because silently re-authenticating to a device is not something to do without
+being asked.
+
+Turned on, it retries only a drop ShellMate did not cause — never after you
+close a tab, never for serial, since the COM port did not go anywhere. It
+backs off, doubling from five seconds to a minute, because a device coming
+back from a reload takes minutes and hammering it for the first two is
+pointless.
+
+**It waits longer after a reload.** ShellMate saw the `reload` go in, so it
+knows why the session dropped and roughly how long the device will be away.
+
+**It only works where credentials can be resolved without being held.** The
+password is cleared from memory the moment authentication succeeds, and that
+does not change here — so this needs a saved connection whose password the
+server can fetch for itself. Where it cannot, the tab says which is missing
+rather than quietly doing nothing.
+
+When it succeeds, the terminal says so. A session that silently reappears
+leaves you unsure whether the scrollback above the line is from the same boot
+of the device, which matters when you are about to reason about what changed.
