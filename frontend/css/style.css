@@ -6470,3 +6470,39 @@ body.resizing-panel * { cursor: ew-resize !important; }
 }
 
 .ctx-quick-edit:hover { text-decoration: underline; }
+
+/* ---------------------------------------------------------------------------
+   Terminal colour overrides (#125)
+
+   A plain <input type="color">, sized to the shared control height so it lines
+   up with the number inputs and selects beside it in the same section — the
+   mismatch these tokens exist to prevent.
+
+   `data-unset` is the "following the colour scheme" state. A colour input has
+   no empty value, so the swatch shows the scheme's own colour and this dims it
+   to say the choice is not the user's. Without that, "no override" and
+   "deliberately chose this exact colour" look identical.
+--------------------------------------------------------------------------- */
+.setting-colour {
+  width: 46px;
+  height: var(--control-height);
+  padding: 2px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.setting-colour[data-unset] {
+  opacity: 0.55;
+}
+
+.setting-clear {
+  height: var(--control-height);
+  white-space: nowrap;
+}
+
+.setting-colour[data-unset] + .setting-clear {
+  visibility: hidden;
+}

@@ -52,6 +52,12 @@
     // Apply per-channel overrides if set
     if (a.foreground_override) theme.foreground = a.foreground_override;
     if (a.background_override) theme.background = a.background_override;
+    // Cursor and selection are the same arrangement foreground and background
+    // already had: the scheme decides unless something is set here. A bar
+    // cursor inherits the scheme's colour, which on a busy screen is often the
+    // one thing it should not blend into.
+    if (s.cursor_colour)    theme.cursor = s.cursor_colour;
+    if (s.selection_colour) theme.selectionBackground = s.selection_colour;
 
     return {
       theme,
@@ -63,6 +69,17 @@
       scrollback:       s.scrollback_lines || 5000,
       copyOnSelect:     !!s.copy_on_select,
       allowProposedApi: true,
+      // Passed through to xterm.js. Every default here is xterm's own, so a
+      // settings file written before these existed behaves exactly as it did.
+      letterSpacing:    s.letter_spacing   || 0,
+      fontWeight:       s.font_weight      || 'normal',
+      fontWeightBold:   s.font_weight_bold || 'bold',
+      tabStopWidth:     s.tab_stop_width   || 8,
+      drawBoldTextInBrightColors: s.draw_bold_in_bright !== false,
+      screenReaderMode: !!s.screen_reader_mode,
+      // Omitted rather than zeroed: xterm.js derives a sensible width from the
+      // font, and passing 0 would draw no cursor at all.
+      ...(s.cursor_width ? { cursorWidth: s.cursor_width } : {}),
       // Stockton (#57). Read at construction, which is why the renderer is
       // marked as needing a restart while the rest apply to the next tab.
       minimumContrastRatio: A('terminal.min_contrast', 1),
@@ -458,6 +475,8 @@
           const theme = Object.assign({}, schemeObj.theme);
           if (a.foreground_override) theme.foreground = a.foreground_override;
           if (a.background_override) theme.background = a.background_override;
+          if (s.cursor_colour)    theme.cursor = s.cursor_colour;
+          if (s.selection_colour) theme.selectionBackground = s.selection_colour;
           terminal.options.theme = theme;
         }
         if (s.font_size)    terminal.options.fontSize    = s.font_size;
@@ -466,6 +485,17 @@
         if (s.cursor_style) terminal.options.cursorStyle  = s.cursor_style;
         terminal.options.cursorBlink  = s.cursor_blink !== false;
         terminal.options.copyOnSelect = !!s.copy_on_select;
+
+        // Applied to open tabs as well as new ones. These are all readability
+        // settings, and the tab somebody is squinting at while changing them
+        // is the one they want to see change.
+        terminal.options.letterSpacing  = s.letter_spacing   || 0;
+        terminal.options.fontWeight     = s.font_weight      || 'normal';
+        terminal.options.fontWeightBold = s.font_weight_bold || 'bold';
+        terminal.options.tabStopWidth   = s.tab_stop_width   || 8;
+        terminal.options.drawBoldTextInBrightColors = s.draw_bold_in_bright !== false;
+        terminal.options.screenReaderMode = !!s.screen_reader_mode;
+        if (s.cursor_width) terminal.options.cursorWidth = s.cursor_width;
         try { fitAddon.fit(); } catch (_) {}
       } catch (err) {
         console.info('Dropping a terminal that no longer accepts settings', err);

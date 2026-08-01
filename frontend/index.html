@@ -669,6 +669,95 @@ GigEth0/2     unassigned    YES unset  down     down
               <span class="toggle-track"></span>
             </label>
           </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-cursor-width">Cursor Width
+              <span class="setting-hint">A bar cursor at the default width disappears on a busy screen. 0 leaves it to the font.</span>
+            </label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-cursor-width" class="setting-input setting-input-sm" min="0" max="5" step="1" />
+              <span class="setting-unit">px</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-cursor-colour">Cursor Colour
+              <span class="setting-hint">Blank follows the colour scheme, as foreground and background do.</span>
+            </label>
+            <div class="setting-input-group">
+              <input type="color" id="setting-cursor-colour" class="setting-colour" />
+              <button type="button" class="btn-tertiary setting-clear" data-clears="setting-cursor-colour">Use scheme</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-selection-colour">Selection Colour
+              <span class="setting-hint">What selected text is highlighted with.</span>
+            </label>
+            <div class="setting-input-group">
+              <input type="color" id="setting-selection-colour" class="setting-colour" />
+              <button type="button" class="btn-tertiary setting-clear" data-clears="setting-selection-colour">Use scheme</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-letter-spacing">Letter Spacing
+              <span class="setting-hint">Opens up a condensed face without changing the font.</span>
+            </label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-letter-spacing" class="setting-input setting-input-sm" min="0" max="5" step="0.5" />
+              <span class="setting-unit">px</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-font-weight">Font Weight
+              <span class="setting-hint">Some faces are unreadably light at 13px.</span>
+            </label>
+            <select id="setting-font-weight" class="setting-input">
+              <option value="100">Thin (100)</option>
+              <option value="300">Light (300)</option>
+              <option value="normal">Normal (400)</option>
+              <option value="500">Medium (500)</option>
+              <option value="600">Semibold (600)</option>
+              <option value="bold">Bold (700)</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-font-weight-bold">Bold Weight
+              <span class="setting-hint">Set separately, because device output leans on bold for headings and status.</span>
+            </label>
+            <select id="setting-font-weight-bold" class="setting-input">
+              <option value="normal">Normal (400)</option>
+              <option value="500">Medium (500)</option>
+              <option value="600">Semibold (600)</option>
+              <option value="bold">Bold (700)</option>
+              <option value="800">Extrabold (800)</option>
+              <option value="900">Black (900)</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-bold-bright">Brighten Bold Text
+              <span class="setting-hint">The traditional terminal behaviour, and what most colour schemes assume. Off keeps bold and bright separate.</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-bold-bright" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-tab-stop">Tab Width
+              <span class="setting-hint">Configuration output aligned to 8 wraps differently at 4.</span>
+            </label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-tab-stop" class="setting-input setting-input-sm" min="1" max="16" step="1" />
+              <span class="setting-unit">cols</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-screen-reader">Screen Reader Mode
+              <span class="setting-hint">Maintains a live region a screen reader can follow. Costs enough that it is off unless wanted.</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-screen-reader" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
         </section>
 
         <!-- Interface -->

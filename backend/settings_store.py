@@ -23,6 +23,29 @@ DEFAULT_SETTINGS: dict = {
         "line_height": 1.2,
         "cursor_style": "block",
         "cursor_blink": True,
+        # A bar cursor at the default width disappears against a busy screen.
+        # 0 means "leave it to xterm.js", which is not the same as 1.
+        "cursor_width": 0,
+        # Empty means "follow the colour scheme". An override here is the same
+        # arrangement foreground and background already have.
+        "cursor_colour": "",
+        "selection_colour": "",
+        # A real readability lever on condensed monospace faces, and the one
+        # people reach for before changing the font.
+        "letter_spacing": 0,
+        # Some faces are unreadably light at 13px. Bold is separate because
+        # network output leans on it for headings and status.
+        "font_weight": "normal",
+        "font_weight_bold": "bold",
+        # Genuinely contentious. On, bold text is also brightened, which is
+        # the traditional terminal behaviour and what most schemes assume.
+        "draw_bold_in_bright": True,
+        # Configuration output aligned to 8 wraps differently at 4.
+        "tab_stop_width": 8,
+        # An accessibility gap rather than a preference: xterm.js maintains a
+        # live region for screen readers only when this is on, and it costs
+        # enough that it is off by default.
+        "screen_reader_mode": False,
         "scrollback_lines": 5000,
         "right_click_paste": True,
         "copy_on_select": False,

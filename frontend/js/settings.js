@@ -327,8 +327,21 @@
     _val('setting-font-size',        t.font_size        || 14);
     _val('setting-line-height',      t.line_height      || 1.2);
     _val('setting-cursor-style',     t.cursor_style     || 'block');
+    _val('setting-cursor-width',     t.cursor_width     || 0);
+    _val('setting-letter-spacing',   t.letter_spacing   || 0);
+    _val('setting-font-weight',      t.font_weight      || 'normal');
+    _val('setting-font-weight-bold', t.font_weight_bold || 'bold');
+    _val('setting-tab-stop',         t.tab_stop_width   || 8);
+    // A colour input has no empty state — it falls back to black, which reads
+    // as a deliberate choice of black. The stored value is what decides, and
+    // the swatch shows the scheme's own colour when nothing is set, so the
+    // picker opens on something sensible rather than on #000000.
+    _colourOrScheme('setting-cursor-colour',    t.cursor_colour,    'cursor');
+    _colourOrScheme('setting-selection-colour', t.selection_colour, 'selectionBackground');
     _val('setting-scrollback',       t.scrollback_lines || 5000);
     _checked('setting-cursor-blink',      t.cursor_blink      !== false);
+    _checked('setting-bold-bright',       t.draw_bold_in_bright !== false);
+    _checked('setting-screen-reader',     !!t.screen_reader_mode);
     _checked('setting-right-click-paste', t.right_click_paste !== false);
     _checked('setting-copy-on-select',    !!t.copy_on_select);
     _checked('setting-expand-aliases',    t.expand_aliases  !== false);
@@ -449,6 +462,15 @@
         line_height:       parseFloat(_gval('setting-line-height')),
         cursor_style:      _gval('setting-cursor-style'),
         cursor_blink:      _gchecked('setting-cursor-blink'),
+        cursor_width:      parseInt(_gval('setting-cursor-width'), 10) || 0,
+        cursor_colour:     _clearedColour('setting-cursor-colour'),
+        selection_colour:  _clearedColour('setting-selection-colour'),
+        letter_spacing:    parseFloat(_gval('setting-letter-spacing')) || 0,
+        font_weight:       _gval('setting-font-weight'),
+        font_weight_bold:  _gval('setting-font-weight-bold'),
+        tab_stop_width:    parseInt(_gval('setting-tab-stop'), 10) || 8,
+        draw_bold_in_bright: _gchecked('setting-bold-bright'),
+        screen_reader_mode:  _gchecked('setting-screen-reader'),
         scrollback_lines:  parseInt(_gval('setting-scrollback'), 10),
         right_click_paste: _gchecked('setting-right-click-paste'),
         copy_on_select:    _gchecked('setting-copy-on-select'),
@@ -634,6 +656,51 @@
   function _checked(id, v) { const el = document.getElementById(id); if (el) el.checked = !!v; }
   function _gval(id)       { const el = document.getElementById(id); return el ? el.value : ''; }
   function _gchecked(id)   { const el = document.getElementById(id); return el ? el.checked : false; }
+
+  /**
+   * Show a colour override, or the scheme's own colour when there is none.
+   *
+   * `<input type="color">` has no empty state: with no value it shows
+   * #000000, which is indistinguishable from somebody deliberately choosing
+   * black. So "unset" is carried on the element rather than in its value, and
+   * the swatch is filled with whatever the active scheme uses — which is both
+   * truthful about what will be drawn and a sane place for the picker to open.
+   */
+  function _colourOrScheme(id, stored, themeKey) {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    if (_isValidHex(stored || '')) {
+      el.value = stored;
+      delete el.dataset.unset;
+      return;
+    }
+
+    const scheme = COLOR_SCHEMES[_gval('setting-scheme')] || COLOR_SCHEMES.deep_space;
+    const fromScheme = scheme && scheme.theme && scheme.theme[themeKey];
+    el.value = _isValidHex(fromScheme || '') ? fromScheme : '#c3c0ff';
+    el.dataset.unset = '1';
+  }
+
+  /** The override, or "" when the row is still following the scheme. */
+  function _clearedColour(id) {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.unset) return '';
+    return _isValidHex(el.value) ? el.value : '';
+  }
+
+  // Choosing a colour is what makes it an override; "Use scheme" undoes that.
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.setting-colour').forEach(el => {
+      el.addEventListener('input', () => { delete el.dataset.unset; });
+    });
+    document.querySelectorAll('.setting-clear').forEach(button => {
+      button.addEventListener('click', () => {
+        const el = document.getElementById(button.dataset.clears);
+        if (el) el.dataset.unset = '1';
+      });
+    });
+  });
 
   function _isValidHex(h) { return /^#[0-9A-Fa-f]{6}$/.test(h); }
 
