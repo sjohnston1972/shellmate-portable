@@ -114,9 +114,15 @@ def _serve(port: int) -> None:
     # the backend.
     from backend.advanced import get as advanced
 
-    uvicorn.run(fastapi_app, host=HOST, port=port, log_config=None,
-                log_level="info",
-                access_log=bool(advanced("diag.http_access_log")))
+    # uvicorn.run() builds and runs a Server in one call and returns no handle
+    # to it. The restart path needs one: it has to stop listening before the
+    # replacement can take the port.
+    config = uvicorn.Config(fastapi_app, host=HOST, port=port, log_config=None,
+                            log_level="info",
+                            access_log=bool(advanced("diag.http_access_log")))
+    instance = uvicorn.Server(config)
+    server.register_server(instance, _serve)
+    instance.run()
 
 
 def main() -> int:
@@ -180,8 +186,20 @@ def main() -> int:
     else:
         logger.info("Vault is locked - waiting for the master password.")
 
+    # A restart hands the port over explicitly. Without this the replacement
+    # scans past the copy that is still shutting down and comes up on 8766,
+    # leaving the user's window pointed at nothing.
+    wanted = PORT
+    if "--restart-port" in sys.argv:
+        try:
+            wanted = int(sys.argv[sys.argv.index("--restart-port") + 1])
+            logger.info("Restart handover: waiting for port %s", wanted)
+            server.wait_for_port(HOST, wanted)
+        except (IndexError, ValueError):
+            logger.info("--restart-port given without a usable number; ignoring.")
+
     try:
-        port = server.find_free_port(HOST, PORT)
+        port = server.find_free_port(HOST, wanted)
     except OSError as exc:
         _fatal(str(exc))
         return 1

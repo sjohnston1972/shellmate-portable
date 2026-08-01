@@ -719,10 +719,60 @@ def restart(desktop=None) -> bool:
         except Exception:
             pass
 
+    # Remembered so it can be put back if the handover fails below. Clearing
+    # it and then not restarting would leave this copy running with no lock,
+    # and a second instance could start alongside it over the same data.
+    held_port = server.running_instance_port()
     try:
         server.clear_lock()
     except Exception as exc:
         logger.warning("Could not clear the instance lock before restarting: %s", exc)
+
+    def keep_running(reason: str) -> bool:
+        """Abandon the restart and put things back as they were."""
+        logger.warning("Restart abandoned: %s", reason)
+        if held_port:
+            try:
+                server.write_lock(held_port)
+            except Exception:
+                pass
+            # If the listener was already released, take the port back.
+            # Otherwise this copy survives the failed restart holding every
+            # open session and answering nothing at all.
+            if not server.port_is_free("127.0.0.1", held_port):
+                return False
+            server.resume_serving(held_port)
+        return False
+
+    # Release the port before the replacement starts, and tell it which one to
+    # take. Both halves are needed: a replacement that starts while this copy
+    # is still listening scans past 8765 and comes up on 8766, and the window
+    # the user is looking at is pointed at 8765.
+    if held_port:
+        if not server.stop_serving("127.0.0.1", held_port):
+            return keep_running(
+                f"port {held_port} was not released, so a replacement would "
+                f"come up on a different address")
+        command = command + ["--restart-port", str(held_port)]
+
+    # Strip PyInstaller's bootloader handshake out of the environment.
+    #
+    # A --onefile build unpacks itself into %TEMP%\_MEIxxxxxx and tells its
+    # real child where that is through these variables. They are inherited by
+    # anything *we* spawn, so a replacement launched from inside the frozen
+    # app reads them, concludes it is already unpacked, and adopts the
+    # directory belonging to the copy that is about to exit — which the
+    # outgoing bootloader then deletes.
+    #
+    # The result is a process that starts, listens, and answers every JSON
+    # endpoint (the Python is already imported) while every file on disk has
+    # gone: `GET /` returns 500 because frontend/index.html no longer exists.
+    # Nothing in the handover looks wrong, because by every check we make it
+    # worked.
+    environment = os.environ.copy()
+    for variable in ("_MEIPASS2", "_PYI_APPLICATION_HOME_DIR",
+                     "_PYI_ARCHIVE_FILE", "_PYI_PARENT_PROCESS_LEVEL"):
+        environment.pop(variable, None)
 
     creation = 0
     if sys.platform == "win32":
@@ -733,7 +783,8 @@ def restart(desktop=None) -> bool:
     try:
         subprocess.Popen(
             command,
-            cwd=str(app_dir()),
+            cwd=str(paths.app_dir()),
+            env=environment,
             close_fds=True,
             creationflags=creation,
             stdin=subprocess.DEVNULL,
@@ -741,13 +792,11 @@ def restart(desktop=None) -> bool:
             stderr=subprocess.DEVNULL,
         )
     except Exception as exc:
-        logger.warning("Could not start a replacement process: %s", exc)
-        return False
+        return keep_running(f"could not start a replacement process ({exc})")
 
     logger.info("Replacement started; waiting for it to answer before exiting.")
     if not _wait_for_replacement():
-        logger.warning("The replacement never answered. Staying up.")
-        return False
+        return keep_running("the replacement never answered")
 
     logger.info("Handover complete. Shutting this copy down.")
     if desktop is not None:

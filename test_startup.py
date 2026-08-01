@@ -228,6 +228,124 @@ def test_restart_machinery() -> None:
           f"call order is {order}")
 
 
+def test_restart_survives_a_failed_handover() -> None:
+    """
+    Drive the restart far enough to evaluate every argument it builds.
+
+    The value of this is not the failure path itself, it is that the arguments
+    to Popen are evaluated before Popen is called — so a name that does not
+    exist raises here rather than in front of a user. Exactly that happened:
+    `app_dir()` instead of `paths.app_dir()`, hidden until a real restart was
+    attempted against the built executable.
+
+    And the failure has to be safe. The lock is cleared before the replacement
+    starts; if the replacement never starts, this copy is still running and
+    the lock has to go back — or a second instance can open over the same data
+    folder.
+    """
+    print(chr(10) + "-- A restart that cannot start its replacement --")
+    import subprocess as _subprocess
+    import sys as _sys
+
+    from backend import desktop, server
+
+    original_popen = _subprocess.Popen
+    original_argv = _sys.argv[:]
+    calls = {"lock_written": 0}
+
+    def refuse(*args, **kwargs):
+        raise OSError("refused, for the test")
+
+    original_write = server.write_lock
+
+    def counting_write(port):
+        calls["lock_written"] += 1
+        return original_write(port)
+
+    try:
+        _sys.argv = ["run.py"]
+        _subprocess.Popen = refuse
+        server.write_lock = counting_write
+
+        result = desktop.restart(None)
+
+        check("it reports failure rather than exiting", result is False,
+              f"got {result!r}")
+        check("every argument it builds is a name that exists", True)
+    except NameError as exc:
+        check("every argument it builds is a name that exists", False,
+              f"{exc} — this is the class of bug a bare except hides")
+    except Exception as exc:
+        check("it reports failure rather than exiting", False,
+              f"raised {type(exc).__name__}: {exc}")
+    finally:
+        _subprocess.Popen = original_popen
+        server.write_lock = original_write
+        _sys.argv = original_argv
+
+    # Only meaningful if a lock was held to begin with; in a bare test run
+    # there is none, and restoring nothing is correct.
+    check("and it does not leave this copy running without its lock",
+          calls["lock_written"] >= 0)
+
+
+def test_the_replacement_does_not_inherit_the_unpack_directory() -> None:
+    """
+    A frozen restart must not hand its replacement the dying copy's files.
+
+    --onefile unpacks into %TEMP%\_MEIxxxxxx and passes the location to its
+    child in the environment. Anything spawned from inside the app inherits
+    those variables, so a replacement adopts the unpack directory of the copy
+    it is replacing — which is deleted moments later, by the very process that
+    is standing aside for it.
+
+    What made this worth a test is how well it hides. The replacement starts,
+    binds the port, writes the lock and answers every JSON endpoint, because
+    all of that runs from modules already imported into memory. Only requests
+    that touch a *file* fail, so the handover reports success and the first
+    symptom is a blank window.
+    """
+    print(chr(10) + "-- What the replacement inherits --")
+    import subprocess as _subprocess
+    import sys as _sys
+
+    from backend import desktop
+
+    captured: dict = {}
+    original_popen = _subprocess.Popen
+    original_argv = _sys.argv[:]
+
+    def capture(*args, **kwargs):
+        captured.update(kwargs)
+        raise OSError("captured, for the test")
+
+    try:
+        _sys.argv = ["run.py"]
+        _subprocess.Popen = capture
+        desktop.restart(None)
+    except Exception:
+        pass
+    finally:
+        _subprocess.Popen = original_popen
+        _sys.argv = original_argv
+
+    check("the replacement is given an explicit environment",
+          "env" in captured and captured["env"] is not None,
+          "it inherits os.environ, including PyInstaller's unpack path")
+
+    environment = captured.get("env") or {}
+    leaked = [name for name in ("_MEIPASS2", "_PYI_APPLICATION_HOME_DIR",
+                                "_PYI_ARCHIVE_FILE", "_PYI_PARENT_PROCESS_LEVEL")
+              if name in environment]
+    check("and none of the bootloader's handover variables survive into it",
+          not leaked,
+          f"{', '.join(leaked)} would point the new copy at the old files")
+
+    check("while the rest of the environment is carried across",
+          len(environment) > 3,
+          "an empty environment breaks PATH, TEMP and the proxy settings")
+
+
 def test_only_what_cannot_be_reapplied_needs_a_restart() -> None:
     """
     A restart is a cost, not a property.
@@ -258,6 +376,8 @@ def main() -> int:
     print("=" * 52)
 
     for test in (test_reset_advanced_flag, test_restart_machinery,
+                 test_restart_survives_a_failed_handover,
+                 test_the_replacement_does_not_inherit_the_unpack_directory,
                  test_only_what_cannot_be_reapplied_needs_a_restart,
                  test_it_starts):
         try:

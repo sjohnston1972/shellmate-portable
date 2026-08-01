@@ -19,6 +19,8 @@ because nothing responds.
 import json
 import logging
 import socket
+import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -63,6 +65,90 @@ def is_port_free(host: str, port: int) -> bool:
             return True
         except OSError:
             return False
+
+
+def port_is_free(host: str, port: int) -> bool:
+    """
+    Whether nothing is listening on a port.
+
+    Tests by *connecting*, not by binding. On Windows a bind with
+    SO_REUSEADDR succeeds against a port another socket is already listening
+    on, so a bind probe would report every busy port as free — which is
+    precisely backwards for the one caller that matters here.
+    """
+    import socket as _socket
+
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.4)
+        return probe.connect_ex((host, port)) != 0
+
+
+def wait_for_port(host: str, port: int, timeout: float = 20.0) -> bool:
+    """
+    Wait for a port to be released, for a restart handing one over.
+
+    The outgoing copy stops listening as it spawns its replacement, but not
+    instantly. Without this wait the replacement scans past the port it was
+    asked for and comes up on the next one, leaving the user's window pointing
+    at an address nothing answers on.
+
+    Returns False on timeout, in which case the caller scans as usual: coming
+    up on a different port is worse than not coming up at all.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if port_is_free(host, port):
+            return True
+        time.sleep(0.25)
+    logger.info("Port %s never freed up; scanning instead.", port)
+    return False
+
+
+#: The live uvicorn Server, and the callable that starts a new one. Held here
+#: rather than in run.py because the restart path lives in desktop.py, and
+#: desktop.py importing the entry point would be a cycle.
+_live_server = None
+_serve_again = None
+
+
+def register_server(instance, serve_again=None) -> None:
+    """Record the running server so a restart can release its port."""
+    global _live_server, _serve_again
+    _live_server = instance
+    if serve_again is not None:
+        _serve_again = serve_again
+
+
+def stop_serving(host: str, port: int, timeout: float = 10.0) -> bool:
+    """
+    Stop listening, so a replacement process can take the port.
+
+    Returns False if the socket is still answering when the timeout expires,
+    which the caller should treat as "do not restart" — handing over a port
+    that was never released produces two copies fighting over one address.
+    """
+    if _live_server is None:
+        return False
+    _live_server.should_exit = True
+    return wait_for_port(host, port, timeout)
+
+
+def resume_serving(port: int) -> bool:
+    """
+    Take the port back after a restart that could not start its replacement.
+
+    Without this, a failed handover leaves a process that is alive, holds the
+    tray icon and every open session, and answers nothing.
+    """
+    if _serve_again is None:
+        return False
+    try:
+        threading.Thread(target=_serve_again, args=(port,), daemon=True).start()
+        logger.info("Resumed serving on port %s after an abandoned restart.", port)
+        return True
+    except Exception as exc:
+        logger.error("Could not resume serving on port %s: %s", port, exc)
+        return False
 
 
 def find_free_port(host: str, preferred: int, attempts: int | None = None) -> int:
