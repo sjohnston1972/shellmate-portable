@@ -388,6 +388,9 @@
     _val('setting-tab-label-width',   ui.max_tab_label_px || 160);
     _checked('setting-connection-dot',    ui.show_connection_dot !== false);
     _checked('setting-sidebar-labels',    ui.sidebar_labels === true);
+    _checked('setting-restore-tabs',      ui.restore_tabs === true);
+    _val('setting-new-tab-opens',         ui.new_tab_opens || 'welcome');
+    _fillProfileChoices(ui.new_tab_profile || '');
     _val('setting-tab-order',             ui.tab_order || 'manual');
     _checked('setting-confirm-close-tab', ui.confirm_close_tab !== false);
     _checked('setting-confirm-quit',      ui.confirm_quit !== false);
@@ -515,6 +518,9 @@
         max_tab_label_px:    parseInt(_gval('setting-tab-label-width'), 10) || 160,
         show_connection_dot: _gchecked('setting-connection-dot'),
         sidebar_labels:      _gchecked('setting-sidebar-labels'),
+        restore_tabs:        _gchecked('setting-restore-tabs'),
+        new_tab_opens:       _gval('setting-new-tab-opens'),
+        new_tab_profile:     _gval('setting-new-tab-profile'),
         tab_order:           _gval('setting-tab-order'),
         confirm_close_tab:   _gchecked('setting-confirm-close-tab'),
         confirm_quit:        _gchecked('setting-confirm-quit'),
@@ -704,6 +710,53 @@
         if (el) el.dataset.unset = '1';
       });
     });
+  });
+
+  /**
+   * Fill the saved-connection picker, and show it only when it applies.
+   *
+   * Listed from /api/profiles rather than kept in step with a copy: the
+   * connection somebody picks here can be renamed or deleted from three other
+   * places, and a stale list would offer one that no longer exists.
+   */
+  async function _fillProfileChoices(selected) {
+    const select = document.getElementById('setting-new-tab-profile');
+    if (!select) return;
+
+    select.innerHTML = '';
+    try {
+      const res = await fetch('/api/profiles');
+      const data = res.ok ? await res.json() : { profiles: [] };
+      (data.profiles || []).forEach(profile => {
+        const option = document.createElement('option');
+        option.value = profile.id;
+        option.textContent = profile.name
+          + (profile.hostname ? ` (${profile.hostname})` : '');
+        select.appendChild(option);
+      });
+      if (!select.options.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No saved connections yet';
+        select.appendChild(option);
+      }
+    } catch (_) { /* the row simply offers nothing */ }
+
+    if (selected) select.value = selected;
+    _syncNewTabRow();
+  }
+
+  function _syncNewTabRow() {
+    const row = document.getElementById('new-tab-profile-row');
+    if (row) {
+      row.style.display =
+        _gval('setting-new-tab-opens') === 'profile' ? '' : 'none';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const mode = document.getElementById('setting-new-tab-opens');
+    if (mode) mode.addEventListener('change', _syncNewTabRow);
   });
 
   function _isValidHex(h) { return /^#[0-9A-Fa-f]{6}$/.test(h); }

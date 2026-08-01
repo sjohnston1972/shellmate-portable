@@ -135,6 +135,21 @@ DEFAULT_SETTINGS: dict = {
         # one setting away rather than a redesign — off by default, because
         # the rail is deliberately narrow and most people learn the icons.
         "sidebar_labels": False,
+        # Reopen the tabs that were open at quit. Off, and it stays off on
+        # upgrade: this reconnects to devices nobody asked to connect to,
+        # which is the same objection that keeps auto-reconnect off. It only
+        # restores connections whose credentials the server already holds,
+        # and names the ones it could not.
+        "restore_tabs": False,
+        # What the open tabs were, so the above has something to restore.
+        # Written on every change rather than at quit — a list that is only
+        # correct after a clean shutdown fails exactly when it is wanted.
+        "open_tabs": [],
+        # "welcome" | "last" | "profile". The welcome screen is a poor answer
+        # for somebody who works on one device all day and a good one for
+        # somebody who does not, so it is a choice rather than a change.
+        "new_tab_opens": "welcome",
+        "new_tab_profile": "",
         # "manual" | "name" | "device" | "opened" | "tag". Manual is where
         # tabs have always been and stays the default: people put tabs where
         # they want them and expect them to stay there. Grouping earns its

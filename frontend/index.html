@@ -830,6 +830,32 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
+            <label class="setting-label" for="setting-restore-tabs">Reopen tabs when ShellMate starts
+              <span class="setting-hint">Only sessions saved as a connection with its password — nothing else can be reconnected without asking you. Any it cannot restore are named.</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-restore-tabs" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-new-tab-opens">New tab opens
+              <span class="setting-hint">The connection dialog appears either way — this decides whether it arrives filled in.</span>
+            </label>
+            <select id="setting-new-tab-opens" class="setting-input">
+              <option value="welcome">An empty connection dialog</option>
+              <option value="last">The last device you connected to</option>
+              <option value="profile">A saved connection…</option>
+            </select>
+          </div>
+
+          <div class="setting-row" id="new-tab-profile-row">
+            <label class="setting-label" for="setting-new-tab-profile">Which saved connection</label>
+            <select id="setting-new-tab-profile" class="setting-input"></select>
+          </div>
+
+          <div class="setting-row">
             <label class="setting-label" for="setting-sidebar-labels">Labels in the sidebar
               <span class="setting-hint">Names beside the icons, in a wider rail. Icons alone are quick once learned and unguessable until then.</span>
             </label>

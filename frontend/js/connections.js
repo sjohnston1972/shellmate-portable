@@ -64,8 +64,14 @@
 
     renderWelcomeProfiles();
 
+    // What this opens is a preference now: the empty dialog, the last device,
+    // or a chosen saved connection. openNewTabTarget resolves that and calls
+    // back into showConnectionDialog, so there is still one dialog.
     document.getElementById('btn-new-tab')
-      .addEventListener('click', () => showConnectionDialog());
+      .addEventListener('click', () => {
+        if (typeof window.openNewTabTarget === 'function') window.openNewTabTarget();
+        else showConnectionDialog();
+      });
 
     document.getElementById('btn-welcome-connect')
       .addEventListener('click', () => showConnectionDialog());

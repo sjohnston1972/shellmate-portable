@@ -153,6 +153,7 @@
     // opened, which is worse than not sorting at all.
     _learnTag(tabObj);
     sortTabs();
+    _rememberOpenTabs();
 
     // The session clock. connected_at is stamped by the backend, so the count
     // is from when the device answered rather than from when this ran.
@@ -435,6 +436,7 @@
 
     // Remove from array
     tabs.splice(index, 1);
+    _rememberOpenTabs();
 
     // Free the pane it occupied before anything is asked to re-render, so a
     // tiled layout pulls in a waiting session rather than leaving a hole.
@@ -564,6 +566,218 @@
     }
   }
 
+
+
+  // -------------------------------------------------------------------------
+  // Remembering, and restoring, what was open
+  //
+  // Every launch started empty. That is right for a tool you dip into and
+  // wrong for one somebody has open all day across the same twelve devices.
+  //
+  // The objection in the issue is the real one and is not dismissed here:
+  // reopening tabs means connecting to devices nobody asked to connect to,
+  // which is the same reason auto-reconnect is off by default. So this is
+  // opt-in, it only restores connections whose credentials the *server*
+  // already holds, and it says which ones it could not — rather than quietly
+  // restoring nine of twelve and leaving somebody to notice.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Record the open tabs, so a restart can offer them back.
+   *
+   * Written on every change rather than at quit: the process can be killed,
+   * the machine can lose power, and a list that is only correct after a clean
+   * shutdown is a list that fails exactly when it would have been most
+   * welcome. prefs.set debounces, so a burst of tab changes is one write.
+   *
+   * Session ids are deliberately not stored. They do not survive a restart,
+   * and storing them would invite code that looks them up and silently finds
+   * nothing.
+   */
+  function _rememberOpenTabs() {
+    if (!window.shellmatePrefs) return;
+    window.shellmatePrefs.set('open_tabs', tabs.map(t => ({
+      label:           t.label,
+      hostname:        t.hostname || '',
+      port:            t.port || 0,
+      username:        t.username || '',
+      connection_type: t.connectionType || 'ssh',
+    })));
+  }
+
+  /**
+   * Reopen what was open, if that was asked for.
+   *
+   * Runs once, after settings have arrived. Each entry is matched to a saved
+   * connection the same way Duplicate and auto-reconnect do — the server fills
+   * the credentials in from the profile, because scrub_secrets() clears them
+   * from the session the moment it connects and the browser has never had
+   * them.
+   */
+  async function _restoreTabs() {
+    const prefs = (window.shellmateSettings || {}).interface || {};
+    if (prefs.restore_tabs !== true) return;
+
+    const remembered = prefs.open_tabs || [];
+    if (!remembered.length) return;
+
+    const unsaved = [];
+    const noPassword = [];
+    let restored = 0;
+
+    for (const entry of remembered) {
+      const profile = await _exactProfileFor(entry);
+
+      // Without saved credentials there is nothing to connect with, and
+      // twelve password prompts on startup is not a feature. Named instead —
+      // and the two reasons are kept apart, because they need different
+      // things done about them: one wants the connection saved, the other
+      // wants a password added to a connection that already exists.
+      if (!profile) {
+        unsaved.push(entry.label || entry.hostname || 'a session');
+        continue;
+      }
+      if (!profile.has_saved_credentials) {
+        noPassword.push(entry.label || entry.hostname || 'a session');
+        continue;
+      }
+
+      try {
+        const res = await fetch('/api/sessions', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            connection_type: profile.connection_type || 'ssh',
+            hostname:        profile.hostname || '',
+            port:            profile.port || 22,
+            username:        profile.username || '',
+            serial_port:     profile.serial_port || '',
+            baud_rate:       profile.baud_rate || 9600,
+            display_label:   profile.name || entry.label || '',
+            profile_id:      profile.id,
+          }),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        createTab(await res.json());
+        restored += 1;
+      } catch (_) {
+        noPassword.push(entry.label || entry.hostname || 'a session');
+      }
+    }
+
+    if (!window.shellmateAlerts) return;
+
+    // Counted, and the failures named. "Restored 9 of 12" with no list is
+    // worse than saying nothing: it tells somebody three devices are missing
+    // without telling them which three.
+    const problems = [];
+    if (unsaved.length) {
+      problems.push(`Not saved as a connection: ${unsaved.join(', ')}.`);
+    }
+    if (noPassword.length) {
+      problems.push(`No saved password: ${noPassword.join(', ')}.`);
+    }
+
+    if (problems.length) {
+      window.shellmateAlerts.notify({
+        severity: 'warning',
+        icon:     'warning',
+        title:    `Restored ${restored} of ${remembered.length} sessions`,
+        body:     problems.join(' ')
+                  + ' Save the connection with its credentials and it comes'
+                  + ' back next time.',
+      });
+    } else if (restored) {
+      window.shellmateAlerts.notify({
+        title: `Restored ${restored} session${restored === 1 ? '' : 's'}`,
+        body:  'Reopened from where you left off.',
+      });
+    }
+  }
+
+  /**
+   * What the New Tab button opens.
+   *
+   * The welcome screen is a poor answer for somebody who works on one device
+   * all day, and a good one for somebody who does not — hence a choice rather
+   * than a change. 'last' repeats whatever was opened most recently, which is
+   * the common case without needing anything chosen in advance.
+   */
+  async function openNewTabTarget() {
+    const prefs = (window.shellmateSettings || {}).interface || {};
+    const mode = prefs.new_tab_opens || 'welcome';
+
+    let profile = null;
+    if (mode === 'profile' && prefs.new_tab_profile) {
+      profile = await _profileById(prefs.new_tab_profile);
+    } else if (mode === 'last') {
+      const last = (prefs.open_tabs || [])[prefs.open_tabs.length - 1];
+      if (last) {
+        profile = await _profileFor({
+          label:          last.label,
+          hostname:       last.hostname,
+          port:           last.port,
+          username:       last.username,
+          connectionType: last.connection_type,
+        });
+      }
+    }
+
+    // The dialog either way, prefilled or empty. Connecting outright on a
+    // button called "New tab" would be a surprise, and the setting is about
+    // saving the typing rather than skipping the decision — a saved
+    // connection is one keypress away once its fields are filled in.
+    if (typeof window.showConnectionDialog === 'function') {
+      window.showConnectionDialog(profile || undefined);
+      return;
+    }
+  }
+
+  /**
+   * Find the saved connection a remembered tab *is*, not the one it is most
+   * like.
+   *
+   * `_profileFor` scores loosely on purpose: it backs Reconnect and Duplicate,
+   * where somebody has asked for this device and a near match is a helpful
+   * guess they can see and correct. Restore is neither asked for nor watched —
+   * it runs at startup, unattended — so the same scoring will happily connect
+   * to a different device on the same address, which is how a change lands in
+   * the wrong place. Found in testing, with two devices on 127.0.0.1
+   * distinguished only by port.
+   *
+   * So: address, port and transport must all agree, and the username too when
+   * one was recorded. Anything less is reported as unrestorable, which is a
+   * far better outcome than a confident connection to the wrong box.
+   */
+  async function _exactProfileFor(entry) {
+    let profiles = [];
+    try {
+      const res = await fetch('/api/profiles');
+      profiles = res.ok ? await res.json() : [];
+    } catch (_) {
+      return null;
+    }
+    if (!Array.isArray(profiles)) profiles = profiles.profiles || [];
+
+    const type = entry.connection_type || 'ssh';
+    return profiles.find(p =>
+      (p.connection_type || 'ssh') === type
+      && (p.hostname || '') === (entry.hostname || '')
+      && Number(p.port || 0) === Number(entry.port || 0)
+      && (!entry.username || (p.username || '') === entry.username)
+    ) || null;
+  }
+
+  async function _profileById(id) {
+    try {
+      const res = await fetch('/api/profiles');
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data.profiles || []).find(p => p.id === id) || null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   // -------------------------------------------------------------------------
   // Tab ordering
@@ -1654,6 +1868,8 @@
   window.getActiveTab     = getActiveTab;
   window.updateTabLabel   = updateTabLabel;
   window.setTabOrder      = setTabOrder;
+  window.openNewTabTarget = openNewTabTarget;
+  window.restoreTabs      = _restoreTabs;
   // ShellMate saw the `reload` go in, so when the session drops it knows why
   // and roughly how long the device will be away. That is what justifies
   // waiting minutes rather than giving up after thirty seconds.

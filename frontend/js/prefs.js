@@ -181,11 +181,30 @@
     if (width > 200) pane.style.width = `${width}px`;
   }
 
+  /**
+   * Reopen the tabs that were open at quit, once.
+   *
+   * Bound to settings-loaded rather than to DOMContentLoaded: it needs the
+   * preference, and it needs the profile list to match against. Guarded to
+   * run once because apply() fires on every save too, and restoring a second
+   * set of tabs when somebody changes their theme would be memorable for the
+   * wrong reason.
+   */
+  let restoredOnce = false;
+  function restoreOnce() {
+    if (restoredOnce) return;
+    restoredOnce = true;
+    if (typeof window.restoreTabs === 'function') window.restoreTabs();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     // settings.js loads and publishes them; this may run before or after.
-    if (window.shellmateSettings) apply();
+    if (window.shellmateSettings) { apply(); restoreOnce(); }
     window.addEventListener('shellmate:settings-changed', apply);
-    window.addEventListener('shellmate:settings-loaded', apply);
+    window.addEventListener('shellmate:settings-loaded', () => {
+      apply();
+      restoreOnce();
+    });
   });
 
   window.shellmatePrefs = { get, set, apply, flush };
