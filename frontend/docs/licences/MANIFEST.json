@@ -1,0 +1,340 @@
+{
+  "components": [
+    {
+      "component": "paramiko",
+      "version": "3.5.1",
+      "licence": "LGPL",
+      "kind": "python",
+      "file": "paramiko.txt",
+      "modified": ""
+    },
+    {
+      "component": "cryptography",
+      "version": "44.0.2",
+      "licence": "Apache-2.0 OR BSD-3-Clause",
+      "kind": "python",
+      "file": "cryptography.txt",
+      "modified": ""
+    },
+    {
+      "component": "bcrypt",
+      "version": "4.3.0",
+      "licence": "Apache-2.0",
+      "kind": "python",
+      "file": "bcrypt.txt",
+      "modified": ""
+    },
+    {
+      "component": "PyNaCl",
+      "version": "1.5.0",
+      "licence": "Apache License 2.0",
+      "kind": "python",
+      "file": "pynacl.txt",
+      "modified": ""
+    },
+    {
+      "component": "pyserial",
+      "version": "3.5",
+      "licence": "BSD",
+      "kind": "python",
+      "file": "pyserial.txt",
+      "modified": ""
+    },
+    {
+      "component": "fastapi",
+      "version": "0.135.1",
+      "licence": "MIT",
+      "kind": "python",
+      "file": "fastapi.txt",
+      "modified": ""
+    },
+    {
+      "component": "starlette",
+      "version": "0.52.1",
+      "licence": "BSD-3-Clause",
+      "kind": "python",
+      "file": "starlette.txt",
+      "modified": ""
+    },
+    {
+      "component": "uvicorn",
+      "version": "0.41.0",
+      "licence": "BSD-3-Clause",
+      "kind": "python",
+      "file": "uvicorn.txt",
+      "modified": ""
+    },
+    {
+      "component": "pydantic",
+      "version": "2.12.5",
+      "licence": "MIT",
+      "kind": "python",
+      "file": "pydantic.txt",
+      "modified": ""
+    },
+    {
+      "component": "pydantic_core",
+      "version": "2.41.5",
+      "licence": "MIT",
+      "kind": "python",
+      "file": "pydantic_core.txt",
+      "modified": ""
+    },
+    {
+      "component": "annotated-types",
+      "version": "0.7.0",
+      "licence": "MIT License",
+      "kind": "python",
+      "file": "annotated-types.txt",
+      "modified": ""
+    },
+    {
+      "component": "anyio",
+      "version": "4.12.1",
+      "licence": "MIT",
+      "kind": "python",
+      "file": "anyio.txt",
+      "modified": ""
+    },
+    {
+      "component": "h11",
+      "version": "0.16.0",
+      "licence": "MIT",
+      "kind": "python",
+      "file": "h11.txt",
+      "modified": ""
+    },
+    {
+      "component": "httptools",
+      "version": "0.7.1",
+      "licence": "MIT",
+      "kind": "python",
+      "file": "httptools.txt",
+      "modified": ""
+    },
+    {
+      "component": "click",
+      "version": "8.3.0",
+      "licence": "BSD-3-Clause",
+      "kind": "python",
+      "file": "click.txt",
+      "modified": ""
+    },
+    {
+      "component": "websockets",
+      "version": "16.0",
+      "licence": "BSD-3-Clause",
+      "kind": "python",
+      "file": "websockets.txt",
+      "modified": ""
+    },
+    {
+      "component": "python-multipart",
+      "version": "0.0.22",
+      "licence": "Apache-2.0",
+      "kind": "python",
+      "file": "python-multipart.txt",
+      "modified": ""
+    },
+    {
+      "component": "typing_extensions",
+      "version": "4.15.0",
+      "licence": "PSF-2.0",
+      "kind": "python",
+      "file": "typing_extensions.txt",
+      "modified": ""
+    },
+    {
+      "component": "httpx",
+      "version": "0.28.1",
+      "licence": "BSD-3-Clause",
+      "kind": "python",
+      "file": "httpx.txt",
+      "modified": ""
+    },
+    {
+      "component": "httpcore",
+      "version": "1.0.9",
+      "licence": "BSD-3-Clause",
+      "kind": "python",
+      "file": "httpcore.txt",
+      "modified": ""
+    },
+    {
+      "component": "certifi",
+      "version": "2024.8.30",
+      "licence": "MPL-2.0",
+      "kind": "python",
+      "file": "certifi.txt",
+      "modified": ""
+    },
+    {
+      "component": "idna",
+      "version": "3.10",
+      "licence": "BSD License",
+      "kind": "python",
+      "file": "idna.txt",
+      "modified": ""
+    },
+    {
+      "component": "pywebview",
+      "version": "6.2.1",
+      "licence": "BSD License",
+      "kind": "python",
+      "file": "pywebview.txt",
+      "modified": ""
+    },
+    {
+      "component": "pystray",
+      "version": "0.19.5",
+      "licence": "LGPLv3",
+      "kind": "python",
+      "file": "pystray.txt",
+      "modified": ""
+    },
+    {
+      "component": "Pillow",
+      "version": "12.3.0",
+      "licence": "MIT-CMU",
+      "kind": "python",
+      "file": "pillow.txt",
+      "modified": ""
+    },
+    {
+      "component": "proxy_tools",
+      "version": "0.1.0",
+      "licence": "MIT",
+      "kind": "python",
+      "file": "proxy_tools.txt",
+      "modified": ""
+    },
+    {
+      "component": "clr_loader",
+      "version": "0.3.1",
+      "licence": "not declared",
+      "kind": "python",
+      "file": "clr_loader.txt",
+      "modified": ""
+    },
+    {
+      "component": "pythonnet",
+      "version": "3.1.0",
+      "licence": "MIT",
+      "kind": "python",
+      "file": "pythonnet.txt",
+      "modified": ""
+    },
+    {
+      "component": "cffi",
+      "version": "1.17.1",
+      "licence": "MIT",
+      "kind": "python",
+      "file": "cffi.txt",
+      "modified": ""
+    },
+    {
+      "component": "pycparser",
+      "version": "2.22",
+      "licence": "BSD-3-Clause",
+      "kind": "python",
+      "file": "pycparser.txt",
+      "modified": ""
+    },
+    {
+      "component": "six",
+      "version": "1.16.0",
+      "licence": "MIT",
+      "kind": "python",
+      "file": "six.txt",
+      "modified": ""
+    },
+    {
+      "component": "python-dotenv",
+      "version": "1.2.1",
+      "licence": "BSD-3-Clause",
+      "kind": "python",
+      "file": "python-dotenv.txt",
+      "modified": ""
+    },
+    {
+      "component": "Fira Code",
+      "version": "",
+      "licence": "SIL Open Font License 1.1",
+      "kind": "font",
+      "file": "font-fira-code.txt",
+      "modified": ""
+    },
+    {
+      "component": "Inconsolata",
+      "version": "",
+      "licence": "SIL Open Font License 1.1",
+      "kind": "font",
+      "file": "font-inconsolata.txt",
+      "modified": ""
+    },
+    {
+      "component": "Inter",
+      "version": "",
+      "licence": "SIL Open Font License 1.1",
+      "kind": "font",
+      "file": "font-inter.txt",
+      "modified": ""
+    },
+    {
+      "component": "JetBrains Mono",
+      "version": "",
+      "licence": "SIL Open Font License 1.1",
+      "kind": "font",
+      "file": "font-jetbrains-mono.txt",
+      "modified": ""
+    },
+    {
+      "component": "Roboto Mono",
+      "version": "",
+      "licence": "SIL Open Font License 1.1",
+      "kind": "font",
+      "file": "font-roboto-mono.txt",
+      "modified": ""
+    },
+    {
+      "component": "Source Code Pro",
+      "version": "",
+      "licence": "SIL Open Font License 1.1",
+      "kind": "font",
+      "file": "font-source-code-pro.txt",
+      "modified": ""
+    },
+    {
+      "component": "Space Grotesk",
+      "version": "",
+      "licence": "SIL Open Font License 1.1",
+      "kind": "font",
+      "file": "font-space-grotesk.txt",
+      "modified": ""
+    },
+    {
+      "component": "Ubuntu Mono",
+      "version": "",
+      "licence": "Ubuntu Font Licence 1.0",
+      "kind": "font",
+      "file": "font-ubuntu-mono.txt",
+      "modified": ""
+    },
+    {
+      "component": "Material Symbols Outlined",
+      "version": "",
+      "licence": "Apache-2.0",
+      "kind": "font",
+      "file": "font-material-symbols-outlined.txt",
+      "modified": "Subsetted by tools/vendor_assets.py to the icons ShellMate uses, reducing the file from about 3.9 MB to 190 KB. No glyph outlines are altered. Apache 2.0 permits modification with notice; this is that notice."
+    },
+    {
+      "component": "xterm.js 5.3.0",
+      "version": "",
+      "licence": "MIT",
+      "kind": "script",
+      "file": "xtermjs.txt",
+      "modified": ""
+    }
+  ]
+}

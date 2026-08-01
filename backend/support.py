@@ -339,6 +339,12 @@ def _manifest(collected: dict[str, str], note: str) -> str:
         "",
         "Everything here was chosen and previewed before it was written.",
         "",
+        "ShellMate Portable is owned by Foundry Networks and Services and is",
+        "provided as is, without warranty. This bundle contains diagnostic",
+        "information from one installation; it carries no ShellMate source or",
+        "third-party code, and no saved credentials. See the Legal and licences",
+        "page in the manual for the full statement and attributions.",
+        "",
     ]
     if note.strip():
         lines.append("what-happened.txt    Your description of the problem")

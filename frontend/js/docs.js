@@ -20,6 +20,10 @@
     { file: 'automation.md',        title: 'Broadcast and the API', icon: 'list_alt' },
     { file: 'settings.md',          title: 'Settings',             icon: 'settings' },
     { file: 'troubleshooting.md',   title: 'Troubleshooting',      icon: 'help' },
+    // Last, but it has to be here rather than only in the repository: the
+    // bundled manual is the only documentation available offline, and an
+    // attribution nobody can reach has not really been given.
+    { file: 'legal.md',             title: 'Legal and licences',   icon: 'gavel' },
   ];
 
   const SUPPORT_EMAIL = 'support@foundry-ns.com';

@@ -281,11 +281,28 @@ ShellMate uses the *Deep Space* design system — dark background, Space Grotesk
 - **No built-in authentication.** ShellMate is an interactive SSH client, so anyone who reaches the web UI can launch sessions to any host the server can route to. Treat it like an open shell:
   - Local development (`python run.py`) binds to `127.0.0.1` only — fine for a single user on the same machine.
   - The Docker / `docker-compose.yml` path binds to `0.0.0.0:8765` so the container is reachable on its network. **Do not expose it directly to the public internet.** Put it behind something that authenticates users — Cloudflare Access, Tailscale, an SSO-aware reverse proxy, etc.
-- **Passwords are never persisted and dropped from memory once the SSH session is open.** They're prompted on each new connection, used to complete the authentication handshake, then cleared — the long-lived session object holds an empty string in their place.
+- **Passwords are dropped from memory once the SSH session is open.** They complete the authentication handshake and are then cleared — the long-lived session object holds an empty string in their place.
+- **A password is only persisted if you ask for it.** Tick *Remember these credentials* and it goes to the encrypted vault; tick the plaintext option instead and it goes to `credentials-plaintext.json`, named for what it is so that `profiles.json` stays safe to share. **Settings → Credentials Vault** lists everything saved, says which store each one is in, and will move a plaintext one into the vault.
 - **API keys** live in `.env` only — never in code, never in saved profiles.
 - **Session buffers** are in-memory and cleared on disconnect, unless file logging is explicitly enabled.
 - **Saved profiles** record host, port, username, and connection type so you can one-click reconnect. They never contain the password — that is always re-prompted.
 
-## License
+## Licence
 
-MIT
+ShellMate is owned by **Foundry Networks and Services**, and is proprietary
+software rather than open source. Copyright © 2025–2026 Foundry Networks and
+Services. Provided **as is**, without warranty of any kind — and it is a tool
+that types commands into live network devices, so that is worth reading rather
+than skimming.
+
+Contact **support@foundry-ns.com**.
+
+The bundled manual's **Legal and licences** page carries the full statement,
+the warranty disclaimer, a note on what is sent to AI providers, and
+attribution for every third-party component in the executable — with each
+licence text reproduced in `frontend/docs/licences/`. Regenerate both after
+changing a dependency:
+
+```bash
+python tools/collect_licences.py
+```

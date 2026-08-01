@@ -1,8 +1,12 @@
 # Credentials
 
-Nothing sensitive is written in plain text. API keys and any device passwords
-you choose to remember are encrypted; saved connections hold only the
-non-secret details needed to reconnect.
+API keys and any device passwords you choose to remember are encrypted, and
+saved connections hold only the non-secret details needed to reconnect.
+
+There is one exception, and it is one you have to ask for: a password can be
+stored as readable text instead. **Settings → Credentials Vault** lists
+everything saved, marks which of the two stores each one is in, and will move
+a plaintext one into the vault.
 
 ## The vault
 
