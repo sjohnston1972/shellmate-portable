@@ -191,6 +191,29 @@ class SSHHandler(ConnectionHandler):
             # makes it unreachable with no way to fix it from the interface.
             disabled = _algorithm_overrides()
 
+            # Only go looking for keys when there is nothing better to try.
+            #
+            # paramiko offers public keys before it offers a password, and a
+            # good deal of network kit cannot survive the rejection: a Cisco
+            # SSH stack answers a failed publickey attempt by tearing the
+            # connection down —
+            #
+            #     Authentication (publickey) failed.
+            #     Disconnect (code 2): Protocol error: expected packet type 50, got 5
+            #
+            # so the password is never tried at all. The user sees
+            # "authentication failed", types the password again more carefully,
+            # and gets the same thing, because the password was never the
+            # problem. Merely *having* an id_ed25519 in ~/.ssh made the device
+            # unreachable.
+            #
+            # A password the user supplied is a statement of how they intend to
+            # authenticate. An explicit key path is honoured either way — this
+            # governs only the keys paramiko finds by itself.
+            discover_keys = bool(advanced("ssh.look_for_keys"))
+            if params.password and not params.private_key_path:
+                discover_keys = False
+
             self._client.connect(
                 hostname=params.hostname,
                 port=params.port,
@@ -198,7 +221,7 @@ class SSHHandler(ConnectionHandler):
                 sock=sock,
                 timeout=advanced("ssh.connect_timeout"),
                 allow_agent=False,
-                look_for_keys=bool(advanced("ssh.look_for_keys")),
+                look_for_keys=discover_keys,
                 **disabled,
                 **self._auth_kwargs(params.private_key_path, params.private_key_passphrase, params.password),
             )

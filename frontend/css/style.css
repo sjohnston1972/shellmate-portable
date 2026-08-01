@@ -1246,18 +1246,10 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   border-color: var(--error);
 }
 
-/* The failure belongs where the click happened. There is no terminal pane to
-   look at yet — the session was never created. */
-.welcome-profile-error {
-  display: block;
-  max-width: 110px;
-  margin: 4px auto 0;
-  color: var(--error);
-  font-size: 11px;
-  line-height: 1.3;
-  text-align: center;
-  word-break: break-word;
-}
+/* The failure itself goes to a notification — an SSH error is a sentence and
+   a tile is 110px wide, so printed here it wrapped to six lines and pushed
+   every other tile down the page. The border says which one failed; the
+   notification says why. */
 
 .welcome-profile-icon {
   font-size: 26px;

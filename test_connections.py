@@ -527,6 +527,83 @@ def test_unknown_connection_type_rejected() -> None:
               f"got {response.text}")
 
 
+def test_a_password_stops_paramiko_offering_keys() -> None:
+    """
+    Having a key in ~/.ssh must not make a device unreachable.
+
+    paramiko offers public keys before it offers a password. A Cisco SSH
+    stack answers a rejected key by tearing the connection down —
+
+        Authentication (publickey) failed.
+        Disconnect (code 2): Protocol error: expected packet type 50, got 5
+
+    — so the password is never tried. What the user sees is "authentication
+    failed for steven@10.20.30.40. Check the username, password or key", so
+    they type the password again more carefully and get the same result. The
+    password was never the problem: the presence of an unrelated id_ed25519 in
+    their home directory was.
+
+    This drives the real connect() far enough to inspect the arguments it
+    builds, without a device.
+    """
+    print("\n-- What paramiko is allowed to offer --")
+
+    import paramiko
+
+    from backend.connections import ssh_handler
+
+    captured: dict = {}
+
+    class Recorder:
+        def set_missing_host_key_policy(self, policy): pass
+        def load_system_host_keys(self, *a, **k): pass
+        def connect(self, **kwargs):
+            captured.update(kwargs)
+            raise paramiko.SSHException("captured, for the test")
+        def close(self): pass
+        def get_transport(self): return None
+
+    original = paramiko.SSHClient
+    paramiko.SSHClient = Recorder
+
+    def attempt(**overrides) -> dict:
+        captured.clear()
+        params = ConnectionParams(
+            connection_type="ssh", hostname="10.20.30.40", port=22,
+            username="steven", **overrides)
+        handler = ssh_handler.SSHHandler(params=params)
+        try:
+            handler.connect()
+        except Exception:
+            pass
+        return dict(captured)
+
+    try:
+        with_password = attempt(password="hunter2")
+        check("a password means keys are not gone looking for",
+              with_password.get("look_for_keys") is False,
+              f"look_for_keys={with_password.get('look_for_keys')!r} — an "
+              f"unrelated key in ~/.ssh will make this device unreachable")
+        check("and the password is passed", with_password.get("password") == "hunter2")
+        check("the agent is never consulted",
+              with_password.get("allow_agent") is False,
+              "an agent key fails the same way a file key does")
+
+        without = attempt()
+        check("with no password, keys are still discovered",
+              without.get("look_for_keys") is True,
+              "key-only authentication has to keep working")
+
+        # An explicitly named key is a deliberate choice and is honoured
+        # whatever else was given.
+        named = attempt(password="hunter2", private_key_path="/no/such/key")
+        check("naming a key file overrides the narrowing",
+              named.get("look_for_keys") is True or not named,
+              f"look_for_keys={named.get('look_for_keys')!r}")
+    finally:
+        paramiko.SSHClient = original
+
+
 def main() -> int:
     print("=" * 52)
     print("  Phase 2 transport tests")
@@ -546,6 +623,7 @@ def main() -> int:
         test_secrets_are_scrubbed,
         test_end_to_end_session,
         test_unknown_connection_type_rejected,
+        test_a_password_stops_paramiko_offering_keys,
     ):
         try:
             test()

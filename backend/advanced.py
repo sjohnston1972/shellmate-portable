@@ -253,8 +253,13 @@ SETTINGS: tuple[Setting, ...] = (
             choices=("auto-add", "warn", "reject")),
     Setting("ssh.look_for_keys", "Try keys in ~/.ssh", True, "bool",
             "Let paramiko offer keys it finds in the usual place.",
-            "Off, only a key you name explicitly is used — which makes an "
-            "authentication failure mean what it says."),
+            "Only consulted when you have given no password and named no key "
+            "file. A password is a statement of how you mean to "
+            "authenticate.||This is narrower than it sounds, and deliberately: "
+            "paramiko offers keys before passwords, and plenty of network kit "
+            "answers a rejected key by dropping the connection — so the "
+            "password never gets tried, and merely having a key in ~/.ssh "
+            "makes the device unreachable."),
     Setting("ssh.telnet_autologin_deadline", "Telnet auto-login window", 30, "int",
             "Stop answering login prompts after this long. Zero disables it.",
             "The guard exists so that a prompt-shaped line arriving an hour "

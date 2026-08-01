@@ -1161,40 +1161,13 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
         </section>
 
-        <!-- Lifted into Stockton's AI category by stockton.js (#64). Kept
-             as markup so prompts_editor.js, which finds its elements by
-             id, needs no changes. -->
-        <section class="settings-section" id="prompt-editor-block" hidden>
-          <h3 class="settings-section-title">The system prompts</h3>
-          <p class="settings-section-hint">What the assistant is told before it sees anything of yours. These are the largest single influence on how it answers, and they are yours to change — tell it to stop explaining things you already know, to always mention a change reference, or to answer in a house style.</p>
-          <p class="settings-section-hint">Stored as <code>prompts.json</code> in your data folder, so they can be edited by hand, kept in version control or carried to another machine. Delete the file to restore the shipped text.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="prompt-mode-select">Editing</label>
-            <select id="prompt-mode-select" class="setting-input">
-              <option value="tshoot">Troubleshoot — terse, fix it now</option>
-              <option value="learn">Learn — explains the why</option>
-            </select>
-            <span id="prompt-modified" class="setting-value"></span>
-          </div>
-
-          <div class="setting-row setting-row-stack">
-            <textarea id="prompt-body" rows="18" spellcheck="false"
-                      aria-label="System prompt"></textarea>
-            <p class="settings-section-hint" id="prompt-marker-hint"></p>
-          </div>
-
-          <div class="setting-row">
-            <button type="button" id="prompt-save" class="btn-secondary">
-              <span class="material-symbols-outlined">save</span>
-              Save prompt
-            </button>
-            <button type="button" id="prompt-reset" class="btn-tertiary">Reset this one</button>
-            <button type="button" id="prompt-reset-all" class="btn-tertiary">Reset both</button>
-          </div>
-          <p id="prompt-status" class="settings-section-hint"></p>
-
-        </section>
+        <!-- The system-prompt editor used to sit here. It moved into the
+             Stockton panel's markup (#64) because a .settings-section inside
+             this panel is indexed by settings_nav.js: it was given a nav
+             entry of its own, and `show()` stamped class="hidden" on it
+             whenever another category was selected. Stockton cleared the
+             hidden *attribute* and the class stayed, so the editor was in the
+             DOM, correctly built, and invisible. -->
 
       </div>
       <div class="panel-footer">
@@ -1340,6 +1313,38 @@ GigEth0/2     unassigned    YES unset  down     down
         <nav id="stockton-nav" class="settings-nav"></nav>
         <div class="panel-body" id="stockton-body"></div>
       </div>
+
+        <section class="settings-section" id="prompt-editor-block" hidden>
+          <h3 class="settings-section-title">The system prompts</h3>
+          <p class="settings-section-hint">What the assistant is told before it sees anything of yours. These are the largest single influence on how it answers, and they are yours to change — tell it to stop explaining things you already know, to always mention a change reference, or to answer in a house style.</p>
+          <p class="settings-section-hint">Stored as <code>prompts.json</code> in your data folder, so they can be edited by hand, kept in version control or carried to another machine. Delete the file to restore the shipped text.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="prompt-mode-select">Editing</label>
+            <select id="prompt-mode-select" class="setting-input">
+              <option value="tshoot">Troubleshoot — terse, fix it now</option>
+              <option value="learn">Learn — explains the why</option>
+            </select>
+            <span id="prompt-modified" class="setting-value"></span>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <textarea id="prompt-body" rows="18" spellcheck="false"
+                      aria-label="System prompt"></textarea>
+            <p class="settings-section-hint" id="prompt-marker-hint"></p>
+          </div>
+
+          <div class="setting-row">
+            <button type="button" id="prompt-save" class="btn-secondary">
+              <span class="material-symbols-outlined">save</span>
+              Save prompt
+            </button>
+            <button type="button" id="prompt-reset" class="btn-tertiary">Reset this one</button>
+            <button type="button" id="prompt-reset-all" class="btn-tertiary">Reset both</button>
+          </div>
+          <p id="prompt-status" class="settings-section-hint"></p>
+
+        </section>
 
       <div class="panel-footer settings-footer">
         <span id="stockton-count" class="settings-footer-note"></span>

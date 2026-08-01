@@ -169,6 +169,11 @@
       const editor = document.getElementById('prompt-editor-block');
       if (editor) {
         editor.hidden = false;
+        // Belt as well as braces. The attribute is what the markup carries;
+        // the class is what any section-hiding code reaches for, and clearing
+        // only one of them is how this block spent a while being present,
+        // correctly built and invisible.
+        editor.classList.remove('hidden');
         bodyEl.appendChild(editor);
       }
     }

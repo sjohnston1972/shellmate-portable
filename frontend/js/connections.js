@@ -427,26 +427,37 @@
     }
   }
 
+  /**
+   * Report a failed connection.
+   *
+   * The message goes to a notification rather than under the tile. A tile is
+   * 110px wide, and an SSH error is a sentence — printed there it wrapped to
+   * six lines, pushed every other tile down the page, and was still cut off.
+   * The tile keeps a red border and the full text in its tooltip, which is
+   * enough to say *which* one failed; the notification says what happened.
+   */
   function showTileError(card, message) {
+    const name = card
+      ? (card.querySelector('.welcome-profile-name') || {}).textContent || ''
+      : '';
+
+    if (window.shellmateAlerts && window.shellmateAlerts.notify) {
+      window.shellmateAlerts.notify({
+        severity: 'warning',
+        icon: 'error',
+        title: name ? `Could not connect to ${name}` : 'Could not connect',
+        body: message,
+      });
+    }
+
     if (!card) return;
     card.classList.add('tile-failed');
     card.title = `${message} Click again to check the details.`;
-    let note = card.parentElement &&
-               card.parentElement.querySelector('.welcome-profile-error');
-    if (!note) {
-      note = document.createElement('span');
-      note.className = 'welcome-profile-error';
-      (card.parentElement || card).appendChild(note);
-    }
-    note.textContent = message;
   }
 
   function clearTileError(card) {
     if (!card) return;
     card.classList.remove('tile-failed');
-    const note = card.parentElement &&
-                 card.parentElement.querySelector('.welcome-profile-error');
-    if (note) note.remove();
   }
 
   /** True when a live session and a profile point at the same device. */
