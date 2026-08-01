@@ -1772,6 +1772,14 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   margin-bottom: 14px;
 }
 
+/* The same box, saying something went right rather than wrong. Sharing the
+   element keeps the dialog from shifting as one replaces the other. */
+.form-error.form-note {
+  background: rgba(166,227,161,0.08);
+  border-color: rgba(166,227,161,0.4);
+  color: var(--success, #a6e3a1);
+}
+
 /* Modal action buttons */
 /* The form scrolls; the dialog itself does not, so the action bar can stay
    pinned. min-height:0 is required or a flex child refuses to shrink below

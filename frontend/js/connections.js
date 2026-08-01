@@ -602,16 +602,40 @@
     if (problem) { showError(problem); return; }
 
     try {
-      await fetch('/api/profiles', {
+      const r = await fetch('/api/profiles', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(profileFrom(payload)),
       });
+      const saved = r.ok ? await r.json() : null;
       await loadProfiles();
       renderWelcomeProfiles();
+
+      // The backend returns the existing profile rather than appending a
+      // second one. Saying nothing would look exactly like a button that did
+      // not work, so say which of the two happened.
+      showSaveNote(saved && saved.already_saved
+        ? 'Already saved — the existing connection was updated.'
+        : 'Connection saved.');
     } catch (e) {
       showError('Could not save profile.');
     }
+  }
+
+  /**
+   * A short confirmation in the dialog's message area.
+   *
+   * Reuses the error box rather than adding a second one — two boxes that
+   * appear in the same place at different times is a layout that shifts, and
+   * the distinction the user needs is the colour, not the position.
+   */
+  function showSaveNote(text) {
+    errorBox.textContent = text;
+    errorBox.classList.add('form-note');
+    errorBox.classList.remove('hidden');
+    setTimeout(() => {
+      if (errorBox.classList.contains('form-note')) clearError();
+    }, 4000);
   }
 
   // -------------------------------------------------------------------------
@@ -671,28 +695,17 @@
    */
   async function autoSaveProfile(payload, wantsRemember, credentials, storage) {
     try {
-      const r = await fetch('/api/profiles');
-      const existing = r.ok ? await r.json() : [];
-      const candidate = profileFrom(payload);
-
-      const matches = (p) =>
-        (p.connection_type || 'ssh') === candidate.connection_type &&
-        (candidate.connection_type === 'serial'
-          ? p.serial_port === candidate.serial_port
-          : p.hostname === candidate.hostname &&
-            (p.port || 22) === (candidate.port || 22) &&
-            p.username === candidate.username);
-
-      let profile = existing.find(matches);
-
-      if (!profile) {
-        const created = await fetch('/api/profiles', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify(candidate),
-        });
-        if (created.ok) profile = await created.json();
-      }
+      // No duplicate check here any more. save_profile() returns the existing
+      // profile rather than appending a second one, so posting unconditionally
+      // is safe — and there is now one rule rather than two, only one of which
+      // used to be enforced.
+      let profile = null;
+      const created = await fetch('/api/profiles', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(profileFrom(payload)),
+      });
+      if (created.ok) profile = await created.json();
 
       // A first-time connection has no profile id when it starts, so the
       // backend had nowhere to file the credentials. Now that the profile
@@ -717,6 +730,7 @@
   // -------------------------------------------------------------------------
 
   function showError(msg) {
+    errorBox.classList.remove('form-note');
     errorBox.textContent = msg;
     errorBox.classList.remove('hidden');
   }
@@ -724,6 +738,7 @@
   function clearError() {
     errorBox.textContent = '';
     errorBox.classList.add('hidden');
+    errorBox.classList.remove('form-note');
   }
 
   function setLoading(loading) {

@@ -183,6 +183,141 @@ def _forget_plaintext(profile_id: str) -> None:
         _write_plaintext(data)
 
 
+# ---------------------------------------------------------------------------
+# Identity — what makes two saved connections the same connection
+#
+# The frontend compared hostname, port and username exactly, which meant
+# `SWITCH01` and `switch01 ` were two devices, and a profile renamed to its
+# detected hostname no longer matched a fresh save of the same address. The
+# comparison belongs here, next to the write, for the same reason SECRET_FIELDS
+# does: every other caller then gets it for free.
+# ---------------------------------------------------------------------------
+
+#: The port a transport uses when the profile does not say. Compared after
+#: filling in, so a profile saved with an explicit 22 and one saved with the
+#: box left empty are recognised as the same device.
+DEFAULT_PORTS = {"ssh": 22, "telnet": 23}
+
+
+def identity(profile: dict) -> tuple:
+    """
+    A comparable identity for a saved connection.
+
+    Deliberately includes the username. Connecting to one switch as `admin`
+    and as `neteng` is two sets of credentials and frequently two levels of
+    access; collapsing them would silently discard one of the passwords. Two
+    tiles for one device is a smaller problem than a merge that loses a
+    credential.
+
+    The display name is deliberately *excluded*: `record_detected_hostname()`
+    renames a profile the moment the device identifies itself, and a name that
+    changes by itself cannot be part of what identity means.
+    """
+    kind = (profile.get("connection_type") or "ssh").strip().lower()
+
+    if kind == "serial":
+        # One cable, one port. The baud rate is part of it — the same port at
+        # 9600 and at 115200 is usually two different devices over time, and
+        # merging them would silently change the setting on one of them.
+        return (
+            kind,
+            (profile.get("serial_port") or "").strip().upper(),
+            int(profile.get("baudrate") or 9600),
+            "",
+        )
+
+    host = (profile.get("hostname") or "").strip().lower()
+    port = int(profile.get("port") or DEFAULT_PORTS.get(kind, 22))
+    user = (profile.get("username") or "").strip().lower()
+    return (kind, host, port, user)
+
+
+def find_matching(fields: dict, profiles: list[dict] | None = None) -> dict | None:
+    """Return an existing profile for the same connection, or None."""
+    wanted = identity(fields)
+    for profile in (profiles if profiles is not None else _load()):
+        if identity(profile) == wanted:
+            return profile
+    return None
+
+
+def _absorb(kept: dict, duplicate: dict, overwrite: bool = False) -> None:
+    """
+    Fill gaps in the surviving profile from the one being discarded.
+
+    A duplicate is rarely a straight copy — one of the two usually has the
+    detected hostname, or a name somebody typed, or a jump host. Dropping it
+    whole would lose that, so anything the survivor does not already have is
+    taken across. Nothing is overwritten unless ``overwrite`` is set, which
+    the deliberate-save path uses: pressing **Save** on a connection that is
+    already saved is an edit, and an edit that quietly does nothing is worse
+    than a duplicate.
+    """
+    for key, value in duplicate.items():
+        if key in ("id", "has_saved_credentials", "credential_storage"):
+            continue
+        if value in (None, "", [], {}):
+            continue
+        if overwrite or kept.get(key) in (None, "", [], {}):
+            kept[key] = value
+
+
+def dedupe_existing() -> int:
+    """
+    Merge duplicates already sitting in profiles.json.
+
+    Refusing new ones does not remove the ones anybody using ShellMate already
+    has. This runs when the list is read and writes only when it actually
+    removes something.
+
+    Which entry survives matters more than it looks: credentials are keyed by
+    profile id, so keeping the wrong one loses the saved password and leaves
+    the real one orphaned in the vault where no interface can ever reach it.
+    The entry holding credentials therefore wins, and any credentials attached
+    to the entries removed are forgotten rather than left behind.
+
+    Returns the number of profiles removed.
+    """
+    profiles = _load()
+    if len(profiles) < 2:
+        return 0
+
+    groups: dict[tuple, list[dict]] = {}
+    for profile in profiles:
+        groups.setdefault(identity(profile), []).append(profile)
+
+    if all(len(group) == 1 for group in groups.values()):
+        return 0
+
+    kept_ids: set[str] = set()
+    dropped: list[str] = []
+
+    for group in groups.values():
+        if len(group) == 1:
+            kept_ids.add(group[0].get("id", ""))
+            continue
+
+        with_credentials = [p for p in group if has_credentials(p.get("id", ""))]
+        keeper = (with_credentials or group)[0]
+
+        for other in group:
+            if other is keeper:
+                continue
+            _absorb(keeper, other)
+            dropped.append(other.get("id", ""))
+
+        kept_ids.add(keeper.get("id", ""))
+
+    survivors = [p for p in profiles if p.get("id", "") in kept_ids]
+    _save(survivors)
+
+    for profile_id in dropped:
+        if profile_id:
+            forget_credentials(profile_id)
+
+    return len(dropped)
+
+
 def get_profiles() -> list[dict]:
     """
     Return saved profiles, each flagged with whether credentials are stored.
@@ -190,6 +325,8 @@ def get_profiles() -> list[dict]:
     The flag is a boolean and never the credential itself — the UI only needs
     to know whether to ask for a password.
     """
+    dedupe_existing()
+
     profiles = _load()
     for profile in profiles:
         profile_id = profile.get("id", "")
@@ -223,6 +360,21 @@ def save_profile(fields: dict) -> dict:
     cleaned = {k: v for k, v in fields.items() if k not in SECRET_FIELDS}
 
     profiles = _load()
+
+    # Refuse to create a second entry for a device already saved. The browser
+    # checked for this and the Save button did not, which is the wrong way
+    # round — the rule belongs where the write happens, so a script, a second
+    # interface or a future caller cannot get it wrong.
+    existing = find_matching(cleaned, profiles)
+    if existing is not None:
+        # A deliberate save is still an edit: take across anything new, such as
+        # a name the user has just typed or a jump host they have added.
+        before = dict(existing)
+        _absorb(existing, cleaned, overwrite=True)
+        if existing != before:
+            _save(profiles)
+        return {**existing, "already_saved": True}
+
     profile = {
         "id": str(uuid.uuid4()),
         **cleaned,
