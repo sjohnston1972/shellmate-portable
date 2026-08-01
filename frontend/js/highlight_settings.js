@@ -92,6 +92,26 @@
     caseLabel.appendChild(caseBox);
     caseLabel.appendChild(document.createTextNode('Aa'));
 
+    // Opens the builder on this rule and writes the answer back. The inline
+    // preview stays: it answers "does this match" at a glance, and the
+    // builder answers "why not" — two different questions.
+    const test = document.createElement('button');
+    test.type = 'button';
+    test.className = 'highlight-test';
+    test.title = 'Build and test this pattern';
+    test.innerHTML = '<span class="material-symbols-outlined">science</span>';
+    test.addEventListener('click', () => {
+      if (typeof window.openRegexBuilder !== 'function') return;
+      window.openRegexBuilder(
+        { pattern: pattern.value, colour: colour.value, ignore_case: caseBox.checked },
+        (answer) => {
+          pattern.value = answer.pattern;
+          colour.value = answer.colour;
+          caseBox.checked = answer.ignore_case;
+          update();
+        });
+    });
+
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'highlight-remove';
@@ -110,6 +130,7 @@
     row.appendChild(pattern);
     row.appendChild(colour);
     row.appendChild(caseLabel);
+    row.appendChild(test);
     row.appendChild(remove);
     row.appendChild(preview);
     listEl.appendChild(row);

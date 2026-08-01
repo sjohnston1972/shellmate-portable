@@ -6553,3 +6553,244 @@ body.sidebar-labelled #sidebar-bottom {
 body.sidebar-labelled .sidebar-label {
   display: inline;
 }
+
+/* ---------------------------------------------------------------------------
+   Pattern builder (#127)
+
+   Wears the existing chrome: .settings-like, .settings-section and the shared
+   .panel-header, so it reads as part of the application rather than as a tool
+   imported from somewhere else.
+
+   z-index 300 is the load-bearing number. This is opened from *inside* a
+   panel: .panel-overlay is 200 and #modal-overlay is 100, so anything styled
+   like the connection dialog renders underneath the very panel that opened it
+   — which this interface has already had happen once.
+--------------------------------------------------------------------------- */
+.regex-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.regex-box {
+  width: min(860px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--overlay-solid);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.regex-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 24px 8px;
+}
+
+.regex-body .settings-section {
+  padding-bottom: 8px;
+}
+
+.regex-pattern,
+.regex-sample {
+  width: 100%;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 13px;
+  padding: 8px 10px;
+  color: var(--on-surface);
+  background: var(--surface-2);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+}
+
+.regex-pattern:focus,
+.regex-sample:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.regex-sample {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.regex-options {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--on-surface-muted);
+}
+
+.regex-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.regex-status {
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--on-surface-muted);
+}
+
+/* The four outcomes are deliberately distinguishable. "Invalid" and "valid
+   but matches nothing" look identical from the terminal, and telling them
+   apart is most of why this exists. */
+.regex-status-error   { color: var(--error); }
+.regex-status-nomatch { color: var(--warn); }
+.regex-status-ok      { color: var(--ok); }
+.regex-status-working { opacity: 0.7; }
+
+.regex-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.regex-chip {
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 12px;
+  padding: 4px 9px;
+  color: var(--on-surface);
+  background: var(--surface-2);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.regex-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.regex-recipes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 6px;
+}
+
+.regex-recipe {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.regex-recipe:hover {
+  border-color: var(--primary);
+}
+
+.regex-recipe-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--on-surface);
+}
+
+.regex-recipe-hint {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--on-surface-muted);
+}
+
+.regex-note {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--on-surface-muted);
+}
+
+.regex-result {
+  margin-top: 10px;
+  padding: 10px;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--on-surface);
+  /* --surface, not a hardcoded terminal black: this box is a preview inside a
+     panel, and it has to be readable in the light theme too. A fallback to a
+     token that was never defined is the bug test_contrast.py exists to catch —
+     the fallback is then always what renders, so the theme is ignored. */
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  max-height: 260px;
+  overflow: auto;
+}
+
+.regex-groups {
+  margin-top: 10px;
+}
+
+.regex-groups-heading {
+  font-size: 12px;
+  color: var(--on-surface-muted);
+  margin-bottom: 6px;
+}
+
+.regex-group {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 12.5px;
+  padding: 3px 0;
+}
+
+.regex-group-number {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.regex-group-value {
+  color: var(--on-surface);
+  word-break: break-all;
+}
+
+.regex-group-empty {
+  color: var(--on-surface-muted);
+  font-style: italic;
+}
+
+.regex-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--outline);
+}
+
+.highlight-test {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height);
+  height: var(--control-height);
+  color: var(--on-surface-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.highlight-test:hover {
+  color: var(--primary);
+  background: var(--surface-high);
+}
