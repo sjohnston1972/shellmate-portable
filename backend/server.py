@@ -119,6 +119,11 @@ def register_server(instance, serve_again=None) -> None:
         _serve_again = serve_again
 
 
+def is_serving() -> bool:
+    """Whether this process has a web server it can be asked to stand down."""
+    return _live_server is not None
+
+
 def stop_serving(host: str, port: int, timeout: float = 10.0) -> bool:
     """
     Stop listening, so a replacement process can take the port.

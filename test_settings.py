@@ -128,6 +128,107 @@ def test_unreadable_file_falls_back() -> None:
           settings["terminal"]["scrollback_lines"] == 5000)
 
 
+def test_a_relative_path_means_the_data_folder() -> None:
+    """
+    Where the file picker opens when a field holds `logs` or `configs`.
+
+    Those names are stored relative on purpose — it is what lets a ShellMate
+    folder be copied to another machine and still work — and ``settings_store``
+    resolves them against the data directory. The browse endpoint resolved them
+    against the *process working directory*, which for a double-clicked
+    executable is wherever Explorer happened to leave us. So "browse from
+    configs" opened somewhere unrelated, then fell back to the home directory,
+    discarding the only thing the caller actually knew.
+    """
+    print("\n-- What a relative path in a settings field means --")
+    from backend.app import _nearest_existing, _resolve_local
+
+    data = paths.data_dir()
+
+    check("a relative name resolves against the data folder",
+          _resolve_local("configs") == data / "configs",
+          f"got {_resolve_local('configs')}")
+    check("and matches what the application itself uses",
+          _resolve_local("logs") == settings_store.log_directory(),
+          f"{_resolve_local('logs')} != {settings_store.log_directory()}")
+    check("an absolute path is used exactly as given",
+          _resolve_local("D:/captures") == Path("D:/captures"))
+
+    unc = _resolve_local("//nas/configs")
+    check("including a path to a share", unc.is_absolute(), str(unc))
+
+    missing = data / "definitely-not-here" / "nor-here"
+    check("a folder that does not exist yet falls back to the nearest that does",
+          _nearest_existing(missing) == data,
+          f"got {_nearest_existing(missing)}")
+
+
+def test_browsing_names_the_folder_that_is_missing() -> None:
+    """
+    Browsing from `configs` before anything has been captured.
+
+    Falling back silently is what happened before, and it throws away the one
+    piece of information the caller had: which folder they were after.
+    """
+    print("\n-- Browsing somewhere that does not exist yet --")
+    from fastapi.testclient import TestClient
+
+    from backend.app import app
+
+    client = TestClient(app)
+    target = "a-folder-that-is-not-there"
+
+    body = client.get(f"/api/local/browse?path={target}").json()
+    check("it lists the folder above rather than the home directory",
+          body["path"] == str(paths.data_dir().resolve()), body["path"])
+    check("and names the part that is missing",
+          body.get("missing", "").endswith(target), repr(body.get("missing")))
+
+    (paths.data_dir() / "logs").mkdir(parents=True, exist_ok=True)
+    body = client.get("/api/local/browse?path=logs").json()
+    check("a folder that does exist reports nothing missing",
+          not body.get("missing"), repr(body.get("missing")))
+    check("and is what gets listed",
+          body["path"] == str((paths.data_dir() / "logs").resolve()), body["path"])
+
+
+def test_creating_a_missing_folder() -> None:
+    """
+    The offer attached to that message.
+
+    One level, never a tree: parents=True would turn a mistyped path into a
+    row of empty folders somebody then has to find and remove.
+    """
+    print("\n-- Creating it --")
+    from fastapi.testclient import TestClient
+
+    from backend.app import app
+
+    client = TestClient(app)
+    made = paths.data_dir() / "created-by-a-test"
+    shutil.rmtree(made, ignore_errors=True)
+
+    try:
+        first = client.post("/api/local/mkdir", json={"path": "created-by-a-test"})
+        check("it is created",
+              first.status_code == 200 and first.json()["created"] is True,
+              first.text)
+        check("where the application would look for it", made.is_dir())
+
+        again = client.post("/api/local/mkdir", json={"path": "created-by-a-test"})
+        check("asking twice is not an error",
+              again.status_code == 200 and again.json()["created"] is False,
+              again.text)
+
+        deep = client.post("/api/local/mkdir", json={"path": "no-such/deeper/still"})
+        check("a whole missing tree is refused rather than built",
+              deep.status_code == 400, deep.text)
+        check("and nothing is left behind",
+              not (paths.data_dir() / "no-such").exists())
+    finally:
+        shutil.rmtree(made, ignore_errors=True)
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Settings")
@@ -139,6 +240,9 @@ def main() -> int:
         test_an_explicit_choice_wins,
         test_saving_preserves_everything_else,
         test_unreadable_file_falls_back,
+        test_a_relative_path_means_the_data_folder,
+        test_browsing_names_the_folder_that_is_missing,
+        test_creating_a_missing_folder,
     ):
         try:
             test()

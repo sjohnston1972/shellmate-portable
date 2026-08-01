@@ -748,11 +748,16 @@ def restart(desktop=None) -> bool:
     # take. Both halves are needed: a replacement that starts while this copy
     # is still listening scans past 8765 and comes up on 8766, and the window
     # the user is looking at is pointed at 8765.
-    if held_port:
+    #
+    # Skipped when this process has no server of its own to stand down — under
+    # a test, or embedded — where there is nothing holding the port and the
+    # replacement can simply take it.
+    if held_port and server.is_serving():
         if not server.stop_serving("127.0.0.1", held_port):
             return keep_running(
                 f"port {held_port} was not released, so a replacement would "
                 f"come up on a different address")
+    if held_port:
         command = command + ["--restart-port", str(held_port)]
 
     # Strip PyInstaller's bootloader handshake out of the environment.

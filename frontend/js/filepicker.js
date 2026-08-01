@@ -179,6 +179,7 @@
   function render(data) {
     currentPath = data.path;
     pathEl.textContent = data.path;
+    offerToCreate(data.missing);
     upBtn.dataset.parent = data.parent || '';
     upBtn.disabled = !data.parent;
 
@@ -239,6 +240,50 @@
 
       listEl.appendChild(row);
     });
+  }
+
+  /**
+   * "That folder does not exist yet — create it?"
+   *
+   * Browsing from `configs` before anything has been captured used to land in
+   * the data folder with no hint that the folder being looked for was one
+   * level down and simply not made yet. The offer is a button rather than a
+   * silent mkdir: a mistyped path should not quietly create a folder.
+   */
+  function offerToCreate(missing) {
+    const existing = overlay.querySelector('#filepicker-missing');
+    if (existing) existing.remove();
+    if (!missing) return;
+
+    const bar = document.createElement('div');
+    bar.id = 'filepicker-missing';
+
+    const text = document.createElement('span');
+    text.textContent = `${missing} does not exist yet.`;
+
+    const make = document.createElement('button');
+    make.type = 'button';
+    make.className = 'btn-secondary';
+    make.textContent = 'Create it';
+    make.addEventListener('click', async () => {
+      make.disabled = true;
+      try {
+        const res = await fetch('/api/local/mkdir', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ path: missing }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Could not create it.');
+        load(data.path);
+      } catch (e) {
+        text.textContent = e.message;
+        make.disabled = false;
+      }
+    });
+
+    bar.append(text, make);
+    listEl.parentElement.insertBefore(bar, listEl);
   }
 
   window.shellmateFilePicker = { browseFor };

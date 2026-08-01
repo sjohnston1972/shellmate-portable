@@ -1043,9 +1043,17 @@ GigEth0/2     unassigned    YES unset  down     down
             </label>
           </div>
           <p class="settings-section-hint">Masks credentials in written logs — devices echo, and a session log is meant to be handed to someone else. The terminal itself always shows the truth.</p>
-          <div class="setting-row">
+          <div class="setting-row setting-row-stack">
             <label class="setting-label" for="setting-log-dir">Log Directory</label>
-            <input type="text" id="setting-log-dir" class="setting-input" placeholder="logs" />
+            <div class="setting-input-group setting-input-group-full">
+              <input type="text" id="setting-log-dir" class="setting-input setting-input-full" placeholder="logs" />
+              <button type="button" class="btn-secondary btn-browse" data-target="setting-log-dir" data-pick="folder">
+                <span class="material-symbols-outlined">folder_open</span>
+                Browse
+              </button>
+            </div>
+            <p class="settings-section-hint">A relative name goes in your data folder; an absolute path is used as given, so a network share works.</p>
+            <p class="settings-section-hint resolved-path" id="log-dir-resolved"></p>
           </div>
         </section>
 

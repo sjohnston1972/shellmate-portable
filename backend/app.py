@@ -626,6 +626,31 @@ async def serial_ports() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_local(path: str) -> Path:
+    """
+    Turn a path from the interface into the path the application would use.
+
+    Relative names are the point of this. `logs` and `configs` are stored
+    relative so a ShellMate folder can be copied to another machine and still
+    work, and `settings_store` resolves them against `data_dir()`. Python
+    resolves them against the *working directory*, which for a double-clicked
+    executable is wherever Explorer happened to leave us — so browsing from
+    `configs` opened somewhere unrelated, or nowhere at all.
+
+    Absolute paths, including UNC paths to a share, are used exactly as given.
+    """
+    candidate = Path(path).expanduser()
+    return candidate if candidate.is_absolute() else paths.data_dir() / candidate
+
+
+
+def _nearest_existing(path: Path) -> Path:
+    """The path itself, or the closest folder above it that exists."""
+    while not path.exists() and path.parent != path:
+        path = path.parent
+    return path if path.exists() else Path.home()
+
+
 class PickFileRequest(BaseModel):
     """Body for POST /api/pick-file."""
 
@@ -651,16 +676,76 @@ async def pick_file(request: PickFileRequest) -> dict:
     if not desktop.has_native_window():
         return {"available": False, "path": ""}
 
+    # Resolved the same way the in-app picker resolves it, or "configs" would
+    # open two different places depending on which picker the machine can show.
+    start = str(_nearest_existing(_resolve_local(request.directory)))         if request.directory else ""
+
     if request.folder:
         chosen = await asyncio.to_thread(
-            desktop.pick_directory, request.title, request.directory,
+            desktop.pick_directory, request.title, start,
         )
         return {"available": True, "path": chosen or "", "cancelled": not chosen}
 
     path = await asyncio.to_thread(
-        desktop.pick_file, request.title, request.directory, tuple(request.file_types),
+        desktop.pick_file, request.title, start, tuple(request.file_types),
     )
     return {"available": True, "path": path or "", "cancelled": not path}
+
+
+@app.get("/api/local/resolve")
+async def local_resolve(path: str = "") -> dict:
+    """
+    Say where a path in a settings field actually lands.
+
+    "logs" in a text box tells nobody where their logs are. It resolves
+    against the data folder, which itself moves depending on whether the
+    portable location beside the executable turned out to be writable — so the
+    answer is not something a user can work out by reading the box.
+    """
+    if not path:
+        return {"path": "", "resolved": "", "exists": False, "absolute": False}
+
+    resolved = _resolve_local(path)
+    return {
+        "path": path,
+        "resolved": str(resolved),
+        "exists": resolved.exists(),
+        "absolute": Path(path).expanduser().is_absolute(),
+    }
+
+
+class CreateFolderRequest(BaseModel):
+    """Body for POST /api/local/mkdir."""
+    path: str
+
+
+@app.post("/api/local/mkdir")
+async def local_mkdir(request: CreateFolderRequest) -> dict:
+    """
+    Create a folder the user has just been told does not exist.
+
+    Only ever reached from the file picker, after it has said which folder is
+    missing and been told to go ahead — so this creates one level and no more.
+    `parents=True` would turn a mistyped path into a tree of empty folders
+    somebody then has to find and remove.
+    """
+    target = _resolve_local(request.path)
+
+    def _create() -> dict:
+        if target.exists():
+            return {"path": str(target), "created": False}
+        if not target.parent.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"{target.parent} does not exist either. "
+                       f"Browse to a folder that does and create it there.")
+        try:
+            target.mkdir()
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"path": str(target), "created": True}
+
+    return await asyncio.to_thread(_create)
 
 
 @app.get("/api/local/browse")
@@ -674,9 +759,20 @@ async def local_browse(path: str = "", hidden: int = 0) -> dict:
     """
     def _listing() -> dict:
         # Default somewhere useful: this is reached for from the SSH key field.
-        base = Path(path).expanduser() if path else (Path.home() / ".ssh")
+        base = _resolve_local(path) if path else (Path.home() / ".ssh")
+
+        # A path that does not exist yet is answered from the nearest folder
+        # above it that does, with the missing part named. Falling back to the
+        # home directory instead — which is what happened before — loses the
+        # only piece of information the caller had.
+        missing = ""
         if not base.exists():
-            base = Path.home()
+            missing = str(base)
+            while not base.exists() and base.parent != base:
+                base = base.parent
+            if not base.exists():
+                base = Path.home()
+
         base = base.resolve()
 
         if base.is_file():
@@ -703,7 +799,8 @@ async def local_browse(path: str = "", hidden: int = 0) -> dict:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         parent = str(base.parent) if base.parent != base else ""
-        return {"path": str(base), "parent": parent, "entries": entries}
+        return {"path": str(base), "parent": parent, "entries": entries,
+                "missing": missing}
 
     return await asyncio.to_thread(_listing)
 

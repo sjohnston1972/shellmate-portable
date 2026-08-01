@@ -205,6 +205,12 @@
     document.getElementById('settings-save')
       .addEventListener('click', saveSettings);
 
+    // Typing a path, or picking one with Browse, updates the line underneath
+    // that says where it lands. Browse fires 'input' deliberately (see
+    // filepicker.js setValue) so one listener covers both.
+    const logDir = document.getElementById('setting-log-dir');
+    if (logDir) logDir.addEventListener('input', describeLogDirectory);
+
     // Wire up color pickers and live preview
     _initColorPickers();
 
@@ -346,6 +352,7 @@
     _val('setting-config-age',   l.config_max_age_days    ?? 365);
     _val('setting-config-size',  l.config_max_total_mb    ?? 200);
     describeArchive();
+    describeLogDirectory();
 
     const al = s.alerts || {};
     _checked('setting-alert-flash',  al.flash_tab     !== false);
@@ -562,6 +569,31 @@
    * it resolves against the data folder, which itself moves depending on
    * whether the portable location was writable.
    */
+  /**
+   * Show where the log directory setting actually points.
+   *
+   * Same reason as describeArchive(): a relative name resolves against the
+   * data folder, and the data folder moves depending on whether the location
+   * beside the executable was writable. Neither is visible from the text box.
+   */
+  async function describeLogDirectory() {
+    const el    = document.getElementById('log-dir-resolved');
+    const field = document.getElementById('setting-log-dir');
+    if (!el || !field) return;
+
+    const value = (field.value || '').trim() || 'logs';
+    try {
+      const res = await fetch(`/api/local/resolve?path=${encodeURIComponent(value)}`);
+      if (!res.ok) return;
+      const info = await res.json();
+      el.textContent = info.exists
+        ? info.resolved
+        : `${info.resolved} — created when the first session is logged`;
+    } catch (e) {
+      /* describing the folder is a nicety, not a reason to fail */
+    }
+  }
+
   async function describeArchive() {
     const el = document.getElementById('config-archive-status');
     if (!el) return;
