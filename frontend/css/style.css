@@ -4966,14 +4966,61 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 
 #broadcast-library-search:focus { outline: none; border-color: var(--primary-container); }
 
+/* The library takes the room, and the composer sits under it.
+   It was capped at 190px — about five rows — while the library grew to 137
+   entries generated from the platform alias table, and the panel below the
+   Send button was empty. A fixed height was survivable at 18 entries and is
+   not at 137, and it will keep growing as platforms are added.
+   The body is the flex container; min-height:0 on it is what lets a flex
+   child shrink below its content, without which the overflow never engages
+   and the panel grows past the window instead. Same trap #connection-form
+   documents. */
+#broadcast-panel .panel-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Everything that is not a scrolling region keeps its natural height. */
+#broadcast-panel .panel-body > *:not(#broadcast-library):not(#broadcast-results) {
+  flex: 0 0 auto;
+}
+
 #broadcast-library {
-  max-height: 190px;
+  flex: 1 1 auto;
+  /* Never so squeezed that it stops being a list. Below this it scrolls. */
+  min-height: 140px;
   overflow-y: auto;
   margin: 0 -8px 14px;
   padding: 0 8px 2px;
   /* A rule under the list, so a library that scrolls does not look like it
      simply ends where the visible area does. */
   border-bottom: 1px solid var(--outline);
+}
+
+/* Results arrive after sending and are the thing you are then reading, so
+   they are allowed to take space back off the library rather than being
+   pinned to whatever is left. */
+#broadcast-results {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Until there is something to read, results claim nothing and the library
+   has the lot. `flex: 1` on an empty box would take half the free space to
+   show nothing at all — broadcast.js clears with innerHTML = '', so :empty
+   is exactly true here. */
+#broadcast-results:empty {
+  flex: 0 0 auto;
+}
+
+/* A fleet is a long list. Bounded so the target picker cannot push Send off
+   the bottom, which is the one control that must always be reachable. */
+#broadcast-targets {
+  max-height: 22vh;
+  overflow-y: auto;
 }
 
 .snippet-row {
