@@ -9,6 +9,8 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from backend.advanced import get as advanced
+
 from backend.config import XAI_API_KEY, XAI_MODEL
 from backend.settings_store import get_effective
 from backend.ai.prompts import SYSTEM_PROMPT
@@ -44,14 +46,15 @@ async def stream_response(
     payload = {
         "model":    model or XAI_MODEL,
         "stream":   True,
-        "max_tokens": 2048,
+        "max_tokens": advanced("ai.max_tokens"),
+        "temperature": advanced("ai.temperature"),
         "messages": [
             {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
             {"role": "user",   "content": full_user_message},
         ],
     }
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=advanced("ai.request_timeout")) as client:
         async with client.stream(
             "POST", XAI_API_URL, headers=headers, json=payload
         ) as resp:

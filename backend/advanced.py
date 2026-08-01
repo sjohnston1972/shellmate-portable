@@ -310,8 +310,10 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("history.prompt_pattern", "Prompt pattern override", "", "text",
             "A regular expression replacing the built-in prompt detector.",
             "The deepest setting here. One pattern drives the whole transcript "
-            "layer — which text is a command, and where its output ends.||An "
-            "invalid expression falls back to the built-in with a log line, "
+            "layer — which text is a command, and where its output ends.||It "
+            "must provide `(?P<prompt>...)` and `(?P<sigil>...)` groups and "
+            "consume any trailing space, or it is ignored. An invalid or "
+            "incomplete expression falls back to the built-in with a log line, "
             "never an unusable session. Blank restores it.",
             restart=True),
 

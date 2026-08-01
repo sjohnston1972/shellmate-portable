@@ -28,6 +28,10 @@
 (function () {
   'use strict';
 
+  /** Shorthand for a Stockton value. */
+  const A = (key, fallback) =>
+    (window.shellmateAdvanced ? window.shellmateAdvanced(key, fallback) : fallback);
+
   let overlay, input, targets, results, waitInput, libraryEl, searchEl;
   let library = [];
   /** Session ids the user has ticked. */
@@ -39,6 +43,8 @@
     targets   = document.getElementById('broadcast-targets');
     results   = document.getElementById('broadcast-results');
     waitInput = document.getElementById('broadcast-wait');
+    // The panel opens at the configured default rather than a literal.
+    if (waitInput) waitInput.value = A('broadcast.default_wait', 500);
     libraryEl = document.getElementById('broadcast-library');
     searchEl  = document.getElementById('broadcast-library-search');
     if (!overlay) return;

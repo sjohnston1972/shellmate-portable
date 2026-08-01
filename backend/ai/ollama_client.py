@@ -8,6 +8,8 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from backend.advanced import get as advanced
+
 from backend.config import OLLAMA_HOST, OLLAMA_MODEL
 from backend.settings_store import get_effective
 from backend.ai.prompts import SYSTEM_PROMPT
@@ -41,7 +43,7 @@ async def stream_response(
         ],
     }
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=advanced("ai.request_timeout")) as client:
         async with client.stream("POST", url, json=payload) as resp:
             if resp.status_code != 200:
                 body = await resp.aread()

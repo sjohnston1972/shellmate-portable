@@ -319,6 +319,43 @@ def test_algorithms_reach_paramiko() -> None:
           ssh._algorithm_overrides() == {})
 
 
+def test_every_setting_is_actually_read() -> None:
+    """
+    A setting nothing reads is worse than no setting at all.
+
+    The rest of this file checks the registry is coherent — defaults inside
+    their ranges, categories with headings, values clamped. None of that
+    notices a setting that is declared, stored, reported as modified, reset by
+    the reset button, and read by nothing.
+
+    That is exactly what happened: 35 of 57 were inert. The failure is silent,
+    because the value really is saved and there is nothing to see.
+
+    Crude on purpose. It looks for the key as a string anywhere outside
+    advanced.py, which cannot prove the value is used *well* — only that
+    something asked for it.
+    """
+    print(chr(10) + "-- Every setting reaches the code --")
+
+    root = Path(__file__).parent
+    sources = []
+    for pattern in ("backend/**/*.py", "frontend/js/*.js", "run.py"):
+        sources.extend(root.glob(pattern))
+
+    blob = ""
+    for source in sources:
+        if source.name == "advanced.py":
+            continue
+        try:
+            blob += source.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+    unread = [s.key for s in advanced.SETTINGS if s.key not in blob]
+    check("nothing is declared and then ignored", not unread,
+          f"{len(unread)} setting(s) nothing reads: {', '.join(sorted(unread))}")
+
+
 def test_what_is_deliberately_absent() -> None:
     """The exclusions are part of the deliverable, not an omission."""
     print("\n-- Deliberately not here --")
@@ -369,6 +406,7 @@ def main() -> int:
         test_the_settings_reach_the_code,
         test_algorithm_settings,
         test_algorithms_reach_paramiko,
+        test_every_setting_is_actually_read,
         test_what_is_deliberately_absent,
         test_describe_is_renderable,
     ):

@@ -236,8 +236,11 @@ def diff_snapshots(old: dict, new: dict) -> dict:
     old_lines = (old.get("content") or "").splitlines()
     new_lines = (new.get("content") or "").splitlines()
 
+    from backend.advanced import get as advanced
+
     diff = list(difflib.unified_diff(
         old_lines, new_lines,
+        n=int(advanced("capture.diff_context")),
         fromfile=f"{old.get('hostname', '')} @ {_when(old.get('captured_at'))}",
         tofile=f"{new.get('hostname', '')} @ {_when(new.get('captured_at'))}",
         lineterm="",

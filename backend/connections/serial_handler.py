@@ -24,6 +24,8 @@ from serial.tools import list_ports
 
 from backend.connections.base import ConnectionError_, ConnectionHandler
 
+from backend.advanced import get as advanced
+
 logger = logging.getLogger(__name__)
 
 # Blocking read window. Matches the SSH handler so the read loop behaves
@@ -109,7 +111,10 @@ class SerialHandler(ConnectionHandler):
         # dead one. A carriage return draws out the prompt and confirms
         # something is actually on the other end of the cable.
         try:
-            self._serial.write(b"\r\n")
+            # Most devices need the nudge to print anything at all;
+            # a few react badly, so it is switchable.
+            if advanced("ssh.serial_wake_on_connect"):
+                self._serial.write(b"\r\n")
         except serial.SerialException:
             pass
 

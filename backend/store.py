@@ -37,6 +37,24 @@ SCHEMA_VERSION = 1
 MAX_OUTPUT_CHARS = 256 * 1024
 
 
+def _recording_enabled() -> bool:
+    """Whether to record at all. Off means no search, replay or drift check."""
+    try:
+        from backend.advanced import get as advanced
+        return bool(advanced("history.record"))
+    except Exception:
+        return True
+
+
+def _retention_days() -> int:
+    """Zero means keep forever, which is the default."""
+    try:
+        from backend.advanced import get as advanced
+        return int(advanced("history.retention_days"))
+    except Exception:
+        return 0
+
+
 def _max_output_chars() -> int:
     """The cap, honouring the Stockton override. A full `show tech` exceeds it."""
     try:
@@ -197,7 +215,9 @@ class SessionStore:
     # ------------------------------------------------------------------
 
     def start_session(self, session_id: str, metadata: dict) -> None:
-        """Record the start of a session."""
+        """Record the start of a session, unless recording is switched off."""
+        if not _recording_enabled():
+            return
         with self._lock:
             connection = self.connect()
             connection.execute(

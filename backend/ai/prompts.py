@@ -179,7 +179,9 @@ def build_context_prompt(
     # Command history
     if command_history:
         lines.append("--- Commands run this session ---")
-        for cmd in command_history[-30:]:  # last 30 commands
+        from backend.advanced import get as advanced
+
+        for cmd in command_history[-int(advanced("ai.context_commands")):]:
             lines.append(f"  {cmd}")
         lines.append("")
 

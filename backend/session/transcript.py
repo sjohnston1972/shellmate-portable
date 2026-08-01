@@ -28,6 +28,7 @@ configuration lines to the wrong command, which is far worse when the result
 is being used as evidence of what changed.
 """
 
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -71,6 +72,66 @@ _NOT_A_PROMPT = re.compile(
 )
 
 
+logger = logging.getLogger(__name__)
+
+
+def _active_prompt_re():
+    """
+    The prompt pattern in force, honouring the Stockton override.
+
+    One pattern drives the whole transcript layer — which text is a command,
+    and where its output ends. An invalid expression falls back to the built-in
+    with a log line rather than leaving every session unparseable, which is why
+    this is compiled here rather than at import.
+    """
+    global _override_source, _override_re
+    try:
+        from backend.advanced import get as advanced
+        source = str(advanced("history.prompt_pattern") or "")
+    except Exception:
+        return PROMPT_RE
+
+    if not source:
+        return PROMPT_RE
+    if source != _override_source:
+        _override_source = source
+        _override_re = _compile_override(source)
+    return _override_re or PROMPT_RE
+
+
+#: What match_prompt() reads off a match. A pattern without both of these
+#: compiles perfectly well and then raises IndexError on the first line of
+#: output — taking the transcript layer, the history and the drift check with
+#: it. Checked here so a bad pattern is rejected rather than armed.
+REQUIRED_GROUPS = ("prompt", "sigil")
+
+
+def _compile_override(source: str):
+    """Compile a user pattern, or return None with a reason in the log."""
+    try:
+        compiled = re.compile(source)
+    except re.error as exc:
+        logger.warning("Ignoring an invalid prompt pattern (%s); using the "
+                       "built-in", exc)
+        return None
+
+    missing = [g for g in REQUIRED_GROUPS if g not in compiled.groupindex]
+    if missing:
+        logger.warning(
+            "Ignoring a prompt pattern with no (?P<%s>...) group; using the "
+            "built-in. A pattern needs %s.",
+            ">, (?P<".join(missing),
+            " and ".join(f"(?P<{g}>...)" for g in REQUIRED_GROUPS),
+        )
+        return None
+
+    return compiled
+
+
+_override_source: str = ""
+_override_re = None
+
+
 def match_prompt(line: str) -> tuple[str, str] | None:
     """
     Test whether *line* begins with a device prompt.
@@ -89,7 +150,7 @@ def match_prompt(line: str) -> tuple[str, str] | None:
     if _NOT_A_PROMPT.match(line):
         return None
 
-    match = PROMPT_RE.match(line)
+    match = _active_prompt_re().match(line)
     if not match:
         return None
 

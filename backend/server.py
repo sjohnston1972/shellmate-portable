@@ -35,6 +35,15 @@ APP_MARKER = "shellmate-portable"
 PORT_SCAN_ATTEMPTS = 20
 
 
+def _scan_attempts() -> int:
+    """How many consecutive ports to try. Read here rather than at import."""
+    try:
+        from backend.advanced import get as advanced
+        return int(advanced("diag.port_scan_attempts"))
+    except Exception:
+        return PORT_SCAN_ATTEMPTS
+
+
 # ---------------------------------------------------------------------------
 # Port selection
 # ---------------------------------------------------------------------------
@@ -56,7 +65,7 @@ def is_port_free(host: str, port: int) -> bool:
             return False
 
 
-def find_free_port(host: str, preferred: int, attempts: int = PORT_SCAN_ATTEMPTS) -> int:
+def find_free_port(host: str, preferred: int, attempts: int | None = None) -> int:
     """
     Return the first free port at or above *preferred*.
 
@@ -75,6 +84,9 @@ def find_free_port(host: str, preferred: int, attempts: int = PORT_SCAN_ATTEMPTS
     could be taken before uvicorn binds it.  The window is microseconds and the
     caller surfaces the bind error, so this is not worth locking against.
     """
+    if attempts is None:
+        attempts = _scan_attempts()
+
     for offset in range(attempts):
         candidate = preferred + offset
         if candidate > 65535:

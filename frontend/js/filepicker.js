@@ -161,7 +161,10 @@
   async function load(path) {
     listEl.innerHTML = '<div class="filepicker-empty">Loading…</div>';
     try {
-      const res = await fetch(`/api/local/browse?path=${encodeURIComponent(path || '')}`);
+      const hidden = window.shellmateAdvanced
+        ? window.shellmateAdvanced('files.show_hidden', false) : false;
+      const res = await fetch(`/api/local/browse?path=${encodeURIComponent(path || '')}`
+        + `&hidden=${hidden ? 1 : 0}`);
       if (!res.ok) throw new Error((await res.json()).detail || 'Could not read that folder');
       render(await res.json());
     } catch (e) {

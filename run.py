@@ -109,7 +109,14 @@ def _serve(port: int) -> None:
     is the only diagnostic there is. With it disabled, uvicorn's own output
     flows into our handlers instead.
     """
-    uvicorn.run(fastapi_app, host=HOST, port=port, log_config=None, log_level="info")
+    # Every request the interface makes to its own API. Very noisy, and
+    # exactly what is wanted when something in the interface is not reaching
+    # the backend.
+    from backend.advanced import get as advanced
+
+    uvicorn.run(fastapi_app, host=HOST, port=port, log_config=None,
+                log_level="info",
+                access_log=bool(advanced("diag.http_access_log")))
 
 
 def main() -> int:

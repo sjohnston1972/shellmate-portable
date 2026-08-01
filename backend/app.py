@@ -664,7 +664,7 @@ async def pick_file(request: PickFileRequest) -> dict:
 
 
 @app.get("/api/local/browse")
-async def local_browse(path: str = "") -> dict:
+async def local_browse(path: str = "", hidden: int = 0) -> dict:
     """
     List a directory on this machine, for the in-app file picker.
 
@@ -685,6 +685,10 @@ async def local_browse(path: str = "") -> dict:
         entries = []
         try:
             for item in sorted(base.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+                # ~/.ssh is hidden on every platform, which is exactly where
+                # keys live — so this is switchable rather than absolute.
+                if not hidden and item.name.startswith("."):
+                    continue
                 try:
                     is_dir = item.is_dir()
                     entries.append({
@@ -1020,7 +1024,13 @@ async def broadcast(request: BroadcastRequest) -> dict:
     if not request.session_ids:
         raise HTTPException(status_code=400, detail="No sessions selected.")
 
-    wait = max(0, min(60_000, request.wait_ms)) / 1000
+    wait = max(0, min(60_000, request.wait_ms or
+                      advanced_setting("broadcast.default_wait"))) / 1000
+
+    # A cap on how many devices are in flight. Two hundred at once is two
+    # hundred SSH channels through the same jump host.
+    limit = advanced_setting("broadcast.concurrency")
+    gate = asyncio.Semaphore(limit) if limit else None
 
     async def run_one(session_id: str) -> dict:
         session = session_manager.get_session(session_id)
@@ -1049,18 +1059,28 @@ async def broadcast(request: BroadcastRequest) -> dict:
                 # Stop this device rather than pressing on: the rest of a
                 # sequence rarely makes sense once a step has failed, and
                 # blindly continuing is how half-applied changes happen.
-                return {"session_id": session_id, "ok": False, "label": label,
-                        "error": f"{exc} (after {len(sent)} of {len(commands)})",
-                        "sent": sent}
+                # Switchable: a run of read-only commands may reasonably
+                # carry on past one failure.
+                if advanced_setting("broadcast.stop_on_error"):
+                    return {"session_id": session_id, "ok": False, "label": label,
+                            "error": f"{exc} (after {len(sent)} of {len(commands)})",
+                            "sent": sent}
+                sent.append(f"{command}  [failed: {exc}]")
 
             if wait and index < len(commands) - 1:
                 await asyncio.sleep(wait)
 
         return {"session_id": session_id, "ok": True, "label": label, "sent": sent}
 
+    async def run_gated(session_id: str) -> dict:
+        if gate is None:
+            return await run_one(session_id)
+        async with gate:
+            return await run_one(session_id)
+
     try:
         results = await asyncio.wait_for(
-            asyncio.gather(*(run_one(sid) for sid in request.session_ids)),
+            asyncio.gather(*(run_gated(sid) for sid in request.session_ids)),
             timeout=advanced_setting("broadcast.max_seconds"),
         )
     except asyncio.TimeoutError:

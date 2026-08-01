@@ -28,16 +28,47 @@
 (function () {
   'use strict';
 
+  /** Shorthand for a Stockton value. */
+  const A = (key, fallback) =>
+    (window.shellmateAdvanced ? window.shellmateAdvanced(key, fallback) : fallback);
+
   /** Seconds remaining at which each escalation fires, loudest last. */
-  const THRESHOLDS = [
-    { at: 600, severity: 'info' },
-    { at: 300, severity: 'warning' },
-    { at: 60,  severity: 'warning' },
-    { at: 10,  severity: 'critical' },
-  ];
+  const DEFAULT_THRESHOLDS = '600,300,60,10';
+
+  /**
+   * Seconds remaining at which each escalation fires, loudest last.
+   *
+   * Read from Stockton so somebody who wants a nudge half an hour out can have
+   * one. A malformed list falls back to the shipped one rather than leaving a
+   * pending reload unannounced — which is the failure that matters here.
+   */
+  function thresholds() {
+    const raw = String(A('alerts.thresholds', DEFAULT_THRESHOLDS));
+    const seconds = raw.split(',')
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => Number.isFinite(n) && n > 0)
+      .sort((a, b) => b - a);
+
+    if (!seconds.length) {
+      return thresholdsFrom(DEFAULT_THRESHOLDS);
+    }
+    return seconds.map((at, i) => ({
+      at,
+      // The last one is the one you must not miss.
+      severity: i === seconds.length - 1 ? 'critical'
+              : i === 0 ? 'info' : 'warning',
+    }));
+  }
+
+  function thresholdsFrom(text) {
+    return text.split(',').map((s, i, all) => ({
+      at: parseInt(s, 10),
+      severity: i === all.length - 1 ? 'critical' : i === 0 ? 'info' : 'warning',
+    }));
+  }
 
   /** Most toasts on screen at once. */
-  const MAX_TOASTS = 3;
+  const MAX_TOASTS_DEFAULT = 3;
 
   const KIND_LABEL = {
     'reload':         'Reload',
@@ -198,7 +229,7 @@
   function severityFor(left) {
     if (left === null) return 'warning';
     if (left <= 60) return 'critical';
-    if (left <= 300) return 'warning';
+    if (left <= A('alerts.flash_within', 300)) return 'warning';
     return 'info';
   }
 
@@ -221,7 +252,7 @@
     // Flashing is for the last stretch. Earlier than that it is decoration,
     // and a tab that pulses for ten minutes is a tab people stop seeing.
     const shouldFlash = enabled('flash_tab', true) &&
-                        left !== null && left <= 300 && !reduceMotion();
+                        left !== null && left <= A('alerts.flash_within', 300) && !reduceMotion();
     tabEl.classList.toggle('tab-alerting', shouldFlash);
     tabEl.classList.toggle('tab-alerting-critical', shouldFlash && severity === 'critical');
   }
@@ -261,7 +292,7 @@
   function escalate(sessionId, entry, left, severity) {
     if (left === null) return;
 
-    THRESHOLDS.forEach(threshold => {
+    thresholds().forEach(threshold => {
       if (left > threshold.at || entry.fired.has(threshold.at)) return;
       // Do not fire every threshold at once for something already overdue.
       if (left < 0) { entry.fired.add(threshold.at); return; }
@@ -354,14 +385,14 @@
     // A stack that grows without limit stops being readable and starts being
     // a wall. Oldest goes first — the newest alert is the current one.
     const stack = [...toastHost.children];
-    if (stack.length > MAX_TOASTS) {
-      stack.slice(0, stack.length - MAX_TOASTS).forEach(old => old.remove());
+    if (stack.length > A('alerts.max_toasts', MAX_TOASTS_DEFAULT)) {
+      stack.slice(0, stack.length - A('alerts.max_toasts', MAX_TOASTS_DEFAULT)).forEach(old => old.remove());
     }
 
     // Critical alerts linger, because the point of the last warning is that it
     // is still there when someone looks back at the machine. Not forever
     // though: one pinned across the screen an hour later is only in the way.
-    setTimeout(() => el.remove(), alert.severity === 'critical' ? 120000 : 12000);
+    setTimeout(() => el.remove(), alert.severity === 'critical' ? 120000 : A('alerts.toast_seconds', 12) * 1000);
   }
 
   /**
@@ -390,7 +421,8 @@
         // Ramped rather than switched, because a square-edged gain change
         // clicks audibly.
         gain.gain.setValueAtTime(0, start);
-        gain.gain.linearRampToValueAtTime(0.14, start + 0.02);
+        gain.gain.linearRampToValueAtTime(
+          A('alerts.tone_volume', 0.2) * 0.7, start + 0.02);
         gain.gain.linearRampToValueAtTime(0, start + 0.16);
 
         osc.connect(gain).connect(audio.destination);

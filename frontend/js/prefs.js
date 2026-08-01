@@ -20,6 +20,21 @@
 
   const SAVE_DELAY_MS = 600;
 
+  /**
+   * Read a Stockton value.
+   *
+   * The advanced settings arrive with everything else on /api/settings, under
+   * "advanced", keyed "category.name". Defaults live in backend/advanced.py —
+   * the caller passes the same one so a value absent from the file behaves
+   * exactly as the backend would make it behave.
+   */
+  window.shellmateAdvanced = (key, fallback) => {
+    const all = ((window.shellmateSettings || {}).advanced) || {};
+    return all[key] === undefined ? fallback : all[key];
+  };
+
+
+
   let pending = {};
   let timer = null;
 

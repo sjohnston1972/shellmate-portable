@@ -27,6 +27,10 @@
 (function () {
   'use strict';
 
+  /** Shorthand for a Stockton value. */
+  const A = (key, fallback) =>
+    (window.shellmateAdvanced ? window.shellmateAdvanced(key, fallback) : fallback);
+
   // Give the session a moment to settle: a device still printing its login
   // banner will not answer a config request cleanly.
   const START_DELAY_MS = 2500;
@@ -47,7 +51,10 @@
     if (!id || checked.has(id)) return;
     checked.add(id);
 
-    setTimeout(() => runCheck(id, sessionData), START_DELAY_MS);
+    const delay = window.shellmateAdvanced
+      ? window.shellmateAdvanced('capture.start_delay', START_DELAY_MS)
+      : START_DELAY_MS;
+    setTimeout(() => runCheck(id, sessionData), delay);
   }
 
   function setting(name, fallback) {
@@ -160,7 +167,7 @@
     // An unchanged config is reassurance, not news — let it fade. A changed
     // one stays until acknowledged.
     if (!report.changed) {
-      setTimeout(() => banner.remove(), 8000);
+      setTimeout(() => banner.remove(), A('files.drift_banner_seconds', 8) * 1000);
     }
   }
 

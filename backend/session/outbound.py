@@ -49,6 +49,14 @@ def redaction_enabled() -> bool:
     secrets" — not of one output format, and two switches for one promise is a
     promise nobody can rely on.
     """
+    from backend.advanced import get as advanced
+
+    # Two switches, and both have to allow it. The logging one is the promise
+    # made to everybody; the Stockton one exists so somebody running a local
+    # model on their own machine can deliberately opt out of masking on the
+    # way to it. Neither alone can turn masking on where the other says no.
+    if not advanced("ai.redact_context"):
+        return False
     return bool((get_settings().get("logging", {}) or {}).get("redact_secrets", True))
 
 

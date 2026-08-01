@@ -35,6 +35,15 @@ logger = logging.getLogger(__name__)
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
 
 
+def _max_upload_bytes() -> int:
+    """The cap, honouring the Stockton override."""
+    try:
+        from backend.advanced import get as advanced
+        return int(advanced("files.max_upload_mb")) * 1024 * 1024
+    except Exception:
+        return MAX_UPLOAD_BYTES
+
+
 @dataclass
 class RemoteEntry:
     """One file or directory in a remote listing."""
@@ -178,10 +187,10 @@ def read_file(session: dict, path: str) -> bytes:
     sftp = _sftp_for(session)
     try:
         attrs = sftp.stat(path)
-        if attrs.st_size and attrs.st_size > MAX_UPLOAD_BYTES:
+        if attrs.st_size and attrs.st_size > _max_upload_bytes():
             raise ConnectionError_(
                 f"{path} is {attrs.st_size / 1e9:.1f} GB, which is above the "
-                f"{MAX_UPLOAD_BYTES / 1e9:.0f} GB transfer limit."
+                f"{_max_upload_bytes() / 1e9:.0f} GB transfer limit."
             )
         with sftp.open(path, "rb") as handle:
             handle.prefetch()
@@ -196,10 +205,10 @@ def read_file(session: dict, path: str) -> bytes:
 
 def write_file(session: dict, path: str, data: bytes) -> dict:
     """Upload *data* to the remote *path*, overwriting what is there."""
-    if len(data) > MAX_UPLOAD_BYTES:
+    if len(data) > _max_upload_bytes():
         raise ConnectionError_(
             f"Upload is {len(data) / 1e9:.1f} GB, above the "
-            f"{MAX_UPLOAD_BYTES / 1e9:.0f} GB limit."
+            f"{_max_upload_bytes() / 1e9:.0f} GB limit."
         )
 
     sftp = _sftp_for(session)

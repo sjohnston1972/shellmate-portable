@@ -87,8 +87,36 @@ def body(mode: str | None) -> str:
 
 
 def rendered(mode: str | None) -> str:
-    """The full system prompt: the body with the command rules substituted in."""
-    return prompts.render(body(mode))
+    """
+    The full system prompt: the body with the command rules substituted in.
+
+    When suggestions are switched off the rules are replaced by an instruction
+    not to offer any, rather than simply omitted — a model given no format to
+    use will invent one, and the blocks would come back as literal tags.
+    """
+    from backend.advanced import get as advanced
+
+    text = prompts.render(body(mode))
+
+    if not advanced("ai.suggest_commands"):
+        text = text.replace(prompts._COMMAND_FORMAT_RULES, _NO_SUGGESTIONS)
+    elif not advanced("ai.confirm_dangerous"):
+        text = text.replace(
+            "- Flag potentially dangerous commands (reload, write erase, "
+            "shutdown, no shutdown, clear) with a ⚠️ warning.",
+            "- Flag potentially dangerous commands with a ⚠️ warning.")
+
+    return text
+
+
+#: What replaces the command-suggestion rules when suggestions are off. An
+#: instruction, not an absence: a model told nothing about format will invent
+#: one, and the tags would arrive as literal text in the reply.
+_NO_SUGGESTIONS = (
+    "- Do NOT propose commands as clickable blocks and do NOT use any "
+    "[SUGGEST_CMD] tags. Describe what to run in prose and let the engineer "
+    "type it themselves."
+)
 
 
 def save(mode: str, text: str) -> dict[str, str]:

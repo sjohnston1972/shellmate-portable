@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 
 from backend.connections.base import ConnectionError_, ConnectionHandler
 
+from backend.advanced import get as advanced
+
 logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT = 15
@@ -119,7 +121,12 @@ class TelnetHandler(ConnectionHandler):
         if params.username:
             self._login_user = params.username
             self._login_password = params.password
-            self._login_deadline = time.monotonic() + AUTOLOGIN_TIMEOUT
+            # Zero disables auto-login entirely. The deadline exists so a
+            # prompt-shaped line arriving an hour in cannot type a password
+            # into a live device.
+            window = advanced("ssh.telnet_autologin_deadline")
+            self._login_deadline = (
+                time.monotonic() + window if window else 0.0)
         else:
             self._login_stage = "done"
 

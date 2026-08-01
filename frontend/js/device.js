@@ -23,6 +23,10 @@
 (function () {
   'use strict';
 
+  /** Shorthand for a Stockton value. */
+  const A = (key, fallback) =>
+    (window.shellmateAdvanced ? window.shellmateAdvanced(key, fallback) : fallback);
+
   /** sessionId -> fingerprint, so switching tabs shows the right device. */
   const identified = new Map();
 
@@ -191,8 +195,9 @@
 
     // Interactive notes wait to be used; the rest fade.
     if (!opts.offerOverride) {
-      setTimeout(() => el.classList.add('device-note-fade'), 3500);
-      setTimeout(() => el.remove(), 4200);
+      const dwell = A('files.note_seconds', 3.5) * 1000;
+      setTimeout(() => el.classList.add('device-note-fade'), dwell);
+      setTimeout(() => el.remove(), dwell + 700);
     } else {
       setTimeout(() => el.classList.add('device-note-fade'), 14000);
       setTimeout(() => el.remove(), 14700);

@@ -8,6 +8,8 @@ from collections.abc import AsyncIterator
 
 import httpx
 
+from backend.advanced import get as advanced
+
 from backend.config import ANTHROPIC_API_KEY
 from backend.settings_store import get_effective
 from backend.ai.prompts import SYSTEM_PROMPT
@@ -45,13 +47,14 @@ async def stream_response(
 
     payload = {
         "model": model or MODEL,
-        "max_tokens": 2048,
+        "max_tokens": advanced("ai.max_tokens"),
+        "temperature": advanced("ai.temperature"),
         "system": system_prompt or SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": full_user_message}],
         "stream": True,
     }
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=advanced("ai.request_timeout")) as client:
         async with client.stream(
             "POST", CLAUDE_API_URL, headers=headers, json=payload
         ) as resp:

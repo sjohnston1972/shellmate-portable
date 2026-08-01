@@ -26,6 +26,10 @@
 (function () {
   'use strict';
 
+  /** Shorthand for a Stockton value. */
+  const A = (key, fallback) =>
+    (window.shellmateAdvanced ? window.shellmateAdvanced(key, fallback) : fallback);
+
   // Track all live terminal instances so we can update them when settings change
   // { sessionId: { terminal, fitAddon, websocket, containerId } }
   const _instances = {};
@@ -59,6 +63,12 @@
       scrollback:       s.scrollback_lines || 5000,
       copyOnSelect:     !!s.copy_on_select,
       allowProposedApi: true,
+      // Stockton (#57). Read at construction, which is why the renderer is
+      // marked as needing a restart while the rest apply to the next tab.
+      minimumContrastRatio: A('terminal.min_contrast', 1),
+      wordSeparator:        A('terminal.word_separators', " ()[]{}',\"`"),
+      scrollSensitivity:    A('terminal.scroll_sensitivity', 1),
+      rendererType:         A('terminal.renderer', 'canvas'),
     };
   }
 
@@ -227,11 +237,38 @@
     function _pasteFromClipboard() {
       navigator.clipboard.readText().then(text => {
         if (!text) return;
-        window._showPasteModal && window._showPasteModal(text, () => {
-          if (websocket.readyState === WebSocket.OPEN) {
+        // Below the threshold a paste goes straight through. Every
+        // multi-line paste used to ask, which somebody pasting short blocks
+        // all day learns to click through.
+        const lines = text.split('\n').length;
+        const send = () => {
+          if (websocket.readyState !== WebSocket.OPEN) return;
+          // Chunked when Stockton asks for it: some devices drop characters
+          // when a paste arrives faster than their input buffer drains.
+          const size = A('terminal.paste_chunk_bytes', 0);
+          if (!size) {
             websocket.send(JSON.stringify({ type: 'input', data: text }));
+            return;
           }
-        });
+          const delay = A('terminal.paste_chunk_delay', 0);
+          const chunks = [];
+          for (let at = 0; at < text.length; at += size) {
+            chunks.push(text.slice(at, at + size));
+          }
+          chunks.forEach((chunk, index) => {
+            setTimeout(() => {
+              if (websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({ type: 'input', data: chunk }));
+              }
+            }, index * delay);
+          });
+        };
+
+        if (lines < A('terminal.paste_confirm_lines', 1) + 1) {
+          send();
+          return;
+        }
+        window._showPasteModal && window._showPasteModal(text, send);
       }).catch(() => {});
     }
 
