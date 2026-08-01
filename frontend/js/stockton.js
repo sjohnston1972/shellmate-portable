@@ -39,6 +39,8 @@
   let overlay, navEl, bodyEl, searchEl, countEl;
   let registry = { settings: [], categories: {}, not_exposed: [] };
   let active = null;
+  /** Set once a setting that cannot be reapplied has been changed. */
+  let pendingRestart = false;
 
   document.addEventListener('DOMContentLoaded', () => {
     overlay = document.getElementById('stockton-overlay');
@@ -211,10 +213,14 @@
     meta.className = 'stockton-meta';
     meta.textContent = describeDefault(setting, showCategory);
 
-    if (setting.restart) {
+    // How a change lands. Nothing for "live", which is 54 of the 57 — a tag
+    // on every row would say nothing.
+    if (setting.applies && setting.applies !== 'live') {
       const tag = document.createElement('span');
       tag.className = 'stockton-restart';
-      tag.textContent = 'needs a restart';
+      tag.textContent = setting.applies === 'tabs'
+        ? 'applies to new tabs'
+        : 'needs a restart';
       meta.appendChild(tag);
     }
 
@@ -471,6 +477,9 @@
       // Re-read rather than trust what was typed: the backend clamps, and a
       // field still showing a rejected value would be a quiet lie.
       const stored = registry.settings.find(s => s.key === setting.key);
+      if (setting.restart) pendingRestart = true;
+      updateRestartOffer();
+
       report(stored && String(stored.value) !== String(value)
         ? `${setting.label} was adjusted to ${format(stored.value)} — its range is ` +
           `${format(setting.min)} to ${format(setting.max)}.`
@@ -505,6 +514,93 @@
     } catch (e) {
       report(e.message, true);
     }
+  }
+
+
+  /**
+   * Offer a restart, once something that needs one has been changed.
+   *
+   * Two of fifty-seven settings genuinely cannot be reapplied — the rest are
+   * read at the point of use. Telling somebody a restart is needed and then
+   * leaving them to work out how is half a feature; the obvious move, closing
+   * the window, is specifically not a shutdown here.
+   */
+  async function updateRestartOffer() {
+    const footer = document.querySelector('#stockton-panel .settings-footer');
+    if (!footer) return;
+
+    const existing = document.getElementById('stockton-restart');
+    if (!pendingRestart) { if (existing) existing.remove(); return; }
+    if (existing) return;
+
+    let info = { available: false, sessions: [] };
+    try {
+      info = await (await fetch('/api/restart')).json();
+    } catch (_) { /* fall through to the note below */ }
+
+    if (!info.available) {
+      // A button that cannot work is worse than a sentence that explains.
+      const note = document.createElement('span');
+      note.id = 'stockton-restart';
+      note.className = 'settings-footer-note field-warn';
+      note.textContent = 'Quit from the tray and start ShellMate again for '
+        + 'that to take effect.';
+      footer.insertBefore(note, footer.firstChild);
+      return;
+    }
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'stockton-restart';
+    button.className = 'btn-primary';
+    button.textContent = 'Restart now';
+    button.addEventListener('click', () => doRestart(info.sessions));
+    footer.appendChild(button);
+  }
+
+  async function doRestart(sessions) {
+    const ok = await window.shellmateDialog.confirm({
+      title: 'Restart ShellMate?',
+      body: sessions.length
+        ? 'Every connection below is dropped. Anything already scheduled on '
+          + 'a device — a pending reload — carries on regardless.'
+        : 'Nothing is connected, so nothing is lost.',
+      list: sessions.map(name => ({ text: name })),
+      confirmLabel: 'Restart',
+      danger: sessions.length > 0,
+    });
+    if (!ok) return;
+
+    report('Restarting…');
+    try {
+      await fetch('/api/restart', { method: 'POST' });
+    } catch (_) {
+      // Expected: the process goes before the response arrives.
+    }
+    waitForReturn();
+  }
+
+  /**
+   * Wait for the replacement to answer, then reload.
+   *
+   * The old process exits as soon as the new one is listening, so the page is
+   * briefly talking to nothing. Reloading immediately shows a connection
+   * error; waiting for an answer shows the application coming back.
+   */
+  function waitForReturn() {
+    const started = Date.now();
+    const tick = async () => {
+      if (Date.now() - started > 60000) {
+        report('ShellMate did not come back. Start it from the tray.', true);
+        return;
+      }
+      try {
+        const res = await fetch('/api/system/info', { cache: 'no-store' });
+        if (res.ok) { window.location.reload(); return; }
+      } catch (_) { /* still down */ }
+      setTimeout(tick, 700);
+    };
+    setTimeout(tick, 1500);
   }
 
   function report(text, isError) {

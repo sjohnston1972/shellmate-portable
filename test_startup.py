@@ -163,12 +163,103 @@ def test_reset_advanced_flag() -> None:
           "--reset-advanced" in (root / "run.py").read_text(encoding="utf-8"))
 
 
+def test_restart_machinery() -> None:
+    """
+    The pieces of a self-restart, without performing one.
+
+    A restart drops every session, so the parts that decide *whether* it can
+    happen matter more than the handover itself: offering a button that cannot
+    work is worse than saying "quit and start it again".
+    """
+    print(chr(10) + "-- Restarting --")
+    import sys as _sys
+
+    from backend import desktop, server
+
+    original = _sys.argv[:]
+    try:
+        _sys.argv = ["run.py"]
+        check("it can work out how to relaunch from source", desktop.can_restart())
+        command = desktop.restart_command()
+        check("and the command names the interpreter and the script",
+              command and len(command) == 2 and command[1].endswith("run.py"),
+              str(command))
+
+        # argv[0] pointing at nothing is the case that must not offer a button.
+        _sys.argv = ["/no/such/entry/point.py"]
+        check("an unusable entry point is refused", not desktop.can_restart())
+        check("and yields no command", desktop.restart_command() is None)
+    finally:
+        _sys.argv = original
+
+    check("the lock helpers the handover needs exist",
+          hasattr(server, "clear_lock") and hasattr(server, "running_instance_port"))
+
+    # os._exit skips atexit, which is where clear_lock is registered — so the
+    # restart path has to clear it explicitly or the replacement races a stale
+    # lock and opens the copy that is shutting down.
+    #
+    # Read through the AST rather than by searching the text: the docstring
+    # explains os._exit, so a substring search finds it in the prose before it
+    # finds the statement and concludes the order is wrong.
+    import ast
+
+    source = (Path(__file__).parent / "backend" / "desktop.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    restart_fn = next(n for n in tree.body
+                      if isinstance(n, ast.FunctionDef) and n.name == "restart")
+
+    calls = []
+    for node in ast.walk(restart_fn):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+            if name in ("clear_lock", "_wait_for_replacement", "_exit"):
+                calls.append((node.lineno, name))
+    order = [name for _line, name in sorted(calls)]
+
+    check("the restart clears the instance lock", "clear_lock" in order,
+          "nothing clears the lock, so the replacement will find it held")
+    check("it waits for the replacement", "_wait_for_replacement" in order)
+    check("and only exits once that has answered",
+          order.index("_wait_for_replacement") < order.index("_exit"),
+          f"call order is {order}")
+    check("with the lock released before the handover starts",
+          order.index("clear_lock") < order.index("_wait_for_replacement"),
+          f"call order is {order}")
+
+
+def test_only_what_cannot_be_reapplied_needs_a_restart() -> None:
+    """
+    A restart is a cost, not a property.
+
+    Five settings claimed to need one. Read at the point of use rather than at
+    import, three of them did not — which is worth holding, because the easy
+    thing is to mark a setting "needs a restart" and never revisit it.
+    """
+    print(chr(10) + "-- What genuinely needs one --")
+    from backend import advanced
+
+    needs = [s.key for s in advanced.SETTINGS if s.restart]
+    check("only a couple of settings need a restart", len(needs) <= 3,
+          f"{len(needs)} do: {', '.join(needs)}")
+    check("and they are the ones fixed at server start",
+          set(needs) <= {"diag.http_access_log", "diag.port_scan_attempts"},
+          f"got {sorted(needs)}")
+
+    for setting in advanced.SETTINGS:
+        check(f"{setting.key}: applies is a value the interface knows",
+              setting.applies in ("live", "tabs", "restart"),
+              f"got {setting.applies!r}")
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Startup")
     print("=" * 52)
 
-    for test in (test_reset_advanced_flag, test_it_starts):
+    for test in (test_reset_advanced_flag, test_restart_machinery,
+                 test_only_what_cannot_be_reapplied_needs_a_restart,
+                 test_it_starts):
         try:
             test()
         except Exception as exc:

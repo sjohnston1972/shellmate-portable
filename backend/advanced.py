@@ -53,8 +53,17 @@ class Setting:
     #: its entries are legacy. Enumerated at render time rather than written
     #: out here, so the picker cannot list something paramiko will not accept.
     algorithms: str = ""
-    #: True when the value is read once at startup.
-    restart: bool = False
+    #: When a change takes effect. "live" is the default and the goal —
+    #: a restart is a cost, not a property, and most of these turned out not
+    #: to need one once they were read at the point of use rather than at
+    #: import. "tabs" means the next session picks it up; "restart" means it
+    #: is genuinely read once at startup and nothing can reapply it.
+    applies: str = "live"
+
+    @property
+    def restart(self) -> bool:
+        """Whether a change needs the application restarted."""
+        return self.applies == "restart"
 
     @property
     def category(self) -> str:
@@ -259,7 +268,7 @@ SETTINGS: tuple[Setting, ...] = (
             "How xterm.js draws the terminal.",
             "`canvas` suits almost everything. `dom` for a VM with no GPU, "
             "where canvas can be slower. `webgl` for a very busy session.",
-            choices=("dom", "canvas", "webgl"), restart=True),
+            choices=("dom", "canvas", "webgl"), applies="tabs"),
     Setting("terminal.min_contrast", "Minimum contrast ratio", 1.0, "float",
             "Force readability when a device sends unreadable colours.",
             "Some devices print dark blue on black. 1 leaves colours exactly as "
@@ -314,8 +323,7 @@ SETTINGS: tuple[Setting, ...] = (
             "must provide `(?P<prompt>...)` and `(?P<sigil>...)` groups and "
             "consume any trailing space, or it is ignored. An invalid or "
             "incomplete expression falls back to the built-in with a log line, "
-            "never an unusable session. Blank restores it.",
-            restart=True),
+            "never an unusable session. Blank restores it."),
 
     # --- Capture -----------------------------------------------------------
     Setting("capture.timeout", "Capture timeout", 60, "int",
@@ -450,15 +458,14 @@ SETTINGS: tuple[Setting, ...] = (
             "How much ShellMate writes to its own log.",
             "`DEBUG` is what support will ask for. It is noisy and the log is "
             "rewritten each launch, so it costs nothing to leave on for one "
-            "run.", choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
-            restart=True),
+            "run.", choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")),
     Setting("diag.http_access_log", "Log every HTTP request", False, "bool",
             "Records each call the interface makes to its own API.",
             "Useful when something in the interface is not reaching the "
-            "backend. Very noisy otherwise.", restart=True),
+            "backend. Very noisy otherwise.", applies="restart"),
     Setting("diag.port_scan_attempts", "Ports to try if 8765 is busy", 20, "int",
             "ShellMate walks upward from its preferred port.",
-            "", minimum=1, maximum=100, restart=True),
+            "", minimum=1, maximum=100, applies="restart"),
 )
 
 SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}
@@ -543,6 +550,7 @@ def describe() -> dict:
                      for name in available_algorithms(s.algorithms)]
                     if s.kind == "algorithms" else []
                 ),
+                "applies":  s.applies,
                 "restart":  s.restart,
             }
             for s in SETTINGS
@@ -577,7 +585,29 @@ def update(values: dict) -> dict:
         current[key] = setting.clamp(value)
 
     update_settings({"advanced": current})
+    _apply_live(values or {})
     return describe()
+
+
+def _apply_live(changed: dict) -> None:
+    """
+    Reapply anything that can take effect now.
+
+    A restart is a cost, not a property. The log level is one call to
+    setLevel, so making somebody relaunch for it would have been laziness
+    dressed up as a constraint.
+    """
+    if "diag.log_level" not in changed:
+        return
+    try:
+        import logging as _logging
+
+        level = str(get("diag.log_level")).upper()
+        if level in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            _logging.getLogger().setLevel(getattr(_logging, level))
+            logger.info("Log level set to %s", level)
+    except Exception as exc:                              # pragma: no cover
+        logger.info("Could not apply the log level: %s", exc)
 
 
 def reset(key: str | None = None, category: str | None = None) -> dict:

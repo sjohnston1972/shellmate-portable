@@ -109,6 +109,22 @@ reason: the vault's key-derivation parameters, the broadcast confirmation, the
 loopback-only binding. Each of them could break something that matters rather
 than merely degrade it.
 
+### When a change needs a restart
+
+Almost none of them do. Fifty-four of the fifty-seven take effect immediately,
+because they are read at the point they are used rather than when ShellMate
+starts. One — the terminal renderer — applies to the next tab you open, and
+says so on its row.
+
+Only two are fixed when the server starts: HTTP access logging and the port
+scan range. Change either and a **Restart now** button appears in the footer.
+It names every device still connected before it does anything, because a
+restart really does drop them — closing the window deliberately does not, and
+the two should not be confused.
+
+Where ShellMate cannot relaunch itself, the footer says to quit from the tray
+and start it again rather than showing a button that would do nothing.
+
 ### If you get stuck
 
 Run ShellMate once with `--reset-advanced`, or delete the `advanced` section

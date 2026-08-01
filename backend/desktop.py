@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 import urllib.error
 import urllib.request
 import webbrowser
@@ -45,6 +46,7 @@ MIN_HEIGHT = 560
 # The live pywebview window, when there is one. None under --no-window, in a
 # plain browser, or when the WebView2 runtime is missing.
 _active_window = None
+_active_desktop = None
 
 
 def has_native_window() -> bool:
@@ -546,8 +548,9 @@ class Desktop:
             # UI is a web page and a browser file input yields no filesystem
             # path, only contents — and a path is exactly what SSH key
             # authentication needs.
-            global _active_window
+            global _active_window, _active_desktop
             _active_window = self._window
+            _active_desktop = self
 
             # private_mode=False with a storage path in the data directory.
             # Interface preferences now live in settings.json rather than in
@@ -647,3 +650,126 @@ def reveal(folder) -> bool:
     except Exception as exc:
         logger.info("Could not open %s (%s)", target, exc)
         return False
+
+
+def active_desktop():
+    """The running Desktop instance, if there is one."""
+    return _active_desktop
+
+
+def can_restart() -> bool:
+    """
+    Whether ShellMate can relaunch itself.
+
+    Frozen, ``sys.executable`` is the application. From source it is the
+    interpreter and the script has to be named alongside it. If neither can be
+    worked out, the interface says "quit and start it again" rather than
+    offering a button that does nothing.
+    """
+    try:
+        if getattr(sys, "frozen", False):
+            return bool(sys.executable) and Path(sys.executable).exists()
+        entry = Path(sys.argv[0]) if sys.argv else None
+        return bool(entry and entry.exists() and Path(sys.executable).exists())
+    except Exception:
+        return False
+
+
+def restart_command() -> list[str] | None:
+    """The argv that starts a fresh copy, or None if it cannot be built."""
+    if not can_restart():
+        return None
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, str(Path(sys.argv[0]).resolve())]
+
+
+def restart(desktop=None) -> bool:
+    """
+    Start a fresh copy and stop this one.
+
+    Three things have to happen in this order, and each of them is a way this
+    goes wrong if it does not:
+
+    **Release the single-instance lock first.**  ``Desktop.quit()`` ends the
+    process with ``os._exit(0)``, which skips ``atexit`` — and ``clear_lock``
+    is registered there.  A relaunch racing its own stale lock finds
+    "ShellMate is already running" and opens the copy that is shutting down.
+
+    **Hand off before exiting.**  The new process is confirmed to be listening
+    before this one goes.  Exiting first and hoping leaves somebody with a
+    window that vanished and nothing running.
+
+    **Detach it.**  A child that dies with its parent is not a restart.
+
+    Returns False when the handover failed, in which case this process is
+    still running and the caller should say so.
+    """
+    from backend import server
+
+    command = restart_command()
+    if command is None:
+        logger.info("Restart requested but the command could not be determined.")
+        return False
+
+    # The window's geometry is worth carrying across; the lock is not.
+    if desktop is not None:
+        try:
+            desktop._remember_geometry()
+        except Exception:
+            pass
+
+    try:
+        server.clear_lock()
+    except Exception as exc:
+        logger.warning("Could not clear the instance lock before restarting: %s", exc)
+
+    creation = 0
+    if sys.platform == "win32":
+        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP — the new copy must
+        # outlive this one.
+        creation = 0x00000008 | 0x00000200
+
+    try:
+        subprocess.Popen(
+            command,
+            cwd=str(app_dir()),
+            close_fds=True,
+            creationflags=creation,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:
+        logger.warning("Could not start a replacement process: %s", exc)
+        return False
+
+    logger.info("Replacement started; waiting for it to answer before exiting.")
+    if not _wait_for_replacement():
+        logger.warning("The replacement never answered. Staying up.")
+        return False
+
+    logger.info("Handover complete. Shutting this copy down.")
+    if desktop is not None:
+        try:
+            if desktop._tray:
+                desktop._tray.stop()
+            if desktop._window is not None:
+                desktop._window.destroy()
+        except Exception:
+            pass
+
+    os._exit(0)
+
+
+def _wait_for_replacement(timeout: float = 30.0) -> bool:
+    """Wait for a new instance to take the lock and answer."""
+    from backend import server
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        port = server.running_instance_port()
+        if port:
+            return True
+        time.sleep(0.4)
+    return False

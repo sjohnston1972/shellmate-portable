@@ -1186,6 +1186,48 @@ class AdvancedRequest(BaseModel):
     category: str = ""
 
 
+@app.get("/api/restart")
+async def restart_available() -> dict:
+    """
+    Whether ShellMate can relaunch itself, and what is still connected.
+
+    Asked before the button is offered: a restart drops every session, which
+    is the one thing the desktop shell is built around not doing, so the
+    interface names them rather than presenting this as a reload.
+    """
+    live = [
+        s.get("display_label") or s.get("hostname") or s["session_id"][:8]
+        for s in session_manager.get_all_sessions() if s.get("is_connected")
+    ]
+    return {"available": desktop.can_restart(), "sessions": live}
+
+
+@app.post("/api/restart")
+async def restart_now() -> dict:
+    """
+    Start a fresh copy and stop this one.
+
+    Returns only on failure — on success the process is gone before the
+    response could be written, which the interface treats as the signal to
+    wait and reconnect.
+    """
+    if not desktop.can_restart():
+        raise HTTPException(
+            status_code=400,
+            detail="ShellMate cannot relaunch itself from here. Quit from the "
+                   "tray and start it again.",
+        )
+
+    # On a thread: the handover waits for the replacement to answer, and doing
+    # that on the event loop would stop this server responding — including to
+    # the health check the new copy's lock depends on.
+    async def go() -> None:
+        await asyncio.to_thread(desktop.restart, desktop.active_desktop())
+
+    asyncio.create_task(go())
+    return {"restarting": True}
+
+
 @app.get("/api/advanced")
 async def advanced_list() -> dict:
     """
