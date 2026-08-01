@@ -30,11 +30,11 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from backend import config_archive, desktop, paths
+from backend import auth, config_archive, desktop, paths
 from backend.configs import capture_config, diff_snapshots, drift_report
 from backend.connections.base import ConnectionError_, ConnectionParams
 from backend.connections import sftp
@@ -143,6 +143,108 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 # a revalidation is a stat and a 304, which is not worth a special case that
 # only ever applied to the stylesheet.
 # ---------------------------------------------------------------------------
+
+
+@app.middleware("http")
+async def _require_login(request: Request, call_next):
+    """
+    Refuse anything that is not the login page until a token is presented.
+
+    Only active when SHELLMATE_AUTH_TOKEN is set, which is the container and
+    reverse-proxy case. The portable single-user installation this is built
+    for never sees it.
+    """
+    if not auth.enabled() or auth.is_public(request.url.path):
+        return await call_next(request)
+
+    if auth.check_cookie(request.cookies.get(auth.COOKIE, "")):
+        return await call_next(request)
+
+    # A browser asking for a page gets sent to log in; anything else gets an
+    # answer it can act on rather than a page it cannot render.
+    if "text/html" in request.headers.get("accept", ""):
+        return RedirectResponse("/login", status_code=303)
+    return JSONResponse({"detail": "Not authenticated."}, status_code=401)
+
+
+@app.get("/login")
+async def login_page() -> Response:
+    """The one page reachable without a token."""
+    if not auth.enabled():
+        return RedirectResponse("/", status_code=303)
+    return Response(content=_LOGIN_PAGE, media_type="text/html")
+
+
+class LoginRequest(BaseModel):
+    token: str = ""
+
+
+@app.post("/api/login")
+async def login(request: LoginRequest) -> JSONResponse:
+    """
+    Exchange the token for a cookie.
+
+    A cookie rather than a header because the WebSocket path is the one that
+    matters — /ws/chat reads every open session — and browser WebSocket
+    clients cannot set headers.
+    """
+    if not auth.check_token(request.token):
+        logger.warning("Rejected a login attempt")
+        return JSONResponse({"detail": "That is not the right token."},
+                            status_code=401)
+
+    response = JSONResponse({"status": "ok"})
+    response.set_cookie(
+        auth.COOKIE, auth.cookie_value(),
+        httponly=True,      # not readable from script
+        samesite="lax",     # not sent on a cross-site request
+        max_age=60 * 60 * 12,
+    )
+    return response
+
+
+#: Deliberately self-contained: it has to render before anything is trusted.
+_LOGIN_PAGE = """<!doctype html>
+<meta charset="utf-8"><title>ShellMate</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { background:#131313; color:#E5E2E1; font-family:system-ui,sans-serif;
+         display:flex; align-items:center; justify-content:center;
+         height:100vh; margin:0; }
+  form { background:#202020; padding:32px; border-radius:8px;
+         border:1px solid rgba(70,69,85,0.4); width:320px; }
+  h1 { font-size:18px; margin:0 0 6px; }
+  p  { font-size:12px; color:rgba(229,226,225,0.6); margin:0 0 18px; line-height:1.5; }
+  input { width:100%; box-sizing:border-box; padding:10px; font-size:14px;
+          background:#2A2A2A; color:#E5E2E1; border:1px solid rgba(70,69,85,0.5);
+          border-radius:4px; }
+  button { width:100%; margin-top:12px; padding:10px; font-size:14px;
+           background:#4F46E5; color:#fff; border:0; border-radius:4px;
+           cursor:pointer; }
+  .err { color:#FFB4AB; font-size:12px; margin-top:10px; min-height:16px; }
+</style>
+<form onsubmit="go(event)">
+  <h1>ShellMate</h1>
+  <p>This instance is reachable beyond your own machine, so it asks for the
+     access token before opening any session.</p>
+  <input id="t" type="password" autocomplete="current-password" autofocus
+         placeholder="Access token">
+  <button type="submit">Unlock</button>
+  <div class="err" id="e"></div>
+</form>
+<script>
+async function go(ev) {
+  ev.preventDefault();
+  const r = await fetch('/api/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: document.getElementById('t').value }),
+  });
+  if (r.ok) { window.location = '/'; return; }
+  document.getElementById('e').textContent =
+    (await r.json()).detail || 'That did not work.';
+}
+</script>
+"""
 
 
 @app.middleware("http")
@@ -2259,6 +2361,15 @@ async def _origin_allowed(websocket: WebSocket) -> bool:
     attaching the user's cookies or their loopback access on their behalf. It
     is the *browser* case that needs the check, and browsers always send it.
     """
+    # Authentication first where it is switched on: an allowed origin says
+    # the page is one of ours, not that whoever is driving it may be here.
+    if auth.enabled() and not auth.check_cookie(
+            websocket.cookies.get(auth.COOKIE, "")):
+        logger.warning("Refused an unauthenticated WebSocket on %s",
+                       websocket.url.path)
+        await websocket.close(code=1008)
+        return False
+
     origin = websocket.headers.get("origin")
     if origin is None:
         return True

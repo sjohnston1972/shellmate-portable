@@ -25,7 +25,7 @@ import webbrowser
 import uvicorn
 from dotenv import load_dotenv
 
-from backend import desktop, paths, server
+from backend import auth, desktop, paths, server
 from backend.vault import vault
 
 # Load .env from beside the executable (not the working directory) before
@@ -197,6 +197,14 @@ def main() -> int:
             server.wait_for_port(HOST, wanted)
         except (IndexError, ValueError):
             logger.info("--restart-port given without a usable number; ignoring.")
+
+    # Bound wider than loopback with no token is the one configuration that
+    # is refused outright. A warning in a log nobody reads is how an
+    # installation ends up exposed; a hard failure is how it does not.
+    refusal = auth.startup_refusal(HOST)
+    if refusal:
+        _fatal(refusal)
+        return 1
 
     try:
         port = server.find_free_port(HOST, wanted)

@@ -213,6 +213,95 @@ def test_the_browser_is_not_the_guarantee() -> None:
           "auto_analysis" in chat)
 
 
+def test_binding_wide_without_a_token_refuses_to_start() -> None:
+    """
+    The shipped Docker deployment bound 0.0.0.0 with no authentication.
+
+    `docker-compose.yml` attached to an external network and the README
+    explained that it "pairs naturally with a Cloudflare tunnel" — remote
+    access, unauthenticated, to a tool that opens SSH sessions to network
+    equipment, runs commands on them, browses the filesystem and holds saved
+    credentials. Meanwhile `NOT_EXPOSED` recorded the opposite as settled
+    policy.
+
+    Refusing to start is the part that matters. A warning in a log nobody
+    reads is how an installation ends up exposed.
+    """
+    print(chr(10) + "-- Binding beyond this machine --")
+    import os
+
+    from backend import auth
+
+    original = os.environ.pop(auth.ENV_VAR, None)
+    try:
+        check("loopback with no token is fine",
+              auth.startup_refusal("127.0.0.1") == "",
+              "the case ShellMate is built for must not need configuring")
+        check("and so is ::1", auth.startup_refusal("::1") == "")
+
+        for host in ("0.0.0.0", "192.168.1.10", "::"):
+            refusal = auth.startup_refusal(host)
+            check(f"{host} with no token is refused", bool(refusal))
+            check(f"{host}: and the message names the variable",
+                  auth.ENV_VAR in refusal, refusal[:80])
+            check(f"{host}: and offers the other way out",
+                  "SHELLMATE_HOST=127.0.0.1" in refusal,
+                  "telling somebody to set a token without mentioning they "
+                  "could simply not bind wide is half an answer")
+
+        os.environ[auth.ENV_VAR] = "a-long-random-token"
+        check("with a token, binding wide is a deliberate choice",
+              auth.startup_refusal("0.0.0.0") == "")
+    finally:
+        os.environ.pop(auth.ENV_VAR, None)
+        if original is not None:
+            os.environ[auth.ENV_VAR] = original
+
+    # And the deployment that needs it says so rather than hoping.
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    check("the compose file requires the token",
+          "SHELLMATE_AUTH_TOKEN" in compose and ":?" in compose,
+          "it binds 0.0.0.0, so it must not start without one")
+
+
+def test_the_token_is_never_the_cookie() -> None:
+    """
+    A stolen cookie proves somebody authenticated. It is not the credential.
+
+    And it dies with the process, because the salt is per-run.
+    """
+    print(chr(10) + "-- What the cookie carries --")
+    import os
+
+    from backend import auth
+
+    original = os.environ.get(auth.ENV_VAR)
+    os.environ[auth.ENV_VAR] = "the-actual-secret-token"
+    try:
+        value = auth.cookie_value()
+        check("the cookie is not the token",
+              "the-actual-secret-token" not in value, value[:32])
+        check("and does not contain it in any form",
+              len(value) == 64 and all(c in "0123456789abcdef" for c in value),
+              value[:40])
+
+        check("the right token is accepted",
+              auth.check_token("the-actual-secret-token"))
+        check("a wrong one is not", not auth.check_token("nearly-right"))
+        check("and neither is an empty one", not auth.check_token(""))
+
+        check("a valid cookie is accepted", auth.check_cookie(value))
+        check("a forged one is not", not auth.check_cookie("0" * 64))
+    finally:
+        os.environ.pop(auth.ENV_VAR, None)
+        if original is not None:
+            os.environ[auth.ENV_VAR] = original
+
+    check("with no token configured, nothing is gated",
+          not auth.enabled() and auth.check_cookie("") and auth.check_token(""),
+          "the portable single-user case must be untouched")
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Security")
@@ -222,7 +311,9 @@ def main() -> int:
                  test_our_own_pages_still_work,
                  test_one_definition_of_an_allowed_origin,
                  test_approving_a_command_does_not_ship_the_reply_unasked,
-                 test_the_browser_is_not_the_guarantee):
+                 test_the_browser_is_not_the_guarantee,
+                 test_binding_wide_without_a_token_refuses_to_start,
+                 test_the_token_is_never_the_cookie):
         try:
             test()
         except Exception as exc:

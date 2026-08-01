@@ -11,6 +11,16 @@ services:
       # Override host so uvicorn binds inside the container (the .env default is 127.0.0.1)
       SHELLMATE_HOST: 0.0.0.0
       SHELLMATE_PORT: 8765
+      # REQUIRED for this deployment, and ShellMate refuses to start without
+      # it. Binding 0.0.0.0 removes the only thing protecting SSH sessions to
+      # your network equipment, your saved credentials and the file browser —
+      # ShellMate has no authentication by default precisely because nothing
+      # but the local machine can normally reach the port.
+      #
+      # Put a long random string in .env as SHELLMATE_AUTH_TOKEN. A reverse
+      # proxy that authenticates in front of this is still worth having; the
+      # token is the floor, not the ceiling.
+      SHELLMATE_AUTH_TOKEN: ${SHELLMATE_AUTH_TOKEN:?set SHELLMATE_AUTH_TOKEN in .env — this deployment is reachable from the network}
     extra_hosts:
       # Lets the container reach Ollama (or any other service) running on the Windows host
       - "host.docker.internal:host-gateway"

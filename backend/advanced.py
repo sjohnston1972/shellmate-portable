@@ -561,8 +561,11 @@ NOT_EXPOSED: tuple[tuple[str, str], ...] = (
      "It stops a pasted block being mistaken for an alias and rewritten. "
      "Nothing to gain by changing it."),
     ("Binding beyond 127.0.0.1",
-     "There is no authentication, precisely because nothing but this machine "
-     "can reach the port. The two go together.||That holds against other "
+     "There is no authentication by default, precisely because nothing but "
+     "this machine can reach the port — loopback, *or* a token. Set "
+     "SHELLMATE_AUTH_TOKEN and ShellMate asks for it; bind wider without one "
+     "and it refuses to start rather than serving your devices to the "
+     "network.||That holds against other "
      "programs on the machine. It does not hold by itself against a web page "
      "you visit — your browser is on this machine and will open a socket to "
      "loopback on the page's behalf. Which is why the WebSocket handshake "

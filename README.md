@@ -106,8 +106,8 @@ less likely to be flagged.
 #### Install
 
 ```bash
-git clone https://github.com/sjohnston1972/shellmate.git
-cd shellmate
+git clone https://github.com/sjohnston1972/shellmate-portable.git
+cd shellmate-portable
 pip install -r requirements.txt
 ```
 
@@ -232,44 +232,41 @@ If you front the container with a TLS reverse proxy, the WebSocket clients pick
 
 ## Project structure
 
+The tree below is a summary. `CLAUDE.md` carries the authoritative one with a
+line explaining each module — this is 24 backend modules, 35 frontend scripts
+and 24 test suites, so a full listing here would be a second copy to keep in
+step and it would lose.
+
 ```
-shellmate/
-├── run.py                     # Entry point — starts server, opens browser
-├── requirements.txt
-├── .env.example               # Configuration template
+shellmate-portable/
+├── run.py                     # Entry point — server thread, window on the main thread
+├── build.spec                 # PyInstaller definition for the one-file executable
+├── tools/
+│   ├── vendor_assets.py       # Downloads and subsets frontend assets (build-time)
+│   └── collect_licences.py    # Gathers third-party licence texts (build-time)
 ├── backend/
-│   ├── app.py                 # FastAPI app, REST endpoints, WebSocket handlers
-│   ├── config.py              # Loads .env config
-│   ├── profiles.py            # Connection profile persistence
-│   ├── settings_store.py      # Application settings persistence
-│   ├── connections/
-│   │   ├── manager.py         # Session lifecycle (create/track/destroy by UUID)
-│   │   ├── ssh_handler.py     # paramiko SSH interactive shell
-│   │   └── serial_handler.py  # pyserial console
-│   ├── session/
-│   │   └── buffer.py          # Per-session terminal I/O buffer
-│   └── ai/
-│       ├── router.py          # Routes to selected backend, builds session context, queries Chroma
-│       ├── prompts.py         # Tshoot + Learn personas, context builder
-│       ├── claude_client.py   # Claude API streaming client
-│       ├── openai_client.py   # OpenAI streaming client
-│       ├── xai_client.py      # xAI Grok streaming client
-│       ├── deepseek_client.py # DeepSeek streaming client
-│       ├── ollama_client.py   # Ollama streaming client
-│       ├── chroma_client.py   # Optional Chroma vector-DB lookup (silently disabled if not configured)
-│       └── summarize.py       # One-shot session summary used by Conclude → Jira
-└── frontend/
-    ├── index.html
-    ├── css/style.css
-    └── js/
-        ├── connections.js     # Connection dialog + saved profiles
-        ├── tabs.js            # Tab bar management + drag reorder
-        ├── terminal.js        # xterm.js init, copy/paste, settings apply
-        ├── mode.js            # Tshoot / Learn pill toggle, persists to localStorage
-        ├── chat.js            # AI chat panel, command blocks, streaming
-        ├── settings.js        # Settings panel (incl. provider keys + Chroma)
-        ├── jira.js            # Conclude-session → Jira modal
-        └── logs.js            # Logs panel
+│   ├── paths.py               # Every filesystem location resolves here
+│   ├── app.py                 # FastAPI routes, WebSockets, auth gate
+│   ├── auth.py                # Optional token authentication
+│   ├── advanced.py            # Stockton — the settings registry
+│   ├── vault.py               # Encrypted credential storage
+│   ├── profiles.py            # Saved connections and shared credentials
+│   ├── platforms.py           # Per-platform commands and aliases (data, not code)
+│   ├── fingerprint.py         # Identify vendor/OS/version on connect
+│   ├── discovery.py           # Network scanning
+│   ├── store.py               # SQLite session history with FTS5
+│   ├── configs.py             # Config capture, diff, drift-on-connect
+│   ├── desktop.py             # Native window, tray, self-restart
+│   ├── session/               # ANSI handling, transcript parsing, buffers, redaction
+│   ├── connections/           # ssh / serial / telnet handlers, SFTP, session manager
+│   └── ai/                    # Provider clients, router, prompts
+├── frontend/
+│   ├── index.html
+│   ├── css/style.css
+│   ├── js/                    # 35 modules — one per panel or concern
+│   ├── docs/                  # The bundled manual, including licences/
+│   └── vendor/                # xterm.js and fonts — no CDN at runtime
+└── test_*.py                  # 24 suites, run individually: python test_vault.py
 ```
 
 ## Design
@@ -278,14 +275,18 @@ ShellMate uses the *Deep Space* design system — dark background, Space Grotesk
 
 ## Security
 
-- **No built-in authentication.** ShellMate is an interactive SSH client, so anyone who reaches the web UI can launch sessions to any host the server can route to. Treat it like an open shell:
-  - Local development (`python run.py`) binds to `127.0.0.1` only — fine for a single user on the same machine.
-  - The Docker / `docker-compose.yml` path binds to `0.0.0.0:8765` so the container is reachable on its network. **Do not expose it directly to the public internet.** Put it behind something that authenticates users — Cloudflare Access, Tailscale, an SSO-aware reverse proxy, etc.
+- **No authentication by default, and that is a bargain rather than an oversight.** ShellMate is an interactive SSH client: anyone who reaches the web UI can open sessions to any host the server can route to, read every open session, and browse the filesystem. That is acceptable only while nothing but the local machine can reach the port.
+  - `python run.py` binds `127.0.0.1` — the case ShellMate is built for, and nothing changes.
+  - **Binding anywhere else requires `SHELLMATE_AUTH_TOKEN`, and ShellMate refuses to start without it.** Not a warning: a hard failure, because a warning in a log nobody reads is how an installation ends up exposed. Set it to a long random string and ShellMate asks for it before opening anything, over both HTTP and WebSockets.
+  - The Docker / `docker-compose.yml` path binds `0.0.0.0:8765`, so the token is mandatory there — the compose file will not start without one. A reverse proxy that authenticates in front of it (Cloudflare Access, Tailscale, an SSO-aware proxy) is still worth having; the token is the floor, not the ceiling.
 - **Passwords are dropped from memory once the SSH session is open.** They complete the authentication handshake and are then cleared — the long-lived session object holds an empty string in their place.
-- **A password is only persisted if you ask for it.** Tick *Remember these credentials* and it goes to the encrypted vault; tick the plaintext option instead and it goes to `credentials-plaintext.json`, named for what it is so that `profiles.json` stays safe to share. **Settings → Credentials Vault** lists everything saved, says which store each one is in, and will move a plaintext one into the vault.
-- **API keys** live in `.env` only — never in code, never in saved profiles.
-- **Session buffers** are in-memory and cleared on disconnect, unless file logging is explicitly enabled.
-- **Saved profiles** record host, port, username, and connection type so you can one-click reconnect. They never contain the password — that is always re-prompted.
+- **A password is only persisted if you ask for it, and you are told where it went.** Tick *Remember these credentials* and it goes to the encrypted vault. Tick the plaintext option instead and it is written as readable text to `ShellMate-Data/credentials-plaintext.json` — named for exactly what it is, kept out of `profiles.json` so that file stays safe to share, and logged at warning level each time it is used. That option exists because a vault you are locked out of is worse than no vault; think twice on anything shared.
+- **The vault** is encrypted with your Windows account by default, so there is nothing to type and a stolen USB stick is inert. A master password is the alternative and travels between machines, at the cost of typing it at startup — with no recovery, deliberately. The whole entry set is one AEAD blob rather than per-entry ciphertext, so entries cannot be swapped or replayed undetected, and which keys exist is not disclosed.
+- **Settings → Credentials Vault** lists everything saved, marks which store each one is in, will move a plaintext one into the vault, and lets you change or delete any of them. A plaintext credential can be displayed — it is already readable in a text file — and an encrypted one cannot, at any price.
+- **A saved password never reaches the browser.** The interface sends a connection id and the server fills the credential in on its own side, so a remembered password exists only on disk and in memory during the handshake. `SECRET_FIELDS` stops one reaching `profiles.json` whatever a caller passes.
+- **API keys** resolve vault → `settings.json` → `.env`. The Settings panel is the preferred place; `update_settings()` diverts them into the vault and blanks them before writing, so they do not land in `settings.json` either.
+- **Session buffers** are in memory and cleared on disconnect. Command transcripts are a separate thing and *are* recorded to `ShellMate-Data/shellmate.db` unconditionally — that is the History and drift feature, and it is documented in the manual.
+- **Terminal content sent to a cloud AI provider is masked** on the way out by the same redaction that covers session logs. It is pattern matching, so it reduces exposure rather than guaranteeing absence. Ollama sends nothing anywhere.
 
 ## Licence
 
