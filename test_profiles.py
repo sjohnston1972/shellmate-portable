@@ -644,6 +644,60 @@ def test_a_set_needs_a_name_and_holds_no_secret() -> None:
     check("and no password at all", "SECRET-SET-VALUE" not in body, body)
 
 
+def test_the_two_ssh_forms_are_one_device() -> None:
+    """
+    Splitting the dialog must not split the data.
+
+    "SSH — password" and "SSH — key or jump host" are two forms over one
+    transport. If the key form stored a different `connection_type`, the same
+    switch saved both ways would become two profiles, the dedupe would stop
+    seeing them, `ready_to_connect` would branch on a value it does not know,
+    and every existing profiles.json would still say `ssh`.
+
+    So `auth_method` carries which form was used and identity ignores it.
+    """
+    print("\n-- Two forms, one transport --")
+    reset()
+
+    by_password = {"hostname": "10.30.0.1", "port": 22, "username": "neteng",
+                   "connection_type": "ssh", "auth_method": "password"}
+    by_key = {"hostname": "10.30.0.1", "port": 22, "username": "neteng",
+              "connection_type": "ssh", "auth_method": "key",
+              "private_key_path": "C:/keys/lab_ed25519"}
+
+    check("the same device by either method is one identity",
+          profiles.identity(by_password) == profiles.identity(by_key),
+          "a switch reached by key and by password is one switch")
+
+    first = profiles.save_profile(by_password)
+    second = profiles.save_profile(by_key)
+    check("so saving both does not create two profiles",
+          second["id"] == first["id"] and len(profiles._load()) == 1,
+          f"{len(profiles._load())} profiles")
+    check("and the second save records the method",
+          profiles._load()[0].get("auth_method") == "key",
+          str(profiles._load()[0].get("auth_method")))
+    check("along with the key it needs",
+          profiles._load()[0].get("private_key_path") == "C:/keys/lab_ed25519")
+
+    # The transport is what the session manager dispatches on, and it has to
+    # stay something HANDLERS knows about.
+    from backend.connections.manager import HANDLERS
+
+    check("the stored transport is one the manager can dispatch",
+          profiles._load()[0].get("connection_type") in HANDLERS,
+          str(profiles._load()[0].get("connection_type")))
+    check("and 'ssh-key' is not a transport",
+          "ssh-key" not in HANDLERS,
+          "the picker value must never reach the handler registry")
+
+    # No secret reaches the file by the new route either.
+    profiles.save_profile({**by_key, "private_key_passphrase": "SECRET-PHRASE"})
+    raw = (_temp / "profiles.json").read_text(encoding="utf-8")
+    check("a key passphrase still cannot reach profiles.json",
+          "SECRET-PHRASE" not in raw, raw[:200])
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Connection profiles")
@@ -665,7 +719,8 @@ def main() -> int:
                  test_a_credential_can_belong_to_more_than_one_connection,
                  test_a_devices_own_password_wins,
                  test_deleting_a_shared_credential_detaches_what_used_it,
-                 test_a_set_needs_a_name_and_holds_no_secret):
+                 test_a_set_needs_a_name_and_holds_no_secret,
+                 test_the_two_ssh_forms_are_one_device):
         try:
             test()
         except Exception as exc:

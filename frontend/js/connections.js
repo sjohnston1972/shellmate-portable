@@ -18,7 +18,25 @@
   let profilesList, typeSelect, serialPortSelect, serialPortHint;
 
   /** Default TCP port per transport, applied when the type changes. */
-  const DEFAULT_PORTS = { ssh: 22, telnet: 23 };
+  const DEFAULT_PORTS = { ssh: 22, 'ssh-key': 22, telnet: 23 };
+
+  /**
+   * The picker's entries, and the transport each one actually is.
+   *
+   * "SSH — password" and "SSH — key or jump host" are two forms over one
+   * transport. They must stay one `connection_type` underneath, because
+   * several things key off it and would break quietly:
+   * `profiles.identity()` treats it as part of what makes two saved
+   * connections the same device, so a separate value would make the same
+   * switch saved both ways into two profiles and stop the dedupe seeing them;
+   * `ready_to_connect`, the discovery scanner's `suggested_type` and every
+   * existing profiles.json all say `ssh`.
+   *
+   * So the split is in the interface and `auth_method` carries which form was
+   * used. Nothing below the dialog changes.
+   */
+  const TRANSPORT = { ssh: 'ssh', 'ssh-key': 'ssh', telnet: 'telnet', serial: 'serial' };
+  const AUTH_METHOD = { ssh: 'password', 'ssh-key': 'key' };
 
   /**
    * Profile the dialog was opened from, if any.
@@ -107,7 +125,9 @@
     activeProfileHasCredentials = Boolean(prefill && prefill.has_saved_credentials);
     activeProfileStorage = (prefill && prefill.credential_storage) || '';
 
-    const type = (prefill && prefill.connection_type) || 'ssh';
+    // The picker's value, not the transport — a key profile has to open on
+    // the key form, and both store connection_type "ssh".
+    const type = prefill ? pickerValue(prefill) : 'ssh';
     typeSelect.value = type;
     applyConnectionType(type);
 
@@ -237,9 +257,20 @@
     return `${p.hostname || '?'}:${p.port || 22}`;
   }
 
-  function profileIcon(type) {
+  /**
+   * The tile icon.
+   *
+   * A key connection is worth telling apart at a glance: when one fails the
+   * cause is usually the key rather than a password, and knowing which kind
+   * it is before clicking is most of the diagnosis.
+   */
+  function profileIcon(profile) {
+    const type = typeof profile === 'string' ? profile : (profile.connection_type || 'ssh');
     if (type === 'serial') return 'cable';
-    if (type === 'telnet') return 'terminal';
+    if (type === 'ssh' && pickerValue(
+        typeof profile === 'string' ? { connection_type: profile } : profile) === 'ssh-key') {
+      return 'key';
+    }
     return 'terminal';
   }
 
@@ -260,7 +291,7 @@
         card.title = `${profileTarget(p)} (${(p.connection_type || 'ssh').toUpperCase()})`;
         card.innerHTML = `
           <span class="material-symbols-outlined welcome-profile-icon">
-            ${profileIcon(p.connection_type)}
+            ${profileIcon(p)}
           </span>
           <span class="welcome-profile-name"></span>
           <span class="welcome-profile-host"></span>
@@ -317,7 +348,7 @@
       label.title = profileTarget(p);
       label.textContent = p.name || '';
       label.addEventListener('click', () => {
-        typeSelect.value = p.connection_type || 'ssh';
+        typeSelect.value = pickerValue(p);
         applyConnectionType(typeSelect.value);
         fillFromProfile(p);
       });
@@ -476,9 +507,25 @@
     if (el != null && value !== undefined && value !== null) el.value = value;
   }
 
+  /**
+   * Which of the picker's entries a saved profile belongs to.
+   *
+   * `auth_method` is what a profile saved since the split carries. Older ones
+   * have none, so a stored key path or jump host stands in — those profiles
+   * were created through the drawer this replaced, and putting them back in
+   * the password form would hide the fields that make them work.
+   */
+  function pickerValue(p) {
+    const kind = p.connection_type || 'ssh';
+    if (kind !== 'ssh') return kind;
+    if (p.auth_method === 'key') return 'ssh-key';
+    if (p.auth_method === 'password') return 'ssh';
+    return (p.private_key_path || p.jump_host) ? 'ssh-key' : 'ssh';
+  }
+
   function fillFromProfile(p) {
     setField('field-label', p.name || '');
-    setField('field-conntype', p.connection_type || 'ssh');
+    setField('field-conntype', pickerValue(p));
 
     setField('field-hostname', p.hostname || '');
     setField('field-port', p.port || DEFAULT_PORTS[p.connection_type] || 22);
@@ -497,10 +544,8 @@
     setField('field-stopbits', p.stop_bits || 1);
     setField('field-flow', p.flow_control || 'none');
 
-    // Open the advanced section when it holds something, so restored key or
-    // jump-host settings are not silently hidden behind a collapsed summary.
-    const advanced = document.getElementById('ssh-advanced');
-    if (advanced) advanced.open = Boolean(p.private_key_path || p.jump_host);
+    // Nothing to open any more: the key form is its own connection type
+    // rather than a drawer, so restoring a key profile shows its fields.
   }
 
   // -------------------------------------------------------------------------
@@ -525,7 +570,9 @@
     const wantsPlain = Boolean(plain && plain.checked);
 
     const payload = {
-      connection_type: type,
+      connection_type: TRANSPORT[type] || type,
+      // Which form was filled in. Not a transport — see TRANSPORT above.
+      auth_method:     AUTH_METHOD[type] || '',
       display_label:   value('field-label'),
       // The backend fills remembered credentials in server-side from this id,
       // so a saved password never travels to the browser.
@@ -553,7 +600,7 @@
       password: document.getElementById('field-password').value,
     });
 
-    if (type === 'ssh') {
+    if (type === 'ssh-key') {
       Object.assign(payload, {
         private_key_path:       value('field-key-path'),
         private_key_username:   value('field-key-username'),
@@ -685,6 +732,10 @@
     return {
       name:             payload.display_label || payload.hostname || payload.serial_port,
       connection_type:  payload.connection_type,
+      // Which of the two SSH forms this connection uses. Not part of its
+      // identity — the same switch reached by key and by password is one
+      // device, and profiles.identity() has to keep seeing it that way.
+      auth_method:      payload.auth_method || '',
       hostname:         payload.hostname || '',
       port:             payload.port || 22,
       username:         payload.username || '',

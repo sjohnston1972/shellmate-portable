@@ -254,6 +254,12 @@ class SaveProfileRequest(BaseModel):
     port: int = 22
     username: str = ""
     connection_type: str = "ssh"
+    #: "password" | "key" | "". Which of the two SSH forms the connection uses.
+    #: Deliberately not part of connection_type: both are the SSH transport,
+    #: and profiles.identity() treats connection_type as part of what makes
+    #: two saved connections the same device — so a separate transport value
+    #: would turn one switch reached both ways into two profiles.
+    auth_method: str = ""
 
     # Reconnect details worth remembering. Never any secret — no password and
     # no key passphrase is ever written to a profile.

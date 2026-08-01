@@ -306,14 +306,16 @@
         <div class="form-group">
           <label for="field-conntype">Connection type</label>
           <select id="field-conntype">
-            <option value="ssh" selected>SSH</option>
+            <option value="ssh" selected>SSH — password</option>
+            <option value="ssh-key">SSH — key or jump host</option>
             <option value="serial">Serial console</option>
             <option value="telnet">Telnet</option>
           </select>
+          <p class="field-hint">Both SSH entries connect the same way. They ask for different things, so each shows only its own fields.</p>
         </div>
 
         <!-- ===== Network transports (SSH / Telnet) ===== -->
-        <div class="conn-fields" data-for="ssh telnet">
+        <div class="conn-fields" data-for="ssh ssh-key telnet">
           <div class="form-group">
             <label for="field-hostname">Hostname / IP <span class="required">*</span></label>
             <div class="field-with-button">
@@ -429,8 +431,9 @@
         </div>
 
         <!-- Offered for every transport that takes credentials. Hidden for
-             serial, which has none. -->
-        <div class="conn-fields" data-for="ssh telnet">
+             serial, which has none. A key passphrase is a credential too, so
+             this covers the key form as well. -->
+        <div class="conn-fields" data-for="ssh ssh-key telnet">
           <label class="checkbox-row" for="field-remember"
                  data-tip="Encrypted with your Windows account by default, so there is nothing to type. Choose a master password instead under Settings → Credentials Vault, and it works on any machine.||The password is never sent back to this dialog. ShellMate fills it in on the device end when you connect, and the interface only ever learns that one is saved.">
             <input type="checkbox" id="field-remember" />
@@ -453,10 +456,14 @@
           <p class="field-hint" id="remember-hint"></p>
         </div>
 
-        <!-- ===== SSH-only advanced options ===== -->
-        <div class="conn-fields" data-for="ssh">
-          <details id="ssh-advanced">
-            <summary>Key authentication and jump host</summary>
+        <!-- ===== SSH by key, or through a jump host =====
+             Was a <details> under the password form: nine fields collapsed
+             beneath four, so expanding it made the dialog about the
+             complicated case and everybody paid for it. It is its own entry
+             in the picker now and needs no drawer. -->
+        <div class="conn-fields" data-for="ssh-key">
+          <div id="ssh-advanced">
+            <p class="field-hint">The device authenticates you by key. A password below is only needed if it asks for one <em>after</em> accepting the key — an enable or AAA prompt.</p>
 
             <div class="form-group">
               <label for="field-key-path">Private key file</label>
@@ -513,7 +520,7 @@
                 </button>
               </div>
             </div>
-          </details>
+          </div>
         </div>
 
         <div id="form-error" class="form-error hidden"></div>

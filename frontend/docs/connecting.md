@@ -142,6 +142,29 @@ Plenty of network devices run an SSH shell with no SFTP subsystem at all. If
 yours is one of them, the panel says so rather than showing an empty
 directory.
 
+## Choosing a connection type
+
+Four entries, and the first two are the same transport asking for different
+things:
+
+| | What it wants |
+|---|---|
+| **SSH — password** | An address, a username and a password |
+| **SSH — key or jump host** | An address, a username, a private key file, and a bastion if you go through one |
+| **Serial console** | A COM port and its line settings |
+| **Telnet** | An address, and credentials only if you want ShellMate to answer the login prompts |
+
+The two SSH entries connect identically. They are separate because the key
+form has nine fields the password form does not, and putting them in one place
+meant everybody paid the cost of the complicated case — it used to be a
+collapsed section that dwarfed the dialog when opened.
+
+Switching between them keeps the address and username, so picking the wrong
+one costs nothing. A saved connection opens on whichever form it uses, and
+key-based ones carry a key icon on the welcome screen — worth knowing before
+you click, because when a key connection fails the cause is usually the key
+rather than a password.
+
 ## Finding devices
 
 On a site you did not build, the first job is working out what is on the wire.
