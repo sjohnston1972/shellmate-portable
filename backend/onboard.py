@@ -174,13 +174,15 @@ class Onboarder:
             return True
         return elapsed >= advanced("identify.deadline_seconds")
 
-    def run(self, prompt: str = "", auto_paging: bool = True) -> dict:
+    def run(self, prompt: str = "", auto_paging: bool = True,
+            remembered: str = "") -> dict:
         """
         Identify the device and decide what to send it.
 
         Args:
             prompt: The most recent prompt, if the device has shown one.
             auto_paging: The user's "turn paging off on connect" setting.
+            remembered: What the user last said this device is, if anything.
 
         Returns:
             A summary for the frontend, including the command that should be
@@ -189,7 +191,41 @@ class Onboarder:
         self._done = True
         self.fingerprint = identify(banner=self._banner, prompt=prompt)
 
+        # A remembered answer beats a guess and loses to direct evidence.
+        #
+        # It beats a prompt-shape guess because that is the whole point: the
+        # devices somebody bothers to identify by hand are the ones a prompt
+        # can never settle, and a remembered value carries confidence 1.0
+        # precisely because it was not inferred.
+        #
+        # It loses to a confident banner because a device that used to answer
+        # as an ASA and now announces itself as IOS has most likely been
+        # replaced, and the banner is evidence about the device as it is now.
+        # Either way the summary says which happened — silently preferring one
+        # is the thing that would leave somebody unable to explain why a
+        # command went out.
+        remembered_used = False
+        overridden = ""
+        if remembered:
+            banner_is_direct = (self.fingerprint.source == "banner"
+                                and self.fingerprint.certain_enough_to_act)
+            if banner_is_direct and self.fingerprint.platform != remembered:
+                overridden = remembered
+            elif not banner_is_direct:
+                try:
+                    self.fingerprint = as_chosen(remembered)
+                    remembered_used = True
+                except ValueError:
+                    # platforms.json edited, or the profile carried to an
+                    # installation without that platform. Falling back to
+                    # automatic identification is the right failure.
+                    logger.info("Remembered platform %r is not one this "
+                                "installation knows; identifying normally",
+                                remembered)
+
         summary = summarise(self.fingerprint, auto_paging)
+        summary["remembered"] = remembered_used
+        summary["remembered_overridden"] = overridden
         self.paging_command = summary["paging_command"]
 
         logger.info(

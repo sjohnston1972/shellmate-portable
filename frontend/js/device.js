@@ -39,6 +39,7 @@
     'prompt':          'its prompt alone',
     'version-command': 'a version command',
     'you':             'you',
+    'ssh-version':     'its SSH version string',
     'none':            'nothing it could match',
   };
 
@@ -122,7 +123,23 @@
    * decide whether they care.
    */
   function announce(info) {
-    const from = SOURCE[info.source] || info.source;
+    // A remembered answer is not "you" in the present tense — it is a
+    // decision made on some earlier connection, and somebody has to be able
+    // to tell that is why a command went out today.
+    const from = info.remembered
+      ? 'what you told it last time'
+      : (SOURCE[info.source] || info.source);
+
+    // A remembered value that a banner contradicted. The device has probably
+    // been replaced, and saying nothing would leave the old answer looking
+    // like it is still in force.
+    if (info.remembered_overridden) {
+      note(`identified ${info.profile_name} from its login banner — this was `
+           + `remembered as ${info.remembered_overridden}, so the device has `
+           + `likely changed. Re-identify it if the new answer is wrong.`,
+           'device', { offerOverride: true });
+      return;
+    }
 
     if (info.paging_command) {
       note(`identified ${info.profile_name} from ${from} — sent "${info.paging_command}"`,

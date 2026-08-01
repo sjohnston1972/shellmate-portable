@@ -481,6 +481,117 @@ def test_the_guardrail_holds_before_it_sends() -> None:
     advanced.reset(key="terminal.confirm_dangerous")
 
 
+def test_a_platform_you_set_is_remembered() -> None:
+    """
+    Telling ShellMate what a device is used to last as long as the tab.
+
+    Which landed hardest on exactly the devices `as_chosen()` exists for — a
+    legal-warning banner and anything behind a terminal server are the ones
+    automatic identification will never settle, so the escape hatch had to be
+    used again on every single reconnect.
+
+    It is also the strongest value ShellMate holds: confidence 1.0, source
+    "you", and its own docstring calls it the one source that is not a guess.
+    Discarding it on disconnect while keeping every guess in the database was
+    the wrong way round.
+    """
+    print(chr(10) + "-- Remembering what you said a device is --")
+    from backend.onboard import Onboarder
+
+    def onboard(banner: str, prompt: str, remembered: str = "") -> dict:
+        o = Onboarder()
+        o.observe(banner)
+        return o.run(prompt=prompt, remembered=remembered)
+
+    legal = "Authorised access only. All activity is logged." + chr(13) + chr(10)
+
+    # Without it: identified from the prompt, below the gate, nothing sent.
+    blind = onboard(legal, "switch01#")
+    check("a legal banner alone sends nothing",
+          blind["paging_command"] == "" and blind["paging_skipped"] == "unconfident",
+          str(blind["paging_skipped"]))
+
+    remembered = onboard(legal, "switch01#", "ios")
+    check("a remembered platform is used", remembered["remembered"] is True)
+    check("and the paging command goes out",
+          remembered["paging_command"] == "terminal length 0",
+          str(remembered["paging_command"]))
+    check("so aliases have a platform to resolve against",
+          remembered["platform"] == "ios")
+
+    # A confident banner is evidence about the device as it is *now*.
+    replaced = onboard(BANNERS["asa"], "fw#", "ios")
+    check("a confident banner beats a remembered value",
+          replaced["platform"] == "asa",
+          "a device answering as an ASA has probably been replaced")
+    check("and the disagreement is reported rather than silent",
+          replaced["remembered_overridden"] == "ios",
+          "silently preferring either would leave somebody unable to explain "
+          "why a command went out")
+
+    # platforms.json is a text file, and a profile can travel between
+    # installations.
+    unknown = onboard(legal, "switch01#", "no-such-platform")
+    check("an unknown remembered platform falls back rather than raising",
+          unknown["remembered"] is False)
+    check("and identification carries on normally",
+          unknown["paging_skipped"] == "unconfident",
+          str(unknown["paging_skipped"]))
+
+    check("nothing changes when there is nothing remembered",
+          onboard(legal, "switch01#")["remembered"] is False)
+
+
+def test_the_profile_carries_it() -> None:
+    """The write and the read, against a temporary profiles.json."""
+    print(chr(10) + "-- Where it is kept --")
+    import json as _json
+    import tempfile
+    from pathlib import Path as _Path
+
+    from backend import paths as _paths, profiles as _profiles
+
+    original_file = _paths.profiles_file
+    temp = _Path(tempfile.mkdtemp(prefix="remember-"))
+    _paths.profiles_file = lambda: temp / "profiles.json"
+
+    try:
+        _profiles._save([{
+            "id": "p1", "hostname": "10.60.0.1", "port": 22,
+            "username": "neteng", "connection_type": "ssh", "name": "10.60.0.1",
+        }])
+
+        check("nothing is remembered to begin with",
+              _profiles.remembered_platform("10.60.0.1", 22, "neteng") == "")
+
+        check("setting it reports a change",
+              _profiles.remember_platform("10.60.0.1", 22, "neteng", "asa") is True)
+        check("and it reads back",
+              _profiles.remembered_platform("10.60.0.1", 22, "neteng") == "asa")
+
+        check("a different device is unaffected",
+              _profiles.remembered_platform("10.60.0.2", 22, "neteng") == "")
+
+        # Matched by target, not by name — the name is rewritten the moment
+        # the device says what it is called.
+        _profiles._save([{**_profiles._load()[0], "name": "core-fw-01"}])
+        check("a renamed profile is still found",
+              _profiles.remembered_platform("10.60.0.1", 22, "neteng") == "asa",
+              "matching on a field that changes by itself would stop finding "
+              "the profile it just renamed")
+
+        check("clearing it works",
+              _profiles.remember_platform("10.60.0.1", 22, "neteng", "") is True)
+        check("and it is gone from the file",
+              "platform" not in _profiles._load()[0],
+              str(_profiles._load()[0]))
+
+        check("an unknown target changes nothing",
+              _profiles.remember_platform("10.99.9.9", 22, "u", "ios") is False)
+    finally:
+        _paths.profiles_file = original_file
+
+
 def main() -> int:
     print("=" * 52)
     print("  Device fingerprinting and platform profiles")
@@ -499,6 +610,8 @@ def main() -> int:
         test_outbound_pipeline,
         test_dangerous_command_matching,
         test_the_guardrail_holds_before_it_sends,
+        test_a_platform_you_set_is_remembered,
+        test_the_profile_carries_it,
     ):
         try:
             test()

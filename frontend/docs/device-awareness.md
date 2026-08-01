@@ -172,3 +172,35 @@ thing.
 
 **Reset all to defaults** discards every edit and restores the built-in
 definitions. Deleting `platforms.json` does the same.
+
+
+## It remembers what you told it
+
+Identifying a device by hand used to last as long as the tab. Close it,
+reconnect, and you were back to a device identified from its prompt alone —
+below the confidence threshold, so no aliases, no paging command, and the
+guardrail falling back to the generic list.
+
+That landed hardest on exactly the devices the override exists for. A switch
+whose banner is a legal warning, and anything behind a terminal server, are
+the two cases automatic identification will never settle on its own — so they
+were the ones you had to re-identify every single time.
+
+Tell ShellMate what a device is and it now remembers, against the saved
+connection. The next time you connect, aliases work immediately, paging is
+turned off, and destructive commands are matched against the right platform's
+list.
+
+**A confident banner still wins.** A device that used to answer as an ASA and
+now announces itself as IOS has most likely been replaced, and the banner is
+evidence about the device as it is today. When that happens ShellMate says so
+rather than quietly changing its mind — and offers to let you re-identify it
+if the new answer is wrong.
+
+**It only works for saved connections**, because there is nowhere else to put
+it. An ad-hoc connection to an address you typed once is forgotten with the
+tab, as before.
+
+Devices found by a network scan arrive with their platform already recorded,
+from the SSH banner the scan read — so this works on them from the first
+connection without anybody setting anything.

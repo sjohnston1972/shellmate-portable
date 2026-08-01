@@ -691,6 +691,16 @@ async def set_session_platform(session_id: str, request: IdentifyRequest) -> dic
             handler.send, (summary["paging_command"] + "\r").encode()
         )
 
+    # Remember it, so the next connection starts where this one ended up.
+    # This is the one source that is not a guess, and it was being discarded
+    # on disconnect while every guess stayed in the database.
+    remembered = await asyncio.to_thread(
+        profiles_module.remember_platform,
+        session.get("hostname", ""), session.get("port", 0),
+        session.get("username", ""), summary["platform"],
+    )
+    summary["remembered_saved"] = remembered
+
     logger.info("Session %s identified as %s by the user%s", session_id[:8],
                 summary["profile_name"],
                 f"; sent '{summary['paging_command']}'" if summary["paging_command"]
@@ -2737,9 +2747,19 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
         # reported the platform's command regardless, and the note in the
         # corner claimed to have sent something to a user who had turned the
         # feature off.
+        # What the user last said this device is, if they ever said. Also
+        # picks up the platform a scan wrote from the device's SSH banner,
+        # which was stored and read by nothing.
+        remembered = await asyncio.to_thread(
+            profiles_module.remembered_platform,
+            session.get("hostname", ""), session.get("port", 0),
+            session.get("username", ""),
+        )
+
         summary = onboarder.run(
             session["transcript"].last_prompt,
             auto_paging=bool(terminal_settings.get("auto_paging_off", True)),
+            remembered=remembered,
         )
         session["fingerprint"] = summary
         session["pipeline"].platform = summary["platform"]

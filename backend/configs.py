@@ -274,6 +274,8 @@ def drift_report(session: dict) -> dict:
     if not config_archive.capture_enabled():
         return {
             "available": False, "hostname": hostname,
+            "capture": {"captured": False,
+                        "reason": "capture is switched off"},
             "reason": "Configuration capture is switched off under "
                       "Settings → Session Logging.",
         }
@@ -283,16 +285,28 @@ def drift_report(session: dict) -> dict:
     try:
         result = capture_config(session)
     except ConnectionError_ as exc:
-        return {"available": False, "reason": str(exc), "hostname": hostname}
+        return {"available": False, "reason": str(exc), "hostname": hostname,
+                "capture": {"captured": False, "reason": str(exc)}}
 
     # What was saved as a file, if anything — the confirmation the user gets
     # for a capture that is otherwise entirely invisible to them.
     archive = result.get("archive") or {}
 
+    # What happened to the snapshot itself, as distinct from what happened to
+    # the optional file. The only confirmation anywhere was tied to the file,
+    # and file archiving is off by default — so a capture that worked
+    # perfectly said nothing at all.
+    capture = {
+        "captured":   True,
+        "lines":      result.get("line_count", 0),
+        "stored":     bool(result.get("stored")),
+        "unchanged":  bool(result.get("unchanged")),
+    }
+
     if previous is None:
         return {
             "available": True, "first_visit": True, "hostname": hostname,
-            "archive": archive,
+            "archive": archive, "capture": capture,
             "summary": f"First configuration snapshot of {hostname} stored "
                        f"({result['line_count']:,} lines).",
         }
@@ -303,7 +317,7 @@ def drift_report(session: dict) -> dict:
         report = {
             "available": True, "first_visit": False, "changed": 0,
             "hostname": hostname,
-            "archive": archive,
+            "archive": archive, "capture": capture,
             "days_since": _days_since(previous.get("captured_at")),
             "summary": _unchanged_summary(hostname, previous.get("captured_at")),
         }
@@ -316,6 +330,7 @@ def drift_report(session: dict) -> dict:
         "first_visit": False,
         "hostname":    hostname,
         "archive":     archive,
+        "capture":     capture,
         "days_since":  _days_since(previous.get("captured_at")),
         "changed":     comparison["changed"],
         "added":       comparison["added"],

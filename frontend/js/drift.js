@@ -68,13 +68,17 @@
       if (!res.ok) return;
       const report = await res.json();
 
-      // Not available on this device: stay quiet rather than explaining
-      // ourselves unprompted every time someone opens a serial console.
-      if (!report.available) return;
+      // Say what happened to the snapshot, whether or not it worked and
+      // whether or not a file was also written. Silence used to mean all
+      // of "captured fine", "capture switched off", "the device refused"
+      // and "this is broken" — which is why a working capture was
+      // reported as a missing feature.
+      confirmCapture(report, sessionData);
 
-      // The capture itself is meant to be invisible, so the one thing said
-      // about it is that a copy was written where the user asked for it.
-      confirmArchive(report, sessionData);
+      // Nothing further to compare. The notice above has already said why,
+      // which is the half that used to be missing — this return is about the
+      // drift banner, not about staying quiet altogether.
+      if (!report.available) return;
 
       if (!report.summary) return;
       if (setting('diff_on_connect', true) === false) return;
@@ -85,17 +89,84 @@
     }
   }
 
-  /** The small confirmation that a capture reached the archive. */
-  function confirmArchive(report, sessionData) {
-    const archive = report.archive || {};
-    if (!archive.written) return;
+  /**
+   * Say what happened to the configuration snapshot.
+   *
+   * This used to be gated on `archive.written` — whether an optional *file*
+   * was produced — and `save_config_files` defaults to false. So the capture
+   * that feeds drift, history and the whole diff feature happened silently
+   * every time, and the one line that would have confirmed it returned on its
+   * first statement.
+   *
+   * The snapshot and the file are two features with two settings, so they are
+   * two sentences rather than one condition.
+   */
+  function confirmCapture(report, sessionData) {
     if (!window.shellmateAlerts || !window.shellmateAlerts.notify) return;
 
-    const name = archive.path.split(/[\\/]/).pop();
+    const capture = report.capture;
+    if (!capture) return;
+
+    const device = report.hostname || sessionData.display_label || 'device';
+
+    if (!capture.captured) {
+      // "No configuration captured", with the reason, is the difference
+      // between a feature that is switched off and one that is broken.
+      window.shellmateAlerts.notify({
+        severity: 'warning',
+        icon: 'error',
+        title: `No configuration captured — ${device}`,
+        body: capture.reason || 'The device did not provide one.',
+        sessionId: sessionData.session_id,
+      });
+      return;
+    }
+
+    queueCaptureNotice(device, capture, report, sessionData);
+  }
+
+  /**
+   * Captures waiting to be summarised.
+   *
+   * Opening a whole tag (#102) opens forty sessions at once, and forty toasts
+   * is not a confirmation, it is an interruption. One line covers them.
+   */
+  let pendingCaptures = [];
+  let captureTimer = null;
+
+  function queueCaptureNotice(device, capture, report, sessionData) {
+    pendingCaptures.push({ device, capture, report, sessionData });
+    clearTimeout(captureTimer);
+    captureTimer = setTimeout(flushCaptureNotices, 1200);
+  }
+
+  function flushCaptureNotices() {
+    const batch = pendingCaptures;
+    pendingCaptures = [];
+    if (!batch.length) return;
+
+    if (batch.length > 1) {
+      const total = batch.reduce((n, b) => n + (b.capture.lines || 0), 0);
+      window.shellmateAlerts.notify({
+        title: `${batch.length} configurations captured`,
+        body: `${total.toLocaleString()} lines in total, stored for comparison.`,
+      });
+      return;
+    }
+
+    const { device, capture, report, sessionData } = batch[0];
+    const archive = report.archive || {};
+    const parts = [`${(capture.lines || 0).toLocaleString()} lines, stored`];
+
+    if (capture.unchanged) parts.push('unchanged since the last one');
+    if (archive.written && archive.path) {
+      parts.push('saved as ' + archive.path.split(/[\\/]/).pop()
+                 + (archive.redacted ? ' with secrets masked' : ''));
+    }
+
     window.shellmateAlerts.notify({
-      title: `Configuration saved — ${report.hostname || sessionData.display_label || 'device'}`,
-      body: `${archive.lines.toLocaleString()} lines to ${name}` +
-            (archive.redacted ? ', secrets masked' : ''),
+      title: `Configuration captured — ${device}`,
+      body: parts.join(' · '),
       sessionId: sessionData.session_id,
     });
   }

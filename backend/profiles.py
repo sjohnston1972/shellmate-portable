@@ -864,6 +864,79 @@ def record_detected_hostname(target: str, port: int, username: str, detected: st
     return changed
 
 
+
+def remember_platform(target: str, port: int, username: str, platform: str) -> bool:
+    """
+    Note what the user said a device is, against the profile used to reach it.
+
+    Told directly, there is nothing left to be unsure about — `as_chosen()`
+    carries confidence 1.0 and source "you", and calls itself the one source
+    that is not a guess. Discarding it on disconnect while keeping every
+    *guess* in the database is the wrong way round, and it lands hardest on
+    exactly the devices the escape hatch exists for: a legal-warning banner
+    and anything behind a terminal server are the ones automatic
+    identification will never get right on its own.
+
+    Matched by target rather than by name, for the same reason
+    `record_detected_hostname()` is: the name is rewritten when the device
+    says what it is called, and matching on something that changes by itself
+    would stop finding the profile it just renamed.
+
+    An empty platform clears it, which is how somebody takes back a decision
+    they made in March.
+
+    Returns:
+        True if a profile was updated.
+    """
+    if not target:
+        return False
+
+    profiles = _load()
+    changed = False
+
+    for profile in profiles:
+        if profile.get("hostname") != target:
+            continue
+        if int(profile.get("port") or 0) != int(port or 0):
+            continue
+        if username and profile.get("username") not in ("", username):
+            continue
+
+        if platform:
+            if profile.get("platform") != platform:
+                profile["platform"] = platform
+                changed = True
+        elif profile.pop("platform", None) is not None:
+            changed = True
+
+    if changed:
+        _save(profiles)
+    return changed
+
+
+def remembered_platform(hostname: str, port: int, username: str) -> str:
+    """
+    What the user last said this device is, or "".
+
+    Also picks up the platform `discovery_save()` writes from a scan's SSH
+    banner — which was stored and read by nothing until now.
+    """
+    if not hostname:
+        return ""
+
+    for profile in _load():
+        if profile.get("hostname") != hostname:
+            continue
+        if port and int(profile.get("port") or 0) != int(port):
+            continue
+        if username and profile.get("username") not in ("", username):
+            continue
+        remembered = (profile.get("platform") or "").strip()
+        if remembered:
+            return remembered
+    return ""
+
+
 def delete_profile(profile_id: str) -> bool:
     """
     Delete a profile and any credentials remembered for it.
