@@ -409,7 +409,37 @@
       await loadLibrary();
     });
 
-    row.append(load, add, del);
+    // Mark it as a quick command — offered on a tab's right-click menu.
+    // Here rather than in Settings because this *is* the library, and one
+    // editor reached by every route beats two that can disagree.
+    const quick = document.createElement('button');
+    quick.type = 'button';
+    quick.className = 'snippet-quick' + (snippet.quick ? ' on' : '');
+    quick.title = snippet.quick
+      ? 'On the tab right-click menu. Click to remove it.'
+      : 'Add to the tab right-click menu';
+    quick.innerHTML = '<span class="material-symbols-outlined">'
+      + (snippet.quick ? 'bolt' : 'bolt') + '</span>';
+    quick.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await fetch('/api/snippets/' + encodeURIComponent(snippet.id), {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          name: snippet.name, commands: snippet.commands,
+          description: snippet.description, platform: snippet.platform,
+          wait_ms: snippet.wait_ms, writes: snippet.writes,
+          quick: !snippet.quick,
+          send_return: snippet.send_return !== false,
+        }),
+      });
+      // The tab menu caches its list, so tell it rather than letting it go
+      // stale until the next reload.
+      window.dispatchEvent(new CustomEvent('shellmate:snippets-changed'));
+      await loadLibrary();
+    });
+
+    row.append(load, quick, add, del);
     return row;
   }
 

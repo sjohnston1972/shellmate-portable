@@ -50,6 +50,16 @@ class Snippet:
     # True when this writes to the device. Drives the confirmation wording;
     # it is a label on the snippet, not a security control.
     writes: bool = False
+    # Offered on a tab's right-click menu, for the handful sent dozens of
+    # times a day. A flag on the library rather than a second store: there is
+    # one place commands are written down and one editor for it, whichever
+    # route you arrive by.
+    quick: bool = False
+    # Whether to press Enter. False types the command into the session and
+    # leaves it — which is what makes a shortcut usable for something you want
+    # to read before running, and is the difference between a shortcut and a
+    # hazard for anything destructive.
+    send_return: bool = True
     builtin: bool = False
 
     def as_dict(self) -> dict:
@@ -425,6 +435,12 @@ def load_snippets() -> list[Snippet]:
     return out or builtins
 
 
+
+def quick_snippets() -> list[Snippet]:
+    """The ones offered on a tab's right-click menu."""
+    return [s for s in load_snippets() if s.quick]
+
+
 def save_snippet(fields: dict) -> Snippet:
     """Create or update one snippet. Returns what was stored."""
     name = (fields.get("name") or "").strip()
@@ -448,6 +464,10 @@ def save_snippet(fields: dict) -> Snippet:
         platform=(fields.get("platform") or "").strip(),
         wait_ms=max(0, min(60_000, int(fields.get("wait_ms", 500) or 0))),
         writes=bool(fields.get("writes")),
+        quick=bool(fields.get("quick")),
+        # Defaults to true so an entry saved without thinking about it behaves
+        # the way every other command in the library does.
+        send_return=bool(fields.get("send_return", True)),
         # Editing a built-in keeps the flag, so the interface can still say
         # where it came from.
         builtin=bool(existing.builtin) if existing else False,

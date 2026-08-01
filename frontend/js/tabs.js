@@ -697,6 +697,9 @@
 
     document.body.appendChild(_ctxMenu);
 
+    // Filled in behind the menu, so a right-click never waits on a request.
+    _appendQuickBroadcast(_ctxMenu, tab);
+
     // Position near cursor, clamped to viewport
     const x = Math.min(e.clientX, window.innerWidth  - 200);
     const y = Math.min(e.clientY, window.innerHeight - 160);
@@ -733,7 +736,13 @@
   }
 
   function _hideTabContextMenu() {
-    if (_ctxMenu) { _ctxMenu.remove(); _ctxMenu = null; }
+    // Remove by class, not only the tracked reference. The dismissal
+    // listeners are registered per menu with { once: true }, so an older
+    // menu's handler can fire after a newer one has replaced the reference —
+    // removing the new menu and orphaning the old one, which then stays in
+    // the DOM for the life of the page.
+    document.querySelectorAll('.tab-context-menu').forEach(el => el.remove());
+    _ctxMenu = null;
   }
 
   /**
@@ -1162,6 +1171,185 @@
    * that, because otherwise being asked for a password you typed two minutes
    * ago looks like a bug.
    */
+
+  // -------------------------------------------------------------------------
+  // Quick broadcast
+  //
+  // A handful of commands get sent dozens of times a day, and reaching them
+  // meant opening the Broadcast panel, finding the entry in a 137-line
+  // library, choosing targets and sending. These are the same library
+  // entries, flagged — one place commands are written down and one editor for
+  // them, whichever route you arrive by.
+  // -------------------------------------------------------------------------
+
+  /** Cached between right-clicks; the menu should not wait on a fetch. */
+  let _quickSnippets = null;
+
+  async function _loadQuick() {
+    if (_quickSnippets) return _quickSnippets;
+    try {
+      const res = await fetch('/api/snippets/quick');
+      _quickSnippets = res.ok ? (await res.json()).snippets : [];
+    } catch (_) {
+      _quickSnippets = [];
+    }
+    return _quickSnippets;
+  }
+
+  // The library can change while the application is open.
+  window.addEventListener('shellmate:snippets-changed', () => { _quickSnippets = null; });
+
+  /**
+   * Add the quick-broadcast entries to an open tab menu.
+   *
+   * Appended after the menu is on screen rather than built into it, so a
+   * right-click is never waiting on a request.
+   */
+  async function _appendQuickBroadcast(menu, tab) {
+    // Guard against being appended twice to one menu. The fetch is async, so
+    // two calls can be in flight against the same element and the entries
+    // appear doubled.
+    if (menu.dataset.quickAdded) return;
+    menu.dataset.quickAdded = '1';
+
+    const snippets = await _loadQuick();
+    if (!menu.isConnected) return;          // menu already dismissed
+
+    const sep = document.createElement('div');
+    sep.className = 'ctx-sep';
+    menu.appendChild(sep);
+
+    const heading = document.createElement('div');
+    heading.className = 'ctx-heading';
+    heading.textContent = 'Quick broadcast';
+    menu.appendChild(heading);
+
+    if (!snippets.length) {
+      const empty = document.createElement('div');
+      empty.className = 'ctx-empty';
+      empty.textContent = 'None marked yet';
+      menu.appendChild(empty);
+    }
+
+    snippets.forEach(snippet => {
+      const row = document.createElement('div');
+      row.className = 'ctx-quick-row';
+
+      const label = document.createElement('span');
+      label.className = 'ctx-quick-name';
+      label.textContent = snippet.name;
+      // The commands themselves, because "Save configuration" is not enough
+      // to decide by when it writes to the device.
+      label.title = snippet.commands.join('\n')
+        + (snippet.send_return ? '' : '\n\n(typed in, not run)');
+
+      const here = document.createElement('button');
+      here.className = 'ctx-quick-btn';
+      here.textContent = 'This tab';
+      here.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _hideTabContextMenu();
+        _quickBroadcast(snippet, [tab]);
+      });
+
+      const all = document.createElement('button');
+      all.className = 'ctx-quick-btn';
+      all.textContent = 'All tabs';
+      all.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _hideTabContextMenu();
+        _quickBroadcast(snippet, tabs.filter(t => t.isConnected));
+      });
+
+      row.append(label, here, all);
+      menu.appendChild(row);
+    });
+
+    const edit = document.createElement('button');
+    edit.className = 'ctx-quick-edit';
+    edit.textContent = 'Edit quick broadcast commands…';
+    edit.addEventListener('click', () => {
+      _hideTabContextMenu();
+      // The same signpost pattern the prompt editor needed: a feature found
+      // on a menu has to say where it is maintained, or it is discovered and
+      // not maintainable.
+      // The library lives in the Broadcast panel, which is where snippets
+      // are already added, edited and removed. One editor, whichever route
+      // you arrive by.
+      if (typeof window.openBroadcast === 'function') window.openBroadcast();
+      else document.dispatchEvent(new KeyboardEvent('keydown',
+        { key: 'B', ctrlKey: true, shiftKey: true, bubbles: true }));
+    });
+    menu.appendChild(edit);
+  }
+
+  /**
+   * Send a quick snippet to one tab or to all of them.
+   *
+   * Routed through /api/broadcast rather than typed into each socket, so it
+   * inherits the concurrency cap, the overall timeout and — most of all —
+   * the per-device result list. A partial failure has to be visible rather
+   * than assumed, and that matters more here than in the panel, because the
+   * whole point is not watching each one.
+   */
+  async function _quickBroadcast(snippet, targets) {
+    const connected = targets.filter(t => t.isConnected);
+    if (!connected.length) return;
+
+    // Anything that writes gets a confirmation naming the count, and sending
+    // to twelve devices is a different decision from sending to one.
+    if (snippet.writes) {
+      const ok = await window.shellmateDialog.confirm({
+        title: connected.length === 1
+          ? `Send "${snippet.name}" to ${connected[0].label}?`
+          : `Send "${snippet.name}" to ${connected.length} devices?`,
+        body: snippet.commands.join('\n'),
+        confirmLabel: 'Send',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+
+    try {
+      const res = await fetch('/api/broadcast', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          session_ids: connected.map(t => t.sessionId),
+          commands:    snippet.commands,
+          wait_ms:     snippet.wait_ms,
+          // The broadcast endpoint already had this flag — `execute` decides
+          // whether a carriage return follows the command, which is exactly
+          // the difference between typing one in and running it.
+          execute:     snippet.send_return !== false,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Could not send it.');
+
+      const failed = (data.results || []).filter(r => !r.ok);
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          severity: failed.length ? 'warning' : 'info',
+          icon: failed.length ? 'warning' : 'check_circle',
+          title: snippet.send_return === false
+            ? `${snippet.name} typed into ${data.sent} of ${connected.length}`
+            : `${snippet.name} sent to ${data.sent} of ${connected.length}`,
+          body: failed.length
+            ? failed.map(r => `${r.label || r.session_id}: ${r.error}`).join('\n')
+            : snippet.commands.join('  ·  '),
+        });
+      }
+    } catch (e) {
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          severity: 'warning', icon: 'error',
+          title: 'Quick broadcast failed', body: e.message,
+        });
+      }
+    }
+  }
+
   async function _saveConnection(tab) {
     let session = null;
     try {

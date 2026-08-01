@@ -2051,6 +2051,23 @@ class SnippetRequest(BaseModel):
     platform: str = ""
     wait_ms: int = 500
     writes: bool = False
+    #: Offered on a tab's right-click menu.
+    quick: bool = False
+    #: False types the command in and leaves it, rather than running it.
+    send_return: bool = True
+
+
+@app.get("/api/snippets/quick")
+async def snippets_quick() -> dict:
+    """
+    The snippets offered on a tab's right-click menu.
+
+    Its own endpoint rather than a filter in the browser: the tab menu opens
+    on a right-click and should not be waiting on the whole 137-entry library
+    to decide what to show.
+    """
+    return {"snippets": [s.as_dict()
+                         for s in await asyncio.to_thread(snippets.quick_snippets)]}
 
 
 @app.get("/api/snippets")

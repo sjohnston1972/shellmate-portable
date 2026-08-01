@@ -6407,3 +6407,66 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
    and keep the resize cursor whatever it is currently above. */
 body.resizing-panel { user-select: none; cursor: ew-resize; }
 body.resizing-panel * { cursor: ew-resize !important; }
+
+/* Quick broadcast (#118, #119) */
+.snippet-quick {
+  flex: 0 0 auto;
+  padding: 2px;
+  background: none;
+  border: 0;
+  color: var(--on-surface-muted);
+  cursor: pointer;
+}
+
+.snippet-quick:hover { color: var(--on-surface); }
+.snippet-quick.on    { color: var(--warn); }
+.snippet-quick .material-symbols-outlined { font-size: 15px; }
+
+.ctx-quick-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+}
+
+.ctx-quick-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.ctx-quick-btn {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface-dim);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.ctx-quick-btn:hover { border-color: var(--primary-container); color: var(--primary); }
+
+.ctx-empty {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+}
+
+/* A feature found on a menu has to say where it is maintained. */
+.ctx-quick-edit {
+  width: 100%;
+  padding: 5px 10px;
+  background: none;
+  border: 0;
+  color: var(--primary);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctx-quick-edit:hover { text-decoration: underline; }
