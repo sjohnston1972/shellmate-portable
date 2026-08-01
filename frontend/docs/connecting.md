@@ -266,3 +266,26 @@ rather than quietly doing nothing.
 When it succeeds, the terminal says so. A session that silently reappears
 leaves you unsure whether the scrollback above the line is from the same boot
 of the device, which matters when you are about to reason about what changed.
+
+## Grouping connections with tags
+
+A saved connection can carry tags — `glasgow`, `production`, `access` — typed
+comma-separated in the connection dialog. **Tags rather than folders**, because
+the useful groupings overlap: a device is both in Glasgow and in production and
+an access switch, and any tree forces you to pick one.
+
+The welcome screen shows a chip per tag with a count. Click one to filter,
+click it again to go back. Past twenty tiles this is the difference between
+finding a device and scanning for it.
+
+**Open all** appears once a group is selected, and opens a tab for every device
+in it. The handshakes are paced rather than fired at once — forty simultaneous
+SSH connections through one bastion buries it — and anything that fails to
+connect is reported by name rather than silently skipped. It is deliberately
+not offered for the unfiltered list: opening two hundred tabs should not be one
+click away.
+
+**Broadcast still works on open sessions only.** "Send this to everything
+tagged `access`, connecting to whatever is not open" is a genuinely different
+and more dangerous operation, so opening the group is the step you take first —
+the devices are visibly in front of you before anything is sent to them.

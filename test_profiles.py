@@ -698,6 +698,64 @@ def test_the_two_ssh_forms_are_one_device() -> None:
           "SECRET-PHRASE" not in raw, raw[:200])
 
 
+def test_tags() -> None:
+    """
+    Grouping saved connections.
+
+    Tags rather than folders because the useful groupings overlap — a device
+    is both "glasgow" and "production" and "access", and any tree forces a
+    choice between them.
+    """
+    print(chr(10) + "-- Tags --")
+    reset()
+
+    check("whitespace and case are normalised",
+          profiles.normalise_tags(" Glasgow , PRODUCTION ") == ["glasgow", "production"])
+    check("duplicates collapse",
+          profiles.normalise_tags(["lab", "Lab", " lab "]) == ["lab"],
+          "'Production' and 'production' being two groups is a distinction "
+          "nobody means to make")
+    check("a comma-separated string works too",
+          profiles.normalise_tags("a,b,,c") == ["a", "b", "c"])
+    check("and empties produce nothing", profiles.normalise_tags(["", "  "]) == [])
+    check("order is kept", profiles.normalise_tags("z,a,m") == ["z", "a", "m"],
+          "sorting them would reorder what somebody typed for no reason")
+
+    saved = profiles.save_profile({
+        "hostname": "10.40.0.1", "port": 22, "username": "u",
+        "connection_type": "ssh", "name": "sw1", "tags": ["Lab", "lab", "Access"],
+    })
+    check("tags are normalised on the way in",
+          saved.get("tags") == ["lab", "access"], str(saved.get("tags")))
+
+    profiles.save_profile({
+        "hostname": "10.40.0.2", "port": 22, "username": "u",
+        "connection_type": "ssh", "name": "sw2", "tags": ["lab"],
+    })
+
+    counts = {entry["tag"]: entry["count"] for entry in profiles.all_tags()}
+    check("the tag list counts what carries each", counts == {"lab": 2, "access": 1},
+          str(counts))
+
+    tagged = profiles.profiles_tagged("lab")
+    check("a tag selects its devices", len(tagged) == 2, str(len(tagged)))
+    check("and matching is case-insensitive",
+          len(profiles.profiles_tagged("LAB")) == 2)
+    check("an unknown tag selects nothing", profiles.profiles_tagged("nope") == [])
+    check("as does an empty one", profiles.profiles_tagged("") == [])
+
+    profiles.set_tags(saved["id"], ["edge"])
+    check("tags can be replaced",
+          profiles.profiles_tagged("edge")[0]["id"] == saved["id"])
+    check("and the old one is gone",
+          len(profiles.profiles_tagged("lab")) == 1)
+
+    profiles.set_tags(saved["id"], [])
+    check("clearing removes the field rather than storing an empty list",
+          "tags" not in profiles._load()[0] or not profiles._load()[0].get("tags"),
+          str(profiles._load()[0].get("tags")))
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Connection profiles")
@@ -720,7 +778,8 @@ def main() -> int:
                  test_a_devices_own_password_wins,
                  test_deleting_a_shared_credential_detaches_what_used_it,
                  test_a_set_needs_a_name_and_holds_no_secret,
-                 test_the_two_ssh_forms_are_one_device):
+                 test_the_two_ssh_forms_are_one_device,
+                 test_tags):
         try:
             test()
         except Exception as exc:

@@ -6243,3 +6243,32 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .diff-history-row:hover { border-color: var(--primary-container); }
 .diff-history-when { flex: 1; font-family: var(--font-mono, monospace); }
 .diff-history-size { color: var(--on-surface-dim); font-size: 11px; }
+
+/* Tag chips on the welcome screen (#102) */
+#welcome-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+
+.welcome-tag {
+  padding: 3px 10px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: 999px;
+  color: var(--on-surface-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.welcome-tag:hover { border-color: var(--primary-container); }
+
+.welcome-tag.active {
+  background: var(--primary-tint);
+  border-color: var(--primary-edge);
+  color: var(--primary);
+}
+
+.welcome-tag-connect { margin-left: 6px; }

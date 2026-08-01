@@ -130,6 +130,11 @@
           <div id="welcome-content">
             <h1><img src="/static/Untitled-removebg-preview.png" alt="" id="welcome-logo" />ShellMate Portable</h1>
 
+            <!-- Groupings, when there are any. Tags rather than folders,
+                 because the useful ones overlap: a device is both "glasgow"
+                 and "production" and "access". -->
+            <div id="welcome-tags" class="hidden"></div>
+
             <!-- Saved session quick-launch grid -->
             <div id="welcome-profiles-grid"></div>
 
@@ -299,6 +304,12 @@
         <div class="form-group">
           <label for="field-label">Display name <span class="optional">(optional)</span></label>
           <input type="text" id="field-label" placeholder="e.g. core-switch-01" />
+        </div>
+
+        <div class="form-group">
+          <label for="field-tags">Tags <span class="optional">(optional)</span></label>
+          <input type="text" id="field-tags" placeholder="glasgow, production, access" />
+          <p class="field-hint">Comma-separated. Groups the welcome screen and lets you open a whole set at once. A device can carry several — they overlap on purpose.</p>
         </div>
 
         <!-- Transport picker. Switching this shows/hides the field groups

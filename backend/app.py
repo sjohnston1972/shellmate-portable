@@ -381,6 +381,9 @@ class SaveProfileRequest(BaseModel):
     parity: str = "N"
     stop_bits: float = 1
     flow_control: str = "none"
+    #: Free-text groupings. Tags rather than folders because the useful ones
+    #: overlap — a device is both "glasgow" and "production" and "access".
+    tags: list[str] = []
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -1234,6 +1237,82 @@ async def discovery_save(request: DiscoverySaveRequest) -> dict:
     logger.info("Discovery: saved %d new profile(s), %d already known",
                 result["saved"], result["already_saved"])
     return result
+
+
+class TagsRequest(BaseModel):
+    """Body for PUT /api/profiles/{profile_id}/tags."""
+    tags: list[str] = []
+
+
+@app.get("/api/profiles/tags")
+async def list_tags() -> dict:
+    """Every tag in use, with how many connections carry it."""
+    return {"tags": await asyncio.to_thread(profiles_module.all_tags)}
+
+
+@app.put("/api/profiles/{profile_id}/tags")
+async def set_profile_tags(profile_id: str, request: TagsRequest) -> dict:
+    """Replace a connection's tags."""
+    return {"status": "ok",
+            "tags": await asyncio.to_thread(
+                profiles_module.set_tags, profile_id, request.tags)}
+
+
+@app.post("/api/tags/{tag}/connect")
+async def connect_tag(tag: str) -> dict:
+    """
+    Open a session to every connection carrying a tag.
+
+    Bounded concurrency, for the same reason broadcast has it: forty
+    simultaneous SSH handshakes through one bastion buries it, and a fleet is
+    exactly where somebody would use this.
+
+    Each result comes back individually. A partial failure has to be visible
+    rather than assumed — the same reasoning broadcast already records, and it
+    matters more here because the whole point is not watching each one.
+    """
+    targets = await asyncio.to_thread(profiles_module.profiles_tagged, tag)
+    if not targets:
+        raise HTTPException(status_code=404,
+                            detail=f"Nothing is tagged '{tag}'.")
+
+    limit = asyncio.Semaphore(max(1, int(advanced_setting("broadcast.concurrency"))))
+    results: list[dict] = []
+
+    async def open_one(profile: dict) -> None:
+        async with limit:
+            kind = profile.get("connection_type") or "ssh"
+            params = ConnectionParams(
+                connection_type=kind,
+                hostname=profile.get("hostname", ""),
+                port=int(profile.get("port") or (22 if kind == "ssh" else 23)),
+                username=profile.get("username", ""),
+                display_label=profile.get("name", ""),
+                serial_port=profile.get("serial_port", ""),
+            )
+            for field, value in load_credentials(profile.get("id", "")).items():
+                if not getattr(params, field, ""):
+                    setattr(params, field, value)
+            params.credential_source = "saved"
+
+            try:
+                session = await asyncio.to_thread(
+                    session_manager.create_session, params)
+                results.append({"ok": True, "name": profile.get("name", ""),
+                                "session": session})
+            except Exception as exc:
+                logger.info("Tag connect failed for %s: %s",
+                            profile.get("name", ""), exc)
+                results.append({"ok": False, "name": profile.get("name", ""),
+                                "error": str(exc)})
+
+    await asyncio.gather(*(open_one(p) for p in targets))
+
+    opened = sum(1 for r in results if r["ok"])
+    logger.info("Connected %s of %s devices tagged '%s'",
+                opened, len(targets), tag)
+    return {"tag": tag, "opened": opened, "total": len(targets),
+            "results": results}
 
 
 @app.get("/api/serial/ports")

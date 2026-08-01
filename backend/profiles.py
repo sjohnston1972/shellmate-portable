@@ -677,6 +677,74 @@ def dedupe_existing() -> int:
     return len(dropped)
 
 
+
+# ---------------------------------------------------------------------------
+# Tags
+#
+# A saved connection was a flat record with no way to say that a device
+# belongs with other devices — fine at a dozen, wrong at the scale the rest of
+# ShellMate assumes. broadcast.concurrency goes to 500 and its tip talks about
+# a fleet of two hundred.
+#
+# Tags rather than folders, because the useful groupings overlap: a device is
+# both "glasgow" and "production" and "access", and any tree forces a choice
+# between them. Nothing to migrate — absent means untagged.
+# ---------------------------------------------------------------------------
+
+
+def normalise_tags(value) -> list[str]:
+    """
+    Clean a list of tags: trimmed, lower-cased, de-duplicated, order kept.
+
+    Lower-cased because "Production" and "production" being two groups is a
+    distinction nobody means to make, and the first time it happens is the
+    day somebody's guardrail does not fire.
+    """
+    if isinstance(value, str):
+        value = value.split(",")
+    out: list[str] = []
+    for item in value or []:
+        tag = " ".join(str(item).split()).strip().lower()
+        if tag and tag not in out:
+            out.append(tag)
+    return out
+
+
+def all_tags() -> list[dict]:
+    """Every tag in use, with how many connections carry it."""
+    counts: dict[str, int] = {}
+    for profile in _load():
+        for tag in normalise_tags(profile.get("tags")):
+            counts[tag] = counts.get(tag, 0) + 1
+    return [{"tag": tag, "count": count}
+            for tag, count in sorted(counts.items())]
+
+
+def set_tags(profile_id: str, tags) -> list[str]:
+    """Replace a connection's tags. Returns what was stored."""
+    cleaned = normalise_tags(tags)
+    profiles = _load()
+    for profile in profiles:
+        if profile.get("id") != profile_id:
+            continue
+        if cleaned:
+            profile["tags"] = cleaned
+        else:
+            profile.pop("tags", None)
+        _save(profiles)
+        return cleaned
+    return []
+
+
+def profiles_tagged(tag: str) -> list[dict]:
+    """Every connection carrying a tag."""
+    wanted = (tag or "").strip().lower()
+    if not wanted:
+        return []
+    return [p for p in get_profiles()
+            if wanted in normalise_tags(p.get("tags"))]
+
+
 def get_profiles() -> list[dict]:
     """
     Return saved profiles, each flagged with whether credentials are stored.
@@ -717,6 +785,8 @@ def save_profile(fields: dict) -> dict:
     not.
     """
     cleaned = {k: v for k, v in fields.items() if k not in SECRET_FIELDS}
+    if "tags" in cleaned:
+        cleaned["tags"] = normalise_tags(cleaned["tags"])
 
     profiles = _load()
 

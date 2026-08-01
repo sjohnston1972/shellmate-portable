@@ -274,6 +274,117 @@
     return 'terminal';
   }
 
+
+  // -------------------------------------------------------------------------
+  // Grouping the welcome screen
+  //
+  // Past roughly twenty tiles, finding the right one is a visual scan of an
+  // unsorted grid. Better *names* — which record_detected_hostname() already
+  // gives — do not help you find core-sw-04 among two hundred siblings.
+  // -------------------------------------------------------------------------
+
+  /** The tag currently filtering the grid, or "" for everything. */
+  let activeTag = '';
+
+  async function renderTagFilter(profiles) {
+    const host = document.getElementById('welcome-tags');
+    if (!host) return;
+
+    const counts = new Map();
+    profiles.forEach(p => (p.tags || []).forEach(tag => {
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }));
+
+    if (!counts.size) {
+      host.classList.add('hidden');
+      host.innerHTML = '';
+      activeTag = '';
+      return;
+    }
+
+    host.classList.remove('hidden');
+    host.innerHTML = '';
+
+    const chip = (label, tag, count) => {
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'welcome-tag' + (activeTag === tag ? ' active' : '');
+      el.textContent = count === null ? label : `${label} ${count}`;
+      el.addEventListener('click', () => {
+        activeTag = (activeTag === tag) ? '' : tag;
+        renderWelcomeProfiles();
+      });
+      return el;
+    };
+
+    host.appendChild(chip('All', '', profiles.length));
+    [...counts.entries()].sort().forEach(([tag, count]) => {
+      host.appendChild(chip(tag, tag, count));
+    });
+
+    // Opening a whole group is the point of having one. Only offered when a
+    // group is actually selected, because "connect all" over an unfiltered
+    // list of two hundred is not something to put one click away.
+    if (activeTag) {
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.className = 'btn-secondary btn-tiny welcome-tag-connect';
+      open.textContent = `Open all ${counts.get(activeTag)}`;
+      open.addEventListener('click', () => connectTag(activeTag,
+                                                      counts.get(activeTag)));
+      host.appendChild(open);
+    }
+  }
+
+  /**
+   * Open a session to every device carrying a tag.
+   *
+   * Confirmed with the count, because forty tabs appearing at once is not
+   * something to do on a mis-click — and the backend paces the handshakes so
+   * a bastion is not buried by them.
+   */
+  async function connectTag(tag, count) {
+    const ok = await (window.shellmateDialog
+      ? window.shellmateDialog.confirm({
+          title: `Open ${count} connection${count === 1 ? '' : 's'} tagged "${tag}"?`,
+          body: 'Each opens its own tab. Any that cannot connect are reported '
+                + 'rather than silently skipped.',
+          confirmLabel: 'Open them',
+        })
+      : Promise.resolve(window.confirm(`Open ${count} connections tagged ${tag}?`)));
+    if (!ok) return;
+
+    try {
+      const res = await fetch(`/api/tags/${encodeURIComponent(tag)}/connect`,
+                              { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Could not open them.');
+
+      (data.results || []).forEach(r => {
+        if (r.ok && typeof window.createTab === 'function') window.createTab(r.session);
+      });
+
+      const failed = (data.results || []).filter(r => !r.ok);
+      if (window.shellmateAlerts && window.shellmateAlerts.notify) {
+        window.shellmateAlerts.notify({
+          severity: failed.length ? 'warning' : 'info',
+          icon: failed.length ? 'warning' : 'check_circle',
+          title: `${data.opened} of ${data.total} opened`,
+          body: failed.length
+            ? failed.map(r => `${r.name}: ${r.error}`).join('\n')
+            : `Everything tagged "${tag}" is connected.`,
+        });
+      }
+    } catch (e) {
+      if (window.shellmateAlerts && window.shellmateAlerts.notify) {
+        window.shellmateAlerts.notify({
+          severity: 'warning', icon: 'error',
+          title: 'Could not open the group', body: e.message,
+        });
+      }
+    }
+  }
+
   async function renderWelcomeProfiles() {
     const grid = document.getElementById('welcome-profiles-grid');
     if (!grid) return;
@@ -282,7 +393,13 @@
       const profiles = await res.json();
       failedRecently.clear();
       grid.innerHTML = '';
-      profiles.forEach(p => {
+
+      renderTagFilter(profiles);
+      const shown = activeTag
+        ? profiles.filter(p => (p.tags || []).includes(activeTag))
+        : profiles;
+
+      shown.forEach(p => {
         const wrap = document.createElement('div');
         wrap.className = 'welcome-profile-wrap';
 
@@ -525,6 +642,7 @@
 
   function fillFromProfile(p) {
     setField('field-label', p.name || '');
+    setField('field-tags', (p.tags || []).join(', '));
     setField('field-conntype', pickerValue(p));
 
     setField('field-hostname', p.hostname || '');
@@ -574,6 +692,9 @@
       // Which form was filled in. Not a transport — see TRANSPORT above.
       auth_method:     AUTH_METHOD[type] || '',
       display_label:   value('field-label'),
+      // Free text, split here and normalised server-side — one definition of
+      // what a tag is, next to where they are written.
+      tags:            value('field-tags').split(',').map(s => s.trim()).filter(Boolean),
       // The backend fills remembered credentials in server-side from this id,
       // so a saved password never travels to the browser.
       profile_id:           activeProfileId,
@@ -731,6 +852,7 @@
   function profileFrom(payload) {
     return {
       name:             payload.display_label || payload.hostname || payload.serial_port,
+      tags:             payload.tags || [],
       connection_type:  payload.connection_type,
       // Which of the two SSH forms this connection uses. Not part of its
       // identity — the same switch reached by key and by password is one
