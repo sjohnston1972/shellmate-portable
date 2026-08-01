@@ -65,10 +65,31 @@
       .addEventListener('click', () => reset({}));
   });
 
-  async function open() {
+  /**
+   * Open Stockton, optionally at a named category.
+   *
+   * The category argument is what makes a signpost from elsewhere land on the
+   * thing it is pointing at rather than wherever Stockton was last left. The
+   * system-prompt editor is the case it exists for: it is in here, people
+   * look for it in Settings, and "it is in Stockton somewhere" is not an
+   * answer.
+   */
+  async function open(category) {
+    if (category) active = category;
     overlay.classList.remove('hidden');
     await load();
-    setTimeout(() => searchEl && searchEl.focus(), 60);
+
+    // Focus the search box only when nothing specific was asked for —
+    // arriving at a category and stealing focus into a search box reads as
+    // having been sent to the wrong place.
+    if (!category) {
+      setTimeout(() => searchEl && searchEl.focus(), 60);
+    } else {
+      setTimeout(() => {
+        const target = bodyEl && bodyEl.firstElementChild;
+        if (target) target.scrollIntoView({ block: 'start' });
+      }, 60);
+    }
   }
 
   function close() { overlay.classList.add('hidden'); }
@@ -77,6 +98,7 @@
     try {
       const res = await fetch('/api/advanced');
       registry = await res.json();
+      // Only when nothing has chosen one — open(category) sets it first.
       if (!active) active = Object.keys(registry.categories)[0];
       buildNav();
       render();

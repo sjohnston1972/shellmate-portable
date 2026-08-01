@@ -59,19 +59,26 @@
       <a href="#" id="sidebar-link-ai" class="sidebar-link" title="Show the AI assistant">
         <span class="material-symbols-outlined">smart_toy</span>
       </a>
-      <a href="#" id="sidebar-link-settings" class="sidebar-link" title="Settings">
-        <span class="material-symbols-outlined">settings</span>
-      </a>
       <a href="#" id="sidebar-link-discovery" class="sidebar-link" title="Find devices on the network">
         <span class="material-symbols-outlined">radar</span>
       </a>
+    </nav>
+    <!-- Below the fold: the application rather than the session.
+         Settings and Stockton were in the group above, which made the theme
+         toggle a setting that lived apart from the panel containing the theme
+         setting. Reading downwards: what you change most, then what you
+         change rarely, then help, then a last resort. -->
+    <div id="sidebar-bottom">
+      <a href="#" id="sidebar-link-settings" class="sidebar-link" title="Settings">
+        <span class="material-symbols-outlined">settings</span>
+      </a>
       <!-- Stockton. Not explained by name on purpose: the notice on the panel
-           says what it is, which is all a user needs. -->
+           says what it is, which is all a user needs. Directly under Settings
+           because they are two halves of one thing — Settings picks what,
+           Stockton tunes how much. -->
       <a href="#" id="sidebar-link-stockton" class="sidebar-link" title="Stockton — settings for the tinkerer">
         <span class="material-symbols-outlined">tune</span>
       </a>
-    </nav>
-    <div id="sidebar-bottom">
       <button id="btn-theme-toggle" class="sidebar-link" title="Toggle light/dark theme">
         <span class="material-symbols-outlined" id="theme-icon">light_mode</span>
       </button>
@@ -1025,6 +1032,19 @@ GigEth0/2     unassigned    YES unset  down     down
 
         <section class="settings-section">
           <h3 class="settings-section-title">AI Providers</h3>
+
+          <!-- Where the prompt editor went.
+               It moved to Stockton, and this is the section somebody opens
+               while looking for it — so without a line here it reads as
+               having been deleted. Settings search does find it, but only if
+               you think to search rather than scan the headings, which is not
+               what people do when looking for something they have seen. -->
+          <p class="settings-section-hint" id="prompt-editor-signpost">
+            The <strong>system prompts</strong> — what the assistant is told before it sees
+            anything of yours — are in Stockton, under AI assistant.
+            <button type="button" id="open-prompt-editor" class="btn-link">Open them</button>
+          </p>
+
           <div class="setting-row">
             <button type="button" id="btn-test-providers" class="btn-secondary">
               <span class="material-symbols-outlined">check_circle</span>

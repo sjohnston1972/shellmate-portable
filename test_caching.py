@@ -206,6 +206,82 @@ def test_a_second_load_picks_up_a_changed_file() -> None:
         time.sleep(0.5)
 
 
+def test_the_prompt_editor_is_visible_where_it_is_advertised() -> None:
+    """
+    Not "in the DOM" — visible.
+
+    The system-prompt editor spent a while present, correctly built and
+    invisible: parked inside the Settings panel, settings_nav.js indexed it as
+    one of its sections and stamped class="hidden" on it whenever another
+    category was selected, while Stockton cleared only the hidden *attribute*.
+    Every check that asked "is it there" said yes throughout.
+
+    This lives here rather than in a panel test because the mechanism is the
+    same one this file is about: something that looks present and is not.
+    """
+    print(chr(10) + "-- The prompt editor, actually on screen --")
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("       playwright not installed — skipping")
+        return
+
+    import threading
+
+    import uvicorn
+
+    from backend.app import app
+
+    port = 8823
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
+                                           log_level="error"))
+    threading.Thread(target=server.run, daemon=True).start()
+    time.sleep(3)
+
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            page = browser.new_page(viewport={"width": 1500, "height": 1000})
+            page.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
+            time.sleep(1.5)
+
+            # The route a user is now told to take.
+            page.eval_on_selector("#sidebar-link-settings", "e => e.click()")
+            time.sleep(1.2)
+            signpost = page.query_selector("#prompt-editor-signpost")
+            check("Settings says where the editor is", signpost is not None,
+                  "the section people open while looking for it says nothing")
+
+            page.eval_on_selector("#open-prompt-editor", "e => e.click()")
+            time.sleep(1.8)
+
+            active = page.query_selector("#stockton-nav .settings-nav-item.active")
+            check("it lands on the right category",
+                  active and "AI assistant" in active.inner_text(),
+                  active.inner_text() if active else "nothing active")
+
+            block = page.query_selector("#prompt-editor-block")
+            check("the editor is on screen", bool(block) and block.is_visible(),
+                  "present in the DOM and not visible is the exact failure "
+                  "this test exists for")
+
+            area = page.query_selector("#prompt-editor-block textarea")
+            check("with a prompt loaded in it",
+                  bool(area) and len(area.input_value()) > 500,
+                  f"{len(area.input_value()) if area else 0} characters")
+
+            modes = page.eval_on_selector(
+                "#prompt-mode-select", "e => [...e.options].map(o => o.value)")
+            check("and both personas offered", set(modes) == {"tshoot", "learn"},
+                  str(modes))
+
+            browser.close()
+    finally:
+        server.should_exit = True
+        time.sleep(0.5)
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Caching")
@@ -214,7 +290,8 @@ def main() -> int:
     for test in (test_every_asset_carries_a_token,
                  test_the_token_follows_the_files,
                  test_nothing_is_served_without_cache_control,
-                 test_a_second_load_picks_up_a_changed_file):
+                 test_a_second_load_picks_up_a_changed_file,
+                 test_the_prompt_editor_is_visible_where_it_is_advertised):
         try:
             test()
         except Exception as exc:

@@ -205,6 +205,14 @@
     document.getElementById('settings-save')
       .addEventListener('click', saveSettings);
 
+    // The prompt editor lives in Stockton. This is the section people open
+    // while looking for it, so it says where it went and takes them there.
+    const signpost = document.getElementById('open-prompt-editor');
+    if (signpost) signpost.addEventListener('click', () => {
+      closeSettings();
+      if (typeof window.openStockton === 'function') window.openStockton('ai');
+    });
+
     // Typing a path, or picking one with Browse, updates the line underneath
     // that says where it lands. Browse fires 'input' deliberately (see
     // filepicker.js setValue) so one listener covers both.
