@@ -113,6 +113,11 @@
     document.documentElement.classList.toggle(
       'hide-connection-dot', s.show_connection_dot === false);
 
+    // On <body> rather than <html>, because the whole layout shifts: the rail
+    // widens and its items go from centred to left-aligned.
+    document.body.classList.toggle('sidebar-labelled', s.sidebar_labels === true);
+
+    applyTabOrder(s);
     applyPanelTransition(s);
 
     if (window.shellmateLayout && s.default_layout &&
@@ -137,6 +142,20 @@
     linear:     'linear',
     sharp:      'cubic-bezier(0.4, 0, 0.6, 1)',
   };
+
+  /**
+   * Apply the tab ordering.
+   *
+   * tabs.js owns the strip, so this only hands over the mode. Guarded because
+   * prefs applies on load and the tab module may not have registered yet —
+   * settings arriving before the thing they configure is normal here, not an
+   * error.
+   */
+  function applyTabOrder(s) {
+    if (typeof window.setTabOrder === 'function') {
+      window.setTabOrder(s.tab_order || 'manual');
+    }
+  }
 
   function applyPanelTransition(s) {
     const root = document.documentElement;

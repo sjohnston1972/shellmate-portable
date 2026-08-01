@@ -130,6 +130,17 @@ DEFAULT_SETTINGS: dict = {
         "density": "comfortable",
         "max_tab_label_px": 160,
         "show_connection_dot": True,
+        # Every sidebar item is an icon with a tooltip. The prompt editor was
+        # reported as deleted when it moved behind a tuner glyph, so this is
+        # one setting away rather than a redesign — off by default, because
+        # the rail is deliberately narrow and most people learn the icons.
+        "sidebar_labels": False,
+        # "manual" | "name" | "device" | "opened" | "tag". Manual is where
+        # tabs have always been and stays the default: people put tabs where
+        # they want them and expect them to stay there. Grouping earns its
+        # keep at twenty tabs across three estates, which is also where the
+        # tags already recorded in the profiles start to matter.
+        "tab_order": "manual",
         # How a side panel arrives. "slide" | "fade" | "scale" | "none".
         # Slide by default because it says which edge the panel came from and
         # where Escape will send it back to. "none" is a real answer, not a

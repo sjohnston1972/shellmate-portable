@@ -124,6 +124,9 @@
     const tabObj = {
       sessionId:        session_id,
       label,
+      // When this tab was opened. The array order answers the same question
+      // until somebody drags or sorts, at which point it no longer does.
+      openedAt:         Date.now(),
       // Transport backing this tab. The file browser needs it to explain why
       // a serial or telnet tab cannot transfer files.
       connectionType:   sessionData.connection_type || 'ssh',
@@ -145,6 +148,11 @@
 
     tabs.push(tabObj);
     const newIndex = tabs.length - 1;
+    // Placed where it belongs rather than always at the end. Sorting only on
+    // the settings change would mean the order was right until the next tab
+    // opened, which is worse than not sorting at all.
+    _learnTag(tabObj);
+    sortTabs();
 
     // The session clock. connected_at is stamped by the backend, so the count
     // is from when the device answered rather than from when this ran.
@@ -191,8 +199,14 @@
     // Hide the welcome screen now that we have a tab
     welcomeScreen.classList.add('hidden');
 
-    // Switch to the new tab
-    switchToTab(newIndex);
+    // Switch to the new tab.
+    //
+    // Looked up rather than reusing newIndex: a sort runs between the two, so
+    // the position this tab was pushed to is not necessarily the one it now
+    // occupies. Using the stale index would open a tab and activate a
+    // different one — most likely under any ordering but 'opened'.
+    const index = tabs.findIndex(t => t.sessionId === session_id);
+    switchToTab(index === -1 ? newIndex : index);
   }
 
   /**
@@ -550,12 +564,121 @@
     }
   }
 
+
+  // -------------------------------------------------------------------------
+  // Tab ordering
+  //
+  // Tabs have always been manual: appended in the order they were opened and
+  // moved by dragging. That is the right default and stays the default —
+  // people put tabs where they want them and expect them to stay there.
+  //
+  // Twenty tabs across three estates is where it stops working, and it is
+  // exactly where the grouping already recorded in the profiles would earn
+  // its keep. Tags exist now, and the tab strip was the one place they were
+  // not reflected.
+  // -------------------------------------------------------------------------
+
+  /** The current mode. 'manual' means this module does nothing at all. */
+  let _order = 'manual';
+
+  /** Tag lookup by session, filled lazily — a profile match costs a fetch. */
+  const _tagCache = new Map();
+
+  /**
+   * Reorder the tab strip.
+   *
+   * Sorts the `tabs` array as well as the DOM, deliberately. Ctrl+1..9,
+   * closeTab's "activate the neighbour" and the drag handler all index into
+   * that array, so sorting only the DOM would leave Ctrl+3 selecting whatever
+   * used to be third — which looks like a bug in the shortcut rather than a
+   * consequence of the sort.
+   */
+  function sortTabs() {
+    if (_order === 'manual' || tabs.length < 2) return;
+
+    const active = getActiveTab();
+
+    const key = {
+      name:   t => (t.label || '').toLowerCase(),
+      device: t => (t.hostname || t.label || '').toLowerCase(),
+      // Opened order is what manual mode starts as, so this is only distinct
+      // once tabs have been dragged — which is precisely when somebody wants
+      // it back.
+      opened: t => t.openedAt || 0,
+      tag:    t => _tagCache.get(t.sessionId) || '￿',
+    }[_order];
+    if (!key) return;
+
+    const sorted = tabs.slice().sort((a, b) => {
+      const ka = key(a);
+      const kb = key(b);
+      if (ka < kb) return -1;
+      if (ka > kb) return 1;
+      // Tabs with no tag, or the same one, keep the order they were opened
+      // in rather than an arbitrary one that changes on every re-sort.
+      return (a.openedAt || 0) - (b.openedAt || 0);
+    });
+
+    tabs.length = 0;
+    sorted.forEach(t => { tabs.push(t); tabList.appendChild(t.tabEl); });
+
+    // The array indices just changed underneath the active-tab index.
+    if (active) {
+      const index = tabs.findIndex(t => t.sessionId === active.sessionId);
+      if (index !== -1) activeTabIndex = index;
+    }
+  }
+
+  /**
+   * Learn a tab's tag, then re-sort.
+   *
+   * Only when grouping by tag, because it costs a profile lookup per tab and
+   * nothing else needs the answer. The first tag is used: a device in both
+   * "core" and "site-3" has to sit somewhere, and picking the first recorded
+   * one is at least stable.
+   */
+  async function _learnTag(tab) {
+    if (_order !== 'tag' || _tagCache.has(tab.sessionId)) return;
+    try {
+      const profile = await _profileFor(tab);
+      const tag = ((profile || {}).tags || [])[0] || '';
+      _tagCache.set(tab.sessionId, tag.toLowerCase());
+    } catch (_) {
+      _tagCache.set(tab.sessionId, '');
+    }
+    sortTabs();
+  }
+
+  /** Set the mode and apply it. Called by prefs.js on load and on save. */
+  function setTabOrder(mode) {
+    const allowed = ['manual', 'name', 'device', 'opened', 'tag'];
+    _order = allowed.includes(mode) ? mode : 'manual';
+    if (_order === 'tag') tabs.forEach(_learnTag);
+    sortTabs();
+
+    // Re-evaluated on every change, not only when a tab is built. _bindDrag
+    // runs once per tab at creation, so tabs that already existed when the
+    // setting changed kept whatever they were given then — leaving them
+    // draggable in a sorted strip, where a drop is silently undone by the
+    // next sort.
+    const draggable = tabOrderIsManual() ? 'true' : 'false';
+    tabs.forEach(t => t.tabEl.setAttribute('draggable', draggable));
+  }
+
+  /** Whether dragging should be offered. Sorted tabs cannot be rearranged. */
+  function tabOrderIsManual() {
+    return _order === 'manual';
+  }
+
   // -------------------------------------------------------------------------
   // Drag-to-reorder
   // -------------------------------------------------------------------------
 
   function _bindDrag(tabEl, sessionId) {
-    tabEl.setAttribute('draggable', 'true');
+    // Only offered while the order is manual. Dropping a tab somewhere the
+    // next sort immediately undoes reads as the drag having failed, and there
+    // is no way to tell from the strip that a sort is what moved it back.
+    tabEl.setAttribute('draggable', tabOrderIsManual() ? 'true' : 'false');
 
     tabEl.addEventListener('dragstart', (e) => {
       _dragSrcId = sessionId;
@@ -1530,6 +1653,7 @@
   window.closeTab         = closeTab;
   window.getActiveTab     = getActiveTab;
   window.updateTabLabel   = updateTabLabel;
+  window.setTabOrder      = setTabOrder;
   // ShellMate saw the `reload` go in, so when the session drops it knows why
   // and roughly how long the device will be away. That is what justifies
   // waiting minutes rather than giving up after thirty seconds.

@@ -6506,3 +6506,50 @@ body.resizing-panel * { cursor: ew-resize !important; }
 .setting-colour[data-unset] + .setting-clear {
   visibility: hidden;
 }
+
+/* ---------------------------------------------------------------------------
+   Sidebar labels (#126)
+
+   Every sidebar item was an icon with a tooltip, and the prompt-editor episode
+   showed what that costs: a feature was reported as deleted when it had moved
+   behind a tuner glyph with an unguessable name. Search only rescues somebody
+   who thinks to search rather than scan a list of headings.
+
+   Off by default — the rail is deliberately narrow and most people learn the
+   icons — but one setting away rather than a redesign.
+--------------------------------------------------------------------------- */
+body.sidebar-labelled #sidebar {
+  width: 168px;
+  align-items: stretch;
+  padding: 12px 10px;
+}
+
+body.sidebar-labelled #sidebar-logo {
+  align-self: center;
+}
+
+body.sidebar-labelled .sidebar-link {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 0 10px;
+}
+
+body.sidebar-labelled #sidebar-nav,
+body.sidebar-labelled #sidebar-bottom {
+  width: 100%;
+  align-items: stretch;
+}
+
+.sidebar-label {
+  display: none;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body.sidebar-labelled .sidebar-label {
+  display: inline;
+}

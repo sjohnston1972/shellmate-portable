@@ -38,27 +38,34 @@
     <nav id="sidebar-nav">
       <a href="#" id="sidebar-link-sessions" class="sidebar-link active" title="Sessions">
         <span class="material-symbols-outlined">terminal</span>
+        <span class="sidebar-label">Sessions</span>
       </a>
       <a href="#" id="sidebar-link-logs" class="sidebar-link" title="Logs">
         <span class="material-symbols-outlined">list_alt</span>
+        <span class="sidebar-label">Logs</span>
       </a>
       <a href="#" id="sidebar-link-history" class="sidebar-link" title="Session history">
         <span class="material-symbols-outlined">search</span>
+        <span class="sidebar-label">History</span>
       </a>
       <a href="#" id="sidebar-link-sftp" class="sidebar-link" title="Files (SFTP)">
         <span class="material-symbols-outlined">description</span>
+        <span class="sidebar-label">Files</span>
       </a>
       <a href="#" id="sidebar-link-keys" class="sidebar-link" title="SSH keys">
         <span class="material-symbols-outlined">key</span>
+        <span class="sidebar-label">SSH Keys</span>
       </a>
       <a href="#" id="sidebar-link-broadcast" class="sidebar-link" title="Broadcast a command (Ctrl+Shift+B)">
         <span class="material-symbols-outlined">send</span>
+        <span class="sidebar-label">Broadcast</span>
       </a>
       <!-- The assistant is off until asked for, so it needs somewhere to be
            asked for from. An empty third of the window is a poor
            advertisement; no hint at all means nobody finds the feature. -->
       <a href="#" id="sidebar-link-discovery" class="sidebar-link" title="Find devices on the network">
         <span class="material-symbols-outlined">radar</span>
+        <span class="sidebar-label">Find Devices</span>
       </a>
     </nav>
     <!-- Below the fold: the application rather than the session.
@@ -69,6 +76,7 @@
     <div id="sidebar-bottom">
       <a href="#" id="sidebar-link-settings" class="sidebar-link" title="Settings">
         <span class="material-symbols-outlined">settings</span>
+        <span class="sidebar-label">Settings</span>
       </a>
       <!-- Stockton. Not explained by name on purpose: the notice on the panel
            says what it is, which is all a user needs. Directly under Settings
@@ -76,15 +84,19 @@
            Stockton tunes how much. -->
       <a href="#" id="sidebar-link-stockton" class="sidebar-link" title="Stockton — settings for the tinkerer">
         <span class="material-symbols-outlined">tune</span>
+        <span class="sidebar-label">Advanced</span>
       </a>
       <button id="btn-theme-toggle" class="sidebar-link" title="Toggle light/dark theme">
         <span class="material-symbols-outlined" id="theme-icon">light_mode</span>
+        <span class="sidebar-label">Theme</span>
       </button>
       <a href="#" id="sidebar-link-docs" class="sidebar-link" title="Documentation">
         <span class="material-symbols-outlined">description</span>
+        <span class="sidebar-label">Documentation</span>
       </a>
       <a href="#" id="sidebar-link-support" class="sidebar-link" title="Contact support">
         <span class="material-symbols-outlined">help</span>
+        <span class="sidebar-label">Support</span>
       </a>
     </div>
   </aside>
@@ -815,6 +827,29 @@ GigEth0/2     unassigned    YES unset  down     down
               <input type="checkbox" id="setting-connection-dot" />
               <span class="toggle-track"></span>
             </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-sidebar-labels">Labels in the sidebar
+              <span class="setting-hint">Names beside the icons, in a wider rail. Icons alone are quick once learned and unguessable until then.</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-sidebar-labels" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-tab-order">Tab order
+              <span class="setting-hint">Anything but Manual sorts the strip and turns off dragging, since the next sort would undo it. Tag uses the first tag on the matching saved connection.</span>
+            </label>
+            <select id="setting-tab-order" class="setting-input">
+              <option value="manual">Manual — where you put them</option>
+              <option value="name">By tab name</option>
+              <option value="device">By device</option>
+              <option value="opened">By when it was opened</option>
+              <option value="tag">Grouped by tag</option>
+            </select>
           </div>
 
           <!-- Whether the assistant pane is on screen is a question about the
