@@ -110,10 +110,86 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
+# ---------------------------------------------------------------------------
+# Cache control
+#
+# ShellMate is upgraded by replacing one executable, and the window then talks
+# to a new backend with whatever frontend it cached. The symptoms are
+# arbitrary — a panel that is empty, a button that does nothing, a feature
+# that appears to have been deleted — and none of them points at the cause.
+# It has cost real time twice.
+#
+# Two mechanisms, because either alone has a hole:
+#
+# `Cache-Control: no-cache` makes the browser revalidate, which over loopback
+# costs nothing and lets the ETag do its job instead of being overridden by
+# heuristic caching. Without any header at all a browser may reuse a response
+# without asking, which is what happened.
+#
+# A token on every asset URL covers the case where a cache ignores that —
+# WebView2 keeps a persistent user-data folder and an in-memory cache for the
+# life of the window. A URL that changes cannot be served from a cache keyed
+# on the old one.
+#
+# Everything gets the same treatment, including the fonts. Exempting them was
+# the obvious optimisation and turned out to be pointless: the woff2 files are
+# referenced from *inside* `vendor/fonts.css` by relative URL, so they never
+# carry the token and could not have been safely pinned anyway. Over loopback
+# a revalidation is a stat and a 304, which is not worth a special case that
+# only ever applied to the stylesheet.
+# ---------------------------------------------------------------------------
+
+
+@app.middleware("http")
+async def _cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
+def _asset_token() -> str:
+    """
+    A short token that changes whenever any frontend file does.
+
+    Derived from the files themselves rather than from a version number
+    somebody has to remember to bump — which is the mechanism that failed:
+    three script tags carried a hand-written `?v=2` and thirty did not.
+    """
+    try:
+        newest = max((f.stat().st_mtime for f in FRONTEND_DIR.rglob("*")
+                      if f.is_file()), default=0.0)
+    except OSError:
+        newest = 0.0
+    return f"{int(newest):x}"
+
+
+#: The rewritten page, keyed by token. Rebuilt when the token changes, which
+#: during development is whenever a frontend file is saved.
+_index_cache: dict[str, str] = {}
+
+_ASSET_REF = re.compile(r'((?:src|href)=")(/static/[^"?]+)((?:\?[^"]*)?)(")')
+
+
 @app.get("/")
-async def serve_index() -> FileResponse:
-    """Serve the main frontend page."""
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+async def serve_index() -> Response:
+    """
+    Serve the main page with a build token on every asset it references.
+
+    Rewritten here rather than written into the markup so that adding a script
+    cannot forget it. Any existing query string is discarded — the three
+    hand-written `?v=` markers this replaces would otherwise sit alongside a
+    mechanism that already covers them.
+    """
+    token = _asset_token()
+
+    if token not in _index_cache:
+        source = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+        _index_cache.clear()
+        _index_cache[token] = _ASSET_REF.sub(
+            lambda m: f"{m.group(1)}{m.group(2)}?b={token}{m.group(4)}", source)
+
+    return Response(content=_index_cache[token], media_type="text/html")
 
 
 # ---------------------------------------------------------------------------
