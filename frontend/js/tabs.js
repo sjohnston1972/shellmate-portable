@@ -384,6 +384,12 @@
 
     const { sessionId, websocket, terminalInstance, containerId, tabEl } = tab;
 
+    // The terminal, its addons, its socket and its resize listener go too.
+    // Without this every terminal ever opened stayed reachable, and — worse —
+    // applySettingsToAll() would later call terminal.options on a disposed
+    // instance, throw, and stop applying settings to every tab after it.
+    if (window.forgetTerminal) window.forgetTerminal(sessionId);
+
     // The clock goes with the tab, so a closed session stops costing a tick.
     if (window.shellmateUptime) window.shellmateUptime.forget(sessionId);
 

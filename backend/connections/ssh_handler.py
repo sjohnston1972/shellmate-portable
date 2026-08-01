@@ -31,7 +31,6 @@ from backend.advanced import get as advanced
 logger = logging.getLogger(__name__)
 
 # How long to wait on the TCP + SSH handshake before giving up.
-CONNECT_TIMEOUT = 15
 
 # recv() blocks for this long before reporting "nothing yet". Short enough that
 # a closed channel is noticed promptly, long enough not to spin the CPU.
@@ -152,6 +151,25 @@ def _algorithm_overrides() -> dict:
 
 def _split(value: str) -> set[str]:
     return {part.strip() for part in str(value or "").split(",") if part.strip()}
+
+
+class _JumpView:
+    """
+    The jump host's fields, shaped like a connection's own.
+
+    So `_explain_auth_failure()` can say the same useful things about a
+    bastion that it says about a device — which method was refused, whether
+    the far end hung up, whether there was anything to fall back to. A
+    failure on the way *through* is otherwise the least diagnosable one in
+    the application: the address in the message is not the address the user
+    typed.
+    """
+
+    def __init__(self, params):
+        self.hostname = params.jump_host
+        self.password = params.jump_password
+        self.private_key_path = params.jump_private_key_path
+        self.credential_source = getattr(params, "credential_source", "")
 
 
 def _explain_auth_failure(exc: Exception, params, username: str,
@@ -357,16 +375,35 @@ class SSHHandler(ConnectionHandler):
         logger.info("Opening jump host %s:%s", params.jump_host, params.jump_port)
 
         self._jump_client = paramiko.SSHClient()
-        self._jump_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # The same settings as the target connection, rather than three
+        # hardcoded values.
+        #
+        # `ssh.host_key_policy` is the one that matters. Its whole purpose is
+        # letting a managed estate refuse an unknown host key — and the
+        # bastion is the machine most worth refusing, because it is the one
+        # every session goes through and the one an attacker would rather be.
+        # Hardcoding AutoAddPolicy here meant the setting protected the switch
+        # and not the door to it.
+        #
+        # The timeout came from a module constant the target stopped using,
+        # and the algorithm overrides exist for kit modern paramiko will not
+        # otherwise negotiate with — a bastion is as likely to be old as
+        # anything behind it.
+        self._jump_client.set_missing_host_key_policy(_host_key_policy())
+
+        discover_keys = bool(advanced("ssh.look_for_keys"))
+        if params.jump_password and not params.jump_private_key_path:
+            discover_keys = False
 
         try:
             self._jump_client.connect(
                 hostname=params.jump_host,
                 port=params.jump_port,
                 username=params.jump_username or params.username,
-                timeout=CONNECT_TIMEOUT,
+                timeout=advanced("ssh.connect_timeout"),
                 allow_agent=False,
-                look_for_keys=False,
+                look_for_keys=discover_keys,
+                **_algorithm_overrides(),
                 **self._auth_kwargs(
                     params.jump_private_key_path,
                     params.jump_private_key_passphrase,
@@ -374,8 +411,12 @@ class SSHHandler(ConnectionHandler):
                 ),
             )
         except paramiko.AuthenticationException as exc:
+            transport = self._jump_client.get_transport()
             raise ConnectionError_(
-                f"Authentication failed on jump host {params.jump_host}."
+                "Jump host: " + _explain_auth_failure(
+                    exc, _JumpView(params), params.jump_username or params.username,
+                    offered_keys=discover_keys,
+                    still_connected=bool(transport and transport.is_active()))
             ) from exc
         except (paramiko.SSHException, OSError) as exc:
             raise ConnectionError_(f"Could not reach jump host {params.jump_host}: {exc}") from exc
@@ -450,7 +491,7 @@ class SSHHandler(ConnectionHandler):
             return None
 
         try:
-            channel = transport.open_session(timeout=CONNECT_TIMEOUT)
+            channel = transport.open_session(timeout=advanced("ssh.connect_timeout"))
             channel.get_pty(term="vt100", width=200, height=1000)
             channel.invoke_shell()
             channel.settimeout(READ_TIMEOUT)

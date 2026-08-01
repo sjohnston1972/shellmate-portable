@@ -2384,6 +2384,46 @@ async def _origin_allowed(websocket: WebSocket) -> bool:
     return False
 
 
+def _open_session_log(session: dict, session_id: str) -> None:
+    """
+    Open this session's log file once, rather than once per chunk.
+
+    Failures are recorded and not raised: a log that cannot be written is a
+    lost log, never a dropped session.
+    """
+    settings = get_settings()
+    if not settings.get("logging", {}).get("enabled"):
+        return
+
+    session["_log_redact"] = bool(settings["logging"].get("redact_secrets", True))
+    try:
+        directory = log_directory()
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{session_id[:8]}-{session.get('hostname', 'session')}.log"
+        session["_log_handle"] = open(path, "a", encoding="utf-8")
+        logger.info("Logging session %s to %s", session_id[:8], path)
+    except OSError as exc:
+        logger.warning("Could not open a session log for %s: %s", session_id[:8], exc)
+        session["_log_handle"] = None
+
+
+def _append_to_log(session: dict, line: str) -> None:
+    """Write one line, flushing so a crash does not lose the tail."""
+    handle = session.get("_log_handle")
+    if handle is None:
+        return
+    try:
+        handle.write(line)
+        handle.flush()
+    except (OSError, ValueError) as exc:
+        logger.warning("Session log write failed, giving up on it: %s", exc)
+        try:
+            handle.close()
+        except Exception:
+            pass
+        session["_log_handle"] = None
+
+
 @app.websocket("/ws/terminal/{session_id}")
 async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
     """
@@ -2580,22 +2620,31 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 except Exception as exc:
                     logger.warning("Transcript error on session %s: %s", session_id, exc)
 
-                # File logging (if enabled in settings)
-                _settings = get_settings()
-                if _settings.get("logging", {}).get("enabled"):
-                    _log_dir = log_directory()
-                    _log_dir.mkdir(parents=True, exist_ok=True)
-                    _log_file = _log_dir / f"{session_id[:8]}-{session.get('hostname', 'session')}.log"
-                    from datetime import datetime
-                    # Devices echo, so a password typed at a login prompt
-                    # can land in a file that exists to be handed to someone
-                    # else. The live terminal always shows the truth; only
-                    # what is written to disk is masked.
-                    _logged = (redact(text)
-                               if _settings["logging"].get("redact_secrets", True)
-                               else text)
-                    with open(_log_file, "a", encoding="utf-8") as _lf:
-                        _lf.write(f"[{datetime.now().isoformat()}] {_logged}")
+                # File logging, if it is switched on.
+                #
+                # This used to read settings.json, parse it, deep-merge it,
+                # read it a second time for the directory, stat and mkdir,
+                # then open/write/close the log — once per chunk of device
+                # output, all of it blocking, all of it on the event loop
+                # that every other session's terminal shares. A `show
+                # tech-support` on one tab made the others stutter.
+                #
+                # The handle is opened once per session and the settings are
+                # read once per session. Changing the setting mid-session
+                # applies to the next one, which is what "tabs" means
+                # everywhere else in the application.
+                if session.get("_log_handle") is None and session.get("_log_checked") is None:
+                    session["_log_checked"] = True
+                    await asyncio.to_thread(_open_session_log, session, session_id)
+
+                handle = session.get("_log_handle")
+                if handle is not None:
+                    logged = (redact(text) if session.get("_log_redact", True)
+                              else text)
+                    stamp = datetime.datetime.now().isoformat()
+                    # Still off the loop: a log directory on a network share
+                    # can block for as long as the share feels like it.
+                    await asyncio.to_thread(_append_to_log, session, f"[{stamp}] {logged}")
 
                 # Send output to browser
                 await websocket.send_text(json.dumps({"type": "output", "data": text}))
@@ -2679,6 +2728,17 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
         task.cancel()
 
     session["is_connected"] = False
+
+    # The log handle is per-session now rather than per-chunk, so it has an
+    # end as well as a beginning.
+    handle = session.pop("_log_handle", None)
+    session.pop("_log_checked", None)
+    if handle is not None:
+        try:
+            handle.close()
+        except Exception:
+            pass
+
     logger.info("WebSocket closed for session %s", session_id)
 
 

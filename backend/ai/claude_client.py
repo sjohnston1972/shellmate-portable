@@ -17,7 +17,45 @@ from backend.ai.prompts import SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
-MODEL = "claude-sonnet-4-6"
+#: The fallback whenever no explicit model is passed — anything not coming
+#: from the chat picker. A model id the API no longer serves comes back as a
+#: 404, so this being current matters more than it looks.
+MODEL = "claude-sonnet-5"
+
+
+
+def _explain_api_error(status: int, body: bytes, model: str) -> str:
+    """
+    Turn an API failure into something a network engineer can act on.
+
+    The raw JSON went straight into a chat bubble, so a retired model id
+    surfaced as a wall of provider JSON with the actionable part — that the
+    model does not exist — buried in the middle of it. The model id is
+    hardcoded as a fallback for anything not coming from the chat picker, so
+    it going stale is a matter of when.
+    """
+    import json as _json
+
+    detail = ""
+    try:
+        parsed = _json.loads(body.decode("utf-8", errors="replace"))
+        detail = (parsed.get("error") or {}).get("message", "")
+    except Exception:
+        detail = body.decode("utf-8", errors="replace")[:300]
+
+    if status == 404 or "model" in detail.lower():
+        return (f"Claude does not recognise the model '{model}'. It has "
+                f"probably been retired — pick another in the model list "
+                f"beside the chat box.")
+    if status == 401:
+        return ("Claude rejected the API key. Check it under Settings → AI "
+                "Providers.")
+    if status == 429:
+        return "Claude is rate-limiting this key. Wait a moment and try again."
+    if status >= 500:
+        return f"Claude returned a server error ({status}). Not something at this end."
+
+    return f"Claude API error {status}: {detail or 'no detail given'}"
 
 
 async def stream_response(
@@ -60,9 +98,8 @@ async def stream_response(
         ) as resp:
             if resp.status_code != 200:
                 body = await resp.aread()
-                raise ValueError(
-                    f"Claude API error {resp.status_code}: {body.decode()}"
-                )
+                raise ValueError(_explain_api_error(resp.status_code, body,
+                                                    payload.get("model", "")))
 
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):

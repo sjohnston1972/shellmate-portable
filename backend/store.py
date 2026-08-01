@@ -93,7 +93,13 @@ class SessionStore:
 
     def __init__(self) -> None:
         self._connection: sqlite3.Connection | None = None
-        self._lock = threading.Lock()
+        # Reentrant on purpose. Reads take the lock now, and add_snapshot()
+        # consults latest_snapshot() before deciding whether to insert — with
+        # a plain Lock that is a deadlock, and splitting them so it is not
+        # would put the check and the write back on opposite sides of the
+        # lock, which is the race the issue was about. RLock lets one thread
+        # hold both and makes the pair atomic.
+        self._lock = threading.RLock()
         self._fts_enabled = False
 
     # ------------------------------------------------------------------
@@ -386,111 +392,131 @@ class SessionStore:
         Returns:
             Matching commands, newest first, each with a snippet of context.
         """
-        connection = self.connect()
-        clauses: list[str] = []
-        params: list[Any] = []
+        # Reads share the one connection with the writer, so they take the
+        # same lock. check_same_thread=False disables Python's guard; it does
+        # not make the connection safe. These run on asyncio worker threads
+        # while the terminal loop is committing from its own.
+        with self._lock:
+            connection = self.connect()
+            clauses: list[str] = []
+            params: list[Any] = []
 
-        if query and self._fts_enabled:
-            base = """
-                SELECT c.id, c.session_id, c.command, c.ran_at,
-                       s.hostname, s.label,
-                       snippet(commands_fts, 1, '', '', ' … ', 12) AS snippet
-                FROM commands_fts
-                JOIN commands c ON c.id = commands_fts.rowid
-                JOIN sessions s ON s.id = c.session_id
-                WHERE commands_fts MATCH ?
-            """
-            params.append(_to_fts_query(query))
-        elif query:
-            base = """
-                SELECT c.id, c.session_id, c.command, c.ran_at,
-                       s.hostname, s.label,
-                       substr(c.output, 1, 200) AS snippet
-                FROM commands c
-                JOIN sessions s ON s.id = c.session_id
-                WHERE (c.command LIKE ? OR c.output LIKE ?)
-            """
-            params.extend([f"%{query}%", f"%{query}%"])
-        else:
-            base = """
-                SELECT c.id, c.session_id, c.command, c.ran_at,
-                       s.hostname, s.label,
-                       substr(c.output, 1, 200) AS snippet
-                FROM commands c
-                JOIN sessions s ON s.id = c.session_id
-                WHERE 1=1
-            """
+            if query and self._fts_enabled:
+                base = """
+                    SELECT c.id, c.session_id, c.command, c.ran_at,
+                           s.hostname, s.label,
+                           snippet(commands_fts, 1, '', '', ' … ', 12) AS snippet
+                    FROM commands_fts
+                    JOIN commands c ON c.id = commands_fts.rowid
+                    JOIN sessions s ON s.id = c.session_id
+                    WHERE commands_fts MATCH ?
+                """
+                params.append(_to_fts_query(query))
+            elif query:
+                base = """
+                    SELECT c.id, c.session_id, c.command, c.ran_at,
+                           s.hostname, s.label,
+                           substr(c.output, 1, 200) AS snippet
+                    FROM commands c
+                    JOIN sessions s ON s.id = c.session_id
+                    WHERE (c.command LIKE ? OR c.output LIKE ?)
+                """
+                params.extend([f"%{query}%", f"%{query}%"])
+            else:
+                base = """
+                    SELECT c.id, c.session_id, c.command, c.ran_at,
+                           s.hostname, s.label,
+                           substr(c.output, 1, 200) AS snippet
+                    FROM commands c
+                    JOIN sessions s ON s.id = c.session_id
+                    WHERE 1=1
+                """
 
-        if hostname:
-            clauses.append("s.hostname = ?")
-            params.append(hostname)
-        if since is not None:
-            clauses.append("c.ran_at >= ?")
-            params.append(since)
-        if until is not None:
-            clauses.append("c.ran_at <= ?")
-            params.append(until)
+            if hostname:
+                clauses.append("s.hostname = ?")
+                params.append(hostname)
+            if since is not None:
+                clauses.append("c.ran_at >= ?")
+                params.append(since)
+            if until is not None:
+                clauses.append("c.ran_at <= ?")
+                params.append(until)
 
-        sql = base + "".join(f" AND {clause}" for clause in clauses)
-        sql += " ORDER BY c.ran_at DESC LIMIT ?"
-        params.append(min(max(limit, 1), 500))
+            sql = base + "".join(f" AND {clause}" for clause in clauses)
+            sql += " ORDER BY c.ran_at DESC LIMIT ?"
+            params.append(min(max(limit, 1), 500))
 
-        try:
-            rows = connection.execute(sql, params).fetchall()
-        except sqlite3.Error as exc:
-            logger.warning("Search failed: %s", exc)
-            return []
+            try:
+                rows = connection.execute(sql, params).fetchall()
+            except sqlite3.Error as exc:
+                logger.warning("Search failed: %s", exc)
+                return []
 
-        return [
-            SearchHit(
-                command_id=row["id"], session_id=row["session_id"],
-                hostname=row["hostname"] or "", label=row["label"] or "",
-                command=row["command"], snippet=(row["snippet"] or "").strip(),
-                ran_at=row["ran_at"],
-            ).as_dict()
-            for row in rows
-        ]
+            return [
+                SearchHit(
+                    command_id=row["id"], session_id=row["session_id"],
+                    hostname=row["hostname"] or "", label=row["label"] or "",
+                    command=row["command"], snippet=(row["snippet"] or "").strip(),
+                    ran_at=row["ran_at"],
+                ).as_dict()
+                for row in rows
+            ]
 
     def list_sessions(self, limit: int = 50, hostname: str = "") -> list[dict]:
         """Return recent sessions, newest first, with their command counts."""
-        connection = self.connect()
-        sql = """
-            SELECT s.*, COUNT(c.id) AS command_count
-            FROM sessions s
-            LEFT JOIN commands c ON c.session_id = s.id
-        """
-        params: list[Any] = []
-        if hostname:
-            sql += " WHERE s.hostname = ?"
-            params.append(hostname)
-        sql += " GROUP BY s.id ORDER BY s.started_at DESC LIMIT ?"
-        params.append(min(max(limit, 1), 500))
+        # Reads share the one connection with the writer, so they take the
+        # same lock. check_same_thread=False disables Python's guard; it does
+        # not make the connection safe. These run on asyncio worker threads
+        # while the terminal loop is committing from its own.
+        with self._lock:
+            connection = self.connect()
+            sql = """
+                SELECT s.*, COUNT(c.id) AS command_count
+                FROM sessions s
+                LEFT JOIN commands c ON c.session_id = s.id
+            """
+            params: list[Any] = []
+            if hostname:
+                sql += " WHERE s.hostname = ?"
+                params.append(hostname)
+            sql += " GROUP BY s.id ORDER BY s.started_at DESC LIMIT ?"
+            params.append(min(max(limit, 1), 500))
 
-        return [dict(row) for row in connection.execute(sql, params).fetchall()]
+            return [dict(row) for row in connection.execute(sql, params).fetchall()]
 
     def get_session(self, session_id: str) -> dict | None:
         """Return one session with every command it ran, in order."""
-        connection = self.connect()
-        row = connection.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        if row is None:
-            return None
+        # Reads share the one connection with the writer, so they take the
+        # same lock. check_same_thread=False disables Python's guard; it does
+        # not make the connection safe. These run on asyncio worker threads
+        # while the terminal loop is committing from its own.
+        with self._lock:
+            connection = self.connect()
+            row = connection.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if row is None:
+                return None
 
-        commands = connection.execute(
-            "SELECT * FROM commands WHERE session_id = ? ORDER BY sequence",
-            (session_id,),
-        ).fetchall()
+            commands = connection.execute(
+                "SELECT * FROM commands WHERE session_id = ? ORDER BY sequence",
+                (session_id,),
+            ).fetchall()
 
-        session = dict(row)
-        session["commands"] = [dict(c) for c in commands]
-        return session
+            session = dict(row)
+            session["commands"] = [dict(c) for c in commands]
+            return session
 
     def known_hostnames(self) -> list[str]:
         """Every device seen, for the history filter."""
-        connection = self.connect()
-        rows = connection.execute(
-            "SELECT DISTINCT hostname FROM sessions WHERE hostname != '' ORDER BY hostname"
-        ).fetchall()
-        return [row["hostname"] for row in rows]
+        # Reads share the one connection with the writer, so they take the
+        # same lock. check_same_thread=False disables Python's guard; it does
+        # not make the connection safe. These run on asyncio worker threads
+        # while the terminal loop is committing from its own.
+        with self._lock:
+            connection = self.connect()
+            rows = connection.execute(
+                "SELECT DISTINCT hostname FROM sessions WHERE hostname != '' ORDER BY hostname"
+            ).fetchall()
+            return [row["hostname"] for row in rows]
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session and its commands."""
@@ -503,18 +529,23 @@ class SessionStore:
 
     def stats(self) -> dict:
         """Summary counts for the history panel header."""
-        connection = self.connect()
-        row = connection.execute(
-            """
-            SELECT (SELECT COUNT(*) FROM sessions)         AS sessions,
-                   (SELECT COUNT(*) FROM commands)         AS commands,
-                   (SELECT COUNT(*) FROM config_snapshots) AS snapshots,
-                   (SELECT COUNT(DISTINCT hostname) FROM sessions WHERE hostname != '') AS devices
-            """
-        ).fetchone()
-        result = dict(row)
-        result["search"] = "fts5" if self._fts_enabled else "like"
-        return result
+        # Reads share the one connection with the writer, so they take the
+        # same lock. check_same_thread=False disables Python's guard; it does
+        # not make the connection safe. These run on asyncio worker threads
+        # while the terminal loop is committing from its own.
+        with self._lock:
+            connection = self.connect()
+            row = connection.execute(
+                """
+                SELECT (SELECT COUNT(*) FROM sessions)         AS sessions,
+                       (SELECT COUNT(*) FROM commands)         AS commands,
+                       (SELECT COUNT(*) FROM config_snapshots) AS snapshots,
+                       (SELECT COUNT(DISTINCT hostname) FROM sessions WHERE hostname != '') AS devices
+                """
+            ).fetchone()
+            result = dict(row)
+            result["search"] = "fts5" if self._fts_enabled else "like"
+            return result
 
     # ------------------------------------------------------------------
     # Config snapshots
@@ -530,12 +561,16 @@ class SessionStore:
         import hashlib
 
         digest = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
-        previous = self.latest_snapshot(hostname)
 
-        if previous and previous["sha256"] == digest:
-            return {"stored": False, "unchanged": True, "snapshot": previous}
-
+        # The whole check-and-insert under one lock. Read outside it, two
+        # captures of the same unchanged configuration could both decide they
+        # were the first and store a duplicate row — which is exactly what the
+        # hash check exists to prevent.
         with self._lock:
+            previous = self.latest_snapshot(hostname)
+            if previous and previous["sha256"] == digest:
+                return {"stored": False, "unchanged": True, "snapshot": previous}
+
             connection = self.connect()
             cursor = connection.execute(
                 """
@@ -557,19 +592,24 @@ class SessionStore:
 
     def latest_snapshot(self, hostname: str, before: float | None = None) -> dict | None:
         """Return the most recent snapshot for a device."""
-        connection = self.connect()
-        sql = "SELECT * FROM config_snapshots WHERE hostname = ?"
-        params: list[Any] = [hostname]
-        if before is not None:
-            sql += " AND captured_at < ?"
-            params.append(before)
-        # Tie-break on id. Two snapshots captured in the same second share a
-        # timestamp, and ordering by it alone leaves them in an arbitrary
-        # order — which silently reverses a diff.
-        sql += " ORDER BY captured_at DESC, id DESC LIMIT 1"
+        # Reads share the one connection with the writer, so they take the
+        # same lock. check_same_thread=False disables Python's guard; it does
+        # not make the connection safe. These run on asyncio worker threads
+        # while the terminal loop is committing from its own.
+        with self._lock:
+            connection = self.connect()
+            sql = "SELECT * FROM config_snapshots WHERE hostname = ?"
+            params: list[Any] = [hostname]
+            if before is not None:
+                sql += " AND captured_at < ?"
+                params.append(before)
+            # Tie-break on id. Two snapshots captured in the same second share a
+            # timestamp, and ordering by it alone leaves them in an arbitrary
+            # order — which silently reverses a diff.
+            sql += " ORDER BY captured_at DESC, id DESC LIMIT 1"
 
-        row = connection.execute(sql, params).fetchone()
-        return dict(row) if row else None
+            row = connection.execute(sql, params).fetchone()
+            return dict(row) if row else None
 
     def list_snapshots(self, hostname: str, limit: int = 50) -> list[dict]:
         """
@@ -578,24 +618,34 @@ class SessionStore:
         Bodies are excluded deliberately — a list of twenty configurations is
         megabytes of JSON the UI has no use for until one is opened.
         """
-        connection = self.connect()
-        rows = connection.execute(
-            """
-            SELECT id, hostname, session_id, captured_at, sha256, line_count
-            FROM config_snapshots WHERE hostname = ?
-            ORDER BY captured_at DESC, id DESC LIMIT ?
-            """,
-            (hostname, min(max(limit, 1), 200)),
-        ).fetchall()
-        return [dict(row) for row in rows]
+        # Reads share the one connection with the writer, so they take the
+        # same lock. check_same_thread=False disables Python's guard; it does
+        # not make the connection safe. These run on asyncio worker threads
+        # while the terminal loop is committing from its own.
+        with self._lock:
+            connection = self.connect()
+            rows = connection.execute(
+                """
+                SELECT id, hostname, session_id, captured_at, sha256, line_count
+                FROM config_snapshots WHERE hostname = ?
+                ORDER BY captured_at DESC, id DESC LIMIT ?
+                """,
+                (hostname, min(max(limit, 1), 200)),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def get_snapshot(self, snapshot_id: int) -> dict | None:
         """Return one snapshot including its content."""
-        connection = self.connect()
-        row = connection.execute(
-            "SELECT * FROM config_snapshots WHERE id = ?", (snapshot_id,)
-        ).fetchone()
-        return dict(row) if row else None
+        # Reads share the one connection with the writer, so they take the
+        # same lock. check_same_thread=False disables Python's guard; it does
+        # not make the connection safe. These run on asyncio worker threads
+        # while the terminal loop is committing from its own.
+        with self._lock:
+            connection = self.connect()
+            row = connection.execute(
+                "SELECT * FROM config_snapshots WHERE id = ?", (snapshot_id,)
+            ).fetchone()
+            return dict(row) if row else None
 
 
 def _to_fts_query(text: str) -> str:

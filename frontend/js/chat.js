@@ -18,7 +18,7 @@
   let chatWs          = null;
   let isStreaming     = false;
   let currentBackend  = 'claude';       // provider key, e.g. "claude", "ollama"
-  let currentModel    = 'claude-sonnet-4-6'; // specific model string
+  let currentModel    = 'claude-sonnet-5'; // specific model string
   let contextMode     = 'active'; // 'active' | 'all' | '1'..'9'
   let streamingBubble = null;     // the <div> currently being filled
   let _outputWatcher  = null;     // active command output watcher
@@ -57,7 +57,7 @@
       currentModel   = model;
     }
 
-    _applySelection(backendSelect.value || 'claude:claude-sonnet-4-6');
+    _applySelection(backendSelect.value || 'claude:claude-sonnet-5');
 
     /**
      * Restore the saved model.

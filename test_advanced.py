@@ -119,7 +119,7 @@ def test_garbage_does_not_raise() -> None:
         "ssh.connect_timeout":     "not a number",
         "history.record":          "yes please",
         "ssh.host_key_policy":     "whatever",
-        "terminal.renderer":       None,
+        "diag.log_level":          None,
         "nonexistent.setting":     42,
     })
 
@@ -130,7 +130,8 @@ def test_garbage_does_not_raise() -> None:
           advanced.get("ssh.host_key_policy") == "auto-add",
           f"got {advanced.get('ssh.host_key_policy')!r}")
     check("and so does a null one",
-          advanced.get("terminal.renderer") == "canvas")
+          advanced.get("diag.log_level") == "INFO",
+          f"got {advanced.get('diag.log_level')!r}")
     check("an unknown key is dropped rather than stored",
           "nonexistent.setting" not in (
               settings_store.get_settings().get("advanced") or {}))

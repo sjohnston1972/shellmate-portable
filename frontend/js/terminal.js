@@ -68,7 +68,10 @@
       minimumContrastRatio: A('terminal.min_contrast', 1),
       wordSeparator:        A('terminal.word_separators', " ()[]{}',\"`"),
       scrollSensitivity:    A('terminal.scroll_sensitivity', 1),
-      rendererType:         A('terminal.renderer', 'canvas'),
+      // `rendererType` was removed in xterm.js 5: the renderer is chosen by
+      // loading an addon, and none is bundled. Passing it did nothing at all,
+      // so the setting has moved to NOT_EXPOSED where the panel can say why
+      // rather than offering a choice that changes nothing.
     };
   }
 
@@ -358,7 +361,11 @@
     // ------------------------------------------------------------------
     // 8. Handle window resize — refit the active terminal
     // ------------------------------------------------------------------
-    window.addEventListener('resize', () => {
+    // Named rather than anonymous so closeTab() can take it off again. An
+    // anonymous closure per instance is a listener that outlives its terminal
+    // and keeps the whole thing — xterm instance, addons, socket — reachable
+    // forever.
+    const onWindowResize = () => {
       const containerEl = document.getElementById(containerId);
       if (containerEl && containerEl.classList.contains('active')) {
         try {
@@ -372,7 +379,8 @@
           }
         } catch (_) {}
       }
-    });
+    };
+    window.addEventListener('resize', onWindowResize);
 
     // Send initial resize once the socket is open
     websocket.addEventListener('open', () => {
@@ -389,7 +397,8 @@
     // ------------------------------------------------------------------
     // 9. Register instance so settings changes can be applied live
     // ------------------------------------------------------------------
-    _instances[sessionId] = { terminal, fitAddon, websocket, containerId };
+    _instances[sessionId] = { terminal, fitAddon, websocket, containerId,
+                              onWindowResize };
 
     // Returns the character count of the last `n` lines — matches what the
     // backend sends to the AI via buf.get_text(n), so the context estimate is accurate.
@@ -420,26 +429,60 @@
       ? window.getColorScheme(a.color_scheme)
       : null;
 
-    Object.values(_instances).forEach(({ terminal, fitAddon }) => {
-      if (schemeObj) {
-        const theme = Object.assign({}, schemeObj.theme);
-        if (a.foreground_override) theme.foreground = a.foreground_override;
-        if (a.background_override) theme.background = a.background_override;
-        terminal.options.theme = theme;
+    // Each in its own try. A disposed instance throws on `terminal.options`,
+    // and the unguarded loop stopped there — so one stale entry meant every
+    // tab after it silently kept the old settings. forgetTerminal() should
+    // prevent stale entries now; this is what keeps one from mattering.
+    Object.entries(_instances).forEach(([sessionId, { terminal, fitAddon }]) => {
+      try {
+        if (schemeObj) {
+          const theme = Object.assign({}, schemeObj.theme);
+          if (a.foreground_override) theme.foreground = a.foreground_override;
+          if (a.background_override) theme.background = a.background_override;
+          terminal.options.theme = theme;
+        }
+        if (s.font_size)    terminal.options.fontSize    = s.font_size;
+        if (s.font_family)  terminal.options.fontFamily   = s.font_family;
+        if (s.line_height)  terminal.options.lineHeight   = s.line_height;
+        if (s.cursor_style) terminal.options.cursorStyle  = s.cursor_style;
+        terminal.options.cursorBlink  = s.cursor_blink !== false;
+        terminal.options.copyOnSelect = !!s.copy_on_select;
+        try { fitAddon.fit(); } catch (_) {}
+      } catch (err) {
+        console.info('Dropping a terminal that no longer accepts settings', err);
+        forgetTerminal(sessionId);
       }
-      if (s.font_size)    terminal.options.fontSize    = s.font_size;
-      if (s.font_family)  terminal.options.fontFamily   = s.font_family;
-      if (s.line_height)  terminal.options.lineHeight   = s.line_height;
-      if (s.cursor_style) terminal.options.cursorStyle  = s.cursor_style;
-      terminal.options.cursorBlink  = s.cursor_blink !== false;
-      terminal.options.copyOnSelect = !!s.copy_on_select;
-      try { fitAddon.fit(); } catch (_) {}
     });
   });
 
   // -------------------------------------------------------------------------
   // Expose to global scope
   // -------------------------------------------------------------------------
+  /**
+   * Forget a closed session's terminal.
+   *
+   * closeTab() tore down everything else — the socket, the xterm instance,
+   * the container, the tab, the uptime clock, the layout entry — and there
+   * was no way to reach this map, so every terminal ever opened stayed in it
+   * along with its addons and its socket.
+   *
+   * The leak was the smaller half. `applySettingsToAll()` iterates this map,
+   * so changing a setting after closing a tab called `terminal.options` on a
+   * disposed instance, which throws — and the loop stopped there, leaving
+   * every terminal after it in the map unchanged. One closed tab and settings
+   * silently stopped applying to the tabs that were still open.
+   */
+  function forgetTerminal(sessionId) {
+    const entry = _instances[sessionId];
+    if (!entry) return false;
+    if (entry.onWindowResize) {
+      window.removeEventListener('resize', entry.onWindowResize);
+    }
+    delete _instances[sessionId];
+    return true;
+  }
+
   window.initTerminal = initTerminal;
+  window.forgetTerminal = forgetTerminal;
 
 })();

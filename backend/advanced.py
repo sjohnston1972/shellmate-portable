@@ -270,11 +270,6 @@ SETTINGS: tuple[Setting, ...] = (
             "Most devices need it to say anything at all. A few react badly."),
 
     # --- Terminal ----------------------------------------------------------
-    Setting("terminal.renderer", "Renderer", "canvas", "choice",
-            "How xterm.js draws the terminal.",
-            "`canvas` suits almost everything. `dom` for a VM with no GPU, "
-            "where canvas can be slower. `webgl` for a very busy session.",
-            choices=("dom", "canvas", "webgl"), applies="tabs"),
     Setting("terminal.min_contrast", "Minimum contrast ratio", 1.0, "float",
             "Force readability when a device sends unreadable colours.",
             "Some devices print dark blue on black. 1 leaves colours exactly as "
@@ -575,6 +570,12 @@ NOT_EXPOSED: tuple[tuple[str, str], ...] = (
      "checks its Origin: loopback-only is what makes no-authentication "
      "acceptable, and that is only true while the browser cannot be used as "
      "the courier."),
+    ("The xterm.js renderer",
+     "xterm.js 5 removed `rendererType`: the renderer is chosen by loading an "
+     "addon, and ShellMate bundles none. The setting offered dom, canvas and "
+     "webgl and did nothing whichever was picked — a choice that changes "
+     "nothing is worse than no choice, because it sends somebody chasing a "
+     "performance problem down a road with no end."),
     ("Redaction in session logs",
      "Already an ordinary setting under Session Logging. A second switch for "
      "the same promise is a promise nobody can rely on."),
