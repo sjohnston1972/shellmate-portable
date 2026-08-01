@@ -155,6 +155,21 @@
 
     const items = registry.settings.filter(s => s.category === active);
     bodyEl.appendChild(section(registry.categories[active], items, false));
+
+    // The prompt editor is not a scalar with a default and a range, so it
+    // cannot be a registry entry — it is two kilobytes of prose stored in a
+    // different file with its own reset. It lives here anyway, because
+    // rewriting what the assistant is told is tinkering by any definition.
+    //
+    // One bespoke section, moved rather than rebuilt, so prompts_editor.js
+    // keeps working untouched.
+    if (active === 'ai') {
+      const editor = document.getElementById('prompt-editor-block');
+      if (editor) {
+        editor.hidden = false;
+        bodyEl.appendChild(editor);
+      }
+    }
   }
 
   function section(title, items, showCategory) {

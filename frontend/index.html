@@ -967,55 +967,6 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
         </section>
 
-        <!-- The assistant's system prompts (#56) -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">AI Prompts</h3>
-          <p class="settings-section-hint">What the assistant is told before it sees anything of yours. These are the largest single influence on how it answers, and they are yours to change — tell it to stop explaining things you already know, to always mention a change reference, or to answer in a house style.</p>
-          <p class="settings-section-hint">Stored as <code>prompts.json</code> in your data folder, so they can be edited by hand, kept in version control or carried to another machine. Delete the file to restore the shipped text.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="prompt-mode-select">Editing</label>
-            <select id="prompt-mode-select" class="setting-input">
-              <option value="tshoot">Troubleshoot — terse, fix it now</option>
-              <option value="learn">Learn — explains the why</option>
-            </select>
-            <span id="prompt-modified" class="setting-value"></span>
-          </div>
-
-          <div class="setting-row setting-row-stack">
-            <textarea id="prompt-body" rows="18" spellcheck="false"
-                      aria-label="System prompt"></textarea>
-            <p class="settings-section-hint" id="prompt-marker-hint"></p>
-          </div>
-
-          <div class="setting-row">
-            <button type="button" id="prompt-save" class="btn-secondary">
-              <span class="material-symbols-outlined">save</span>
-              Save prompt
-            </button>
-            <button type="button" id="prompt-reset" class="btn-tertiary">Reset this one</button>
-            <button type="button" id="prompt-reset-all" class="btn-tertiary">Reset both</button>
-          </div>
-          <p id="prompt-status" class="settings-section-hint"></p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-suggest-commands"
-                   data-tip="The assistant proposes commands as clickable blocks you can send to a device with one press. Off, it still explains what to run — you type it yourself.">Let the assistant suggest commands</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-suggest-commands" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-confirm-dangerous"
-                   data-tip="A suggested `reload`, `write erase` or `shutdown` asks before it is sent. Which commands count is per-platform, under Platform Definitions — this is only the switch.">Confirm dangerous suggestions</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-confirm-dangerous" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-        </section>
-
         <section class="settings-section">
           <h3 class="settings-section-title">AI Providers</h3>
           <div class="setting-row">
@@ -1169,6 +1120,41 @@ GigEth0/2     unassigned    YES unset  down     down
               <span class="setting-unit">MB</span>
             </div>
           </div>
+        </section>
+
+        <!-- Lifted into Stockton's AI category by stockton.js (#64). Kept
+             as markup so prompts_editor.js, which finds its elements by
+             id, needs no changes. -->
+        <section class="settings-section" id="prompt-editor-block" hidden>
+          <h3 class="settings-section-title">The system prompts</h3>
+          <p class="settings-section-hint">What the assistant is told before it sees anything of yours. These are the largest single influence on how it answers, and they are yours to change — tell it to stop explaining things you already know, to always mention a change reference, or to answer in a house style.</p>
+          <p class="settings-section-hint">Stored as <code>prompts.json</code> in your data folder, so they can be edited by hand, kept in version control or carried to another machine. Delete the file to restore the shipped text.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="prompt-mode-select">Editing</label>
+            <select id="prompt-mode-select" class="setting-input">
+              <option value="tshoot">Troubleshoot — terse, fix it now</option>
+              <option value="learn">Learn — explains the why</option>
+            </select>
+            <span id="prompt-modified" class="setting-value"></span>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <textarea id="prompt-body" rows="18" spellcheck="false"
+                      aria-label="System prompt"></textarea>
+            <p class="settings-section-hint" id="prompt-marker-hint"></p>
+          </div>
+
+          <div class="setting-row">
+            <button type="button" id="prompt-save" class="btn-secondary">
+              <span class="material-symbols-outlined">save</span>
+              Save prompt
+            </button>
+            <button type="button" id="prompt-reset" class="btn-tertiary">Reset this one</button>
+            <button type="button" id="prompt-reset-all" class="btn-tertiary">Reset both</button>
+          </div>
+          <p id="prompt-status" class="settings-section-hint"></p>
+
         </section>
 
       </div>

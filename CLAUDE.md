@@ -320,6 +320,18 @@ Three rules for adding one:
   renders outside every group and is invisible. `test_advanced.py` checks
   this, along with every default surviving its own clamp.
 
+A category may also carry **one bespoke section** where the thing being edited
+genuinely is not a scalar. The system prompts are the worked example: two
+kilobytes of prose in `prompts.json`, with their own reset and their own marker
+warning. Widening `Setting` to express that would make it carry a storage
+indirection it was designed not to have, so the editor is markup that
+`stockton.js` moves into place instead.
+
+Anything in Stockton that is *not* a registry entry has to be added to `EXTRAS`
+in `settings_nav.js`, or the ordinary Settings search — which queries
+`/api/advanced` — will not know it exists, and moving something there becomes a
+regression for anyone who had learned where it was.
+
 ## Changing a default
 
 `DEFAULT_SETTINGS` applies to an installation that has never been configured.

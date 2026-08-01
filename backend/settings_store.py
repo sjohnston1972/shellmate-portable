@@ -165,12 +165,6 @@ DEFAULT_SETTINGS: dict = {
         # with the data folder — which is why the quick buttons moved out of
         # localStorage, and this never followed.
         "default_model": "",
-        # The assistant may propose commands the user can click into a live
-        # device. Some people want an explainer and nothing clickable.
-        "suggest_commands": True,
-        # Dangerous suggestions get a confirmation step. Which commands count
-        # is per-platform in platforms.json; this is only the switch.
-        "confirm_dangerous": True,
         # The assistant is optional, and off until asked for. A fresh install
         # otherwise opens with a third of the window given to a pane that
         # cannot answer anything until a provider is configured — and on a

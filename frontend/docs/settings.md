@@ -26,7 +26,6 @@ written.
 | Serial Defaults | Baud rate and framing for new serial connections |
 | Output Colours | Regular expressions that colour terminal text |
 | Credentials Vault | How saved passwords and API keys are encrypted |
-| AI Prompts | What the assistant is told, and whether it may suggest commands |
 | AI Providers | API keys, endpoints, and the connection test |
 | Knowledge Base | An optional Chroma collection of your own guidelines |
 | Session Logging | Plain-text logs, and whether secrets are masked in them |
@@ -102,6 +101,7 @@ The ones people reach for most:
 | Key exchange, ciphers, MACs, host keys | Tick-lists of what paramiko will negotiate. Very old kit offers only algorithms that have been dropped from the defaults, which makes it unreachable otherwise. Legacy entries are marked |
 | Confidence needed to act | A single-vendor estate can safely act on weaker identification. Floored at 0.4 — never zero |
 | Terminal lines sent as context | More context means better answers from the assistant and more tokens |
+| The system prompts | What the assistant is told before it sees anything of yours |
 | Log level | `DEBUG` is what support will ask for |
 
 Some things are deliberately **not** there, and the panel lists them with the
@@ -123,7 +123,7 @@ independently:
 - **Platform Definitions → Reset all to defaults**, or delete `platforms.json`.
 - **Output Colours → Reset to defaults**.
 - The command library: `POST /api/snippets/reset`, or delete `snippets.json`.
-- **AI Prompts → Reset**, or delete `prompts.json`.
+- **Stockton → AI assistant → Reset**, or delete `prompts.json`.
 - **Stockton → Reset everything**, or run once with `--reset-advanced`.
 - Everything else: delete `settings.json`. ShellMate starts as if new.
 

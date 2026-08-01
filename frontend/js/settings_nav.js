@@ -27,7 +27,6 @@
     ['platform',            'list_alt'],
     ['serial',              'cable'],
     ['credentials vault',   'bookmark_add'],
-    ['ai prompts',          'description'],
     ['ai providers',        'smart_toy'],
     ['knowledge base',      'description'],
     ['alerts',              'warning'],
@@ -36,6 +35,22 @@
     ['behavior',            'settings'],
     ['behaviour',           'settings'],
     ['logging',             'description'],
+  ];
+
+
+  /**
+   * Stockton entries that are not registry settings.
+   *
+   * The registry is the source for everything else, so this list is short by
+   * design — anything on it is something that could not be expressed as a
+   * scalar with a default and a range.
+   */
+  const EXTRAS = [
+    {
+      key:   'ai.prompts',
+      label: 'The system prompts',
+      terms: ['prompt', 'prompts', 'system prompt', 'persona', 'tshoot', 'learn'],
+    },
   ];
 
   let panel, nav, search, sections = [];
@@ -207,7 +222,20 @@
         s.label.toLowerCase().includes(query) ||
         s.key.toLowerCase().includes(query) ||
         (s.summary || '').toLowerCase().includes(query));
-    } catch (_) { return; }
+    } catch (_) { /* the extras below are still worth offering */ }
+
+    // Things that live in Stockton without being registry settings. The
+    // prompt editor moved there and is not a scalar, so /api/advanced does
+    // not know about it — and somebody who had learned where it was must not
+    // simply find nothing.
+    // Unshifted, not pushed. Somebody typing "prompt" means the prompt
+    // editor, not the three settings whose summaries happen to contain the
+    // word "prompt" — an exact intent outranks a substring.
+    EXTRAS.forEach(extra => {
+      if (extra.terms.some(term => term.includes(query) || query.includes(term))) {
+        matches.unshift({ key: extra.key, label: extra.label });
+      }
+    });
 
     if (!matches.length) return;
 

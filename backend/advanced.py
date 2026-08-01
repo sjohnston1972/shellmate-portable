@@ -409,6 +409,15 @@ SETTINGS: tuple[Setting, ...] = (
             "How long to wait for a provider to finish answering.",
             "A long reply from a slow local model can legitimately take a "
             "while.", minimum=5, maximum=600, unit="s"),
+    Setting("ai.suggest_commands", "Let the assistant suggest commands", True, "bool",
+            "Proposals appear as clickable blocks you can send with one press.",
+            "Off, it still explains what to run — you type it yourself.||Worth "
+            "it if you would rather nothing near a live device is one click "
+            "away."),
+    Setting("ai.confirm_dangerous", "Confirm dangerous suggestions", True, "bool",
+            "A suggested `reload`, `write erase` or `shutdown` asks first.",
+            "Which commands count is per-platform, under Platform Definitions. "
+            "This is only the switch."),
     Setting("ai.redact_context", "Mask secrets in what is sent", True, "bool",
             "Apply the same redaction that covers session logs.",
             "Terminal output going to a third-party API is at least as "

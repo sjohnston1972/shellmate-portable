@@ -59,7 +59,9 @@ context window is in use.
 ## The prompts
 
 What the assistant is told before it sees anything of yours lives under
-**Settings → AI Prompts**, in full, and is yours to change. Tell it to stop
+**Stockton → AI assistant**, in full, and is yours to change. It sits there
+rather than in ordinary Settings because rewriting the assistant's instructions
+is tinkering by any definition. Tell it to stop
 explaining things you already know, to always quote a change reference, or to
 answer in your team's house style.
 
@@ -97,7 +99,7 @@ says so once.
 
 ## Suggested commands
 
-Two switches under **Settings → AI Prompts** govern this: whether the
+Two switches under **Stockton → AI assistant** govern this: whether the
 assistant may suggest commands at all — some people want an explainer and
 nothing clickable near a live device — and whether dangerous ones ask first.
 

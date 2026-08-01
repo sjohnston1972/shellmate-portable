@@ -324,8 +324,6 @@
     // ai_panel.js and LEGACY_DEFAULTS already read it: moving a control is not
     // a reason to migrate everyone's settings file.
     _checked('setting-ai-enabled',        (s.ai || {}).panel_enabled === true);
-    _checked('setting-suggest-commands',  (s.ai || {}).suggest_commands !== false);
-    _checked('setting-confirm-dangerous', (s.ai || {}).confirm_dangerous !== false);
 
     // Colour rules are a repeating row, so their editor owns the DOM.
     const h = s.highlight || {};
@@ -442,9 +440,7 @@
         auto_paging_off:   _gchecked('setting-auto-paging'),
       },
       ai: {
-        panel_enabled:     _gchecked('setting-ai-enabled'),
-        suggest_commands:  _gchecked('setting-suggest-commands'),
-        confirm_dangerous: _gchecked('setting-confirm-dangerous'),
+        panel_enabled: _gchecked('setting-ai-enabled'),
       },
       highlight: {
         enabled: _gchecked('setting-highlight-enabled'),
