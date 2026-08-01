@@ -37,6 +37,15 @@ SCHEMA_VERSION = 1
 MAX_OUTPUT_CHARS = 256 * 1024
 
 
+def _max_output_chars() -> int:
+    """The cap, honouring the Stockton override. A full `show tech` exceeds it."""
+    try:
+        from backend.advanced import get as advanced
+        return int(advanced("history.max_output_chars"))
+    except Exception:
+        return MAX_OUTPUT_CHARS
+
+
 @dataclass
 class SearchHit:
     """One command matching a search."""
@@ -244,8 +253,9 @@ class SessionStore:
             and swallowed.
         """
         output = record.output or ""
-        if len(output) > MAX_OUTPUT_CHARS:
-            kept = MAX_OUTPUT_CHARS
+        cap = _max_output_chars()
+        if len(output) > cap:
+            kept = cap
             output = (
                 output[:kept]
                 + f"\n\n[... truncated, {len(record.output) - kept:,} more characters]"

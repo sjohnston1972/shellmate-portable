@@ -53,7 +53,10 @@ class Fingerprint:
     @property
     def certain_enough_to_act(self) -> bool:
         """Whether to send this device platform-specific commands."""
-        return self.platform != GENERIC and self.confidence >= ACT_THRESHOLD
+        from backend.advanced import get as advanced
+
+        return (self.platform != GENERIC
+                and self.confidence >= advanced("identify.act_threshold"))
 
     def as_dict(self) -> dict:
         return {

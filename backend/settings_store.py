@@ -150,6 +150,11 @@ DEFAULT_SETTINGS: dict = {
         "chroma_url": "",
         "chroma_collection": "design_guidelines",
     },
+    # Stockton: the granular settings, keyed "category.name". Empty means
+    # every one of them is at its default — see backend/advanced.py, which
+    # owns the defaults themselves so a constant and its description cannot
+    # disagree.
+    "advanced": {},
     "ai": {
         # "learn" | "tshoot" — controls which system-prompt persona is used.
         # Now a starting value rather than only a record of the last toggle:
@@ -309,6 +314,13 @@ def update_settings(partial: dict) -> dict:
 
     current = get_settings()
     merged = _deep_merge(current, incoming)
+
+    # "advanced" is replaced wholesale rather than merged. A deep merge can add
+    # a key and change one, but never remove one — so resetting a setting back
+    # to its default would leave the old value in the file, and it would come
+    # straight back on the next read.
+    if isinstance(incoming.get("advanced"), dict):
+        merged["advanced"] = dict(incoming["advanced"])
 
     # Belt and braces: even if a secret slipped through the extraction above,
     # it must not be written to disk in the clear.

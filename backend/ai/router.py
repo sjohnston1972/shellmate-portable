@@ -14,6 +14,8 @@ from backend.settings_store import get_settings
 from backend.session import outbound
 from backend.session.transcript import match_prompt
 
+from backend.advanced import get as advanced
+
 logger = logging.getLogger(__name__)
 
 def _extract_commands(buffer_text: str) -> list[str]:
@@ -93,7 +95,8 @@ async def stream_chat(
                 session.get("hostname", active_session_id[:8])
             )
             if session.get("buffer"):
-                active_buffer = _session_text(session, 200)
+                active_buffer = _session_text(
+                    session, advanced("ai.context_lines"))
                 command_history = _extract_commands(active_buffer)
 
     # Extra contexts (/context all or /context N)

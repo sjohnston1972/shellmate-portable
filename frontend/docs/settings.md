@@ -78,6 +78,43 @@ because that is what it means. Unticking it clears what was stored, so the
 next launch opens at the default size rather than silently restoring a stale
 one.
 
+## Stockton
+
+The **tune** icon in the sidebar opens the advanced settings: fifty-odd values
+that govern how ShellMate behaves and were, until now, constants in the source.
+Timeouts, thresholds, buffer sizes, retry counts.
+
+Every one has a sensible default and a range it is held to, checked on the
+server rather than by the input box — so nothing there can stop ShellMate
+starting or send a device something wrong. The worst you can do is make it work
+less well.
+
+Anything you change is marked, with its default and range printed beneath it,
+and **Reset** is available on every row, every section, and the whole panel.
+Searching ordinary Settings finds advanced settings too, badged **Stockton**,
+so looking for something does not depend on knowing which panel it is in.
+
+The ones people reach for most:
+
+| Setting | Why |
+|---|---|
+| SSH keepalive | Firewalls and jump hosts idle a session out mid-change. Off by default; 30–60 seconds suits most |
+| Key exchange algorithms, ciphers | Very old kit offers only algorithms modern paramiko has dropped, which makes it unreachable otherwise |
+| Confidence needed to act | A single-vendor estate can safely act on weaker identification. Floored at 0.4 — never zero |
+| Terminal lines sent as context | More context means better answers from the assistant and more tokens |
+| Log level | `DEBUG` is what support will ask for |
+
+Some things are deliberately **not** there, and the panel lists them with the
+reason: the vault's key-derivation parameters, the broadcast confirmation, the
+loopback-only binding. Each of them could break something that matters rather
+than merely degrade it.
+
+### If you get stuck
+
+Run ShellMate once with `--reset-advanced`, or delete the `advanced` section
+from `settings.json`. The way back does not depend on the interface, because
+the interface is what might be in the way.
+
 ## Resetting
 
 There is no global reset. Each area has its own, because they fail
@@ -87,6 +124,7 @@ independently:
 - **Output Colours → Reset to defaults**.
 - The command library: `POST /api/snippets/reset`, or delete `snippets.json`.
 - **AI Prompts → Reset**, or delete `prompts.json`.
+- **Stockton → Reset everything**, or run once with `--reset-advanced`.
 - Everything else: delete `settings.json`. ShellMate starts as if new.
 
 Deleting the whole `ShellMate-Data` folder resets everything, including your

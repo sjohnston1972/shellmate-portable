@@ -137,7 +137,9 @@ class Onboarder:
 
     def observe(self, text: str) -> None:
         """Accumulate output for identification. Bounded to the first few KB."""
-        if self._done or len(self._banner) > 8192:
+        from backend.advanced import get as advanced
+
+        if self._done or len(self._banner) > advanced("identify.banner_bytes"):
             return
         self._banner += text
 
@@ -165,10 +167,12 @@ class Onboarder:
         """
         if self._done:
             return False
+        from backend.advanced import get as advanced
+
         elapsed = time.monotonic() - self.started_at
-        if at_prompt and elapsed >= IDENTIFY_AFTER:
+        if at_prompt and elapsed >= advanced("identify.wait_seconds"):
             return True
-        return elapsed >= IDENTIFY_DEADLINE
+        return elapsed >= advanced("identify.deadline_seconds")
 
     def run(self, prompt: str = "", auto_paging: bool = True) -> dict:
         """

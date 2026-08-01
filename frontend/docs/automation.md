@@ -231,6 +231,9 @@ and these exist only to get one back.
 | `GET` `POST` | `/api/settings` | Read and write settings |
 | `GET` | `/api/platforms` | Platform definitions |
 | `PUT` | `/api/platforms/{id}` | Update one |
+| `GET` | `/api/advanced` | Every advanced setting, its default and its bounds |
+| `POST` | `/api/advanced` | Change some. Values are clamped server-side |
+| `POST` | `/api/advanced/reset` | Reset one, one category, or all |
 | `GET` | `/api/keys` | SSH keys ShellMate is looking after |
 | `POST` | `/api/keys` | Generate one |
 | `POST` | `/api/keys/import` | Copy an existing key in |

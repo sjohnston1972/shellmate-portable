@@ -29,6 +29,8 @@ from backend.session.buffer import SessionBuffer
 from backend.session.transcript import TranscriptParser
 from backend.store import store
 
+from backend.advanced import get as advanced
+
 logger = logging.getLogger(__name__)
 
 # Transport registry. The keys are what the frontend sends as connection_type.
@@ -93,7 +95,8 @@ class SessionManager:
         session: dict[str, Any] = {
             "session_id":      session_id,
             "handler":         handler,
-            "buffer":          SessionBuffer(session_id),
+            "buffer":          SessionBuffer(
+                session_id, max_lines=advanced("history.buffer_lines")),
             # Reconstructs commands and their output from the raw stream. Lives
             # alongside the buffer rather than replacing it: the buffer paints
             # the screen, the transcript answers questions about it.

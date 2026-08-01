@@ -26,6 +26,8 @@ import paramiko
 
 from backend.connections.base import ConnectionError_, ConnectionHandler, ConnectionParams
 
+from backend.advanced import get as advanced
+
 logger = logging.getLogger(__name__)
 
 # How long to wait on the TCP + SSH handshake before giving up.
@@ -91,6 +93,57 @@ def load_private_key(path: str, passphrase: str = "") -> paramiko.PKey:
     )
 
 
+def _host_key_policy():
+    """
+    What to do about a host key ShellMate has not seen before.
+
+    Auto-add by default: network devices legitimately change keys after an RMA
+    or an image upgrade, and blocking on an unknown-host prompt would make the
+    tool unusable on the estate it is built for. A site where every key is
+    already known can choose to reject instead.
+    """
+    import paramiko
+
+    choice = str(advanced("ssh.host_key_policy"))
+    if choice == "reject":
+        return paramiko.RejectPolicy()
+    if choice == "warn":
+        return paramiko.WarningPolicy()
+    return paramiko.AutoAddPolicy()
+
+
+def _algorithm_overrides() -> dict:
+    """
+    Turn the user's preferred algorithm lists into paramiko's disabled_algorithms.
+
+    paramiko takes a list of what *not* to offer rather than what to prefer, so
+    naming what you want means disabling everything else. An empty setting
+    disables nothing, which is the default behaviour.
+    """
+    import paramiko
+
+    wanted_kex = _split(advanced("ssh.kex_algorithms"))
+    wanted_ciphers = _split(advanced("ssh.ciphers"))
+    if not wanted_kex and not wanted_ciphers:
+        return {}
+
+    security = paramiko.Transport._preferred_kex, paramiko.Transport._preferred_ciphers
+    disabled: dict[str, list[str]] = {}
+
+    if wanted_kex:
+        disabled["kex"] = [k for k in security[0] if k not in wanted_kex]
+    if wanted_ciphers:
+        disabled["ciphers"] = [c for c in security[1] if c not in wanted_ciphers]
+
+    logger.info("Restricting SSH algorithms: kex=%s ciphers=%s",
+                wanted_kex or "default", wanted_ciphers or "default")
+    return {"disabled_algorithms": disabled}
+
+
+def _split(value: str) -> set[str]:
+    return {part.strip() for part in str(value or "").split(",") if part.strip()}
+
+
 @dataclass
 class SSHHandler(ConnectionHandler):
     """Manages a single SSH connection and its interactive shell."""
@@ -117,20 +170,36 @@ class SSHHandler(ConnectionHandler):
             # where the user is choosing what to connect to, and network gear
             # legitimately changes host keys after an RMA or an image upgrade.
             # Blocking on an unknown-host prompt would make the tool unusable.
-            self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            # A managed estate can tighten this under Stockton.
+            self._client.set_missing_host_key_policy(_host_key_policy())
 
             logger.info("Connecting to %s as %s", params.target(), username)
+
+            # Algorithm preferences, for the devices modern paramiko will not
+            # otherwise talk to. Very old kit offers only key exchanges and
+            # ciphers that have since been dropped from the defaults, which
+            # makes it unreachable with no way to fix it from the interface.
+            disabled = _algorithm_overrides()
 
             self._client.connect(
                 hostname=params.hostname,
                 port=params.port,
                 username=username,
                 sock=sock,
-                timeout=CONNECT_TIMEOUT,
+                timeout=advanced("ssh.connect_timeout"),
                 allow_agent=False,
-                look_for_keys=False,
+                look_for_keys=bool(advanced("ssh.look_for_keys")),
+                **disabled,
                 **self._auth_kwargs(params.private_key_path, params.private_key_passphrase, params.password),
             )
+
+            # Firewalls and jump hosts idle a session out mid-change, and the
+            # first anyone knows is a dead prompt. Off by default because it is
+            # traffic on a link that may be metered.
+            keepalive = advanced("ssh.keepalive_seconds")
+            transport = self._client.get_transport()
+            if keepalive and transport is not None:
+                transport.set_keepalive(int(keepalive))
 
             self._channel = self._client.invoke_shell(
                 term="xterm-256color", width=80, height=24,
@@ -139,7 +208,7 @@ class SSHHandler(ConnectionHandler):
             # "idle" from "closed". With setblocking(False), recv() returns
             # b"" immediately when idle, which is indistinguishable from the
             # channel having been closed.
-            self._channel.settimeout(READ_TIMEOUT)
+            self._channel.settimeout(advanced("ssh.read_timeout"))
 
         except paramiko.AuthenticationException as exc:
             self.disconnect()

@@ -46,6 +46,8 @@ from backend.profiles import (
 from backend import platforms as platforms_module
 from backend import snippets
 from backend import support
+from backend import advanced as advanced_settings
+from backend.advanced import get as advanced_setting
 from backend import keys as ssh_keys
 from backend.onboard import as_chosen, summarise
 from backend.session import outbound
@@ -1059,7 +1061,7 @@ async def broadcast(request: BroadcastRequest) -> dict:
     try:
         results = await asyncio.wait_for(
             asyncio.gather(*(run_one(sid) for sid in request.session_ids)),
-            timeout=BROADCAST_MAX_SECONDS,
+            timeout=advanced_setting("broadcast.max_seconds"),
         )
     except asyncio.TimeoutError:
         raise HTTPException(
@@ -1149,6 +1151,50 @@ class PlatformRequest(BaseModel):
     dangerous_commands: list[str] = []
     config_mode_markers: list[str] = []
     comment_prefix: str = "!"
+
+
+# ---------------------------------------------------------------------------
+# REST — Stockton, the advanced settings
+# ---------------------------------------------------------------------------
+
+
+class AdvancedRequest(BaseModel):
+    """Body for the Stockton endpoints."""
+
+    values: dict = {}
+    key: str = ""
+    category: str = ""
+
+
+@app.get("/api/advanced")
+async def advanced_list() -> dict:
+    """
+    The whole registry: every setting, its default, its bounds and its value.
+
+    The panel renders itself from this rather than from hand-written markup,
+    so a setting cannot exist in the code and be missing from the interface,
+    or be described there as something it no longer is.
+    """
+    return await asyncio.to_thread(advanced_settings.describe)
+
+
+@app.post("/api/advanced")
+async def advanced_update(request: AdvancedRequest) -> dict:
+    """
+    Store a partial update.
+
+    Values are clamped to their declared bounds here rather than trusted from
+    the browser — this API is documented and scriptable, and settings.json is
+    a text file people are encouraged to edit.
+    """
+    return await asyncio.to_thread(advanced_settings.update, request.values)
+
+
+@app.post("/api/advanced/reset")
+async def advanced_reset(request: AdvancedRequest) -> dict:
+    """Restore one setting, one category, or all of them."""
+    return await asyncio.to_thread(
+        advanced_settings.reset, request.key or None, request.category or None)
 
 
 # ---------------------------------------------------------------------------

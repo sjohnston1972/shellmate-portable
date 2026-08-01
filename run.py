@@ -124,6 +124,8 @@ def main() -> int:
         webbrowser.open(f"http://localhost:{existing}")
         return 0
 
+    _apply_log_level()
+
     logger.info("Data directory: %s", paths.data_dir())
     if paths.data_dir_is_fallback():
         logger.warning(
@@ -134,6 +136,16 @@ def main() -> int:
 
     for item in paths.migrate_legacy_data():
         logger.info("Migrated %s", item)
+
+    # The way back from an advanced setting that made ShellMate unusable. It
+    # has to work without the interface, because the interface is what might
+    # be broken — a reset that lives only inside the thing you cannot reach is
+    # not a reset.
+    if "--reset-advanced" in sys.argv:
+        from backend.advanced import reset as reset_advanced
+
+        reset_advanced()
+        logger.info("Every advanced (Stockton) setting is back to its default.")
 
     # Write the platform definitions out now rather than on first connect, so
     # they are there to be found and edited before anyone needs them.
@@ -207,3 +219,24 @@ if __name__ == "__main__":
     # fork-bomb itself.
     multiprocessing.freeze_support()
     sys.exit(main())
+
+
+def _apply_log_level() -> None:
+    """
+    Honour the Stockton log level.
+
+    Read here rather than at import: a windowed build's log file is its only
+    diagnostic, and DEBUG is the first thing support will ask for. Failing to
+    read it must never stop the application starting, so anything unexpected
+    leaves the level where it was.
+    """
+    try:
+        from backend.advanced import get as advanced
+
+        level = str(advanced("diag.log_level")).upper()
+        if level in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            logging.getLogger().setLevel(getattr(logging, level))
+            if level != "INFO":
+                logger.info("Log level set to %s", level)
+    except Exception as exc:                              # pragma: no cover
+        logger.info("Could not apply the configured log level: %s", exc)

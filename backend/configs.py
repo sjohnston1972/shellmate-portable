@@ -70,7 +70,7 @@ def session_platform(session: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _read_until_idle(channel, timeout: float = CAPTURE_TIMEOUT) -> str:
+def _read_until_idle(channel, timeout: float | None = None) -> str:
     """
     Read from a channel until it goes quiet or the timeout expires.
 
@@ -80,6 +80,12 @@ def _read_until_idle(channel, timeout: float = CAPTURE_TIMEOUT) -> str:
     talking is cruder but does not truncate.
     """
     import socket
+
+    from backend.advanced import get as advanced
+
+    if timeout is None:
+        timeout = advanced("capture.timeout")
+    settle = advanced("capture.idle_settle")
 
     chunks: list[str] = []
     deadline = time.time() + timeout
@@ -93,7 +99,7 @@ def _read_until_idle(channel, timeout: float = CAPTURE_TIMEOUT) -> str:
             chunks.append(data.decode("utf-8", errors="replace"))
             last_data = time.time()
         except socket.timeout:
-            if time.time() - last_data > IDLE_SETTLE and chunks:
+            if time.time() - last_data > settle and chunks:
                 break
         except Exception:
             break

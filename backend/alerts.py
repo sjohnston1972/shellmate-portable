@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 
 from backend import platforms as platforms_module
 
+from backend.advanced import get as advanced
+
 logger = logging.getLogger(__name__)
 
 RELOAD = "reload"
@@ -247,7 +249,7 @@ class AlertTracker:
         seconds = _seconds_from(match)
         if seconds is None and not from_device:
             # "commit confirmed" with no number: the platform's own default.
-            seconds = DEFAULT_COMMIT_CONFIRM_MINUTES * 60
+            seconds = advanced("alerts.commit_confirm_minutes") * 60
         return self._record(COMMIT_CONFIRM, match.group(0).strip(), seconds, from_device)
 
     def _record(self, kind: str, source: str, seconds: float | None,
@@ -313,7 +315,7 @@ class AlertTracker:
             self.pending = None
             return True
 
-        if age > STALE_AFTER_SECONDS:
+        if age > advanced("alerts.stale_hours") * 3600:
             logger.info("Pending %s is stale; clearing", self.pending.kind)
             self.pending = None
             return True

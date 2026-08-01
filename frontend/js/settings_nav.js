@@ -126,6 +126,8 @@
   function show(index) {
     active = index;
     if (search) search.value = '';
+    const stockton = document.getElementById('settings-stockton-results');
+    if (stockton) stockton.remove();
     sections.forEach((section, i) => {
       section.classList.toggle('hidden', i !== index);
       section.querySelectorAll('.settings-hidden-by-search')
@@ -178,6 +180,75 @@
 
       section.classList.toggle('hidden', !anyVisible && !titleMatches);
     });
+
+    showStocktonMatches(query);
+  }
+
+  /**
+   * Surface matching advanced settings, badged, at the end of the results.
+   *
+   * They live in their own panel, which is the point — but somebody searching
+   * "keepalive" here should be told it exists rather than concluding it does
+   * not. The badge says where it is; clicking opens it.
+   */
+  async function showStocktonMatches(query) {
+    const body = panel.querySelector('.panel-body');
+    if (!body) return;
+
+    const existing = document.getElementById('settings-stockton-results');
+    if (existing) existing.remove();
+    if (query.length < 2) return;
+
+    let matches = [];
+    try {
+      const res = await fetch('/api/advanced');
+      const data = await res.json();
+      matches = (data.settings || []).filter(s =>
+        s.label.toLowerCase().includes(query) ||
+        s.key.toLowerCase().includes(query) ||
+        (s.summary || '').toLowerCase().includes(query));
+    } catch (_) { return; }
+
+    if (!matches.length) return;
+
+    // Deliberately NOT class "settings-section": the observer below rebuilds
+    // the whole nav whenever that count changes, and rebuilding calls show(),
+    // which removes this block again. It ate its own results.
+    const block = document.createElement('section');
+    block.className = 'settings-extra-results';
+    block.id = 'settings-stockton-results';
+
+    const heading = document.createElement('h3');
+    heading.className = 'settings-section-title';
+    heading.textContent = 'Also in Stockton';
+    block.appendChild(heading);
+
+    matches.slice(0, 12).forEach(setting => {
+      const row = document.createElement('div');
+      row.className = 'setting-row';
+
+      const label = document.createElement('span');
+      label.className = 'setting-label';
+      label.textContent = setting.label;
+
+      const badge = document.createElement('span');
+      badge.className = 'snippet-tag stockton-badge';
+      badge.textContent = 'Stockton';
+      label.appendChild(badge);
+
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'btn-tertiary';
+      go.textContent = 'Open';
+      go.addEventListener('click', () => {
+        if (typeof window.openStockton === 'function') window.openStockton();
+      });
+
+      row.append(label, go);
+      block.appendChild(row);
+    });
+
+    body.appendChild(block);
   }
 
   /** Open Settings at a named section, for deep links from elsewhere. */

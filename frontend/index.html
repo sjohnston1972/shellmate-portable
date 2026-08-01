@@ -62,6 +62,11 @@
       <a href="#" id="sidebar-link-settings" class="sidebar-link" title="Settings">
         <span class="material-symbols-outlined">settings</span>
       </a>
+      <!-- Stockton. Not explained by name on purpose: the notice on the panel
+           says what it is, which is all a user needs. -->
+      <a href="#" id="sidebar-link-stockton" class="sidebar-link" title="Stockton — advanced settings">
+        <span class="material-symbols-outlined">tune</span>
+      </a>
     </nav>
     <div id="sidebar-bottom">
       <button id="btn-theme-toggle" class="sidebar-link" title="Toggle light/dark theme">
@@ -1279,6 +1284,40 @@ GigEth0/2     unassigned    YES unset  down     down
 
 
   <!-- ================================================================
+       STOCKTON — the advanced settings (#57)
+  ================================================================ -->
+  <div id="stockton-overlay" class="panel-overlay hidden">
+    <div id="stockton-panel" class="side-panel side-panel-wide">
+      <div class="panel-header">
+        <h2 class="panel-title">Stockton</h2>
+        <button id="stockton-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <div id="stockton-intro">
+        <p><strong>This is the advanced settings panel.</strong> Everything below governs how ShellMate behaves and was, until now, a constant in the source.</p>
+        <p>Every value has a sensible default and a range it is held to, so nothing here can stop ShellMate starting or send a device something wrong — the worst you can do is make it work less well. Anything you change is marked, with its default beside it, and <strong>Reset</strong> is on every row, every section, and the whole panel.</p>
+        <p class="stockton-escape">Locked yourself out of the interface entirely? Run ShellMate once with <code>--reset-advanced</code>, or delete the <code>advanced</code> section from <code>settings.json</code>.</p>
+      </div>
+
+      <div id="settings-search-wrap">
+        <input type="search" id="stockton-search" placeholder="Search advanced settings…" autocomplete="off" />
+      </div>
+
+      <div class="stockton-toolbar">
+        <span id="stockton-count" class="settings-section-hint"></span>
+        <button type="button" id="stockton-reset-all" class="btn-tertiary">Reset everything</button>
+      </div>
+      <p id="stockton-status" class="settings-section-hint"></p>
+
+      <div class="panel-body">
+        <div id="stockton-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
        SSH KEYS (#55)
   ================================================================ -->
   <div id="keys-overlay" class="panel-overlay hidden">
@@ -1716,6 +1755,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/docs.js"></script>
   <script src="/static/js/support.js"></script>
   <script src="/static/js/keys.js"></script>
+  <script src="/static/js/stockton.js"></script>
   <script src="/static/js/broadcast.js"></script>
   <script src="/static/js/settings_nav.js"></script>
   <script src="/static/js/tooltips.js"></script>

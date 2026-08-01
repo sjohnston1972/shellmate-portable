@@ -299,6 +299,27 @@ and that every resolved pair clears WCAG AA in both themes. Checking by eye is
 unreliable here anyway — the theme transition is animated, so a reading taken
 mid-transition measures a blend.
 
+## Stockton — the advanced settings
+
+`backend/advanced.py` holds ~53 values that used to be constants scattered
+across the modules. The declaration **is** the default: `ssh_handler.py` calls
+`advanced("ssh.connect_timeout")` rather than holding its own, and the panel
+renders itself from the same registry. Sixty hand-written rows against sixty
+constants would drift, and the drift would be silent — the label would go on
+describing what the code no longer does.
+
+Three rules for adding one:
+
+- **It must be bounded, and the bound is enforced in `clamp()`**, not by the
+  input's `min` attribute. The API is scriptable and settings.json is a text
+  file people are told to edit.
+- **The worst outcome must be *degraded*, never broken.** Anything that fails
+  that goes in `NOT_EXPOSED` with its reason, which the panel shows — an
+  absent setting with no explanation just sends someone hunting in the JSON.
+- **The category prefix must have a heading** in `CATEGORIES`, or the row
+  renders outside every group and is invisible. `test_advanced.py` checks
+  this, along with every default surviving its own clamp.
+
 ## Changing a default
 
 `DEFAULT_SETTINGS` applies to an installation that has never been configured.

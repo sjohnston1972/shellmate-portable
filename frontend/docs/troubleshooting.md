@@ -133,6 +133,16 @@ Providers**. It reports exactly what went wrong per provider.
 proxied or blocked, not that the key is wrong. Ollama running locally avoids
 the problem entirely.
 
+## Something I changed in Stockton broke it
+
+Run ShellMate once with `--reset-advanced` and every advanced setting goes back
+to its default. Deleting the `advanced` section from `settings.json` does the
+same thing.
+
+Nothing in that panel can stop ShellMate starting — every value is held to a
+range on the server — but a connect timeout of three seconds or a restrictive
+cipher list will certainly stop it reaching a device.
+
 ## Reporting a problem
 
 Click the **?** in the sidebar. It opens a panel that gathers what the first
