@@ -190,71 +190,60 @@
   // The prompt
   // -------------------------------------------------------------------------
 
+  /**
+   * Ask whether the changes are worth looking at.
+   *
+   * This was a full-width bar of its own, pinned bottom-left-to-right at
+   * z-index 40 — while the alert toasts sat bottom-right at 60 and the device
+   * notes bottom-right at 45. Three floating elements, three geometries, three
+   * sizes, none aware of the others, and the two at bottom:16px occupied the
+   * same corner. The device note landed squarely on this banner's "Show me"
+   * button, so the one notification carrying a question was also the one most
+   * likely to be buried.
+   *
+   * It is a toast now, in the same stack as everything else: one column, one
+   * format, one set of dismissal rules, and things queue instead of colliding.
+   * Sticky when there is something to answer, timed when it is only
+   * reassurance.
+   */
   function showBanner(sessionId, report, sessionData) {
-    const host = document.getElementById('terminals-container');
-    if (!host) return;
+    if (!window.shellmateAlerts || !window.shellmateAlerts.notify) return;
 
-    // Replace any previous banner for this session rather than stacking them.
-    const existing = document.querySelector(`.drift-banner[data-session="${sessionId}"]`);
-    if (existing) existing.remove();
+    const device = report.hostname || sessionData.display_label || 'This device';
 
-    const banner = document.createElement('div');
-    banner.className = 'drift-banner' + (report.changed ? ' drift-banner-changed' : '');
-    banner.dataset.session = sessionId;
-
-    const icon = document.createElement('span');
-    icon.className = 'material-symbols-outlined drift-icon';
-    icon.textContent = report.changed ? 'difference' : 'check_circle';
-
-    const text = document.createElement('span');
-    text.className = 'drift-text';
-
-    if (report.changed) {
-      // Phrased as the question it is. "4 lines have changed" states a fact
-      // and leaves the reader to work out that something can be done about
-      // it; this says what is on offer.
-      const lead = document.createElement('strong');
-      lead.className = 'drift-lead';
-      lead.textContent =
-        `${report.hostname || sessionData.display_label || 'This device'} has changed ` +
-        `since you last logged in.`;
-      const detail = document.createElement('span');
-      detail.className = 'drift-detail';
-      detail.textContent =
-        ` ${report.changed} line${report.changed === 1 ? '' : 's'} ` +
-        `(${report.added} added, ${report.removed} removed)` +
-        (report.days_since ? `, ${report.days_since} day${report.days_since === 1 ? '' : 's'} ago` : '') +
-        '. Would you like to see the difference?';
-      text.append(lead, detail);
-    } else {
-      text.textContent = report.summary;
-    }
-
-    banner.appendChild(icon);
-    banner.appendChild(text);
-
-    if (report.diff) {
-      const view = document.createElement('button');
-      view.className = 'drift-action';
-      view.textContent = 'Show me';
-      view.addEventListener('click', () => showDiff(report, sessionData));
-      banner.appendChild(view);
-    }
-
-    const dismiss = document.createElement('button');
-    dismiss.className = 'drift-dismiss';
-    dismiss.setAttribute('aria-label', 'Dismiss');
-    dismiss.innerHTML = '<span class="material-symbols-outlined">close</span>';
-    dismiss.addEventListener('click', () => banner.remove());
-    banner.appendChild(dismiss);
-
-    host.appendChild(banner);
-
-    // An unchanged config is reassurance, not news — let it fade. A changed
-    // one stays until acknowledged.
     if (!report.changed) {
-      setTimeout(() => banner.remove(), A('files.drift_banner_seconds', 8) * 1000);
+      // Nothing changed is reassurance, not news. It goes in the stack like
+      // everything else and lets itself out.
+      window.shellmateAlerts.notify({
+        icon:      'check_circle',
+        title:     `${device} is unchanged`,
+        body:      report.summary || '',
+        sessionId,
+      });
+      return;
     }
+
+    const detail =
+      `${report.changed} line${report.changed === 1 ? '' : 's'} ` +
+      `(${report.added} added, ${report.removed} removed)` +
+      (report.days_since
+        ? `, ${report.days_since} day${report.days_since === 1 ? '' : 's'} ago`
+        : '') + '.';
+
+    window.shellmateAlerts.notify({
+      severity: 'warning',
+      icon:     'difference',
+      // Phrased as the question it is. "4 lines have changed" states a fact
+      // and leaves the reader to work out that something can be done about it.
+      title:    `${device} has changed since you last logged in`,
+      body:     detail,
+      sessionId,
+      // Stays until answered or dismissed — see the sticky note in alerts.js.
+      sticky:   true,
+      action:   report.diff ? { label: 'Show me',
+                                onClick: () => showDiff(report, sessionData) }
+                            : null,
+    });
   }
 
   // -------------------------------------------------------------------------

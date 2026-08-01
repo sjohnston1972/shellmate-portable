@@ -368,7 +368,26 @@
     close.innerHTML = '<span class="material-symbols-outlined">close</span>';
     close.addEventListener('click', () => el.remove());
 
-    el.append(icon, text, close);
+    el.append(icon, text);
+
+    // An offer needs the thing being offered attached to it. Without this,
+    // anything with an action had to build its own floating element — which
+    // is how ShellMate ended up with three of them in the same corner,
+    // different sizes, overlapping, one hiding another's button.
+    if (alert.action && alert.action.label) {
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'alert-toast-action';
+      action.textContent = alert.action.label;
+      action.addEventListener('click', (e) => {
+        e.stopPropagation();
+        el.remove();
+        try { alert.action.onClick(); } catch (_) { /* the toast still goes */ }
+      });
+      el.appendChild(action);
+    }
+
+    el.appendChild(close);
 
     // Clicking the toast takes you to the device it is about, which is what
     // anyone reading it is about to want.
@@ -389,10 +408,16 @@
       stack.slice(0, stack.length - A('alerts.max_toasts', MAX_TOASTS_DEFAULT)).forEach(old => old.remove());
     }
 
+    // A question waits to be answered. "This device has changed — would you
+    // like to see the difference?" timing out after twelve seconds asks
+    // something and then withdraws it, which is worse than not asking.
+    if (alert.sticky) return el;
+
     // Critical alerts linger, because the point of the last warning is that it
     // is still there when someone looks back at the machine. Not forever
     // though: one pinned across the screen an hour later is only in the way.
     setTimeout(() => el.remove(), alert.severity === 'critical' ? 120000 : A('alerts.toast_seconds', 12) * 1000);
+    return el;
   }
 
   /**

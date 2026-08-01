@@ -2750,67 +2750,8 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .hl-grey    { color: #8a8a8a; }
 .hl-white   { color: #eeeeee; }
 
-/* Transient note when ShellMate sent something on the user's behalf. Stacks
-   above the drift banner rather than overlapping it. */
-.device-note {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  z-index: 45;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  background: var(--overlay);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--outline);
-  border-radius: var(--radius-md);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 11px;
-  /* --dim rather than --muted: this is the only on-screen account of what
-     ShellMate sent to the device on the user's behalf, so it has to clear
-     the AA ratio in both themes, not merely be present. */
-  color: var(--on-surface-dim);
-  transition: opacity 0.6s;
-  pointer-events: none;
-}
-
-.device-note .material-symbols-outlined {
-  font-size: 15px;
-  color: var(--primary);
-}
-
-.device-note-alias {
-  font-family: 'JetBrains Mono', monospace;
-}
-
-/* A note carrying a button has to be clickable; the rest stay transparent to
-   the mouse so they never swallow a click aimed at the terminal beneath. */
-.device-note-interactive {
-  pointer-events: auto;
-  max-width: 520px;
-  line-height: 1.4;
-}
-
-.device-note-action {
-  flex-shrink: 0;
-  margin-left: 4px;
-  padding: 3px 9px;
-  background: transparent;
-  border: 1px solid var(--outline);
-  border-radius: var(--radius-sm);
-  color: var(--primary);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 11px;
-  cursor: pointer;
-}
-
 .device-note-action:hover {
   background: var(--surface-high);
-}
-
-.device-note-fade {
-  opacity: 0;
 }
 
 /* How long the active session has been up. Monospace so the digits do not
@@ -2908,89 +2849,9 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
    Config drift banner and diff view
 --------------------------------------------------------------------------- */
 
-/* Floats over the terminal rather than displacing it — arriving at a device
-   should not reflow the screen under the cursor. */
-.drift-banner {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 16px;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: var(--overlay);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--outline);
-  border-radius: var(--radius-md);
-  box-shadow: 0 12px 28px -10px rgba(0,0,0,0.6);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 12px;
-  color: var(--on-surface-dim);
-  animation: drift-in 0.18s ease-out;
-}
-
 @keyframes drift-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
-}
-
-/* A changed config is the one worth noticing, and the old treatment — a
-   one-pixel border in a slightly different colour — was easy to miss on a
-   screen already full of text. */
-.drift-banner-changed {
-  border-color: var(--primary-container);
-  border-left: 3px solid var(--primary-container);
-  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.7);
-}
-
-/* The question, then the numbers behind it. */
-.drift-lead {
-  color: var(--on-surface);
-  font-weight: 600;
-}
-
-.drift-detail {
-  color: var(--on-surface-dim);
-}
-
-.drift-icon {
-  flex: 0 0 auto;
-  font-size: 18px;
-  color: var(--on-surface-muted);
-}
-
-.drift-banner-changed .drift-icon {
-  color: var(--primary);
-}
-
-.drift-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.drift-action {
-  flex: 0 0 auto;
-  background: var(--primary-container);
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 5px 10px;
-  color: var(--on-surface);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.drift-dismiss {
-  flex: 0 0 auto;
-  background: none;
-  border: none;
-  color: var(--on-surface-muted);
-  cursor: pointer;
-  display: flex;
-  padding: 2px;
 }
 
 .drift-dismiss:hover {
@@ -3013,6 +2874,28 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   font-size: 11px;
   line-height: 1.5;
   padding: 8px 0;
+}
+
+/* The snapshot list and the baseline controls.
+ *
+ * This had no rule at all, so it sat flush against the panel edge while
+ * everything above it was inset — the heading, the hint, the checkboxes and
+ * the Compare button all started at x=0 and ran under the panel's left border.
+ * .panel-body is padding:0 by design (the hunk cards inset themselves), so a
+ * child that does not say otherwise gets nothing.
+ *
+ * 16px to match .diff-hunk-block's gutter rather than the 24px used by the
+ * header and summary: this section sits directly beneath the hunks and lines
+ * up with them, which is the edge the eye is following down the panel.
+ */
+#diff-history {
+  padding: 4px 16px 20px;
+}
+
+/* Room between the last hunk and the section that follows it, so the two read
+ * as separate rather than as one run of controls. */
+#diff-history .settings-subsection-title {
+  margin-top: 18px;
 }
 
 .diff-line {
@@ -5413,6 +5296,13 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   box-shadow: 0 12px 32px -8px rgba(0,0,0,0.55);
   pointer-events: auto;
   animation: alert-toast-in 0.18s ease-out;
+  /* --overlay-solid, not --surface: this floats over the terminal, and the
+     token exists for exactly that. It is a step lighter than the app
+     background in dark and a step lighter than the panel in light, so a toast
+     reads as raised rather than as a hole in the page. The drift prompt and
+     the device note both used the overlay tokens before they became toasts;
+     matching them keeps the one stack looking like one thing. */
+  background: var(--overlay-solid);
 }
 
 @keyframes alert-toast-in {
@@ -5425,6 +5315,31 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .alert-toast .material-symbols-outlined { font-size: 18px; flex-shrink: 0; }
+
+/* The button on a toast that carries an offer — "Show me", "Set platform".
+ *
+ * Aligned to the top with the icon and the close button rather than centred,
+ * because a two-line body would otherwise drag it down the card and out of
+ * line with the row it belongs to. */
+.alert-toast-action {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: -1px;
+  padding: 4px 10px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--on-surface);
+  background: var(--primary-container);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.alert-toast-action:hover {
+  filter: brightness(1.08);
+}
 
 .alert-info     { border-left-color: var(--primary); }
 .alert-warning  { border-left-color: #f0a94a; }

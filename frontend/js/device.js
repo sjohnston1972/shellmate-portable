@@ -178,47 +178,27 @@
    * would corrupt the very transcript the evidence pack depends on.
    */
   function note(text, kind, opts) {
-    const host = document.getElementById('terminals-container');
-    if (!host) return;
-
+    if (!window.shellmateAlerts || !window.shellmateAlerts.notify) return;
     opts = opts || {};
 
-    const el = document.createElement('div');
-    el.className = `device-note device-note-${kind}`;
-
-    const icon = document.createElement('span');
-    icon.className = 'material-symbols-outlined';
-    icon.textContent = kind === 'alias' ? 'edit' : 'smart_toy';
-
-    const label = document.createElement('span');
-    label.textContent = text;
-
-    el.appendChild(icon);
-    el.appendChild(label);
-
-    // A note that explains a feature did nothing should carry the fix, not
-    // leave the reader to go looking for it.
-    if (opts.offerOverride) {
-      const fix = document.createElement('button');
-      fix.type = 'button';
-      fix.className = 'device-note-action';
-      fix.textContent = 'Set platform';
-      fix.addEventListener('click', (e) => { e.stopPropagation(); openChooser(); });
-      el.appendChild(fix);
-      el.classList.add('device-note-interactive');
-    }
-
-    host.appendChild(el);
-
-    // Interactive notes wait to be used; the rest fade.
-    if (!opts.offerOverride) {
-      const dwell = A('files.note_seconds', 3.5) * 1000;
-      setTimeout(() => el.classList.add('device-note-fade'), dwell);
-      setTimeout(() => el.remove(), dwell + 700);
-    } else {
-      setTimeout(() => el.classList.add('device-note-fade'), 14000);
-      setTimeout(() => el.remove(), 14700);
-    }
+    // This was a floating element of its own at bottom-right, z-index 45,
+    // while the drift prompt sat at bottom:16px too — so the note announcing
+    // what ShellMate sent to the device landed on top of the question asking
+    // whether you wanted to see what had changed, covering its button.
+    //
+    // Same stack as everything else now. A note that explains a feature did
+    // nothing still carries the fix rather than leaving the reader to go
+    // looking for it, but as the toast's own action.
+    window.shellmateAlerts.notify({
+      icon:  kind === 'alias' ? 'edit' : 'smart_toy',
+      title: text,
+      // Interactive notes wait to be used; the rest let themselves out on the
+      // shared timer. An offer that withdraws itself is worse than no offer.
+      sticky: Boolean(opts.offerOverride),
+      action: opts.offerOverride
+        ? { label: 'Set platform', onClick: () => openChooser() }
+        : null,
+    });
   }
 
   // ---------------------------------------------------------------------------

@@ -143,8 +143,12 @@ def contrast(fg: tuple[float, float, float], bg: tuple[float, float, float]) -> 
 # (rule, what it is, the token its text uses). The background of each comes
 # from the rule itself, so a regression to a literal is caught by test 1.
 SURFACES = [
-    (".device-note",  'the "identified Cisco IOS" note',        "--on-surface-dim"),
-    (".drift-banner", "the config-drift banner shown on connect", "--on-surface-dim"),
+    # `.device-note` and `.drift-banner` were here. Both were floating
+    # elements of their own, and both are alert toasts now: they sat in the
+    # same bottom corner at different z-indexes, different sizes and different
+    # shapes, and the device note rendered on top of the drift prompt's own
+    # button. One stack, one format — so there is one surface to measure.
+    (".alert-toast",  "the notification stack",                 "--on-surface"),
     ("#vault-dialog", "the master-password prompt",             "--on-surface-dim"),
     ("#modal-dialog", "the connection dialog",                  "--on-surface"),
     (".side-panel",   "Settings, History and the other panels", "--on-surface"),
@@ -171,11 +175,18 @@ def test_no_hardcoded_overlay_backgrounds() -> None:
     for selector, _label, _token in SURFACES:
         decls = declarations_for(parsed, selector)
         background = decls.get("background", "")
+        # --overlay-solid belongs here too. The rule being enforced is that a
+        # floating surface takes its background from a theme token, and the
+        # pair --overlay / --overlay-solid is what the project documents for
+        # exactly this — the second for surfaces that must not be translucent.
+        # Omitting it made the test reject a correct fix and demand a
+        # translucent background for a notification, which is the opposite of
+        # what it is protecting.
         check(
             f"{selector} background is themed",
-            background in ("var(--overlay)", "var(--modal-bg)"),
-            f"expected var(--overlay), found {background!r} — a literal here is "
-            f"what made the light theme unreadable in #46",
+            background in ("var(--overlay)", "var(--overlay-solid)", "var(--modal-bg)"),
+            f"expected an overlay token, found {background!r} — a literal here "
+            f"is what made the light theme unreadable in #46",
         )
 
     # The specific literal that caused it, anywhere outside the token itself.
