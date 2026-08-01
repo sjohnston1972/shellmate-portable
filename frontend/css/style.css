@@ -2200,16 +2200,39 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .preview-prompt { color: #89b4fa; }
+/* The preview cursor follows the Cursor Style and Cursor Blink settings.
+   It used to be a block that always blinked, whatever was chosen — which made
+   the preview useless for the one comparison somebody opens it to make. The
+   shapes live here rather than as inline styles set from JavaScript, beside
+   the rest of the appearance rules. */
 .preview-cursor {
   display: inline-block;
   width: 0.6em;
   height: 1em;
   background: currentColor;
   vertical-align: text-bottom;
+}
+
+.settings-preview-terminal[data-cursor="bar"] .preview-cursor {
+  width: 0.12em;
+  min-width: 1px;
+}
+
+.settings-preview-terminal[data-cursor="underline"] .preview-cursor {
+  height: 0.12em;
+  min-height: 1px;
+  vertical-align: baseline;
+}
+
+.settings-preview-terminal.preview-blink .preview-cursor {
   animation: blink-cursor 1s step-end infinite;
 }
 
 @keyframes blink-cursor { 50% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-preview-terminal.preview-blink .preview-cursor { animation: none; }
+}
 
 /* --------------------------------------------------------------------------
    Color picker in settings

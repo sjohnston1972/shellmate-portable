@@ -208,12 +208,23 @@
     // Wire up color pickers and live preview
     _initColorPickers();
 
-    // Update preview whenever appearance fields change
-    ['setting-color-scheme', 'setting-font-family', 'setting-font-size', 'setting-line-height'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.addEventListener('change', _updatePreview);
-    });
-    document.getElementById('setting-font-size').addEventListener('input', _updatePreview);
+    // Every control in the section that has the preview drives the preview.
+    //
+    // This was an explicit list of four ids, which is how Cursor Style and
+    // Cursor Blink came to do nothing to it — and how the next control added
+    // there would have done nothing either. Derived from the section itself,
+    // a new row is wired up by existing.
+    const previewSection = document.querySelector('.settings-preview')
+      ? document.querySelector('.settings-preview').closest('.settings-section')
+      : null;
+    if (previewSection) {
+      previewSection.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('change', _updatePreview);
+        // Typing in a number or a font name should show as you type, not on
+        // blur. Harmless on the others, which do not fire it.
+        el.addEventListener('input', _updatePreview);
+      });
+    }
 
     // Wire Chroma "Test connection" button
     const testBtn = document.getElementById('setting-chroma-test');
@@ -615,6 +626,11 @@
 
     previewEl.style.background = bg;
     previewEl.style.color      = fg;
+
+    // The cursor. Attribute for the shape, class for the blink — so the
+    // rules stay in the stylesheet with the rest of the appearance.
+    previewEl.dataset.cursor = _gval('setting-cursor-style') || 'block';
+    previewEl.classList.toggle('preview-blink', _gchecked('setting-cursor-blink'));
     previewPre.style.fontFamily  = fontFamily;
     previewPre.style.fontSize    = `${fontSize}px`;
     previewPre.style.lineHeight  = String(lineHeight);
