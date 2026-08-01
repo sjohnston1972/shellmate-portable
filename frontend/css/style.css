@@ -5275,7 +5275,14 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 #alert-toasts {
   position: absolute;
   right: 16px;
-  bottom: 72px;
+  /* 16px, matching the gutter every other floating element used.
+   *
+   * This was 72px, which was clearance for the drift banner: that sat at
+   * bottom:16px in this same container and stood about 40px tall, so the
+   * toasts had to start above it. The banner is a toast in this very stack
+   * now, so the offset was reserving space against itself — leaving the
+   * column floating well clear of the bottom with nothing underneath it. */
+  bottom: 16px;
   z-index: 60;
   display: flex;
   flex-direction: column;
