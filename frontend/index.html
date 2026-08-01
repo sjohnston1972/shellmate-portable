@@ -62,6 +62,9 @@
       <a href="#" id="sidebar-link-settings" class="sidebar-link" title="Settings">
         <span class="material-symbols-outlined">settings</span>
       </a>
+      <a href="#" id="sidebar-link-discovery" class="sidebar-link" title="Find devices on the network">
+        <span class="material-symbols-outlined">radar</span>
+      </a>
       <!-- Stockton. Not explained by name on purpose: the notice on the panel
            says what it is, which is all a user needs. -->
       <a href="#" id="sidebar-link-stockton" class="sidebar-link" title="Stockton — settings for the tinkerer">
@@ -306,7 +309,16 @@
         <div class="conn-fields" data-for="ssh telnet">
           <div class="form-group">
             <label for="field-hostname">Hostname / IP <span class="required">*</span></label>
-            <input type="text" id="field-hostname" placeholder="192.168.1.1" />
+            <div class="field-with-button">
+              <input type="text" id="field-hostname" placeholder="192.168.1.1" />
+              <!-- Here because this is where somebody realises they do not
+                   know the address. -->
+              <button type="button" class="btn-secondary" id="field-find-devices"
+                      title="Scan the network for devices">
+                <span class="material-symbols-outlined">radar</span>
+                Find
+              </button>
+            </div>
           </div>
 
           <div class="form-row">
@@ -1453,6 +1465,106 @@ GigEth0/2     unassigned    YES unset  down     down
        goes in, build it. Sections in order, no rail, since a rail would
        invite people to skip the step that makes the rest useful.
   ================================================================ -->
+  <!-- ================================================================
+       Network discovery (#69)
+
+       The first part of ShellMate that reaches out across the network on
+       its own initiative rather than to a device the user named. The
+       notice in the panel is permanent rather than dismissable: scanning
+       is not a neutral act, and somebody who scrolls past it once should
+       still see it the next time.
+       ================================================================ -->
+  <div id="discovery-overlay" class="panel-overlay hidden">
+    <div id="discovery-panel" class="side-panel settings-like">
+      <div class="panel-header">
+        <h2 class="panel-title">Find Devices</h2>
+        <button id="discovery-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <div class="panel-body">
+        <p class="discovery-notice">
+          <span class="material-symbols-outlined">info</span>
+          <span>This makes real connections to every address you give it. That
+          traffic is logged by the network, and scanning something you do not
+          own or have permission to test is at best poor manners. ShellMate
+          reads what each device announces and nothing more — it never tries a
+          password.</span>
+        </p>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">What to scan</h3>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="discovery-targets">Addresses</label>
+            <input type="text" id="discovery-targets" class="setting-input setting-input-full"
+                   placeholder="10.20.30.0/24" autocomplete="off" spellcheck="false" />
+            <p class="settings-section-hint">A subnet (<code>10.20.30.0/24</code>),
+              a range (<code>10.20.30.1-60</code>), a comma-separated list, or a
+              single address.</p>
+            <p class="settings-section-hint" id="discovery-subnet-hint"></p>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="discovery-ports">Ports</label>
+            <input type="text" id="discovery-ports" class="setting-input setting-input-full"
+                   autocomplete="off" spellcheck="false" />
+            <p class="settings-section-hint">Port 22 is the one that matters:
+              its banner is what tells ShellMate what the device is. Concurrency,
+              timeouts and the size limit live in Stockton.</p>
+          </div>
+
+          <div class="setting-row">
+            <button type="button" id="discovery-start" class="btn-primary">
+              <span class="material-symbols-outlined">radar</span>
+              Scan
+            </button>
+            <button type="button" id="discovery-cancel" class="btn-secondary hidden">
+              <span class="material-symbols-outlined">stop_circle</span>
+              Stop
+            </button>
+            <span id="discovery-status" class="setting-value"></span>
+          </div>
+
+          <div id="discovery-progress" class="discovery-progress hidden">
+            <div class="discovery-bar"><span id="discovery-bar-fill"></span></div>
+            <p class="settings-section-hint" id="discovery-progress-text"></p>
+          </div>
+        </section>
+
+        <section class="settings-section" id="discovery-results-section">
+          <h3 class="settings-section-title">Found</h3>
+          <p class="settings-section-hint" id="discovery-results-hint">
+            Nothing scanned yet. Only addresses that answered on a port are
+            listed — a page of "nothing here" would bury the ones that did.</p>
+          <div id="discovery-results" class="discovery-results"></div>
+
+          <div class="setting-row hidden" id="discovery-save-row">
+            <button type="button" id="discovery-select-all" class="btn-secondary">
+              <span class="material-symbols-outlined">select_all</span>
+              Select all
+            </button>
+            <button type="button" id="discovery-save" class="btn-primary">
+              <span class="material-symbols-outlined">bookmark_add</span>
+              Save as connections
+            </button>
+            <span id="discovery-save-status" class="setting-value"></span>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">Why there is no ping</h3>
+          <p class="settings-section-hint">A ping sweep needs raw sockets, which
+            need administrator rights on Windows — and ShellMate deliberately
+            requires none. It would also find less: ICMP is filtered on most
+            management networks, which are exactly the ones worth scanning. A
+            TCP connect to port 22 needs no privileges and tells you more.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+
   <div id="support-overlay" class="panel-overlay hidden">
     <div id="support-panel" class="side-panel settings-like">
       <div class="panel-header">
@@ -1793,6 +1905,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/chat.js?v=2"></script>
   <script src="/static/js/settings.js?v=2"></script>
   <script src="/static/js/credentials.js"></script>
+  <script src="/static/js/discovery.js"></script>
   <script src="/static/js/markdown.js"></script>
   <script src="/static/js/docs.js"></script>
   <script src="/static/js/support.js"></script>

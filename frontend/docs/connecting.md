@@ -141,3 +141,53 @@ pulling a config off a switch or pushing an image onto one.
 Plenty of network devices run an SSH shell with no SFTP subsystem at all. If
 yours is one of them, the panel says so rather than showing an empty
 directory.
+
+## Finding devices
+
+On a site you did not build, the first job is working out what is on the wire.
+The **Find Devices** panel (the radar icon in the sidebar, or **Find** beside
+the hostname box in the connection dialog) sweeps a subnet and lists what
+answered.
+
+Give it a subnet (`10.20.30.0/24`), a range (`10.20.30.1-60`), a
+comma-separated list, or a single address. Your own subnet is filled in for
+you, because that is the answer most of the time and it is the one target that
+cannot accidentally reach somebody else's network.
+
+**What it tells you.** Not just which ports are open. ShellMate reads the SSH
+banner and runs it through the same identification it uses on a live session,
+so the list says *Cisco IOS / IOS-XE* rather than *port 22 open* — before you
+have connected to anything. Where a device has a web interface, the page title
+and certificate name are shown too; a title of "Cisco Integrated Management
+Controller" identifies a box more usefully than its address does.
+
+Tick the ones worth keeping and **Save as connections**. They arrive on the
+welcome screen knowing what platform they are. Scanning the same subnet again
+updates those entries rather than adding a second copy of everything.
+
+### Before you scan something
+
+This makes real connection attempts to every address you give it, and the
+network will log them. Scanning something you do not own or have permission to
+test is at best poor manners, and an intrusion detection system worth its
+licence will raise an alert. A scan of more than 256 addresses asks first, with
+the number in the question.
+
+ShellMate reads what each device announces and fetches its home page. **It
+never tries a password.** This finds devices; it does not test them.
+
+### Why there is no ping
+
+A ping sweep needs raw sockets, which need administrator rights on Windows —
+and ShellMate deliberately requires none. It would also find less: ICMP is
+filtered on most management networks, which are exactly the ones worth
+scanning. A TCP connection to port 22 needs no privileges and tells you more.
+
+### Tuning it
+
+How many addresses are probed at once, how long each waits, which ports are
+tried, whether web pages are fetched at all, and the limits on size and
+duration are all in **Stockton → Network discovery**. The defaults are
+deliberately unhurried: a burst of hundreds of simultaneous connections
+exhausts a firewall's session table and looks exactly like an attack to
+anything watching.

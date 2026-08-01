@@ -175,6 +175,7 @@ CATEGORIES = {
     "broadcast": "Broadcast",
     "ai":        "AI assistant",
     "files":     "Files and interface",
+    "discovery": "Network discovery",
     "diag":      "Diagnostics",
 }
 
@@ -452,6 +453,44 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("files.drift_banner_seconds", "How long an unchanged-config note stays", 8, "int",
             "A changed configuration always waits to be dismissed.",
             "", minimum=1, maximum=120, unit="s"),
+
+    # --- Network discovery --------------------------------------------------
+    Setting("discovery.concurrency", "Addresses probed at once", 32, "int",
+            "How many connections a sweep has open simultaneously.",
+            "Higher finishes sooner. It also exhausts a firewall's session "
+            "table faster, and a burst of hundreds of connections is "
+            "indistinguishable from an attack to anything watching.||A /24 at "
+            "32 takes well under a minute. Raise it on a lab; think before you "
+            "do on somebody's production estate.", minimum=1, maximum=256),
+    Setting("discovery.timeout", "Per-probe timeout", 1.5, "float",
+            "How long one port is given to answer.",
+            "The whole cost of a sweep is this multiplied by the addresses "
+            "that do not answer — which on a sparse subnet is nearly all of "
+            "them.||Too short and a busy device is missed. Over a WAN link, "
+            "raise it.", minimum=0.2, maximum=30, unit="s"),
+    Setting("discovery.ports", "Ports to probe", "22,23,80,443", "text",
+            "Which TCP ports each address is tried on.",
+            "22 gives the SSH banner, which is what identifies the platform — "
+            "removing it costs you the only part of this that another tool "
+            "does not do.||Each extra port multiplies the time a sweep takes "
+            "by roughly one more timeout per dead address."),
+    Setting("discovery.fetch_http", "Fetch the web page on 80 and 443", True, "bool",
+            "Reads the title, Server header and any redirect.",
+            "A page title of 'Cisco Integrated Management Controller' is worth "
+            "considerably more than 'port 443 open'.||It is a real HTTP "
+            "request, so it appears in the device's own logs. Nothing is sent "
+            "beyond a GET of /."),
+    Setting("discovery.max_hosts", "Most addresses in one scan", 1024, "int",
+            "A sweep larger than this is refused rather than started.",
+            "A /16 is 65,534 addresses and nobody means it the first time. "
+            "This is the backstop for a typed CIDR with a digit wrong.",
+            minimum=1, maximum=65536),
+    Setting("discovery.max_seconds", "Give up after", 300, "int",
+            "The overall limit on one sweep, however far it has got.",
+            "The same reasoning as the broadcast limit: something that cannot "
+            "be bounded is something people will not start.||Stopping early is "
+            "reported with the count, rather than passed off as a finished "
+            "scan.", minimum=10, maximum=3600, unit="s"),
 
     # --- Diagnostics --------------------------------------------------------
     Setting("diag.log_level", "Log level", "INFO", "choice",

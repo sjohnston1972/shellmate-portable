@@ -48,7 +48,7 @@ class Fingerprint:
     version: str = ""
     model: str = ""
     confidence: float = 0.0
-    source: str = "none"          # banner | prompt | version-command | you
+    source: str = "none"   # banner | prompt | ssh-version | version-command | you
 
     @property
     def certain_enough_to_act(self) -> bool:
@@ -156,6 +156,47 @@ def _from_prompt(prompt: str) -> tuple[str, float]:
     return GENERIC, 0.0
 
 
+# ---------------------------------------------------------------------------
+# The SSH version string
+#
+# A fourth source, and the cheapest of all: RFC 4253 requires an SSH server to
+# announce itself as ``SSH-2.0-<software>`` before anything is negotiated, so
+# it arrives on any connection — including one that is opened and immediately
+# closed, which is what network discovery does.
+#
+# It is weaker evidence than a login banner. "SSH-2.0-Cisco-1.25" says Cisco
+# with certainty and says nothing about whether the device is IOS, NX-OS or an
+# ASA, and the confidence below reflects that: enough to show the engineer,
+# deliberately *below* the threshold at which ShellMate sends the device
+# anything. A guess good enough to display is not a guess good enough to act
+# on.
+# ---------------------------------------------------------------------------
+
+SSH_VERSION_SIGNATURES: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"SSH-2\.0-Cisco", re.IGNORECASE), "ios"),
+    (re.compile(r"SSH-\d\.\d-.*NX-?OS", re.IGNORECASE), "nxos"),
+    (re.compile(r"SSH-\d\.\d-.*Arista", re.IGNORECASE), "arista"),
+    (re.compile(r"SSH-\d\.\d-.*Juniper", re.IGNORECASE), "junos"),
+    (re.compile(r"SSH-\d\.\d-.*PaloAlto", re.IGNORECASE), "panos"),
+    # OpenSSH is on everything from a Linux host to a modern switch, so it
+    # narrows nothing on its own — but on a discovery sweep, "this is a host
+    # running OpenSSH" is still more than "port 22 is open".
+    (re.compile(r"SSH-\d\.\d-OpenSSH", re.IGNORECASE), "linux"),
+]
+
+#: What an SSH version string is worth. Below `identify.act_threshold` on
+#: purpose — see the note above.
+SSH_VERSION_CONFIDENCE = 0.5
+
+
+def _from_ssh_version(text: str) -> tuple[str, float]:
+    """Identify from the server's SSH announcement, or (GENERIC, 0.0)."""
+    for pattern, platform_id in SSH_VERSION_SIGNATURES:
+        if pattern.search(text):
+            return platform_id, SSH_VERSION_CONFIDENCE
+    return GENERIC, 0.0
+
+
 def identify(banner: str = "", prompt: str = "") -> Fingerprint:
     """
     Identify a device from what it has already told us.
@@ -176,6 +217,12 @@ def identify(banner: str = "", prompt: str = "") -> Fingerprint:
     if platform == GENERIC:
         platform, confidence = _from_prompt(prompt)
         source = "prompt" if platform != GENERIC else "none"
+
+    # Last, because it is the weakest: a device that printed a real banner has
+    # already been identified better than its SSH version string can manage.
+    if platform == GENERIC:
+        platform, confidence = _from_ssh_version(text)
+        source = "ssh-version" if platform != GENERIC else "none"
 
     version, model = "", ""
     for platform_id, pattern in VERSION_PATTERNS:

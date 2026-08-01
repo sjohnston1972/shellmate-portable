@@ -44,6 +44,7 @@ from backend.profiles import (
     load_credentials, record_detected_hostname, save_credentials,
     save_plaintext_credentials, save_profile,
 )
+from backend import discovery
 from backend import platforms as platforms_module
 from backend import snippets
 from backend import support
@@ -756,6 +757,160 @@ async def sftp_delete(session_id: str, path: str) -> dict:
         return await asyncio.to_thread(sftp.delete_file, session, path)
     except ConnectionError_ as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Network discovery
+#
+# The first feature that reaches *out* across the network on its own
+# initiative, rather than to a device the user named. The server still binds
+# to 127.0.0.1 and nothing about that changes — but the posture is different
+# enough to be worth stating where the code is, not only in the panel.
+#
+# Everything is bounded, and every bound is a Stockton setting: how many
+# probes are in flight, how long each waits, how many addresses one sweep may
+# cover, and how long the whole thing may run. A sweep that cannot be stopped
+# is a sweep people will not start.
+# ---------------------------------------------------------------------------
+
+
+class DiscoveryScanRequest(BaseModel):
+    """Body for POST /api/discovery/scans."""
+
+    targets: str = ""
+    #: Overrides the Stockton default for this scan only.
+    ports: str = ""
+
+
+class DiscoverySaveRequest(BaseModel):
+    """Body for POST /api/discovery/save."""
+
+    #: Rows from a scan result, each with at least an address.
+    devices: list[dict] = []
+
+
+def _discovery_settings() -> dict:
+    return {
+        "concurrency": advanced_setting("discovery.concurrency"),
+        "timeout":     advanced_setting("discovery.timeout"),
+        "fetch_http":  advanced_setting("discovery.fetch_http"),
+        "max_seconds": advanced_setting("discovery.max_seconds"),
+    }
+
+
+def _discovery_ports(requested: str) -> list[int]:
+    """Parse a port list, falling back to the configured default."""
+    text = requested or str(advanced_setting("discovery.ports"))
+    ports = []
+    for piece in re.split(r"[,\s]+", text.strip()):
+        try:
+            port = int(piece)
+        except ValueError:
+            continue
+        if 1 <= port <= 65535 and port not in ports:
+            ports.append(port)
+    return ports or [22]
+
+
+@app.get("/api/discovery/subnets")
+async def discovery_subnets() -> dict:
+    """The subnets this machine is on, offered as the default target."""
+    return {
+        "subnets": await asyncio.to_thread(discovery.local_subnets),
+        "max_hosts": advanced_setting("discovery.max_hosts"),
+        "ports": str(advanced_setting("discovery.ports")),
+    }
+
+
+@app.post("/api/discovery/preview")
+async def discovery_preview(request: DiscoveryScanRequest) -> dict:
+    """
+    How many addresses a target specification comes to, without scanning.
+
+    So the confirmation before a large sweep can name the number. "Scan
+    10.0.0.0/16?" means nothing; "that is 65,534 addresses" means quite a lot.
+    """
+    try:
+        targets = discovery.parse_targets(
+            request.targets, int(advanced_setting("discovery.max_hosts")))
+    except discovery.TargetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"count": len(targets), "first": targets[:3], "last": targets[-1]}
+
+
+@app.post("/api/discovery/scans")
+async def discovery_start(request: DiscoveryScanRequest) -> dict:
+    """Start a sweep. Returns at once; poll the scan for progress."""
+    try:
+        targets = discovery.parse_targets(
+            request.targets, int(advanced_setting("discovery.max_hosts")))
+    except discovery.TargetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    ports = _discovery_ports(request.ports)
+    logger.info("Discovery: scanning %d address(es) on ports %s",
+                len(targets), ports)
+    scan = discovery.start(targets, ports, _discovery_settings())
+    return scan.state()
+
+
+@app.get("/api/discovery/scans/{scan_id}")
+async def discovery_progress(scan_id: str) -> dict:
+    """Progress and results so far. Results appear as they are found."""
+    scan = discovery.get(scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail="That scan is no longer held.")
+    return scan.state()
+
+
+@app.post("/api/discovery/scans/{scan_id}/cancel")
+async def discovery_cancel(scan_id: str) -> dict:
+    """Stop a sweep. Probes already in flight finish; nothing new starts."""
+    if not discovery.cancel(scan_id):
+        raise HTTPException(status_code=404,
+                            detail="That scan is not running.")
+    return {"status": "ok"}
+
+
+@app.post("/api/discovery/save")
+async def discovery_save(request: DiscoverySaveRequest) -> dict:
+    """
+    Save discovered devices as connection profiles.
+
+    A bulk call rather than new storage: save_profile() already strips secrets
+    and, since #73, already refuses to create a second entry for a device it
+    has — so a repeated scan updates the existing profiles rather than
+    doubling everybody's list.
+    """
+    def _save() -> dict:
+        saved, existing = [], []
+        for device in request.devices:
+            address = (device.get("address") or "").strip()
+            if not address:
+                continue
+
+            kind = device.get("suggested_type") or "ssh"
+            profile = save_profile({
+                "name": (device.get("hostname") or address).split(".")[0],
+                "hostname": address,
+                "port": 22 if kind == "ssh" else 23,
+                "username": "",
+                "connection_type": kind,
+                # What the scan worked out, carried across so the profile
+                # arrives knowing its platform rather than rediscovering it.
+                "platform": device.get("platform") or "",
+                "discovered": True,
+            })
+            (existing if profile.get("already_saved") else saved).append(profile)
+
+        return {"saved": len(saved), "already_saved": len(existing),
+                "profiles": saved + existing}
+
+    result = await asyncio.to_thread(_save)
+    logger.info("Discovery: saved %d new profile(s), %d already known",
+                result["saved"], result["already_saved"])
+    return result
 
 
 @app.get("/api/serial/ports")

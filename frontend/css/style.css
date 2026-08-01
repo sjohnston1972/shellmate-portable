@@ -5810,3 +5810,109 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   color: var(--error);
   font-size: 11px;
 }
+
+
+/* ---------------------------------------------------------------------------
+   Network discovery (#69)
+   --------------------------------------------------------------------------- */
+
+/* Permanent, not dismissable. Scanning is not a neutral act, and somebody who
+   scrolled past this once should still see it the next time. */
+.discovery-notice {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  background: rgba(249,226,175,0.08);
+  border: 1px solid rgba(249,226,175,0.35);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--on-surface-variant);
+}
+
+.discovery-notice .material-symbols-outlined {
+  flex: 0 0 auto;
+  font-size: 18px;
+  color: #f9e2af;
+}
+
+.discovery-progress { margin-top: 10px; }
+
+.discovery-bar {
+  height: 4px;
+  background: var(--surface-highest);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.discovery-bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--primary);
+  transition: width 0.3s ease;
+}
+
+.discovery-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0 12px;
+}
+
+.discovery-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.discovery-row:hover { border-color: var(--primary-container); }
+
+.discovery-detail { display: flex; flex-direction: column; min-width: 0; }
+
+.discovery-address {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--on-surface);
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Whatever the device said about itself — a page title, a certificate name,
+   a banner. All of it attacker-supplied, all of it set with textContent. */
+.discovery-what {
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discovery-badge {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(195,192,255,0.12);
+  border: 1px solid rgba(195,192,255,0.4);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.discovery-ports {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+}
+
+.discovery-error { color: var(--error); }
