@@ -324,14 +324,28 @@
       if (e.target === overlay) close(cancelValue(opts.kind));
     });
 
+    // A key the dialog acts on is stopped here, not merely defaulted away.
+    //
+    // Every panel registers its own Escape handler on `document`, and this
+    // overlay is a child of `document.body` — so without stopPropagation the
+    // event carried on bubbling and cancelling a dialog *also* closed the
+    // panel that opened it. Found with the history panel: Escape out of
+    // "Clear history" and the whole panel went with it, which reads as the
+    // clear having happened.
+    //
+    // preventDefault() was never going to cover this. It suppresses the
+    // browser's default action, and another listener on an ancestor is not a
+    // default action.
     overlay.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation();
         close(cancelValue(opts.kind));
         return;
       }
       if (e.key === 'Enter' && (opts.kind !== 'confirm' || e.target !== cancel)) {
         e.preventDefault();
+        e.stopPropagation();
         accept.click();
         return;
       }

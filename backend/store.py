@@ -630,6 +630,108 @@ class SessionStore:
             ).fetchall()
             return [row["hostname"] for row in rows]
 
+    def clear_history(self, hostname: str = "", before: float | None = None,
+                      include_snapshots: bool = True) -> dict:
+        """
+        Remove recorded history, optionally for one device or up to a date.
+
+        Retention answers "discard anything older than N days" and recording
+        answers "stop from now on". Neither answers "get rid of what you have
+        about *that* device", which is the question that actually comes up: a
+        customer engagement ends, a lab is torn down, or a session captured
+        something that should not have been kept.
+
+        Configuration snapshots go by default and are counted separately. They
+        are the most sensitive thing in the database — a running config
+        carries hashes, keys and community strings — so leaving them behind
+        while claiming to have cleared a device's history would be misleading.
+
+        A pinned baseline is **not** exempt here. It is exempt from *ageing
+        out*, because being old is what makes it a baseline; it is not exempt
+        from somebody explicitly asking for a device's history to go.
+
+        Returns what was removed, so the interface can say rather than guess.
+        """
+        clauses, params = [], []
+        if hostname:
+            clauses.append("hostname = ?")
+            params.append(hostname)
+
+        with self._lock:
+            connection = self.connect()
+
+            # Commands are joined to sessions for the hostname, so the set of
+            # sessions is worked out first.
+            session_sql = "SELECT id FROM sessions"
+            if clauses:
+                session_sql += " WHERE " + " AND ".join(clauses)
+            session_ids = [r[0] for r in connection.execute(session_sql, params).fetchall()]
+
+            removed_commands = 0
+            if session_ids:
+                marks = ",".join("?" for _ in session_ids)
+                command_sql = f"DELETE FROM commands WHERE session_id IN ({marks})"
+                command_params = list(session_ids)
+                if before is not None:
+                    command_sql += " AND ran_at < ?"
+                    command_params.append(before)
+                removed_commands = connection.execute(
+                    command_sql, command_params).rowcount or 0
+
+            # Sessions go only once nothing is left pointing at them, so
+            # clearing "everything before Friday" does not take a session that
+            # still holds later commands.
+            #
+            # The date bound is repeated here rather than relying on the
+            # session being empty. A session that recorded nothing — connected,
+            # nothing typed — is empty from the first second, and without this
+            # a date-scoped clear would take one opened a minute ago.
+            session_clauses = ["id NOT IN (SELECT DISTINCT session_id FROM commands)"]
+            session_params: list = []
+            if hostname:
+                session_clauses.append("hostname = ?")
+                session_params.append(hostname)
+            if before is not None:
+                session_clauses.append("started_at < ?")
+                session_params.append(before)
+
+            removed_sessions = connection.execute(
+                "DELETE FROM sessions WHERE " + " AND ".join(session_clauses),
+                session_params,
+            ).rowcount or 0
+
+            removed_snapshots = 0
+            if include_snapshots:
+                snapshot_sql = "DELETE FROM config_snapshots"
+                snapshot_params: list = []
+                conditions = []
+                if hostname:
+                    conditions.append("hostname = ?")
+                    snapshot_params.append(hostname)
+                if before is not None:
+                    conditions.append("captured_at < ?")
+                    snapshot_params.append(before)
+                if conditions:
+                    snapshot_sql += " WHERE " + " AND ".join(conditions)
+                removed_snapshots = connection.execute(
+                    snapshot_sql, snapshot_params).rowcount or 0
+
+                # A baseline pointing at a snapshot that no longer exists
+                # would leave drift comparing against nothing.
+                connection.execute(
+                    """
+                    DELETE FROM config_baselines
+                     WHERE snapshot_id NOT IN (SELECT id FROM config_snapshots)
+                    """)
+
+            connection.commit()
+
+        logger.info("Cleared history%s: %d command(s), %d session(s), %d snapshot(s)",
+                    f" for {hostname}" if hostname else "",
+                    removed_commands, removed_sessions, removed_snapshots)
+        return {"commands": removed_commands, "sessions": removed_sessions,
+                "snapshots": removed_snapshots}
+
     def delete_session(self, session_id: str) -> bool:
         """Delete a session and its commands."""
         with self._lock:

@@ -519,6 +519,31 @@ async def history_delete_session(session_id: str) -> dict:
     return {"status": "ok"}
 
 
+@app.delete("/api/history")
+async def history_clear(hostname: str = "", days: int = 0,
+                        snapshots: bool = True) -> dict:
+    """
+    Clear recorded history, optionally for one device or older than N days.
+
+    Scoped by the same two filters the panel already has, so "clear" means
+    "clear what I am looking at" rather than opening a second, differently
+    shaped question. Choosing a device and then being offered only
+    all-or-nothing is how the wrong thing gets deleted.
+
+    `days` is inverted relative to the filter: the panel shows the last N
+    days, and this removes everything *older* than N — so clearing while a
+    range is selected keeps what is on screen. Nothing here can be undone, so
+    the surprising reading is the dangerous one.
+    """
+    if days < 0:
+        raise HTTPException(status_code=400, detail="days cannot be negative")
+
+    before = (time.time() - days * 86400) if days else None
+    removed = await asyncio.to_thread(
+        store.clear_history, hostname, before, snapshots)
+    return {"status": "ok", **removed}
+
+
 @app.get("/api/history/devices")
 async def history_devices() -> list[str]:
     """Every device seen, for the history filter."""

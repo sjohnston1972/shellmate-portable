@@ -37,6 +37,7 @@
       .addEventListener('click', (e) => { e.preventDefault(); openHistory(); });
 
     document.getElementById('history-close').addEventListener('click', closeHistory);
+    document.getElementById('history-clear').addEventListener('click', clearHistory);
     document.getElementById('replay-close').addEventListener('click', closeReplay);
 
     queryInput.addEventListener('input', () => {
@@ -70,6 +71,102 @@
 
   function closeHistory() { overlay.classList.add('hidden'); }
   function closeReplay()  { replayOverlay.classList.add('hidden'); }
+
+
+  // -------------------------------------------------------------------------
+  // Clearing
+  // -------------------------------------------------------------------------
+
+  /**
+   * Clear history, scoped by whatever the panel is already filtered to.
+   *
+   * Retention answers "discard anything older than N days" and recording
+   * answers "stop from now on". Neither answers "get rid of what you have
+   * about *that* device", which is the question that actually comes up when
+   * an engagement ends or a lab is torn down.
+   *
+   * The two filters are the scope rather than a second, differently shaped
+   * question — choosing a device and then being offered only all-or-nothing
+   * is how the wrong thing gets deleted.
+   */
+  async function clearHistory() {
+    const hostname = deviceSelect.value;
+    const days     = Number(rangeSelect.value) || 0;
+
+    // Said in full, because it cannot be undone and the two filters compose:
+    // "Cisco-3560 older than 7 days" is easy to read as either half alone.
+    const scope = [
+      hostname ? `for ${hostname}` : 'for every device',
+      days ? `older than ${days} day${days === 1 ? '' : 's'}` : '',
+    ].filter(Boolean).join(', ');
+
+    const answer = await window.shellmateDialog.form({
+      title: 'Clear session history',
+      body:  `This removes recorded commands and output ${scope}. It cannot be undone.`,
+      note:  days
+        // The inversion is worth stating outright: the panel shows the last N
+        // days and this removes everything older, so what is on screen stays.
+        ? 'The range filter selects what is kept — everything currently listed '
+          + 'survives, and everything older goes.'
+        : 'No date filter is set, so this covers all of it.',
+      confirmLabel: 'Clear',
+      danger: true,
+      fields: [
+        { name: 'snapshots', label: 'Also delete configuration snapshots',
+          type: 'checkbox', value: true,
+          // The most sensitive thing in the database: a running config
+          // carries hashes, keys and community strings. Clearing a device's
+          // history while quietly keeping its configs would be misleading.
+          hint: 'Snapshots hold full configurations, including secrets. '
+                + 'Baselines pointing at deleted snapshots are removed too.' },
+      ],
+    });
+    if (!answer) return;
+
+    const params = new URLSearchParams({
+      snapshots: answer.snapshots ? 'true' : 'false',
+    });
+    if (hostname) params.set('hostname', hostname);
+    if (days)     params.set('days', String(days));
+
+    try {
+      const res  = await fetch(`/api/history?${params}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Could not clear it.');
+
+      // Counted rather than "done", because a scope that matched nothing and
+      // a scope that took a thousand records look identical otherwise.
+      const parts = [
+        `${data.commands} command${data.commands === 1 ? '' : 's'}`,
+        `${data.sessions} session${data.sessions === 1 ? '' : 's'}`,
+      ];
+      if (answer.snapshots) {
+        parts.push(`${data.snapshots} snapshot${data.snapshots === 1 ? '' : 's'}`);
+      }
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          severity: 'info', icon: 'delete_sweep',
+          title: 'History cleared',
+          body:  parts.join(', ') + ' removed.',
+        });
+      }
+    } catch (e) {
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          severity: 'warning', icon: 'error',
+          title: 'Could not clear history', body: e.message,
+        });
+      }
+      return;
+    }
+
+    // The device list is rebuilt too: a device with nothing left should not
+    // stay in the filter, and it is currently the selected one.
+    deviceSelect.value = '';
+    await loadDevices();
+    await loadStats();
+    await runSearch();
+  }
 
   async function loadDevices() {
     try {
