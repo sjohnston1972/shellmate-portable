@@ -41,6 +41,7 @@
 
     document.getElementById('support-build').addEventListener('click', build);
     document.getElementById('support-folder').addEventListener('click', reveal);
+    document.getElementById('support-feedback').addEventListener('click', feedback);
   });
 
   async function open() {
@@ -173,6 +174,44 @@
     } catch (e) {
       report('Could not build the bundle: ' + e.message, true);
     }
+  }
+
+
+  /**
+   * Write to the developer about anything that is not a fault.
+   *
+   * The bundle flow asks for a log file and a description of what went wrong,
+   * which is the right shape for a bug and the wrong one for an idea. Anyone
+   * with a suggestion either had to dress it up as a fault report or not send
+   * it — so this is deliberately the opposite: no attachments, no gathering,
+   * and a template that reads like writing to a person.
+   *
+   * Two version facts in the footer so a reply can be accurate. Anything more
+   * turns it back into a support request.
+   */
+  async function feedback() {
+    let build = 'unknown build';
+    try {
+      const res = await fetch('/api/system/info');
+      const info = await res.json();
+      build = info.portable ? 'portable build' : 'running from source';
+    } catch (_) { /* the mail still opens without it */ }
+
+    const body = [
+      'Hello,',
+      '',
+      '',
+      '',
+      '---',
+      `Sent from ShellMate Portable (${build}). Nothing else is attached.`,
+    ].join('\n');
+
+    window.location.href =
+      `mailto:${SUPPORT_EMAIL}` +
+      `?subject=${encodeURIComponent('ShellMate — feedback')}` +
+      `&body=${encodeURIComponent(body)}`;
+
+    report('Opening your email. Nothing was gathered or attached.');
   }
 
   function openMail(bundlePath) {

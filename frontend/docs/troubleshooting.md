@@ -178,3 +178,11 @@ through the same masking that covers session logs.
 
 The bundles are kept in `ShellMate-Data/support/`, so you can look at one
 again — or delete it — after sending.
+
+### Anything that is not a fault
+
+The same panel has **Email the developer**, which opens a plain email with
+nothing attached and nothing gathered. An idea, something that reads oddly, a
+device that behaved unexpectedly, or that it is useful — none of that needs a
+diagnostic bundle, and dressing it up as a fault report to get it sent is how
+good feedback goes unsent.
