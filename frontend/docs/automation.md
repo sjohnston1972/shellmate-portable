@@ -20,17 +20,45 @@ ambiguous which half you are about to get.
 
 The commands worth broadcasting are usually the ones you send often, and a
 broadcast is the worst possible place to be improvising. So the library holds
-them, written once and checked: saving the configuration on each platform,
-interface and error summaries, neighbours, logs, a health check.
+them, written once and checked.
 
-Click one to load it. **Save to library** puts whatever is in the box back,
-under a name.
+It is **grouped by vendor**. Cross-vendor entries come first, then whatever
+the devices you have selected are running, then everything else — visible but
+collapsed, because wanting a Junos command while looking at a switch is a
+perfectly reasonable thing to do.
+
+Click one to load it. **Ctrl+click**, or the **+** button, adds it to what is
+already in the box, so a sequence can be assembled from pieces that have
+already been checked rather than typed fresh into something that sends to a
+fleet. Appending takes the *longest* wait of the snippets involved: waiting
+longer than necessary costs a second, waiting less than a device needs means
+the next command arrives while it is still busy.
+
+Searching ignores the grouping and shows everything that matches, labelled
+with its vendor — the point of a search is finding something without knowing
+which group it was filed under.
+
+**Save to library** puts whatever is in the box back, under a name.
 
 Anything that changes the device is marked **writes**. Nothing destructive
 ships in the library — `write erase` one mis-click away is not a default.
 
+#### Where the entries come from
+
+Most of them are **generated from the alias table** in Platform Definitions.
+`ints` is `show ip interface brief` on IOS, `show interfaces terse` on Junos
+and `show interface all` on PAN-OS, and ShellMate already knew that — keeping
+a second copy in the library would mean two sets of commands that eventually
+disagree.
+
+So correcting a command under **Settings → Platform Definitions** corrects it
+in the library too, and a platform you add gets a library of its own with
+nothing else to do.
+
 The library lives in `snippets.json` in your data folder, so you can edit it
-in bulk or carry it between machines. Deleting a built-in keeps it deleted.
+in bulk or carry it between machines. Deleting an entry keeps it deleted —
+including when a later version ships new ones, which are added alongside
+without bringing back anything you removed.
 
 ### Sequences
 

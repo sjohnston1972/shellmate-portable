@@ -5165,3 +5165,87 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   color: var(--primary);
   font-weight: 600;
 }
+
+/* --------------------------------------------------------------------------
+   The command library, grouped by vendor (#52)
+   -------------------------------------------------------------------------- */
+
+.snippet-group {
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--outline);
+}
+
+.snippet-group:last-child { border-bottom: none; }
+
+.snippet-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  cursor: pointer;
+  list-style: none;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--on-surface-dim);
+}
+
+.snippet-group-head::-webkit-details-marker { display: none; }
+
+.snippet-group-head:hover { color: var(--on-surface); }
+
+/* A disclosure arrow drawn rather than relying on the platform's, which
+   differs between the native window and a browser. */
+.snippet-group-head::before {
+  content: '';
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  margin-right: 2px;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 0.12s;
+}
+
+.snippet-group[open] > .snippet-group-head::before {
+  transform: rotate(90deg);
+}
+
+.snippet-group-count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-high);
+  color: var(--on-surface-muted);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* Which vendor an entry belongs to, shown only while searching — the group
+   heading says it the rest of the time. */
+.snippet-vendor {
+  color: var(--on-surface-muted);
+}
+
+/* Add to what is already in the box, rather than replacing it. */
+.snippet-add {
+  flex-shrink: 0;
+  display: flex;
+  padding: 3px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--on-surface-muted);
+  cursor: pointer;
+}
+
+.snippet-add:hover {
+  color: var(--primary);
+  background: var(--surface-high);
+}
+
+.snippet-add .material-symbols-outlined { font-size: 15px; }

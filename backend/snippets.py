@@ -200,17 +200,166 @@ BUILTIN: list[Snippet] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# The generated library
+#
+# The hand-written set above is Cisco-heavy, because writing the same fourteen
+# intents out for seven platforms by hand is how a library ends up wrong: the
+# alias table already knows that "interfaces" is ``show ip interface brief`` on
+# IOS, ``show interfaces terse`` on Junos and ``show interface all`` on PAN-OS,
+# and a second copy of that knowledge in a different file will disagree with it
+# eventually.
+#
+# So these are derived from ``platforms.py`` at load time. A platform someone
+# adds gets a library for free, and correcting a command in one place corrects
+# it everywhere.
+#
+# Only intents worth sending to a *fleet* are here. Plenty of aliases are
+# useful at a single prompt and pointless across forty switches.
+# ---------------------------------------------------------------------------
+
+#: alias -> (display name, why you would broadcast it)
+BROADCASTABLE: dict[str, tuple[str, str]] = {
+    "ver":     ("Version",                "What everything is running, for an upgrade plan or an advisory."),
+    "uptime":  ("Uptime",                 "Which devices rebooted, and when."),
+    "ints":    ("Interface summary",      "Addresses and state across the estate."),
+    "port":    ("Port status",            "What is up, down, or err-disabled."),
+    "errors":  ("Interface errors",       "The counters that find a bad cable before anyone reports it."),
+    "desc":    ("Interface descriptions", "Auditing what the cabling records claim."),
+    "nei":     ("Neighbours",             "Building a topology from what the devices themselves see."),
+    "log":     ("Recent log",             "What happened last night, everywhere at once."),
+    "inv":     ("Hardware inventory",     "Serial numbers and modules, for support contracts."),
+    "routes":  ("Routing table",          "Where traffic is actually going."),
+    "bgp":     ("BGP summary",            "Neighbours up, and how many prefixes."),
+    "arp":     ("ARP table",              "Finding where a host is."),
+    "mac":     ("MAC address table",      "Same question, one layer down."),
+    "stp":     ("Spanning tree",          "Root bridge and topology changes."),
+    "vlans":   ("VLANs",                  "Auditing what exists where."),
+    "cpu":     ("CPU",                    "Load across the estate."),
+    "mem":     ("Memory",                 "Free memory, before an image upgrade."),
+    "ntp":     ("Clock and NTP",          "Worth checking before trusting anyone's timestamps."),
+    "temp":    ("Temperature",            "After an air-conditioning failure."),
+    "power":   ("Power",                  "Supplies and PoE budget."),
+    "ha":      ("High availability",      "Which unit is active."),
+    "run":     ("Running configuration",  "A full config off every device at once."),
+}
+
+#: A single request that answers "is this device healthy", per platform.
+HEALTH_CHECK = ("ver", "ints", "errors", "log")
+
+
+def generated_snippets() -> list["Snippet"]:
+    """
+    Build per-platform snippets from the alias table.
+
+    Returns one snippet per (platform, intent) the platform actually defines,
+    plus a health check for each platform that has enough of the pieces.
+    Generic is skipped — it has no aliases by design.
+    """
+    from backend.platforms import GENERIC, load_profiles
+
+    out: list[Snippet] = []
+
+    for platform_id, profile in sorted(load_profiles().items()):
+        if platform_id == GENERIC or not profile.aliases:
+            continue
+
+        for alias, (title, why) in BROADCASTABLE.items():
+            command = profile.aliases.get(alias)
+            if not command:
+                continue
+            out.append(Snippet(
+                id=f"gen-{platform_id}-{alias}",
+                name=title,
+                commands=[command],
+                description=why,
+                platform=platform_id,
+                # Read-only by construction: everything above is a show.
+                wait_ms=500, writes=False, builtin=True,
+            ))
+
+        steps = [profile.aliases[a] for a in HEALTH_CHECK if profile.aliases.get(a)]
+        if len(steps) >= 3:
+            out.append(Snippet(
+                id=f"gen-{platform_id}-health",
+                name="Health check",
+                commands=steps,
+                description="Version, interfaces, errors and the recent log, in one pass.",
+                platform=platform_id,
+                wait_ms=800, writes=False, builtin=True,
+            ))
+
+    return out
+
+
+def all_builtins() -> list["Snippet"]:
+    """
+    The full shipped library: hand-written plus generated.
+
+    The hand-written ones win on an id clash, since they exist precisely
+    because the generated form was not good enough.
+    """
+    seen = {s.id for s in BUILTIN}
+    return list(BUILTIN) + [s for s in generated_snippets() if s.id not in seen]
+
+
 def snippets_path():
     return paths.data_dir() / "snippets.json"
 
 
-def _write_all(snippets: list[Snippet]) -> None:
+def _known_ids() -> set[str]:
+    """
+    Every built-in id this installation has already been offered.
+
+    Read straight off disk rather than from the loaded library, because the
+    two answer different questions: the library is what the user *has*, this
+    is what they have *been shown* — and a built-in they deleted is in the
+    second and not the first. Conflating them is what makes a deletion
+    reappear on the next launch.
+    """
+    path = snippets_path()
+    if not path.exists():
+        return set()
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    if isinstance(document, dict):
+        return set(document.get("known_builtins") or [])
+    # An old bare-list file records no history; everything in it counts.
+    if isinstance(document, list):
+        return {i.get("id") for i in document if isinstance(i, dict) and i.get("id")}
+    return set()
+
+
+def _write_all(snippets: list[Snippet], known: set[str] | None = None) -> None:
+    """
+    Write the library.
+
+    ``known`` records every built-in id this installation has ever been
+    offered. Without it there is no way to tell a built-in the user deleted
+    from one that did not exist when their file was written — and the library
+    can never grow without either resurrecting deletions or never reaching
+    anyone who has opened Broadcast once.
+    """
     path = snippets_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps([s.as_dict() for s in snippets], indent=2),
-        encoding="utf-8",
-    )
+
+    if known is None:
+        known = {s.id for s in snippets if s.builtin}
+
+    document = {
+        "_comment": (
+            "The command library used by Broadcast. Edit freely — this file is "
+            "read in preference to the built-ins. Delete an entry and it stays "
+            "deleted; delete the whole file to start again. Entries with an id "
+            "beginning 'gen-' are generated from the alias table in "
+            "platforms.json, so correcting a command there corrects it here."
+        ),
+        "known_builtins": sorted(known),
+        "snippets": [s.as_dict() for s in snippets],
+    }
+    path.write_text(json.dumps(document, indent=2), encoding="utf-8")
 
 
 def load_snippets() -> list[Snippet]:
@@ -223,34 +372,57 @@ def load_snippets() -> list[Snippet]:
     someone deliberately removed, which is the more annoying failure.
     """
     path = snippets_path()
+    builtins = all_builtins()
 
     if not path.exists():
-        _write_all(BUILTIN)
-        return list(BUILTIN)
+        _write_all(builtins)
+        return builtins
 
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        document = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
         logger.warning("snippets.json is unreadable (%s); using the built-ins", exc)
-        return list(BUILTIN)
+        return builtins
 
-    if not isinstance(raw, list):
-        return list(BUILTIN)
+    # The file was a bare list before it carried "known_builtins". An older
+    # file records what the user has, so treat everything in it as offered —
+    # a built-in they deleted before this version comes back once, and
+    # deleting it again sticks. The alternative is that a growing library
+    # never reaches anybody who has opened Broadcast.
+    if isinstance(document, list):
+        raw, known = document, {i.get("id") for i in document if isinstance(i, dict)}
+    elif isinstance(document, dict):
+        raw = document.get("snippets") or []
+        known = set(document.get("known_builtins") or [])
+    else:
+        return builtins
 
     out = []
     for item in raw:
         if not isinstance(item, dict) or not item.get("id"):
             continue
-        known = {f: item.get(f) for f in Snippet.__dataclass_fields__ if f in item}
-        known.setdefault("name", known.get("id", ""))
-        commands = known.get("commands") or []
-        known["commands"] = [str(c) for c in commands if str(c).strip()]
+        # Named "fields" rather than "known": the set of ids the file has
+        # already been offered is called that, one scope out.
+        fields = {f: item.get(f) for f in Snippet.__dataclass_fields__ if f in item}
+        fields.setdefault("name", fields.get("id", ""))
+        commands = fields.get("commands") or []
+        fields["commands"] = [str(c) for c in commands if str(c).strip()]
         try:
-            out.append(Snippet(**known))
+            out.append(Snippet(**fields))
         except TypeError:
             continue
 
-    return out or list(BUILTIN)
+    # Anything shipped since this file was written is new to it, so append it.
+    # A built-in whose id is already in known_builtins but absent from the list
+    # was deleted deliberately and stays gone.
+    existing = {s.id for s in out}
+    added = [s for s in builtins if s.id not in known and s.id not in existing]
+    if added:
+        logger.info("Adding %s new built-in snippet(s) to the library", len(added))
+        out.extend(added)
+        _write_all(out, known | {s.id for s in builtins})
+
+    return out or builtins
 
 
 def save_snippet(fields: dict) -> Snippet:
@@ -286,7 +458,10 @@ def save_snippet(fields: dict) -> Snippet:
     else:
         library.append(updated)
 
-    _write_all(library)
+    # Preserve the offered-ids record. Writing without it would forget that a
+    # deleted built-in had ever been shown, and the next load would put it
+    # back — so saving any snippet at all would undo an unrelated deletion.
+    _write_all(library, _known_ids() | {s.id for s in all_builtins()})
     return updated
 
 
@@ -296,11 +471,14 @@ def delete_snippet(snippet_id: str) -> bool:
     remaining = [s for s in library if s.id != snippet_id]
     if len(remaining) == len(library):
         return False
-    _write_all(remaining)
+    # Keep the offered-ids record intact, or deleting a built-in would remove
+    # it from "known" too and the next load would put it straight back.
+    _write_all(remaining, _known_ids() | {s.id for s in all_builtins()})
     return True
 
 
 def reset_to_defaults() -> list[Snippet]:
     """Put the shipped library back, discarding every edit."""
-    _write_all(BUILTIN)
-    return list(BUILTIN)
+    builtins = all_builtins()
+    _write_all(builtins)
+    return builtins

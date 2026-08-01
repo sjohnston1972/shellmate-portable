@@ -230,6 +230,54 @@
     renderLibrary();
   }
 
+  /** Platform id -> heading. Anything unlisted falls back to the id itself. */
+  const VENDOR = {
+    '':       'Any device',
+    ios:      'Cisco IOS / IOS-XE',
+    nxos:     'Cisco NX-OS',
+    asa:      'Cisco ASA',
+    junos:    'Juniper Junos',
+    panos:    'Palo Alto PAN-OS',
+    arista:   'Arista EOS',
+    linux:    'Linux / Unix shell',
+  };
+
+  /**
+   * Group the library by vendor.
+   *
+   * Most of the library does not apply to most devices in a mixed estate, and
+   * a flat list of a hundred and thirty says nothing about which is which.
+   *
+   * The platform of whatever is *selected* comes first, because that is what
+   * you are about to send to. The rest stay visible rather than hidden:
+   * hiding them is tidier and wrong the moment somebody wants a Junos command
+   * while looking at a switch.
+   */
+  function groupLibrary(matches) {
+    const groups = new Map();
+    matches.forEach(s => {
+      const key = s.platform || '';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(s);
+    });
+
+    const selectedPlatforms = new Set(
+      selectedIds()
+        .map(id => (window.getDeviceInfo ? window.getDeviceInfo(id) : null))
+        .filter(Boolean)
+        .map(info => info.platform)
+        .filter(p => p && p !== 'generic'));
+
+    return [...groups.entries()].sort((a, b) => {
+      // Cross-vendor first, then whatever the selected devices are, then
+      // alphabetically so the order never shuffles for no reason.
+      const rank = (entry) => (entry[0] === '' ? 0 : selectedPlatforms.has(entry[0]) ? 1 : 2);
+      const diff = rank(a) - rank(b);
+      if (diff) return diff;
+      return (VENDOR[a[0]] || a[0]).localeCompare(VENDOR[b[0]] || b[0]);
+    });
+  }
+
   function renderLibrary() {
     const query = (searchEl.value || '').trim().toLowerCase();
     libraryEl.innerHTML = '';
@@ -248,61 +296,139 @@
       return;
     }
 
-    matches.forEach(snippet => {
-      const row = document.createElement('div');
-      row.className = 'snippet-row';
+    // Searching flattens the groups. The point of a search is finding
+    // something without knowing which vendor it was filed under.
+    if (query) {
+      matches.forEach(s => libraryEl.appendChild(snippetRow(s, true)));
+      return;
+    }
 
-      const load = document.createElement('button');
-      load.type = 'button';
-      load.className = 'snippet-load';
-      load.title = snippet.description || snippet.commands.join('\n');
+    groupLibrary(matches).forEach((entry, index) => {
+      const platform = entry[0];
+      const items = entry[1];
 
-      const name = document.createElement('span');
-      name.className = 'snippet-name';
-      // textContent — a snippet name may have been typed by the user.
-      name.textContent = snippet.name;
-      load.appendChild(name);
+      const group = document.createElement('details');
+      group.className = 'snippet-group';
+      // The first two open: cross-vendor, and whatever is selected. The rest
+      // are one click away rather than a wall of a hundred rows.
+      group.open = index < 2;
 
-      if (snippet.writes) {
-        const tag = document.createElement('span');
-        tag.className = 'snippet-tag snippet-writes';
-        tag.textContent = 'writes';
-        load.appendChild(tag);
-      }
-      if (snippet.commands.length > 1) {
-        const tag = document.createElement('span');
-        tag.className = 'snippet-tag';
-        tag.textContent = `${snippet.commands.length} cmds`;
-        load.appendChild(tag);
-      }
+      const summary = document.createElement('summary');
+      summary.className = 'snippet-group-head';
 
-      load.addEventListener('click', () => {
-        input.value = snippet.commands.join('\n');
-        waitInput.value = snippet.wait_ms;
-        updateSummary();
-        input.focus();
-      });
+      const title = document.createElement('span');
+      title.textContent = VENDOR[platform] || platform;
 
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.className = 'snippet-delete';
-      del.title = 'Remove from the library';
-      del.innerHTML = '<span class="material-symbols-outlined">close</span>';
-      del.addEventListener('click', async () => {
-        const ok = await window.shellmateDialog.confirm({
-          title: `Remove "${snippet.name}" from the library?`,
-          body: 'Removing a built-in keeps it removed. Reset the library to bring it back.',
-          confirmLabel: 'Remove',
-          danger: true,
-        });
-        if (!ok) return;
-        await fetch(`/api/snippets/${encodeURIComponent(snippet.id)}`, { method: 'DELETE' });
-        await loadLibrary();
-      });
+      const count = document.createElement('span');
+      count.className = 'snippet-group-count';
+      count.textContent = String(items.length);
 
-      row.append(load, del);
-      libraryEl.appendChild(row);
+      summary.append(title, count);
+      group.appendChild(summary);
+
+      items.forEach(s => group.appendChild(snippetRow(s, false)));
+      libraryEl.appendChild(group);
     });
+  }
+
+  /**
+   * One library entry.
+   *
+   * Clicking loads it. Ctrl-clicking, or the + button, *appends* it — so a
+   * sequence can be assembled from pieces that have already been written and
+   * checked rather than improvised into a box that sends to a fleet.
+   */
+  function snippetRow(snippet, showVendor) {
+    const row = document.createElement('div');
+    row.className = 'snippet-row';
+
+    const load = document.createElement('button');
+    load.type = 'button';
+    load.className = 'snippet-load';
+    load.title = (snippet.description ? snippet.description + '\n\n' : '')
+      + snippet.commands.join('\n')
+      + '\n\nClick to load, Ctrl+click to add to what is already there.';
+
+    const name = document.createElement('span');
+    name.className = 'snippet-name';
+    // textContent — a snippet name may have been typed by the user.
+    name.textContent = snippet.name;
+    load.appendChild(name);
+
+    if (showVendor && snippet.platform) {
+      const tag = document.createElement('span');
+      tag.className = 'snippet-tag snippet-vendor';
+      tag.textContent = VENDOR[snippet.platform] || snippet.platform;
+      load.appendChild(tag);
+    }
+
+    if (snippet.writes) {
+      const tag = document.createElement('span');
+      tag.className = 'snippet-tag snippet-writes';
+      tag.textContent = 'writes';
+      load.appendChild(tag);
+    }
+    if (snippet.commands.length > 1) {
+      const tag = document.createElement('span');
+      tag.className = 'snippet-tag';
+      tag.textContent = snippet.commands.length + ' cmds';
+      load.appendChild(tag);
+    }
+
+    load.addEventListener('click', (e) => {
+      applySnippet(snippet, e.ctrlKey || e.metaKey || e.shiftKey);
+    });
+
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'snippet-add';
+    add.title = 'Add to the commands already in the box';
+    add.innerHTML = '<span class="material-symbols-outlined">add</span>';
+    add.addEventListener('click', () => applySnippet(snippet, true));
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'snippet-delete';
+    del.title = 'Remove from the library';
+    del.innerHTML = '<span class="material-symbols-outlined">close</span>';
+    del.addEventListener('click', async () => {
+      const ok = await window.shellmateDialog.confirm({
+        title: 'Remove "' + snippet.name + '" from the library?',
+        body: 'Removing a built-in keeps it removed. Reset the library to bring it back.',
+        confirmLabel: 'Remove',
+        danger: true,
+      });
+      if (!ok) return;
+      await fetch('/api/snippets/' + encodeURIComponent(snippet.id), { method: 'DELETE' });
+      await loadLibrary();
+    });
+
+    row.append(load, add, del);
+    return row;
+  }
+
+  /**
+   * Put a snippet into the command box.
+   *
+   * Appending takes the *largest* wait of the snippets involved rather than
+   * the last one clicked. Waiting longer than necessary costs a second;
+   * waiting less than a device needs means the next command lands while it is
+   * still busy, which is the failure that matters.
+   */
+  function applySnippet(snippet, append) {
+    const existing = append ? commandList() : [];
+    const commands = existing.concat(snippet.commands);
+
+    input.value = commands.join('\n');
+    waitInput.value = append
+      ? Math.max(parseInt(waitInput.value, 10) || 0, snippet.wait_ms)
+      : snippet.wait_ms;
+
+    updateSummary();
+    input.focus();
+    // Cursor to the end, so the next append visibly lands after this one.
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.scrollTop = input.scrollHeight;
   }
 
   async function saveToLibrary() {
