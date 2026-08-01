@@ -73,6 +73,31 @@
     return open({ ...opts, kind: 'alert' });
   }
 
+  /**
+   * Ask for several things at once.
+   *
+   * `prompt` takes one input, so anything wanting two either chained prompts
+   * — losing everything entered when the last one is cancelled — or built its
+   * own overlay. Four call sites had gone one of those two ways, and one of
+   * the hand-built ones rendered *behind* the panel that opened it, because
+   * it also had to rediscover the z-index.
+   *
+   * @param {object}   opts
+   * @param {string}   opts.title
+   * @param {string}  [opts.body]
+   * @param {Array}    opts.fields   [{ name, label, type, value, options,
+   *                                    placeholder, hint, required }]
+   *                                 type: text | password | select | checkbox
+   * @param {Function} [opts.validate] (values) => message | "" — checked
+   *                                 before the dialog closes, so a rule the
+   *                                 server enforces can be shown here too
+   *                                 rather than after the fact.
+   * @returns {Promise<object|null>} the values, or null if cancelled.
+   */
+  function form(opts) {
+    return open({ ...opts, kind: 'form' });
+  }
+
   // -------------------------------------------------------------------------
 
   function open(opts) {
@@ -89,7 +114,10 @@
   }
 
   function cancelValue(kind) {
-    return kind === 'prompt' ? null : false;
+    // null for anything returning a value, so "" stays a distinguishable
+    // answer from "no answer".
+    if (kind === 'prompt' || kind === 'form') return null;
+    return false;
   }
 
   function build(opts) {
@@ -143,6 +171,76 @@
       box.appendChild(input);
     }
 
+    const fields = {};
+    if (opts.kind === 'form') {
+      (opts.fields || []).forEach((spec, index) => {
+        const row = document.createElement('div');
+        row.className = 'sm-dialog-field';
+
+        const id = `sm-dialog-field-${index}`;
+        const label = document.createElement('label');
+        label.className = 'sm-dialog-label';
+        label.htmlFor = id;
+        label.textContent = spec.label || spec.name;
+
+        let control;
+        if (spec.type === 'select') {
+          control = document.createElement('select');
+          (spec.options || []).forEach(option => {
+            const el = document.createElement('option');
+            el.value = option.value !== undefined ? option.value : option;
+            el.textContent = option.label !== undefined ? option.label : option;
+            control.appendChild(el);
+          });
+        } else if (spec.type === 'checkbox') {
+          control = document.createElement('input');
+          control.type = 'checkbox';
+          control.checked = Boolean(spec.value);
+        } else {
+          control = document.createElement('input');
+          control.type = spec.type === 'password' ? 'password' : 'text';
+          control.autocomplete = 'off';
+          control.spellcheck = false;
+          if (spec.placeholder) control.placeholder = spec.placeholder;
+        }
+
+        control.id = id;
+        control.className = 'sm-dialog-input';
+        if (spec.type !== 'checkbox' && spec.value !== undefined) {
+          control.value = spec.value;
+        }
+        fields[spec.name] = { control, spec };
+
+        row.append(label, control);
+
+        // A password cannot be read back once it is in the vault, so being
+        // able to check what was typed matters more here than the masking
+        // does — the alternative is discovering a typo when a device refuses
+        // it a week later.
+        if (spec.type === 'password') {
+          const reveal = document.createElement('button');
+          reveal.type = 'button';
+          reveal.className = 'sm-dialog-reveal';
+          reveal.textContent = 'Show';
+          reveal.addEventListener('click', () => {
+            const showing = control.type === 'text';
+            control.type = showing ? 'password' : 'text';
+            reveal.textContent = showing ? 'Show' : 'Hide';
+          });
+          row.appendChild(reveal);
+        }
+
+        if (spec.hint) {
+          const hint = document.createElement('p');
+          hint.className = 'sm-dialog-hint';
+          hint.textContent = spec.hint;
+          row.appendChild(hint);
+        }
+
+        box.appendChild(row);
+      });
+    }
+
     if (opts.note) {
       const note = document.createElement('p');
       note.className = 'sm-dialog-note';
@@ -171,7 +269,48 @@
     accept.className = opts.danger ? 'btn-danger' : 'btn-primary';
     accept.textContent = opts.confirmLabel
       || (opts.kind === 'alert' ? 'OK' : opts.kind === 'prompt' ? 'Save' : 'Confirm');
+    /** Read every field back. */
+    const collect = () => {
+      const values = {};
+      Object.entries(fields).forEach(([name, { control, spec }]) => {
+        values[name] = spec.type === 'checkbox' ? control.checked
+                                                : control.value.trim();
+      });
+      return values;
+    };
+
+    /** Shown in the dialog rather than after it closes. */
+    const complain = (message) => {
+      let el = box.querySelector('.sm-dialog-error');
+      if (!el) {
+        el = document.createElement('p');
+        el.className = 'sm-dialog-error';
+        actions.parentNode.insertBefore(el, actions);
+      }
+      el.textContent = message;
+    };
+
     accept.addEventListener('click', () => {
+      if (opts.kind === 'form') {
+        const values = collect();
+
+        const missing = (opts.fields || []).find(
+          spec => spec.required && !values[spec.name]);
+        if (missing) {
+          complain(`${missing.label || missing.name} is needed.`);
+          const entry = fields[missing.name];
+          if (entry) entry.control.focus();
+          return;
+        }
+
+        if (typeof opts.validate === 'function') {
+          const problem = opts.validate(values);
+          if (problem) { complain(problem); return; }
+        }
+
+        close(values);
+        return;
+      }
       close(opts.kind === 'prompt' ? (input ? input.value : '') : true);
     });
     actions.appendChild(accept);
@@ -203,8 +342,15 @@
     // without reaching for the mouse. Otherwise the confirm button — except
     // when it is destructive, where landing on Cancel is the safer default
     // for anyone who hits Enter on reflex.
-    const initial = input || (opts.danger && cancel ? cancel : accept);
-    setTimeout(() => { initial.focus(); if (input) input.select(); }, 0);
+    const firstField = Object.values(fields)[0];
+    const initial = input
+                 || (firstField && firstField.control)
+                 || (opts.danger && cancel ? cancel : accept);
+    setTimeout(() => {
+      initial.focus();
+      if (input) input.select();
+      else if (firstField && firstField.control.select) firstField.control.select();
+    }, 0);
   }
 
   function renderList(items) {
@@ -273,5 +419,5 @@
     if (resolve) resolve(value);
   }
 
-  window.shellmateDialog = { confirm, prompt, alert };
+  window.shellmateDialog = { confirm, prompt, alert, form };
 })();

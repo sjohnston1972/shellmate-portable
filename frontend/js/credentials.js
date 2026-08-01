@@ -359,25 +359,44 @@
     return el;
   }
 
+  /**
+   * Create a shared credential, in one form.
+   *
+   * This was three chained prompts — name, then username, then password —
+   * which meant three confirmations, no way back, nothing visible once
+   * entered, and validation only after all three had been answered. The
+   * storage choice was not offered at all.
+   */
   async function createSet() {
-    const name = await promptText('Name this credential',
-      'Something you will recognise when picking it later — "Lab admin", '
-      + '"Core switches".');
-    if (!name) return;
-
-    const username = await promptText('Username for ' + name,
-      'The account these connections log in as. Leave it blank if it varies.');
-    if (username === null) return;
-
-    const password = await promptWith('Password for ' + name,
-      'Encrypted in the vault. Change it here later and every connection '
-      + 'using it picks up the new one.');
-    if (!password) return;
+    const values = await window.shellmateDialog.form({
+      title: 'New shared credential',
+      body:  'A login several connections use. They point at it rather than '
+             + 'each keeping a copy, so changing it later fixes all of them.',
+      confirmLabel: 'Create',
+      fields: [
+        { name: 'name', label: 'Name', required: true,
+          placeholder: 'Lab admin',
+          hint: 'What you will recognise when picking it later.' },
+        { name: 'username', label: 'Username',
+          placeholder: 'neteng',
+          hint: 'The account these connections log in as. Leave blank if it varies.' },
+        { name: 'password', label: 'Password', type: 'password', required: true,
+          hint: 'Cannot be read back once encrypted — use Show to check it.' },
+        { name: 'storage', label: 'Keep it', type: 'select',
+          options: [
+            { value: 'vault',     label: 'Encrypted in the vault' },
+            { value: 'plaintext', label: 'Plain text — readable on disk' },
+          ],
+          hint: 'Plain text puts one file in your data folder holding the '
+                + 'password for every device using this.' },
+      ],
+    });
+    if (!values) return;
 
     const res = await fetch('/api/credential-sets', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ name, username, password, storage: 'vault' }),
+      body:    JSON.stringify(values),
     });
     if (!res.ok) {
       const detail = (await res.json()).detail || 'Could not save it.';

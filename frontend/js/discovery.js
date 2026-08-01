@@ -338,10 +338,15 @@
   /**
    * The username and credential to give every device being saved.
    *
-   * Returns { username, credential_ref } or null if cancelled. A *reference*
-   * rather than a password: forty copies of one lab login is forty entries to
-   * update the day it changes, with nothing recording that they were ever the
-   * same credential.
+   * Returns { username, credential_ref } or null if cancelled.
+   *
+   * This was a hand-built overlay with `class="modal-overlay"` — a class that
+   * matches no rule in the stylesheet, only the *id* of the connection
+   * dialog's overlay. So it had no position, no z-index and no backdrop, and
+   * rendered behind the scanner panel: the click appeared to do nothing.
+   *
+   * It uses the shared dialog now, which sits above every panel and brings
+   * the focus trap and Escape handling with it.
    */
   async function askForLogin(count) {
     let sets = [];
@@ -350,94 +355,81 @@
       const res = await fetch('/api/credential-sets');
       if (res.ok) {
         const data = await res.json();
-        sets = data.sets || [];
+        sets = (data.sets || []).filter(s => s.has_credentials);
         locked = Boolean(data.vault_locked);
       }
     } catch (e) { /* saving without one is still a valid answer */ }
 
-    return new Promise(resolve => {
-      const overlay = document.createElement('div');
-      overlay.className = 'modal-overlay';
-      overlay.id = 'discovery-login-overlay';
+    const CREATE = '__create__';
+    const options = [{ value: '', label: 'None — ask me on first connect' }];
+    sets.forEach(s => options.push({
+      value: s.id,
+      label: s.username ? `${s.name} (${s.username})` : s.name,
+    }));
+    // The dead end this replaces: with nothing saved, the only advice was to
+    // leave, create one in Settings, and come back — at the one moment
+    // somebody has forty devices in front of them and knows the login for all
+    // of them. Taking "None" instead saves forty connections that cannot
+    // connect, with no bulk way back.
+    if (!locked) options.push({ value: CREATE, label: 'Create a new one…' });
 
-      const box = document.createElement('div');
-      box.className = 'sm-dialog';
+    const note = locked
+      ? 'The vault is locked, so saved credentials cannot be listed or created.'
+      : (sets.length
+          ? 'The connections point at the credential rather than copying it, '
+            + 'so changing it later fixes all of them at once.'
+          : 'Nothing saved yet — you can create one here without leaving.');
 
-      const title = document.createElement('h3');
-      title.className = 'sm-dialog-title';
-      title.textContent = `Save ${count} connection${count === 1 ? '' : 's'}`;
-
-      const body = document.createElement('p');
-      body.className = 'sm-dialog-body';
-      body.textContent = 'These apply to all of them. Leave the credential '
-        + 'as None to be asked on first connect.';
-
-      const userLabel = document.createElement('label');
-      userLabel.className = 'sm-dialog-label';
-      userLabel.textContent = 'Username';
-      const user = document.createElement('input');
-      user.className = 'sm-dialog-input';
-      user.autocomplete = 'off';
-      user.spellcheck = false;
-
-      const credLabel = document.createElement('label');
-      credLabel.className = 'sm-dialog-label';
-      credLabel.textContent = 'Credential';
-      const cred = document.createElement('select');
-      cred.className = 'sm-dialog-input';
-
-      const none = document.createElement('option');
-      none.value = '';
-      none.textContent = 'None — ask me on first connect';
-      cred.appendChild(none);
-
-      sets.filter(s => s.has_credentials).forEach(s => {
-        const option = document.createElement('option');
-        option.value = s.id;
-        option.textContent = s.username ? `${s.name} (${s.username})` : s.name;
-        cred.appendChild(option);
-      });
-
-      const note = document.createElement('p');
-      note.className = 'sm-dialog-note';
-      if (locked) {
-        note.textContent = 'The vault is locked, so saved credentials cannot '
-          + 'be listed. Unlock it to pick one.';
-      } else if (!sets.some(s => s.has_credentials)) {
-        note.textContent = 'No shared credentials saved yet. Create one under '
-          + 'Settings → Credentials Vault and it will be offered here.';
-      } else {
-        note.textContent = 'The connections point at the credential rather '
-          + 'than copying it, so changing it later fixes all of them at once.';
-      }
-
-      const actions = document.createElement('div');
-      actions.className = 'sm-dialog-actions';
-      const cancel = document.createElement('button');
-      cancel.type = 'button';
-      cancel.className = 'btn-secondary';
-      cancel.textContent = 'Cancel';
-      const confirm = document.createElement('button');
-      confirm.type = 'button';
-      confirm.className = 'btn-primary';
-      confirm.textContent = 'Save';
-      actions.append(cancel, confirm);
-
-      box.append(title, body, userLabel, user, credLabel, cred, note, actions);
-      overlay.appendChild(box);
-      document.body.appendChild(overlay);
-      user.focus();
-
-      const finish = (value) => { overlay.remove(); resolve(value); };
-      cancel.addEventListener('click', () => finish(null));
-      confirm.addEventListener('click', () => finish({
-        username: user.value.trim(), credential_ref: cred.value }));
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) finish(null); });
-      user.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') confirm.click();
-        if (e.key === 'Escape') finish(null);
-      });
+    const answer = await window.shellmateDialog.form({
+      title: `Save ${count} connection${count === 1 ? '' : 's'}`,
+      body:  'These apply to all of them.',
+      note,
+      confirmLabel: 'Save',
+      fields: [
+        { name: 'username', label: 'Username',
+          hint: 'The account these devices log in as.' },
+        { name: 'credential_ref', label: 'Credential', type: 'select',
+          options },
+      ],
     });
+    if (!answer) return null;
+
+    if (answer.credential_ref !== CREATE) return answer;
+
+    // Create one inline, prefilled with the username already given — they are
+    // the same value nearly every time, and asking twice invites them to
+    // disagree.
+    const created = await window.shellmateDialog.form({
+      title: 'New shared credential',
+      body:  `It will be attached to all ${count} connection`
+             + `${count === 1 ? '' : 's'} being saved.`,
+      confirmLabel: 'Create and save',
+      fields: [
+        { name: 'name', label: 'Name', required: true,
+          placeholder: 'Lab admin',
+          hint: 'What you will recognise when picking it later.' },
+        { name: 'username', label: 'Username', value: answer.username || '',
+          hint: 'Used for the credential and for the connections.' },
+        { name: 'password', label: 'Password', type: 'password', required: true,
+          hint: 'Cannot be read back once encrypted — use Show to check it.' },
+      ],
+    });
+    if (!created) return null;
+
+    const res = await fetch('/api/credential-sets', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ ...created, storage: 'vault' }),
+    });
+    if (!res.ok) {
+      const detail = (await res.json()).detail || 'Could not create it.';
+      saveStatusEl.textContent = detail;
+      return null;
+    }
+
+    const set = await res.json();
+    return { username: created.username || answer.username || '',
+             credential_ref: set.id };
   }
 
   function setStatus(text, isError) {

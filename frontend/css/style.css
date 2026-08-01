@@ -6272,3 +6272,63 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .welcome-tag-connect { margin-left: 6px; }
+
+/* ---------------------------------------------------------------------------
+   Multi-field dialogs (#106, #107, #109)
+
+   `prompt` takes one input, so anything wanting two chained prompts — losing
+   everything typed when the last was cancelled — or built its own overlay,
+   which is how one of them ended up behind the panel that opened it.
+   --------------------------------------------------------------------------- */
+.sm-dialog-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  margin-bottom: 14px;
+}
+
+.sm-dialog-field .sm-dialog-label { grid-column: 1 / -1; margin: 0; }
+
+.sm-dialog-field .sm-dialog-input { grid-column: 1; margin: 0; }
+
+/* A password cannot be read back once it is in the vault, so checking what
+   was typed matters more here than the masking does. */
+.sm-dialog-reveal {
+  grid-column: 2;
+  align-self: stretch;
+  padding: 0 12px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sm-dialog-reveal:hover { border-color: var(--primary-container); }
+
+.sm-dialog-field input[type="checkbox"] {
+  grid-column: 1;
+  justify-self: start;
+  width: auto;
+}
+
+.sm-dialog-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--on-surface-dim);
+}
+
+/* Shown before the dialog closes, so a rule the server enforces is stated
+   here rather than after the fact. */
+.sm-dialog-error {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: rgba(255,180,171,0.08);
+  border: 1px solid rgba(255,180,171,0.35);
+  border-radius: var(--radius-md);
+  color: var(--error);
+  font-size: 12px;
+}
