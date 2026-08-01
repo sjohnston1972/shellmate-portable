@@ -657,6 +657,12 @@
         Copy address
       </button>
       <div class="ctx-sep"></div>
+      <!-- An ad-hoc connection could not be kept: the only way was to retype
+           the whole thing into the dialog. -->
+      <button data-action="save-connection">
+        <span class="material-symbols-outlined">bookmark_add</span>
+        Save this connection
+      </button>
       <button data-action="duplicate">
         <span class="material-symbols-outlined">tab_duplicate</span>
         Duplicate session
@@ -707,6 +713,7 @@
           case 'clear':     _clearConsole(tab);       break;
           case 'copy':      _copyHistory(tab);        break;
           case 'copy-address': _copyAddress(tab);      break;
+          case 'save-connection': _saveConnection(tab);  break;
           case 'duplicate': _duplicateSession(tab);   break;
           case 'pane':
             window.shellmateLayout.place(Number(btn.dataset.pane), tab.sessionId);
@@ -1142,6 +1149,108 @@
       await navigator.clipboard.writeText(text);
       if (window._showCopyToast) window._showCopyToast(text);
     } catch (_) { /* clipboard refused; nothing useful to say */ }
+  }
+
+  /**
+   * Keep an ad-hoc connection, credentials included.
+   *
+   * The credential has to be asked for rather than recovered.
+   * `ConnectionParams.scrub_secrets()` clears it the moment authentication
+   * succeeds — deliberately, so it cannot be read out of a memory dump or
+   * leak into a crash report — so by the time anybody decides the connection
+   * is worth keeping, ShellMate genuinely does not have it. The dialog says
+   * that, because otherwise being asked for a password you typed two minutes
+   * ago looks like a bug.
+   */
+  async function _saveConnection(tab) {
+    let session = null;
+    try {
+      const res = await fetch('/api/sessions');
+      if (res.ok) {
+        session = (await res.json())
+          .find(s => s.session_id === tab.sessionId) || null;
+      }
+    } catch (_) { /* nothing to save without it */ }
+    if (!session) return;
+
+    const address = session.address || session.hostname || '';
+    const isSerial = session.connection_type === 'serial';
+
+    const answer = await window.shellmateDialog.form({
+      title: `Save ${session.display_label || address}`,
+      body:  'Kept on the welcome screen so you can reconnect with one click.',
+      note:  isSerial ? '' :
+             'ShellMate does not still have the password — it is cleared the '
+             + 'moment a connection succeeds, on purpose. Give it again to '
+             + 'save it, or leave it blank to save the connection without one.',
+      confirmLabel: 'Save',
+      fields: [
+        { name: 'name', label: 'Name', required: true,
+          value: session.display_label || address },
+        { name: 'tags', label: 'Tags',
+          placeholder: 'glasgow, production',
+          hint: 'Optional. Groups the welcome screen and lets you open a set '
+                + 'at once.' },
+      ].concat(isSerial ? [] : [
+        { name: 'password', label: 'Password', type: 'password',
+          hint: 'Optional. Leave blank and you will be asked on connect.' },
+        { name: 'storage', label: 'Keep it', type: 'select',
+          options: [
+            { value: 'vault',     label: 'Encrypted in the vault' },
+            { value: 'plaintext', label: 'Plain text — readable on disk' },
+          ] },
+      ]),
+    });
+    if (!answer) return;
+
+    try {
+      const res = await fetch('/api/profiles', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          name:            answer.name,
+          hostname:        address,
+          port:            session.port || 22,
+          username:        session.username || '',
+          connection_type: session.connection_type || 'ssh',
+          serial_port:     isSerial ? address : '',
+          tags:            (answer.tags || '').split(',')
+                             .map(s => s.trim()).filter(Boolean),
+        }),
+      });
+      if (!res.ok) throw new Error('Could not save it.');
+      const profile = await res.json();
+
+      if (answer.password) {
+        // PUT with a flat body — the same endpoint the connection dialog
+        // uses after a successful connect.
+        await fetch(`/api/profiles/${profile.id}/credentials`, {
+          method:  'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            password: answer.password,
+            storage:  answer.storage || 'vault',
+          }),
+        });
+      }
+
+      if (typeof window.renderWelcomeProfiles === 'function') {
+        window.renderWelcomeProfiles();
+      }
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          title: profile.already_saved ? 'Connection updated' : 'Connection saved',
+          body:  `${answer.name} is on the welcome screen.`,
+        });
+      }
+    } catch (e) {
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          severity: 'warning', icon: 'error',
+          title: 'Could not save the connection', body: e.message,
+        });
+      }
+    }
   }
 
   async function _duplicateSession(tab) {

@@ -339,6 +339,11 @@ class CreateSessionRequest(BaseModel):
     # sends the profile id and the backend fills the credentials in from the
     # vault server-side.
     profile_id: str = ""
+    #: A named credential to authenticate with, for a device that has no
+    #: profile of its own yet. Names only ever travel; the value is resolved
+    #: here, exactly as it is for profile_id — a saved password must not
+    #: reach the browser, and that rule is what makes the whole design work.
+    credential_ref: str = ""
     remember_credentials: bool = False
     # "vault" (encrypted, the default) or "plaintext". The two are alternatives
     # rather than independent choices — a credential lives in one place.
@@ -347,7 +352,10 @@ class CreateSessionRequest(BaseModel):
     def to_params(self) -> ConnectionParams:
         """Convert to the transport-layer parameter object."""
         fields = self.model_dump()
+        # Everything about *where a credential comes from* stays here. The
+        # transport takes credentials, not instructions for finding them.
         fields.pop("profile_id", None)
+        fields.pop("credential_ref", None)
         fields.pop("remember_credentials", None)
         fields.pop("credential_storage", None)
         return ConnectionParams(**fields)
@@ -407,6 +415,18 @@ async def create_session(request: CreateSessionRequest) -> dict:
     # blank are filled, so a password typed in the dialog always wins over a
     # stale stored one.
     params.credential_source = "typed" if request.password else ""
+
+    # A shared credential, chosen in the dialog for a device with no profile.
+    # Filled first so a password typed in the dialog still wins over it, the
+    # same precedence a profile's own saved credentials have.
+    if request.credential_ref and not request.password:
+        owner = profiles_module.set_owner(request.credential_ref)
+        for field, value in profiles_module._read_credentials(owner).items():
+            if not getattr(params, field, ""):
+                setattr(params, field, value)
+                if field == "password":
+                    params.credential_source = "saved"
+
     if request.profile_id:
         for field, value in load_credentials(request.profile_id).items():
             if not getattr(params, field, ""):

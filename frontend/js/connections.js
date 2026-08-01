@@ -120,6 +120,7 @@
   function showConnectionDialog(prefill) {
     clearError();
     form.reset();
+    loadCredentialChoices();
 
     activeProfileId = (prefill && prefill.id) || '';
     activeProfileHasCredentials = Boolean(prefill && prefill.has_saved_credentials);
@@ -640,6 +641,51 @@
     return (p.private_key_path || p.jump_host) ? 'ssh-key' : 'ssh';
   }
 
+  /**
+   * Offer the shared credentials, by name.
+   *
+   * Never values: the backend resolves the reference the same way it resolves
+   * a profile id, which is what keeps a saved password out of the browser.
+   */
+  async function loadCredentialChoices() {
+    const row = document.getElementById('field-credential-row');
+    const select = document.getElementById('field-credential');
+    if (!row || !select) return;
+
+    select.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'the password above';
+    select.appendChild(none);
+
+    try {
+      const res = await fetch('/api/credential-sets');
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const usable = (data.sets || []).filter(s => s.has_credentials);
+
+      if (data.vault_locked) {
+        // Saying so beats presenting an empty list as "nothing saved".
+        const locked = document.createElement('option');
+        locked.value = '';
+        locked.disabled = true;
+        locked.textContent = 'vault locked — unlock it to use a saved credential';
+        select.appendChild(locked);
+      }
+
+      usable.forEach(s => {
+        const option = document.createElement('option');
+        option.value = s.id;
+        option.textContent = s.username ? `${s.name} (${s.username})` : s.name;
+        select.appendChild(option);
+      });
+
+      row.hidden = !usable.length && !data.vault_locked;
+    } catch (e) {
+      row.hidden = true;
+    }
+  }
+
   function fillFromProfile(p) {
     setField('field-label', p.name || '');
     setField('field-tags', (p.tags || []).join(', '));
@@ -698,7 +744,12 @@
       // The backend fills remembered credentials in server-side from this id,
       // so a saved password never travels to the browser.
       profile_id:           activeProfileId,
-      remember_credentials: wantsPlain || Boolean(remember && remember.checked),
+      // Choosing a saved credential and asking to remember a new one are
+      // contradictory, so one suppresses the other rather than both being
+      // sent and the backend picking.
+      credential_ref:       value('field-credential'),
+      remember_credentials: !value('field-credential')
+                            && (wantsPlain || Boolean(remember && remember.checked)),
       credential_storage:   wantsPlain ? 'plaintext' : 'vault',
     };
 

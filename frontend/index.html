@@ -371,6 +371,15 @@
               </span>
             </label>
             <input type="password" id="field-password" />
+            <!-- Shared credentials exist and the dialog did not know about
+                 them, so connecting to a new device that shares a login with
+                 forty others meant typing the password again. Names only —
+                 the value is resolved server-side, exactly as it is for a
+                 saved profile. -->
+            <div class="setting-input-group" id="field-credential-row" hidden>
+              <label class="field-inline-label" for="field-credential">or use</label>
+              <select id="field-credential" class="setting-input"></select>
+            </div>
             <p class="field-hint" data-for="telnet">
               Optional. If given, ShellMate answers the device's login prompts for you.
             </p>
