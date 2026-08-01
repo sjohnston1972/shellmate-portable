@@ -231,6 +231,9 @@ and these exist only to get one back.
 | `GET` `POST` | `/api/settings` | Read and write settings |
 | `GET` | `/api/platforms` | Platform definitions |
 | `PUT` | `/api/platforms/{id}` | Update one |
+| `GET` | `/api/support/sections` | What can go in a diagnostic bundle |
+| `POST` | `/api/support/preview` | Gather sections without writing anything |
+| `POST` | `/api/support/bundle` | Write the chosen sections as one zip |
 | `GET` | `/api/prompts` | The assistant's prompts, with their defaults |
 | `PUT` | `/api/prompts/{mode}` | Replace one (`tshoot` or `learn`) |
 | `POST` | `/api/prompts/reset` | Restore one, or both with no `mode` |

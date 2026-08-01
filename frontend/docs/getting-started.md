@@ -143,6 +143,7 @@ Everything lives in `ShellMate-Data` beside the executable.
 | `prompts.json` | The assistant's system prompts, editable |
 | `logs/` | Session logs, if you turn them on |
 | `configs/` | Captured device configurations, if you ask for them as files |
+| `support/` | Diagnostic bundles you have built for a support request |
 | `window-storage/` | The desktop window's own state — scroll positions and the like |
 | `shellmate.log` | What the application itself did, for troubleshooting |
 

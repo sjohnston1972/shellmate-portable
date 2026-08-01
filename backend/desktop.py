@@ -616,3 +616,34 @@ class Desktop:
             self._window.show()
         else:
             webbrowser.open(f"http://localhost:{self.port}")
+
+
+def reveal(folder) -> bool:
+    """
+    Open a folder in the platform's file manager.
+
+    Used after writing a support bundle: telling somebody a path is not the
+    same as putting the file in front of them, and the whole point of the
+    bundle is that it gets attached to an email.
+
+    Returns False rather than raising when there is no way to do it — a
+    headless run, or a platform without a handler. The path is shown either
+    way, so this is a convenience and never the only route.
+    """
+    import subprocess
+    from pathlib import Path
+
+    target = Path(folder)
+    try:
+        if sys.platform == "win32":
+            # os.startfile is the reliable one on Windows; explorer.exe
+            # returns a non-zero exit code even on success.
+            os.startfile(str(target))          # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.run(["open", str(target)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(target)], check=False)
+        return True
+    except Exception as exc:
+        logger.info("Could not open %s (%s)", target, exc)
+        return False

@@ -1274,6 +1274,50 @@ GigEth0/2     unassigned    YES unset  down     down
     </div>
   </div>
 
+
+  <!-- ================================================================
+       SUPPORT — assembling a diagnostic bundle (#53)
+  ================================================================ -->
+  <div id="support-overlay" class="panel-overlay hidden">
+    <div id="support-panel" class="side-panel side-panel-wide">
+      <div class="panel-header">
+        <h2 class="panel-title">Contact support</h2>
+        <button id="support-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="panel-body">
+        <p class="settings-section-hint">Everything below can be read before it goes anywhere, and nothing is included unless you tick it. API keys, device passwords and vault contents are never gathered at all.</p>
+
+        <div class="setting-row-stack">
+          <label class="setting-label" for="support-note">What happened?</label>
+          <textarea id="support-note" rows="4" spellcheck="true"
+                    placeholder="What you were doing, and what happened instead."></textarea>
+        </div>
+
+        <div class="broadcast-targets-head">
+          <span class="setting-label">Include</span>
+        </div>
+        <div id="support-sections"></div>
+
+        <div class="setting-row">
+          <button type="button" id="support-build" class="btn-primary">
+            <span class="material-symbols-outlined">archive</span>
+            Build the bundle
+          </button>
+          <button type="button" id="support-folder" class="btn-tertiary hidden">Show me the file</button>
+        </div>
+        <p id="support-status" class="settings-section-hint"></p>
+
+        <div id="support-preview" class="hidden">
+          <div class="broadcast-targets-head">
+            <span class="setting-label" id="support-preview-title"></span>
+          </div>
+          <pre id="support-preview-body"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
   <!-- ================================================================
        DOCUMENTATION
   ================================================================ -->
@@ -1562,6 +1606,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/settings.js?v=2"></script>
   <script src="/static/js/markdown.js"></script>
   <script src="/static/js/docs.js"></script>
+  <script src="/static/js/support.js"></script>
   <script src="/static/js/broadcast.js"></script>
   <script src="/static/js/settings_nav.js"></script>
   <script src="/static/js/tooltips.js"></script>

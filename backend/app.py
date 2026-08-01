@@ -45,6 +45,7 @@ from backend.profiles import (
 )
 from backend import platforms as platforms_module
 from backend import snippets
+from backend import support
 from backend.onboard import as_chosen, summarise
 from backend.session import outbound
 from backend.session.redact import redact
@@ -1147,6 +1148,67 @@ class PlatformRequest(BaseModel):
     dangerous_commands: list[str] = []
     config_mode_markers: list[str] = []
     comment_prefix: str = "!"
+
+
+# ---------------------------------------------------------------------------
+# REST — Support bundle
+# ---------------------------------------------------------------------------
+
+
+class SupportRequest(BaseModel):
+    """Body for the support endpoints."""
+
+    sections: list[str] = []
+    note: str = ""
+
+
+@app.get("/api/support/sections")
+async def support_sections() -> dict:
+    """What can go in a support bundle, and what defaults to being included."""
+    return {"sections": support.describe(), "folder": str(support.bundle_dir())}
+
+
+@app.post("/api/support/preview")
+async def support_preview(request: SupportRequest) -> dict:
+    """
+    Gather the chosen sections without writing anything.
+
+    Everything is readable in the panel before it leaves — the manual already
+    tells people to read the log before sending it, and an instruction nobody
+    follows is worse than a preview nobody can avoid.
+    """
+    collected = await asyncio.to_thread(
+        support.collect, request.sections, session_manager)
+    return {"sections": collected}
+
+
+@app.post("/api/support/bundle")
+async def support_bundle(request: SupportRequest) -> dict:
+    """Write the chosen sections as one zip in the data folder."""
+    collected = await asyncio.to_thread(
+        support.collect, request.sections, session_manager)
+    try:
+        path = await asyncio.to_thread(support.write_bundle, collected, request.note)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not write the bundle: {exc}",
+        ) from exc
+    return {"path": str(path), "folder": str(path.parent),
+            "bytes": path.stat().st_size, "sections": sorted(collected)}
+
+
+@app.post("/api/support/reveal")
+async def support_reveal(request: SupportRequest) -> dict:
+    """Open the folder holding the bundles, where the platform allows it."""
+    folder = support.bundle_dir()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        opened = await asyncio.to_thread(desktop.reveal, folder)
+    except Exception as exc:
+        logger.info("Could not open the bundle folder: %s", exc)
+        opened = False
+    return {"opened": opened, "folder": str(folder)}
 
 
 # ---------------------------------------------------------------------------

@@ -5249,3 +5249,96 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .snippet-add .material-symbols-outlined { font-size: 15px; }
+
+/* --------------------------------------------------------------------------
+   Support bundle (#53)
+   -------------------------------------------------------------------------- */
+
+.support-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--outline);
+}
+
+.support-row:last-child { border-bottom: none; }
+
+.support-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.support-choice input[type="checkbox"] {
+  margin-top: 2px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.support-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.support-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12.5px;
+  color: var(--on-surface);
+}
+
+.support-summary {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--on-surface-dim);
+}
+
+/* Which sections describe the estate rather than the application. It is the
+   only judgement anyone has to make on this panel, so it is on the row. */
+.support-tag {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: var(--surface-high);
+  color: var(--secondary);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.support-view { flex-shrink: 0; }
+
+#support-preview-body {
+  max-height: 40vh;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#support-note {
+  width: 100%;
+  padding: 9px 11px;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+#support-note:focus { outline: none; border-color: var(--primary-container); }

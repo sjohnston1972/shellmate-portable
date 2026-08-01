@@ -135,12 +135,36 @@ the problem entirely.
 
 ## Reporting a problem
 
-Email **support@foundry-ns.com** with:
+Click the **?** in the sidebar. It opens a panel that gathers what the first
+reply would otherwise have to ask for, writes it as a single zip in your data
+folder, and opens an email naming the file so you can attach it.
 
-- What you were doing and what happened instead
-- The relevant part of `ShellMate-Data/shellmate.log`
-- The device platform and version, if it is connection-related
+Everything is a choice, and everything can be read first. **Preview** beside
+each row shows exactly what would be written.
 
-**Check the log before sending it.** It records what the application did, not
-your session contents, but read it through — it is the sort of file worth
-knowing the contents of before it leaves the building.
+| Included by default | What it is |
+|---|---|
+| About this installation | Version, frozen or not, where the data lives |
+| Library versions | What paramiko, pywebview and the rest actually are |
+| Application log | What ShellMate did this run — not your session contents |
+| Settings | Your preferences, with API keys masked |
+
+| Off unless you ask | What it is |
+|---|---|
+| Platform definitions | The commands and aliases per device type |
+| Assistant prompts | The system prompts, and whether you changed them |
+| Command library | Your saved broadcast commands |
+| AI providers | Which are configured — never the keys |
+| Open sessions | Device names, transports, what each was identified as |
+| Recent terminal output | The last few hundred lines, credentials masked |
+
+The last two are marked **about your devices**, because that is the only
+judgement worth making here: everything else describes ShellMate, not the
+estate you have pointed it at.
+
+**What is never gathered, whatever you tick:** API keys, device passwords,
+vault contents, and the plaintext credentials file. Terminal output goes
+through the same masking that covers session logs.
+
+The bundles are kept in `ShellMate-Data/support/`, so you can look at one
+again — or delete it — after sending.

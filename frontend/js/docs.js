@@ -37,8 +37,14 @@
     document.getElementById('sidebar-link-docs')
       .addEventListener('click', (e) => { e.preventDefault(); open(); });
 
+    // The support panel owns this now (#53). It gathers what the first reply
+    // always asks for, and shows all of it before anything is sent.
     document.getElementById('sidebar-link-support')
-      .addEventListener('click', (e) => { e.preventDefault(); contactSupport(); });
+      .addEventListener('click', (e) => {
+        e.preventDefault();
+        if (typeof window.openSupport === 'function') window.openSupport();
+        else contactSupport();
+      });
 
     document.getElementById('docs-close').addEventListener('click', close);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
