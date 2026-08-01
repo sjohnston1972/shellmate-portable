@@ -64,7 +64,7 @@
     listEl.innerHTML = '';
     sections.forEach(section => {
       const row = document.createElement('div');
-      row.className = 'support-row';
+      row.className = 'setting-row support-row';
 
       const label = document.createElement('label');
       label.className = 'support-choice';
@@ -78,7 +78,7 @@
       text.className = 'support-text';
 
       const title = document.createElement('span');
-      title.className = 'support-title';
+      title.className = 'setting-label support-title';
       title.textContent = section.label;
 
       // Said on the row rather than in a note underneath: which of these
@@ -92,7 +92,7 @@
       }
 
       const summary = document.createElement('span');
-      summary.className = 'support-summary';
+      summary.className = 'settings-section-hint support-summary';
       summary.textContent = section.summary;
 
       text.append(title, summary);
@@ -138,11 +138,12 @@
     const body = document.getElementById('support-preview-body');
     if (!box) return;
 
-    title.textContent = section.label;
+    title.textContent = `Preview — ${section.label}`;
     // textContent — this is a log, a config or device output, and none of it
     // is ours to trust as markup.
     body.textContent = text;
-    box.classList.remove('hidden');
+    box.hidden = false;
+    box.scrollIntoView({ block: 'nearest' });
     body.scrollTop = 0;
   }
 

@@ -1,34 +1,53 @@
 /**
  * stockton.js — The advanced settings, rendered from the registry.
  *
- * Every row here is built from what `backend/advanced.py` declares, and that
+ * Every row is built from what `backend/advanced.py` declares, and that
  * declaration *is* the default the code reads. Sixty hand-written rows against
  * sixty constants would drift — silently, because the label would go on
  * describing something the code no longer does.
  *
- * Two things the panel owes the person opening it:
+ * It wears the Settings chrome rather than one of its own: search box,
+ * category rail, and sections using the same title/row/hint vocabulary. Two
+ * panels that do the same kind of job should not need learning twice, and
+ * fifty-three settings across ten categories is exactly the case a rail
+ * exists to solve — the first attempt was a wall of accordions flush against
+ * the panel edge, which is how it earned the rewrite.
  *
- * **Saying what this is.** Not a scare — a signpost. Every value has a sane
- * default, nothing here can stop ShellMate starting, and the way back is on
- * the same screen.
- *
- * **Showing what has been changed.** A setting altered eight months ago should
- * be visibly not standard, with its default beside it, or the panel becomes a
- * place where things quietly differ from everyone else's.
+ * Two things the panel owes whoever opens it: saying plainly what this is,
+ * and showing what has been changed. A setting altered eight months ago should
+ * be visibly not standard, with its default beside it.
  */
 (function () {
   'use strict';
 
-  let overlay, bodyEl, searchEl, statusEl;
+  /** The pseudo-category for the "not exposed" list, kept last in the rail. */
+  const EXCLUSIONS = '__excluded__';
+
+  const ICONS = {
+    identify:  'smart_toy',
+    ssh:       'cable',
+    terminal:  'terminal',
+    history:   'search',
+    capture:   'save',
+    alerts:    'warning',
+    broadcast: 'send',
+    ai:        'smart_toy',
+    files:     'description',
+    diag:      'help',
+  };
+
+  let overlay, navEl, bodyEl, searchEl, countEl;
   let registry = { settings: [], categories: {}, not_exposed: [] };
+  let active = null;
 
   document.addEventListener('DOMContentLoaded', () => {
     overlay = document.getElementById('stockton-overlay');
     if (!overlay) return;
 
+    navEl    = document.getElementById('stockton-nav');
     bodyEl   = document.getElementById('stockton-body');
     searchEl = document.getElementById('stockton-search');
-    statusEl = document.getElementById('stockton-status');
+    countEl  = document.getElementById('stockton-count');
 
     const link = document.getElementById('sidebar-link-stockton');
     if (link) link.addEventListener('click', (e) => { e.preventDefault(); open(); });
@@ -47,6 +66,7 @@
   async function open() {
     overlay.classList.remove('hidden');
     await load();
+    setTimeout(() => searchEl && searchEl.focus(), 60);
   }
 
   function close() { overlay.classList.add('hidden'); }
@@ -55,116 +75,144 @@
     try {
       const res = await fetch('/api/advanced');
       registry = await res.json();
+      if (!active) active = Object.keys(registry.categories)[0];
+      buildNav();
       render();
     } catch (e) {
       report('Could not read the advanced settings: ' + e.message, true);
     }
   }
 
+  function buildNav() {
+    navEl.innerHTML = '';
+
+    const entries = Object.keys(registry.categories)
+      .map(id => [id, registry.categories[id]]);
+    // The exclusions read as a category from the rail's point of view, and
+    // belong at the end where somebody looking for a missing setting finds
+    // them after failing to find it anywhere else.
+    entries.push([EXCLUSIONS, 'Deliberately not here']);
+
+    entries.forEach(([id, label]) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'settings-nav-item' + (id === active ? ' active' : '');
+
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-outlined';
+      icon.textContent = id === EXCLUSIONS ? 'block' : (ICONS[id] || 'tune');
+
+      const text = document.createElement('span');
+      text.textContent = label;
+
+      item.append(icon, text);
+      item.addEventListener('click', () => {
+        active = id;
+        searchEl.value = '';
+        buildNav();
+        render();
+      });
+      navEl.appendChild(item);
+    });
+  }
+
   function render() {
     const query = (searchEl.value || '').trim().toLowerCase();
     bodyEl.innerHTML = '';
-
-    const matches = registry.settings.filter(s =>
-      !query ||
-      s.label.toLowerCase().includes(query) ||
-      s.key.toLowerCase().includes(query) ||
-      (s.summary || '').toLowerCase().includes(query) ||
-      (s.tip || '').toLowerCase().includes(query));
+    bodyEl.scrollTop = 0;
 
     const changed = registry.settings.filter(s => s.modified).length;
-    const count = document.getElementById('stockton-count');
-    if (count) {
-      count.textContent = changed
+    if (countEl) {
+      countEl.textContent = changed
         ? `${changed} of ${registry.settings.length} changed from the default`
         : `${registry.settings.length} settings, all at their defaults`;
     }
 
-    if (!matches.length) {
-      const empty = document.createElement('div');
-      empty.className = 'broadcast-empty';
-      empty.textContent = 'Nothing matches.';
-      bodyEl.appendChild(empty);
+    // Searching drops the categories entirely — the point of a search is
+    // finding a setting without knowing which one it lives under.
+    if (query) {
+      navEl.querySelectorAll('.settings-nav-item')
+        .forEach(i => i.classList.remove('active'));
+
+      const matches = registry.settings.filter(s =>
+        s.label.toLowerCase().includes(query) ||
+        s.key.toLowerCase().includes(query) ||
+        (s.summary || '').toLowerCase().includes(query) ||
+        (s.tip || '').toLowerCase().includes(query));
+
+      if (!matches.length) {
+        bodyEl.appendChild(emptyState('Nothing matches.'));
+        return;
+      }
+      bodyEl.appendChild(section('Search results', matches, true));
       return;
     }
 
-    Object.keys(registry.categories).forEach(category => {
-      const items = matches.filter(s => s.category === category);
-      if (!items.length) return;
+    if (active === EXCLUSIONS) {
+      bodyEl.appendChild(exclusions());
+      return;
+    }
 
-      const group = document.createElement('details');
-      group.className = 'stockton-group';
-      group.open = !!query || items.some(s => s.modified);
-
-      const summary = document.createElement('summary');
-      summary.className = 'snippet-group-head';
-
-      const title = document.createElement('span');
-      title.textContent = registry.categories[category];
-
-      const reset = document.createElement('button');
-      reset.type = 'button';
-      reset.className = 'btn-tertiary stockton-reset';
-      reset.textContent = 'Reset these';
-      reset.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        resetCategory(category, registry.categories[category]);
-      });
-
-      summary.append(title, reset);
-      group.appendChild(summary);
-
-      items.forEach(s => group.appendChild(row(s)));
-      bodyEl.appendChild(group);
-    });
-
-    bodyEl.appendChild(notExposed());
+    const items = registry.settings.filter(s => s.category === active);
+    bodyEl.appendChild(section(registry.categories[active], items, false));
   }
 
-  function row(setting) {
-    const el = document.createElement('div');
-    el.className = 'stockton-row' + (setting.modified ? ' stockton-modified' : '');
+  function section(title, items, showCategory) {
+    const el = document.createElement('section');
+    el.className = 'settings-section';
 
-    const label = document.createElement('label');
-    label.className = 'stockton-label';
-    label.htmlFor = fieldId(setting);
-    label.textContent = setting.label;
-    // The tooltip carries the trade-off, which is the only thing a label
-    // cannot: what you give up by changing it.
-    if (setting.tip) label.setAttribute('data-tip', setting.tip);
+    const heading = document.createElement('h3');
+    heading.className = 'settings-section-title';
+    heading.textContent = title;
+    el.appendChild(heading);
+
+    items.forEach(setting => el.appendChild(row(setting, showCategory)));
+    return el;
+  }
+
+  function row(setting, showCategory) {
+    const el = document.createElement('div');
+    el.className = 'setting-row stockton-row'
+      + (setting.modified ? ' stockton-modified' : '');
 
     const text = document.createElement('div');
     text.className = 'stockton-text';
+
+    const label = document.createElement('label');
+    label.className = 'setting-label';
+    label.htmlFor = fieldId(setting);
+    label.textContent = setting.label;
+    // The tooltip carries the trade-off, which is the one thing a label
+    // cannot: what you give up by changing it.
+    if (setting.tip) label.setAttribute('data-tip', setting.tip);
 
     const summary = document.createElement('div');
     summary.className = 'stockton-summary';
     summary.textContent = setting.summary;
 
-    text.append(label, summary);
-
     const meta = document.createElement('div');
     meta.className = 'stockton-meta';
-    meta.textContent = describeDefault(setting);
-    text.appendChild(meta);
+    meta.textContent = describeDefault(setting, showCategory);
 
     if (setting.restart) {
       const tag = document.createElement('span');
-      tag.className = 'snippet-tag stockton-restart';
+      tag.className = 'stockton-restart';
       tag.textContent = 'needs a restart';
       meta.appendChild(tag);
     }
 
+    text.append(label, summary, meta);
     el.append(text, control(setting));
     return el;
   }
 
-  function describeDefault(setting) {
-    const bits = [`default ${format(setting.default)}${setting.unit ? ' ' + setting.unit : ''}`];
+  function describeDefault(setting, showCategory) {
+    const bits = [];
+    if (showCategory) bits.push(registry.categories[setting.category]);
+    bits.push(`default ${format(setting.default)}${setting.unit ? ' ' + setting.unit : ''}`);
     if (setting.min !== null && setting.max !== null) {
       bits.push(`${format(setting.min)}–${format(setting.max)}`);
     }
-    bits.push(setting.key);
     return bits.join('  ·  ');
   }
 
@@ -179,14 +227,22 @@
 
   function control(setting) {
     const wrap = document.createElement('div');
-    wrap.className = 'stockton-control';
+    wrap.className = 'setting-input-group stockton-control';
 
     let field;
     if (setting.kind === 'bool') {
+      // The same switch the rest of Settings uses, rather than a bare
+      // checkbox that would read as a different application.
+      const toggle = document.createElement('label');
+      toggle.className = 'toggle';
       field = document.createElement('input');
       field.type = 'checkbox';
       field.checked = !!setting.value;
       field.addEventListener('change', () => save(setting, field.checked));
+      const track = document.createElement('span');
+      track.className = 'toggle-track';
+      toggle.append(field, track);
+      wrap.appendChild(toggle);
     } else if (setting.kind === 'choice') {
       field = document.createElement('select');
       field.className = 'setting-input';
@@ -198,12 +254,14 @@
       });
       field.value = setting.value;
       field.addEventListener('change', () => save(setting, field.value));
+      wrap.appendChild(field);
     } else if (setting.kind === 'text') {
       field = document.createElement('input');
       field.type = 'text';
       field.className = 'setting-input';
       field.value = setting.value;
       field.addEventListener('change', () => save(setting, field.value));
+      wrap.appendChild(field);
     } else {
       field = document.createElement('input');
       field.type = 'number';
@@ -213,24 +271,24 @@
       if (setting.kind === 'float') field.step = '0.1';
       field.value = setting.value;
       field.addEventListener('change', () => save(setting, field.value));
+      wrap.appendChild(field);
+
+      if (setting.unit) {
+        const unit = document.createElement('span');
+        unit.className = 'setting-unit';
+        unit.textContent = setting.unit;
+        wrap.appendChild(unit);
+      }
     }
 
     field.id = fieldId(setting);
-    wrap.appendChild(field);
 
-    if (setting.unit) {
-      const unit = document.createElement('span');
-      unit.className = 'setting-unit';
-      unit.textContent = setting.unit;
-      wrap.appendChild(unit);
-    }
-
-    // Only on a row that has been changed — a reset button beside a value
-    // already at its default is a button that does nothing.
+    // Only on a row that has been changed — a reset beside a value already at
+    // its default is a button that does nothing.
     if (setting.modified) {
       const undo = document.createElement('button');
       undo.type = 'button';
-      undo.className = 'btn-tertiary';
+      undo.className = 'btn-tertiary stockton-undo';
       undo.textContent = 'Reset';
       undo.title = `Back to ${format(setting.default)}`;
       undo.addEventListener('click', () => reset({ key: setting.key }));
@@ -238,6 +296,58 @@
     }
 
     return wrap;
+  }
+
+  function emptyState(text) {
+    const el = document.createElement('section');
+    el.className = 'settings-section';
+    const p = document.createElement('p');
+    p.className = 'settings-section-hint';
+    p.textContent = text;
+    el.appendChild(p);
+    return el;
+  }
+
+  /**
+   * What was left out, and why.
+   *
+   * Part of the deliverable rather than an omission: without it somebody goes
+   * looking for the vault's key-derivation parameters in settings.json and
+   * concludes they were forgotten.
+   */
+  function exclusions() {
+    const el = document.createElement('section');
+    el.className = 'settings-section';
+
+    const heading = document.createElement('h3');
+    heading.className = 'settings-section-title';
+    heading.textContent = 'Deliberately not here';
+    el.appendChild(heading);
+
+    const intro = document.createElement('p');
+    intro.className = 'settings-section-hint';
+    intro.textContent =
+      'Each of these could break something rather than merely degrade it, ' +
+      'which is the line everything above stays on the right side of.';
+    el.appendChild(intro);
+
+    (registry.not_exposed || []).forEach(entry => {
+      const row = document.createElement('div');
+      row.className = 'setting-row setting-row-stack stockton-excluded';
+
+      const label = document.createElement('span');
+      label.className = 'setting-label';
+      label.textContent = entry.label;
+
+      const why = document.createElement('p');
+      why.className = 'settings-section-hint';
+      why.textContent = entry.why;
+
+      row.append(label, why);
+      el.appendChild(row);
+    });
+
+    return el;
   }
 
   async function save(setting, value) {
@@ -260,15 +370,6 @@
     } catch (e) {
       report(e.message, true);
     }
-  }
-
-  async function resetCategory(category, label) {
-    const ok = await window.shellmateDialog.confirm({
-      title: `Reset everything under ${label}?`,
-      body: 'Those settings go back to their defaults.',
-      confirmLabel: 'Reset',
-    });
-    if (ok) reset({ category });
   }
 
   async function reset(what) {
@@ -297,49 +398,20 @@
     }
   }
 
-  /**
-   * What was left out, and why.
-   *
-   * Part of the deliverable rather than an omission: without it somebody goes
-   * looking for the scrypt parameters in settings.json and concludes they were
-   * forgotten.
-   */
-  function notExposed() {
-    const group = document.createElement('details');
-    group.className = 'stockton-group';
-
-    const summary = document.createElement('summary');
-    summary.className = 'snippet-group-head';
-    summary.textContent = 'Deliberately not here';
-    group.appendChild(summary);
-
-    (registry.not_exposed || []).forEach(entry => {
-      const row = document.createElement('div');
-      row.className = 'stockton-row';
-
-      const text = document.createElement('div');
-      text.className = 'stockton-text';
-
-      const label = document.createElement('div');
-      label.className = 'stockton-label';
-      label.textContent = entry.label;
-
-      const why = document.createElement('div');
-      why.className = 'stockton-summary';
-      why.textContent = entry.why;
-
-      text.append(label, why);
-      row.appendChild(text);
-      group.appendChild(row);
-    });
-
-    return group;
-  }
-
   function report(text, isError) {
-    if (!statusEl) return;
-    statusEl.textContent = text || '';
-    statusEl.classList.toggle('field-warn', !!isError);
+    if (!countEl) return;
+    const note = document.getElementById('stockton-message');
+    if (note) note.remove();
+
+    if (!text) return;
+    const el = document.createElement('span');
+    el.id = 'stockton-message';
+    el.className = 'settings-footer-note' + (isError ? ' field-warn' : '');
+    el.textContent = text;
+    countEl.after(el);
+    // The count is the steady state; a message is transient and should not
+    // sit there for the rest of the session pretending to be current.
+    setTimeout(() => el.remove(), 6000);
   }
 
   window.openStockton = open;

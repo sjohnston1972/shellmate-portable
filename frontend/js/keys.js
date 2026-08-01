@@ -77,9 +77,9 @@
     listEl.innerHTML = '';
 
     if (!items.length) {
-      const empty = document.createElement('div');
-      empty.className = 'broadcast-empty';
-      empty.textContent = 'No keys yet.';
+      const empty = document.createElement('p');
+      empty.className = 'settings-section-hint';
+      empty.textContent = 'No keys yet. Make one above, or import one you already have.';
       listEl.appendChild(empty);
       return;
     }
@@ -89,31 +89,31 @@
 
   function row(key) {
     const el = document.createElement('div');
-    el.className = 'key-row';
+    el.className = 'setting-row setting-row-stack key-row';
 
     const head = document.createElement('div');
     head.className = 'key-head';
 
     const name = document.createElement('span');
-    name.className = 'key-name';
+    name.className = 'setting-label key-name';
     name.textContent = key.name;
 
     const kind = document.createElement('span');
-    kind.className = 'snippet-tag';
+    kind.className = 'key-tag';
     kind.textContent = key.kind;
 
     head.append(name, kind);
 
     if (key.encrypted) {
       const lock = document.createElement('span');
-      lock.className = 'snippet-tag key-locked';
+      lock.className = 'key-tag key-locked';
       lock.textContent = 'passphrase';
       head.appendChild(lock);
     } else {
       // Said every time the key is looked at, not once when it was made. An
       // unencrypted private key is a password sitting in a folder.
       const warn = document.createElement('span');
-      warn.className = 'snippet-tag key-open';
+      warn.className = 'key-tag key-open';
       warn.textContent = 'no passphrase';
       head.appendChild(warn);
     }
@@ -122,7 +122,7 @@
 
     if (key.comment) {
       const comment = document.createElement('div');
-      comment.className = 'key-comment';
+      comment.className = 'settings-section-hint key-comment';
       comment.textContent = key.comment;
       el.appendChild(comment);
     }
