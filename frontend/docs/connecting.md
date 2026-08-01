@@ -214,3 +214,30 @@ duration are all in **Stockton → Network discovery**. The defaults are
 deliberately unhurried: a burst of hundreds of simultaneous connections
 exhausts a firewall's session table and looks exactly like an attack to
 anything watching.
+
+## Confirming destructive commands
+
+`reload`, `write erase` and the rest of each platform's destructive list are
+held when you type them, and a prompt names **the device** before anything is
+sent. Nothing has reached it at that point — the line is cleared from the
+device's input and the carriage return is withheld, so cancelling leaves it
+exactly as it was.
+
+The device is named first on purpose. The mistake this exists to catch is not
+"did I mean to type reload" — it is "which tab am I in".
+
+Which commands count is per-platform, under **Settings → Platform
+Definitions**, and the switch is **Stockton → Terminal → Confirm destructive
+commands you type**.
+
+**It catches common mistakes rather than everything, and it is worth knowing
+where the edges are.** ShellMate matches on the line it can see you assemble,
+so an abbreviation like `relo` matches nothing, and a command recalled with
+the up arrow arrives with nothing to match against — the cursor moved
+invisibly and the assembled line is empty. A guardrail believed to be total is
+worse than one whose limits are known.
+
+On a device ShellMate could not identify confidently there is no platform
+list, so the generic one is used — the commands that are destructive on
+anything. **Stockton → Terminal → On devices ShellMate could not identify**
+turns that off if you would rather.

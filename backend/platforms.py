@@ -661,6 +661,44 @@ def get_profile(platform_id: str) -> PlatformProfile:
     return profiles.get(platform_id) or profiles[GENERIC]
 
 
+
+def matches_dangerous(platform_id: str, command: str) -> str:
+    """
+    The dangerous command a typed line matches, or "".
+
+    Prefix matching on the normalised line, so `reload in 10` matches
+    `reload` and `show reload-reason` does not. Whitespace is collapsed
+    because `write  erase` is the same instruction as `write erase`.
+
+    Two limits worth stating rather than papering over:
+
+    Abbreviations are not covered. `relo` is a valid IOS reload and matches
+    nothing here — expanding every abbreviation of every command would mean
+    knowing each platform's parser, and a guardrail that is wrong about what
+    it catches is worse than one that is clear about it.
+
+    Neither is anything the line assembler could not track: a command recalled
+    with the up arrow arrives with nothing to match. Both are why the
+    interface says this catches common mistakes rather than claiming to be a
+    net.
+    """
+    profile = load_profiles().get(platform_id)
+    if profile is None:
+        return ""
+
+    normalised = " ".join((command or "").split()).lower()
+    if not normalised:
+        return ""
+
+    for dangerous in profile.dangerous_commands:
+        pattern = " ".join(dangerous.split()).lower()
+        if not pattern:
+            continue
+        if normalised == pattern or normalised.startswith(pattern + " "):
+            return dangerous
+    return ""
+
+
 def resolve_alias(platform_id: str, command: str) -> str | None:
     """
     Expand a short alias for this platform.

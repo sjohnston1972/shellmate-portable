@@ -191,6 +191,12 @@
           }));
           break;
 
+        case 'guardrail_prompt':
+          // A destructive command is being held. Nothing has reached the
+          // device — the answer decides whether anything does.
+          askBeforeSending(sessionId, websocket, msg.command, msg.device);
+          break;
+
         case 'pending_action':
           // Something is scheduled on this device — a reload, a commit
           // waiting to be confirmed. alerts.js owns what that looks like.
@@ -480,6 +486,39 @@
     }
     delete _instances[sessionId];
     return true;
+  }
+
+  /**
+   * Ask before a destructive command reaches the device.
+   *
+   * The device is named, and named first, because the mistake this exists to
+   * catch is not "did I mean to type reload" — it is "which tab am I in".
+   * A confirmation that only quotes the command answers the wrong question.
+   *
+   * Answering is not optional: an unanswered prompt leaves the command held
+   * server-side forever, so cancelling is the default on every route out
+   * including Escape and clicking away.
+   */
+  function askBeforeSending(sessionId, websocket, command, device) {
+    const reply = (confirmed) => {
+      if (websocket.readyState === WebSocket.OPEN) {
+        websocket.send(JSON.stringify({ type: 'guardrail_answer', confirmed }));
+      }
+    };
+
+    if (!window.shellmateDialog) {
+      reply(window.confirm(`Send "${command}" to ${device}?`));
+      return;
+    }
+
+    window.shellmateDialog.confirm({
+      title: `Send this to ${device}?`,
+      body:  `${command}\n\nThis is on the list of destructive commands for `
+             + `this platform. Nothing has been sent yet.`,
+      confirmLabel: 'Send it',
+      cancelLabel:  'Cancel',
+      danger: true,
+    }).then(reply).catch(() => reply(false));
   }
 
   window.initTerminal = initTerminal;

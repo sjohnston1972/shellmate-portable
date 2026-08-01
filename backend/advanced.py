@@ -300,6 +300,25 @@ SETTINGS: tuple[Setting, ...] = (
             "outcome chunking exists to prevent, so it is floored at 1ms.",
             minimum=0, maximum=2000, unit="ms"),
 
+    Setting("terminal.confirm_dangerous", "Confirm destructive commands you type", True, "bool",
+            "Holds `reload`, `write erase` and the like until you say yes.",
+            "The risk was the wrong way round before this: a `write erase` "
+            "*suggested by the assistant* asked first, and the same command "
+            "typed by hand went straight to the device — which is how the "
+            "accident actually happens.||Which commands count is per-platform, "
+            "under Settings → Platform Definitions. This is only the switch.||"
+            "It catches common mistakes rather than everything: an "
+            "abbreviation like `relo`, or a command recalled with the up "
+            "arrow, arrives with nothing to match against."),
+    Setting("terminal.confirm_dangerous_scope", "On devices ShellMate could not identify",
+            "unidentified-too", "choice",
+            "Whether to guard a device whose platform is unknown.",
+            "With no platform there is no list, so the generic one is used — "
+            "the commands that are destructive on anything.||`identified-only` "
+            "guards nothing there, which is the older behaviour and worth "
+            "choosing deliberately rather than getting by accident.",
+            choices=("unidentified-too", "identified-only")),
+
     # --- History -----------------------------------------------------------
     Setting("history.record", "Record sessions", True, "bool",
             "Write commands and output to the history database.",

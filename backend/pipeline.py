@@ -30,7 +30,7 @@ a stale line would send something the user never typed.
 import logging
 from dataclasses import dataclass, field
 
-from backend.platforms import resolve_alias
+from backend.platforms import GENERIC, matches_dangerous, resolve_alias
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,8 @@ class OutboundPipeline:
     # "reload in 10" the moment Enter is pressed, and this is the one place
     # where a line is known to be complete.
     completed_commands: list[str] = field(default_factory=list, init=False)
+    #: A destructive command waiting for an answer. Nothing has been sent.
+    held_command: str = field(default="", init=False)
 
     def process(self, data: str) -> str:
         """
@@ -94,6 +96,7 @@ class OutboundPipeline:
         out: list[str] = []
         self.last_expansion = None
         self.completed_commands = []
+        self.held_command = ""
 
         for char in data:
             if char in (CR, LF):
@@ -126,21 +129,97 @@ class OutboundPipeline:
         return "".join(out)
 
     def _on_enter(self, terminator: str) -> str:
-        """Handle Enter: expand an alias if the line is exactly one."""
+        """Handle Enter: expand an alias, then check what is about to be sent."""
         line = self._line
         self._line = ""
 
         if line.strip():
             self.completed_commands.append(line.strip())
 
+        expanded = self._expand(line)
+        if expanded is not None:
+            line = expanded
+
+        # The guardrail runs on what will actually reach the device, so an
+        # alias for `reload in 10` is caught exactly as typing it out would be.
+        held = self._guard(line)
+        if held is not None:
+            return held
+
+        if expanded is not None:
+            # Ctrl-U clears whatever the device has echoed onto its input
+            # line, so the expansion replaces it rather than appending to it.
+            return CTRL_U + expanded + terminator
+        return terminator
+
+    def _guard(self, line: str) -> str | None:
+        """
+        Hold a destructive command until somebody confirms it.
+
+        The risk was inverted before this existed. A `write erase` *suggested
+        by the assistant* got a confirmation; the same `write erase` typed by
+        the engineer went straight to the device. The second is how the
+        accident actually happens — `reload` typed from muscle memory into
+        whichever tab happens to be focused is the canonical mistake, and
+        ShellMate already knows which tab is which device and which commands
+        are destructive on it.
+
+        Returns CTRL_U to swallow the line, or None to let it through.
+
+        **Deliberately partial, and the interface says so.** This works on the
+        assembled line, and the assembler gives up on ESC because arrow keys
+        and history recall move the cursor invisibly — so a recalled `reload`
+        arrives with nothing to match against. Failing open with a visible
+        tell beats pretending to total coverage: a guardrail believed to catch
+        everything is worse than a known-partial one.
+        """
+        from backend.advanced import get as advanced
+
+        self.held_command = ""
+        command = line.strip()
+        if not command or not advanced("terminal.confirm_dangerous"):
+            return None
+
+        # Below the confidence gate there is no platform list to consult. The
+        # generic profile carries the commands that are destructive on
+        # anything, which is the honest thing to check against.
+        platform = self.platform
+        if not platform:
+            if advanced("terminal.confirm_dangerous_scope") == "identified-only":
+                return None
+            platform = GENERIC
+
+        if not matches_dangerous(platform, command):
+            return None
+
+        self.held_command = command
+        logger.info("Holding %r for confirmation", command)
+        # Clear what the device echoed. Nothing is sent until the answer
+        # comes back, so an unanswered prompt leaves the device untouched.
+        return CTRL_U
+
+    def release(self) -> str:
+        """The held command plus a carriage return, and forget it."""
+        command = self.held_command
+        self.held_command = ""
+        return (command + CR) if command else ""
+
+    def drop(self) -> str:
+        """Forget the held command. Returns what was dropped, for the log."""
+        command = self.held_command
+        self.held_command = ""
+        return command
+
+    def _expand(self, line: str) -> str | None:
+        """The alias expansion for a line, or None if there is not one."""
         if not self.expand_aliases or not self.platform:
-            return terminator
+            return None
         if not line.strip() or len(line) > MAX_ALIAS_LINE:
-            return terminator
+            return None
 
         expansion = resolve_alias(self.platform, line)
         if not expansion:
-            return terminator
+            return None
 
         # What reaches the device is the expansion, so that is what anything
         # downstream should be told about — an alias for `reload in 10` has to
@@ -150,16 +229,14 @@ class OutboundPipeline:
 
         self.last_expansion = (line.strip(), expansion)
         logger.info("Expanded alias %r to %r", line.strip(), expansion)
-
-        # Ctrl-U clears whatever the device has echoed onto its input line, so
-        # the expansion replaces it rather than being appended to it.
-        return CTRL_U + expansion + terminator
+        return expansion
 
     def reset(self) -> None:
         """Forget the partial line, e.g. after a reconnect."""
         self._line = ""
         self.last_expansion = None
         self.completed_commands = []
+        self.held_command = ""
 
     @property
     def current_line(self) -> str:

@@ -382,6 +382,105 @@ def test_outbound_pipeline() -> None:
           CTRL_U not in result, f"got {result!r}")
 
 
+def test_dangerous_command_matching() -> None:
+    """
+    Which typed lines count as destructive.
+
+    `dangerous_commands` was defined for all nine platforms, documented as
+    feeding the guardrails, editable in the interface — and read by nothing.
+    The consequence was an inverted risk: a `write erase` *suggested by the
+    assistant* got a confirmation, and the same command typed by hand went
+    straight to the device. The second is how the accident happens.
+    """
+    print("\n-- What counts as destructive --")
+    from backend.platforms import GENERIC, matches_dangerous
+
+    check("a bare reload matches", matches_dangerous("ios", "reload") == "reload")
+    check("and one with arguments",
+          matches_dangerous("ios", "reload in 10") == "reload")
+    check("case does not matter",
+          matches_dangerous("ios", "WRITE ERASE") == "write erase")
+    check("nor does doubled whitespace",
+          matches_dangerous("ios", "write  erase") == "write erase")
+
+    # The one that decides whether this is usable. A guardrail that fires on
+    # `show reload-reason` gets switched off in week two.
+    check("a command that merely starts with the same letters does not match",
+          matches_dangerous("ios", "show reload-reason") == "",
+          "prefix matching has to respect word boundaries")
+    check("nor does an ordinary show command",
+          matches_dangerous("ios", "show ip interface brief") == "")
+    check("an empty line matches nothing", matches_dangerous("ios", "   ") == "")
+    check("an unknown platform matches nothing rather than raising",
+          matches_dangerous("no-such-platform", "reload") == "")
+
+    check("the generic profile still catches the universal ones",
+          bool(matches_dangerous(GENERIC, "reload")),
+          "a device below the confidence gate has only this list")
+
+
+def test_the_guardrail_holds_before_it_sends() -> None:
+    """
+    Nothing reaches the device until the answer comes back.
+
+    That is the whole guarantee. The line is cleared from the device's input
+    with CTRL_U — the same trick alias expansion already uses — and the
+    terminator is withheld, so an unanswered prompt leaves the device exactly
+    as it was.
+    """
+    print("\n-- Holding a destructive command --")
+    from backend import advanced
+    from backend.pipeline import CTRL_U, OutboundPipeline
+
+    def make(platform: str) -> OutboundPipeline:
+        pipeline = OutboundPipeline()
+        pipeline.platform = platform
+        return pipeline
+
+    pipeline = make("ios")
+
+    sent = pipeline.process("show ip interface brief\r")
+    check("an ordinary command goes straight through",
+          sent.endswith("\r") and not pipeline.held_command, repr(sent))
+
+    sent = pipeline.process("reload\r")
+    check("a destructive one is held", pipeline.held_command == "reload")
+    check("and no carriage return reaches the device",
+          sent.endswith(CTRL_U) and "\r" not in sent[len("reload"):],
+          repr(sent))
+
+    check("confirming releases it with its terminator",
+          pipeline.release() == "reload\r")
+    check("and it is not held twice", pipeline.held_command == "")
+
+    pipeline.process("write erase\r")
+    check("cancelling reports what was dropped",
+          pipeline.drop() == "write erase")
+    check("and forgets it", pipeline.held_command == "")
+
+    # Below the confidence gate there is no platform list.
+    unknown = make("")
+    unknown.process("reload\r")
+    check("an unidentified device falls back to the generic list",
+          unknown.held_command == "reload",
+          "guarding nothing there is a choice, not a default")
+    unknown.drop()
+
+    advanced.update({"terminal.confirm_dangerous_scope": "identified-only"})
+    strict = make("")
+    sent = strict.process("reload\r")
+    check("unless that has been switched off deliberately",
+          not strict.held_command and sent.endswith("\r"), repr(sent))
+    advanced.reset(key="terminal.confirm_dangerous_scope")
+
+    advanced.update({"terminal.confirm_dangerous": False})
+    off = make("ios")
+    sent = off.process("reload\r")
+    check("and the switch turns the whole thing off",
+          not off.held_command and sent.endswith("\r"), repr(sent))
+    advanced.reset(key="terminal.confirm_dangerous")
+
+
 def main() -> int:
     print("=" * 52)
     print("  Device fingerprinting and platform profiles")
@@ -398,6 +497,8 @@ def main() -> int:
         test_profiles_and_aliases,
         test_profiles_are_editable,
         test_outbound_pipeline,
+        test_dangerous_command_matching,
+        test_the_guardrail_holds_before_it_sends,
     ):
         try:
             test()

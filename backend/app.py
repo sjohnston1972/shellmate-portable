@@ -2384,6 +2384,14 @@ async def _origin_allowed(websocket: WebSocket) -> bool:
     return False
 
 
+#: Shown in the terminal when a held command is refused.
+#:
+#: The line was already cleared from the device's input, so without this
+#: nothing happens and nothing says why — a command that silently vanishes is
+#: its own kind of confusion.
+CANCELLED_NOTE = "\r\n\x1b[33m[not sent: {command}]\x1b[0m\r\n"
+
+
 def _open_session_log(session: dict, session_id: str) -> None:
     """
     Open this session's log file once, rather than once per chunk.
@@ -2476,6 +2484,22 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                             handler.send, outbound.encode("utf-8", errors="replace")
                         )
 
+                        # A destructive command is held rather than sent. The
+                        # device has had CTRL_U — enough to clear what it
+                        # echoed — and nothing else, so an unanswered prompt
+                        # leaves it untouched.
+                        held = session["pipeline"].held_command
+                        if held:
+                            await websocket.send_text(json.dumps({
+                                "type":    "guardrail_prompt",
+                                "command": held,
+                                # Named, because the whole point of this is the
+                                # tab you thought you were in.
+                                "device":  session.get("hostname")
+                                           or session.get("display_label")
+                                           or "this device",
+                            }))
+
                         # Say so when a command was rewritten. Silently sending
                         # something other than what was typed would be worse
                         # than not helping at all.
@@ -2495,6 +2519,33 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                             session["alerts"].observe_command(command)
                             for command in session["pipeline"].completed_commands
                         )
+
+                elif msg_type == "guardrail_answer":
+                    # The answer to a held command. Confirmed, it goes now;
+                    # refused, it is dropped and the terminal says so.
+                    pipeline = session["pipeline"]
+                    if msg.get("confirmed"):
+                        outbound = pipeline.release()
+                        if outbound and handler.is_connected:
+                            logger.info("Confirmed at the guardrail and sent: %r",
+                                        outbound.strip())
+                            await asyncio.to_thread(
+                                handler.send,
+                                outbound.encode("utf-8", errors="replace"),
+                            )
+                            # Same watch as any other command: `reload in 10`
+                            # schedules itself whether it was confirmed or not.
+                            await note_pending(
+                                [session["alerts"].observe_command(outbound.strip())]
+                            )
+                    else:
+                        dropped = pipeline.drop()
+                        if dropped:
+                            logger.info("Cancelled at the guardrail: %r", dropped)
+                            await websocket.send_text(json.dumps({
+                                "type": "output",
+                                "data": CANCELLED_NOTE.format(command=dropped),
+                            }))
 
                 elif msg_type == "resize":
                     cols = int(msg.get("cols", 80))
