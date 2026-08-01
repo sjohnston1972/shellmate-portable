@@ -2701,6 +2701,19 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
 
                 if msg_type == "input":
                     data: str = msg.get("data", "")
+
+                    # Typing ends a live capture immediately, and the session
+                    # goes straight back. The alternative — holding the
+                    # keystrokes until the capture finished — keeps the screen
+                    # tidier, but a terminal that ignores you for two seconds
+                    # is alarming in a way a truncated capture is not, and
+                    # interfering with the live session is the one thing this
+                    # feature promised not to do. A capture is a nicety; their
+                    # session is the job.
+                    capture = session.get("live_capture")
+                    if data and capture is not None and capture.state != "done":
+                        capture.abort("you started typing")
+
                     if data and handler.is_connected:
                         # Everything the user sends goes through the pipeline,
                         # which assembles keystrokes into lines and may rewrite
@@ -2872,6 +2885,29 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 handler.send, (summary["paging_command"] + "\r").encode()
             )
 
+    async def drive_live_capture() -> None:
+        """
+        Start or time out a capture running through the user's own session.
+
+        Called from the idle path of the read loop, which is the only place
+        that knows the device has stopped talking. capture_config_live() waits
+        on a thread for this to finish; it never reads the channel itself,
+        because two readers on one channel race for every byte.
+        """
+        capture = session.get("live_capture")
+        if capture is None:
+            return
+
+        if capture.ready_to_start(bool(session["transcript"].last_prompt)):
+            capture.started()
+            await asyncio.to_thread(
+                handler.send, (capture.command + "\r").encode())
+            return
+
+        # A device that goes quiet mid-configuration without printing its
+        # prompt again would otherwise hold the capture open to the timeout.
+        capture.tick()
+
     async def read_from_channel() -> None:
         """Forward device output to the browser and the session buffer."""
         nonlocal hostname_sent
@@ -2887,6 +2923,13 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         await maybe_onboard()
                     except Exception as exc:
                         logger.warning("Onboarding failed for %s: %s", session_id, exc)
+                    # Idle is also where a live capture starts: the device is
+                    # at a prompt and saying nothing, which is the only safe
+                    # moment to type into somebody else's session.
+                    try:
+                        await drive_live_capture()
+                    except Exception as exc:
+                        logger.warning("Live capture failed for %s: %s", session_id, exc)
                     # An idle session is exactly where a reload deadline passes
                     # unnoticed, so retire it here rather than only when the
                     # device happens to say something.
@@ -2908,6 +2951,24 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     break
 
                 text = data_bytes.decode("utf-8", errors="replace")
+
+                # A live capture takes its output here and nothing else sees
+                # it. This has to come before every consumer below, not after
+                # a convenient one: the browser would show a configuration
+                # nobody asked for, the buffer would feed it to the AI as
+                # context, the transcript would record it as a command that
+                # was typed, and the log would file it as evidence of what
+                # happened in the session. Withholding it from four of five
+                # places is the same bug four times over.
+                capture = session.get("live_capture")
+                if capture is not None and capture.active:
+                    answer = capture.feed(text)
+                    if answer:
+                        # A pager, answered rather than disabled — changing
+                        # the user's terminal length to suit us would outlast
+                        # the capture.
+                        await asyncio.to_thread(handler.send, answer.encode())
+                    continue
 
                 # Write to session buffer
                 session_manager.write_to_buffer(session_id, text)

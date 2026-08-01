@@ -441,6 +441,23 @@ SETTINGS: tuple[Setting, ...] = (
             "Pruning removes oldest-first, so without this the baseline is "
             "the *first* thing discarded — which is precisely backwards, "
             "since being old is what makes it a baseline."),
+    Setting("capture.live_fallback",
+            "Capture over your session if a second channel is refused",
+            True, "bool",
+            "Runs the command in the tab you are using, hidden while it does.",
+            "A second channel is always tried first and cannot disturb what "
+            "you are typing. But a great many switches cap concurrent "
+            "sessions and refuse one — and on those devices capture, drift "
+            "detection and the whole diff feature never work at all.||The "
+            "fallback withholds the command and its output from your screen, "
+            "the session buffer, the transcript and the log, so it is neither "
+            "seen nor recorded as something you did. It waits for the device "
+            "to be idle at a prompt, answers any pager rather than changing "
+            "your terminal length, gives up the moment you type, and says "
+            "afterwards that it ran.||Turn it off if you would rather nothing "
+            "were ever sent to a device you did not send it to. Serial and "
+            "telnet tabs then have no capture at all, since neither can open "
+            "a second channel."),
     Setting("capture.channel_width", "Capture terminal width", 200, "int",
             "The PTY width requested when capturing a configuration.",
             "A wide PTY is what stops a captured config wrapping. Some "

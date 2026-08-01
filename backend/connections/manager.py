@@ -104,6 +104,12 @@ class SessionManager:
             # Identifies the device and applies its platform settings during
             # the first seconds of the session.
             "onboarder":       Onboarder(),
+            # A configuration capture running through this session's own
+            # channel, when the device refused a second one. Declared here and
+            # not created on demand: the read loop tests it on every pass, and
+            # a key that sometimes exists is a KeyError waiting for the one
+            # device that behaves differently.
+            "live_capture":    None,
             "fingerprint":     None,
             # Chokepoint for everything the user sends. Alias expansion today,
             # guardrails and paste throttling next.

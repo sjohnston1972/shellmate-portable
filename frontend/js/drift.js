@@ -147,9 +147,16 @@
 
     if (batch.length > 1) {
       const total = batch.reduce((n, b) => n + (b.capture.lines || 0), 0);
+      const live  = batch.filter(b => b.capture.via === 'live session').length;
       window.shellmateAlerts.notify({
         title: `${batch.length} configurations captured`,
-        body: `${total.toLocaleString()} lines in total, stored for comparison.`,
+        body: `${total.toLocaleString()} lines in total, stored for comparison.`
+              // Still said when forty tabs open at once. This is somebody's
+              // only notice that a command was run in sessions they are
+              // sitting in, so it survives the batching that exists to stop
+              // forty toasts.
+              + (live ? ` ${live} ran in your own session${live === 1 ? '' : 's'}.`
+                      : ''),
       });
       return;
     }
@@ -163,6 +170,14 @@
       parts.push('saved as ' + archive.path.split(/[\\/]/).pop()
                  + (archive.redacted ? ' with secrets masked' : ''));
     }
+
+    // A capture over the live channel is deliberately hidden while it runs —
+    // withheld from the screen, the buffer, the transcript and the log — so
+    // this line is the whole of how anyone learns a command was typed into
+    // the session they are sitting in. Hidden while it happens and stated
+    // afterwards is the honest shape; genuinely invisible is not.
+    const live = capture.via === 'live session';
+    if (live) parts.push('run in this session, as the device refused a second channel');
 
     window.shellmateAlerts.notify({
       title: `Configuration captured — ${device}`,
