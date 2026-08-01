@@ -2032,6 +2032,33 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 /* --------------------------------------------------------------------------
    Side panels (Settings + Logs overlays)
    -------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+   Panels arriving and leaving
+
+   Sixteen overlays are shown by removing a `.hidden` class that is
+   `display: none !important`, so a 420px surface materialised over the
+   terminal with no indication of where it came from. A property that starts
+   at `display: none` cannot be transitioned, so adding a duration to these
+   rules would have done nothing at all.
+
+   Rather than rewrite thirty-four `classList.add/remove('hidden')` call sites
+   across sixteen files — each with its own close logic and its own
+   `contains('hidden')` checks — `.hidden` stays the state and stops meaning
+   `display: none` *for overlays only*. `.panel-overlay.hidden` outranks
+   `.hidden` on specificity, so the !important is beatable. Every existing
+   call site keeps working, and the state is still readable from the class.
+
+   Which transition is a Settings choice (`data-panel-transition` on the root)
+   and the timing is Stockton's. Both are read here rather than in JavaScript,
+   so nothing has to be reapplied to a panel that is already open.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --panel-ms: 180ms;
+  --panel-ms-out: 140ms;
+  --panel-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
 .panel-overlay {
   position: fixed;
   inset: 0;
@@ -2041,6 +2068,125 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   display: flex;
   justify-content: flex-end;
   align-items: stretch;
+
+  /* visibility is transitioned rather than toggled so it holds until the
+     movement has finished; without it the panel vanishes on frame one and
+     animates something nobody can see. */
+  transition: opacity var(--panel-ms) var(--panel-ease),
+              visibility var(--panel-ms) var(--panel-ease);
+}
+
+/* Hidden, but still laid out — so there is something to animate from. */
+.panel-overlay.hidden {
+  display: flex !important;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* A blurred backdrop nobody can see is GPU work for nothing, and this is
+     the expensive part of the whole effect. */
+  backdrop-filter: none;
+  transition: opacity var(--panel-ms-out) var(--panel-ease),
+              visibility var(--panel-ms-out) var(--panel-ease);
+}
+
+.panel-overlay > .side-panel {
+  transition: transform var(--panel-ms) var(--panel-ease);
+}
+
+.panel-overlay.hidden > .side-panel {
+  transition: transform var(--panel-ms-out) var(--panel-ease);
+}
+
+/* --- Slide (the default) ---------------------------------------------------
+   From the edge the panel is anchored to, which says where it came from and
+   where Escape will send it. */
+:root[data-panel-transition="slide"] .panel-overlay.hidden > .side-panel {
+  transform: translateX(100%);
+}
+
+/* --- Scale ---------------------------------------------------------------- */
+:root[data-panel-transition="scale"] .panel-overlay.hidden > .side-panel {
+  transform: scale(0.97);
+  transform-origin: right center;
+}
+
+/* --- Fade ------------------------------------------------------------------
+   Nothing to add: the overlay's own opacity is the whole effect. */
+
+/* --- None ------------------------------------------------------------------
+   Not a joke option. Over Remote Desktop or a VDI session an animation that
+   drops frames is worse than none, and network engineers work over both
+   constantly. */
+:root[data-panel-transition="none"] .panel-overlay,
+:root[data-panel-transition="none"] .panel-overlay > .side-panel,
+:root[data-panel-transition="none"] .panel-overlay.hidden,
+:root[data-panel-transition="none"] .panel-overlay.hidden > .side-panel {
+  transition: none;
+}
+
+/* The four centred dialogs.
+   They do not carry .panel-overlay — they are their own overlays, centred
+   rather than edge-anchored — so sliding them in from the right would be
+   simply wrong. They get the same arrival, always as a scale from the middle,
+   whichever transition is chosen for the panels. */
+#modal-overlay,
+#paste-overlay,
+#vault-overlay,
+#jira-overlay {
+  transition: opacity var(--panel-ms) var(--panel-ease),
+              visibility var(--panel-ms) var(--panel-ease);
+}
+
+#modal-overlay.hidden,
+#paste-overlay.hidden,
+#vault-overlay.hidden,
+#jira-overlay.hidden {
+  display: flex !important;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  backdrop-filter: none;
+  transition: opacity var(--panel-ms-out) var(--panel-ease),
+              visibility var(--panel-ms-out) var(--panel-ease);
+}
+
+#modal-dialog, #paste-dialog, #vault-dialog, #jira-dialog {
+  transition: transform var(--panel-ms) var(--panel-ease);
+}
+
+.hidden > #modal-dialog,
+.hidden > #paste-dialog,
+.hidden > #vault-dialog,
+.hidden > #jira-dialog {
+  transform: scale(0.97);
+  transition: transform var(--panel-ms-out) var(--panel-ease);
+}
+
+:root[data-panel-transition="none"] #modal-overlay,
+:root[data-panel-transition="none"] #paste-overlay,
+:root[data-panel-transition="none"] #vault-overlay,
+:root[data-panel-transition="none"] #jira-overlay,
+:root[data-panel-transition="none"] #modal-dialog,
+:root[data-panel-transition="none"] #paste-dialog,
+:root[data-panel-transition="none"] #vault-dialog,
+:root[data-panel-transition="none"] #jira-dialog {
+  transition: none;
+}
+
+/* The operating system has already answered this question. It wins over the
+   setting, rather than being one more thing to remember to turn off. */
+@media (prefers-reduced-motion: reduce) {
+  .panel-overlay,
+  .panel-overlay > .side-panel,
+  .panel-overlay.hidden,
+  .panel-overlay.hidden > .side-panel,
+  #modal-overlay, #paste-overlay, #vault-overlay, #jira-overlay,
+  #modal-dialog, #paste-dialog, #vault-dialog, #jira-dialog,
+  .hidden > #modal-dialog, .hidden > #paste-dialog,
+  .hidden > #vault-dialog, .hidden > #jira-dialog {
+    transition: none;
+    transform: none;
+  }
 }
 
 .side-panel {
@@ -3269,9 +3415,9 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   justify-content: center;
 }
 
-#vault-overlay.hidden {
-  display: none;
-}
+/* `.hidden` for this overlay is defined with the other panel
+   transitions near the top — a `display: none` here would win on
+   source order and there would be nothing to animate. */
 
 #vault-dialog {
   background: var(--overlay);
@@ -3465,7 +3611,9 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   justify-content: center;
 }
 
-#jira-overlay.hidden { display: none; }
+/* `.hidden` for this overlay is defined with the other panel
+   transitions near the top — a `display: none` here would win on
+   source order and there would be nothing to animate. */
 
 #jira-dialog {
   background: var(--panel);

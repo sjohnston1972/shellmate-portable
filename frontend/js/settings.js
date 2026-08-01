@@ -363,6 +363,7 @@
     const ui = s.interface || {};
     _val('setting-theme',             ui.theme || 'dark');
     _val('setting-density',           ui.density || 'comfortable');
+    _val('setting-panel-transition',  ui.panel_transition || 'slide');
     _val('setting-tab-label-width',   ui.max_tab_label_px || 160);
     _checked('setting-connection-dot',    ui.show_connection_dot !== false);
     _checked('setting-confirm-close-tab', ui.confirm_close_tab !== false);
@@ -478,6 +479,7 @@
       interface: {
         theme:               _gval('setting-theme') || 'dark',
         density:             _gval('setting-density') || 'comfortable',
+        panel_transition:    _gval('setting-panel-transition') || 'slide',
         max_tab_label_px:    parseInt(_gval('setting-tab-label-width'), 10) || 160,
         show_connection_dot: _gchecked('setting-connection-dot'),
         confirm_close_tab:   _gchecked('setting-confirm-close-tab'),

@@ -18,7 +18,7 @@ written.
 | Category | What lives there |
 |---|---|
 | Terminal Appearance | Font, size, colour scheme, cursor, and a live preview |
-| ShellMate Interface | Theme, text size, density, tab width, confirmations, window behaviour, whether the AI panel is shown |
+| ShellMate Interface | Theme, text size, density, tab width, how panels open, confirmations, window behaviour, whether the AI panel is shown |
 | Alerts | How loudly a pending reload or commit-confirm interrupts you |
 | Behavior | Scrollback, right-click paste, copy on select |
 | Device Awareness | Paging-off and alias expansion, both gated on confident identification |
@@ -145,3 +145,24 @@ independently:
 
 Deleting the whole `ShellMate-Data` folder resets everything, including your
 saved connections and session history.
+
+## How panels open
+
+**ShellMate Interface → Panels open with** decides how Settings, Stockton,
+History and the other side panels arrive: **slide** in from the edge they are
+anchored to, **fade**, **scale**, or **nothing** — appear instantly.
+
+Slide is the default because it says which edge the panel came from, and
+therefore where Escape will send it back to.
+
+**Nothing** is a real answer rather than a joke one. Over Remote Desktop or a
+VDI session, an animation that drops frames is worse than no animation, and
+the panels carry a blurred backdrop that is the expensive part of drawing
+them.
+
+Duration and pacing are in **Stockton → Files and interface** — separate values
+for opening and closing, because a panel generally wants to leave faster than
+it arrived, and one value for both makes dismissing something feel slow.
+
+If your operating system is set to reduce motion, that wins over this setting.
+You have already answered the question and ShellMate should not ask again.

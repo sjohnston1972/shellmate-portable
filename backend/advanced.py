@@ -458,6 +458,25 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("files.drift_banner_seconds", "How long an unchanged-config note stays", 8, "int",
             "A changed configuration always waits to be dismissed.",
             "", minimum=1, maximum=120, unit="s"),
+    Setting("files.panel_ms", "How long a panel takes to open", 180, "int",
+            "The duration of the transition chosen in Settings.",
+            "Under about 120ms reads as a jump rather than a movement; over "
+            "about 300ms it starts to feel like waiting.||Zero is instant, "
+            "which is the same as choosing None — nothing breaks, it just "
+            "stops moving.", minimum=0, maximum=1000, unit="ms"),
+    Setting("files.panel_ms_out", "How long it takes to close", 140, "int",
+            "Closing is a separate duration from opening.",
+            "A panel generally wants to leave faster than it arrived. One "
+            "value for both makes dismissing something feel slow, which is "
+            "the half people notice.", minimum=0, maximum=1000, unit="ms"),
+    Setting("files.panel_easing", "How the movement is paced", "decelerate", "choice",
+            "The curve the panel follows on its way in.",
+            "`decelerate` starts fast and settles, which is what a physical "
+            "object does.||A named set rather than a free-text cubic-bezier: "
+            "the API is scriptable and settings.json is a text file people "
+            "are told to edit, and an unparseable curve would disable the "
+            "transition with nothing to say why.",
+            choices=("decelerate", "standard", "linear", "sharp")),
 
     # --- Network discovery --------------------------------------------------
     Setting("discovery.concurrency", "Addresses probed at once", 32, "int",

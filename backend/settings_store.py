@@ -107,6 +107,12 @@ DEFAULT_SETTINGS: dict = {
         "density": "comfortable",
         "max_tab_label_px": 160,
         "show_connection_dot": True,
+        # How a side panel arrives. "slide" | "fade" | "scale" | "none".
+        # Slide by default because it says which edge the panel came from and
+        # where Escape will send it back to. "none" is a real answer, not a
+        # joke one: over Remote Desktop an animation that drops frames is
+        # worse than no animation.
+        "panel_transition": "slide",
     },
     # Remembered so it opens where it was left rather than at a fixed size in
     # the middle of whichever monitor Windows picks.

@@ -113,12 +113,46 @@
     document.documentElement.classList.toggle(
       'hide-connection-dot', s.show_connection_dot === false);
 
+    applyPanelTransition(s);
+
     if (window.shellmateLayout && s.default_layout &&
         window.shellmateLayout.current() !== s.default_layout) {
       window.shellmateLayout.set(s.default_layout);
     }
 
     applyChatWidth(s.chat_pane_fraction);
+  }
+
+  /**
+   * How panels arrive: the choice from Settings, the timing from Stockton.
+   *
+   * Written onto the root as an attribute and two custom properties, so the
+   * whole thing lives in CSS. Nothing has to be reapplied to a panel that is
+   * already open, and a panel opened before the settings arrived picks up the
+   * change the moment it closes.
+   */
+  const EASING = {
+    decelerate: 'cubic-bezier(0.2, 0, 0, 1)',
+    standard:   'cubic-bezier(0.4, 0, 0.2, 1)',
+    linear:     'linear',
+    sharp:      'cubic-bezier(0.4, 0, 0.6, 1)',
+  };
+
+  function applyPanelTransition(s) {
+    const root = document.documentElement;
+    const choice = ['slide', 'fade', 'scale', 'none']
+      .includes(s.panel_transition) ? s.panel_transition : 'slide';
+    root.setAttribute('data-panel-transition', choice);
+
+    const advanced = window.shellmateAdvanced || (() => null);
+    const inMs  = Number(advanced('files.panel_ms', 180));
+    const outMs = Number(advanced('files.panel_ms_out', 140));
+    const ease  = EASING[advanced('files.panel_easing', 'decelerate')]
+                  || EASING.decelerate;
+
+    root.style.setProperty('--panel-ms', `${Number.isFinite(inMs) ? inMs : 180}ms`);
+    root.style.setProperty('--panel-ms-out', `${Number.isFinite(outMs) ? outMs : 140}ms`);
+    root.style.setProperty('--panel-ease', ease);
   }
 
   function applyChatWidth(fraction) {
