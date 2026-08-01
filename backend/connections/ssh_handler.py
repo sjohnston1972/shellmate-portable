@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 # recv() blocks for this long before reporting "nothing yet". Short enough that
 # a closed channel is noticed promptly, long enough not to spin the CPU.
-READ_TIMEOUT = 0.5
 
 # Key types to try when the user supplies a key file. Paramiko needs to be told
 # the algorithm, and the file itself does not reliably say which it is.
@@ -307,7 +306,12 @@ class SSHHandler(ConnectionHandler):
                 username=username,
                 sock=sock,
                 timeout=advanced("ssh.connect_timeout"),
-                allow_agent=False,
+                # Distinct phases of the handshake, and each has its own way
+                # of failing: a terminal server slow to print its banner, a
+                # device waiting on a distant RADIUS server.
+                banner_timeout=advanced("ssh.banner_timeout"),
+                auth_timeout=advanced("ssh.auth_timeout"),
+                allow_agent=bool(advanced("ssh.allow_agent")),
                 look_for_keys=discover_keys,
                 **disabled,
                 **self._auth_kwargs(params.private_key_path, params.private_key_passphrase, params.password),
@@ -401,7 +405,9 @@ class SSHHandler(ConnectionHandler):
                 port=params.jump_port,
                 username=params.jump_username or params.username,
                 timeout=advanced("ssh.connect_timeout"),
-                allow_agent=False,
+                banner_timeout=advanced("ssh.banner_timeout"),
+                auth_timeout=advanced("ssh.auth_timeout"),
+                allow_agent=bool(advanced("ssh.allow_agent")),
                 look_for_keys=discover_keys,
                 **_algorithm_overrides(),
                 **self._auth_kwargs(
@@ -492,9 +498,14 @@ class SSHHandler(ConnectionHandler):
 
         try:
             channel = transport.open_session(timeout=advanced("ssh.connect_timeout"))
-            channel.get_pty(term="vt100", width=200, height=1000)
+            # Wide enough that the device does not wrap the configuration
+            # itself — a wrapped capture diffs against an unwrapped one and
+            # reports the whole file as changed.
+            channel.get_pty(term="vt100",
+                            width=int(advanced("capture.channel_width")),
+                            height=int(advanced("capture.channel_height")))
             channel.invoke_shell()
-            channel.settimeout(READ_TIMEOUT)
+            channel.settimeout(advanced("ssh.secondary_channel_timeout"))
             return channel
         except paramiko.SSHException as exc:
             logger.info("Device refused a secondary channel: %s", exc)

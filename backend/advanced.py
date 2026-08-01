@@ -260,6 +260,36 @@ SETTINGS: tuple[Setting, ...] = (
             "answers a rejected key by dropping the connection — so the "
             "password never gets tried, and merely having a key in ~/.ssh "
             "makes the device unreachable."),
+    Setting("ssh.banner_timeout", "Wait for the SSH banner", 15, "int",
+            "How long to wait for the device to announce itself.",
+            "The single most common cause of \"Error reading SSH protocol "
+            "banner\" on terminal servers and slow console gateways — and a "
+            "*different* timeout from the connect one, which is why raising "
+            "that never fixed it.",
+            minimum=5, maximum=180, unit="s"),
+    Setting("ssh.auth_timeout", "Wait for authentication", 30, "int",
+            "How long the device is given to accept or refuse credentials.",
+            "A device checking with a distant RADIUS or TACACS server "
+            "routinely takes longer than paramiko's default. Same argument as "
+            "the banner timeout, a different phase of the same handshake.",
+            minimum=5, maximum=180, unit="s"),
+    Setting("ssh.allow_agent", "Use keys from an SSH agent", False, "bool",
+            "Let Pageant or the Windows OpenSSH agent offer keys.",
+            "Off by default for the same reason ~/.ssh keys are only tried as "
+            "a last resort: a rejected key can make some network kit drop the "
+            "connection before the password is ever tried.||On, a key held in "
+            "an agent can be used without naming a file — which is how PuTTY "
+            "behaves, and today ShellMate simply cannot."),
+    Setting("ssh.telnet_connect_timeout", "Telnet connect timeout", 15, "int",
+            "How long to wait for a telnet socket to open.",
+            "The SSH one has been settable for a while and this was not, "
+            "though a slow out-of-band path needs it for exactly the same "
+            "reason.", minimum=2, maximum=120, unit="s"),
+    Setting("ssh.secondary_channel_timeout", "Second-channel read timeout", 0.5, "float",
+            "How long the config-capture channel waits between reads.",
+            "Not the same as the terminal read timeout, which is why tuning "
+            "that one never changed config capture — the second channel kept "
+            "its own copy of the number.", minimum=0.1, maximum=10, unit="s"),
     Setting("ssh.telnet_autologin_deadline", "Telnet auto-login window", 30, "int",
             "Stop answering login prompts after this long. Zero disables it.",
             "The guard exists so that a prompt-shaped line arriving an hour "
@@ -334,6 +364,13 @@ SETTINGS: tuple[Setting, ...] = (
             "Separate from the terminal's own scrollback. Across a dozen tabs "
             "this is the setting that costs memory.",
             minimum=100, maximum=500000, unit="lines"),
+    Setting("history.record_output", "Record command output too", True, "bool",
+            "Off, only the commands themselves are stored.",
+            "The middle ground between recording everything and recording "
+            "nothing. Which commands ran is the audit trail people actually "
+            "need for a change record; the output is the part that carries "
+            "configurations and secrets.||Search and drift detection depend on "
+            "the output, so both stop working for sessions recorded this way."),
     Setting("history.retention_days", "Discard history after", 0, "int",
             "Zero keeps it forever.",
             "Nothing prunes the database today. Worth setting if ShellMate "
@@ -366,6 +403,19 @@ SETTINGS: tuple[Setting, ...] = (
             "Unchanged lines shown either side of a change.",
             "More context makes a change easier to place and the diff longer.",
             minimum=0, maximum=20, unit="lines"),
+
+    Setting("capture.channel_width", "Capture terminal width", 200, "int",
+            "The PTY width requested when capturing a configuration.",
+            "A wide PTY is what stops a captured config wrapping. Some "
+            "platforms clamp or ignore it and wrap anyway — which then diffs "
+            "against an unwrapped capture and reports the whole file as "
+            "changed. A drift check that cries wolf is one people stop "
+            "reading.", minimum=80, maximum=1000, unit="cols"),
+    Setting("capture.channel_height", "Capture terminal height", 1000, "int",
+            "The PTY height requested when capturing.",
+            "Tall enough that paging never engages on platforms that decide "
+            "by screen size rather than by the paging command.",
+            minimum=24, maximum=10000, unit="rows"),
 
     # --- Alerts ------------------------------------------------------------
     Setting("alerts.thresholds", "Escalation thresholds", "600,300,60,10", "text",
@@ -482,6 +532,14 @@ SETTINGS: tuple[Setting, ...] = (
             "Dot-files in the local file picker.",
             "`~/.ssh` is hidden on every platform, which is exactly where keys "
             "live."),
+    Setting("files.max_download_mb", "Maximum SFTP download", 512, "int",
+            "The largest file ShellMate will pull off a device.",
+            "Separate from the upload cap, and lower, because the shapes "
+            "differ: an upload is streamed from the request, while a download "
+            "is held whole in memory before it reaches the browser. One "
+            "number for both meant a row labelled *upload* quietly governing "
+            "how much RSS a download could take.",
+            minimum=1, maximum=10240, unit="MB"),
     Setting("files.note_seconds", "How long a device note stays", 3.5, "float",
             "The line in the corner saying what was sent on connect.",
             "Long enough to read is the only requirement, and reading speed "

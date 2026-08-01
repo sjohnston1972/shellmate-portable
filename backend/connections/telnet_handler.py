@@ -29,7 +29,6 @@ from backend.advanced import get as advanced
 
 logger = logging.getLogger(__name__)
 
-CONNECT_TIMEOUT = 15
 READ_TIMEOUT = 0.5
 
 # --- RFC 854 command bytes -------------------------------------------------
@@ -94,7 +93,8 @@ class TelnetHandler(ConnectionHandler):
 
         try:
             self._socket = socket.create_connection(
-                (params.hostname, port), timeout=CONNECT_TIMEOUT,
+                (params.hostname, port),
+                timeout=advanced("ssh.telnet_connect_timeout"),
             )
         except socket.timeout as exc:
             raise ConnectionError_(

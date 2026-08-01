@@ -335,7 +335,18 @@ class SessionStore:
         if not _recording_enabled():
             return -1
 
-        output = record.output or ""
+        # Which commands ran is the audit trail people need for a change
+        # record; the output is the part carrying configurations and secrets.
+        # Recording one without the other is the middle ground between
+        # history.record on and off.
+        from backend.advanced import get as _advanced
+
+        try:
+            keep_output = bool(_advanced("history.record_output"))
+        except Exception:
+            keep_output = True
+
+        output = (record.output or "") if keep_output else ""
         cap = _max_output_chars()
         if len(output) > cap:
             kept = cap

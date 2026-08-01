@@ -36,12 +36,29 @@ MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
 
 
 def _max_upload_bytes() -> int:
-    """The cap, honouring the Stockton override."""
+    """The cap on what may be pushed to a device."""
     try:
         from backend.advanced import get as advanced
         return int(advanced("files.max_upload_mb")) * 1024 * 1024
     except Exception:
         return MAX_UPLOAD_BYTES
+
+
+def _max_download_bytes() -> int:
+    """
+    The cap on what may be pulled off one.
+
+    Its own number rather than the upload cap, because the two are not the
+    same shape: an upload is streamed from the request, while `read_file()`
+    holds the whole thing in memory before it reaches the browser. Sharing
+    one meant a row labelled *upload* deciding how much RSS a download could
+    take in a portable process.
+    """
+    try:
+        from backend.advanced import get as advanced
+        return int(advanced("files.max_download_mb")) * 1024 * 1024
+    except Exception:
+        return 512 * 1024 * 1024
 
 
 @dataclass
@@ -187,10 +204,11 @@ def read_file(session: dict, path: str) -> bytes:
     sftp = _sftp_for(session)
     try:
         attrs = sftp.stat(path)
-        if attrs.st_size and attrs.st_size > _max_upload_bytes():
+        if attrs.st_size and attrs.st_size > _max_download_bytes():
             raise ConnectionError_(
-                f"{path} is {attrs.st_size / 1e9:.1f} GB, which is above the "
-                f"{_max_upload_bytes() / 1e9:.0f} GB transfer limit."
+                f"{path} is {attrs.st_size / 1e6:.0f} MB, which is above the "
+                f"{_max_download_bytes() / 1e6:.0f} MB download limit. "
+                f"Raise it in Stockton if you mean to pull something this big."
             )
         with sftp.open(path, "rb") as handle:
             handle.prefetch()
