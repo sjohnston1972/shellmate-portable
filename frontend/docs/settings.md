@@ -99,7 +99,7 @@ The ones people reach for most:
 | Setting | Why |
 |---|---|
 | SSH keepalive | Firewalls and jump hosts idle a session out mid-change. Off by default; 30–60 seconds suits most |
-| Key exchange algorithms, ciphers | Very old kit offers only algorithms modern paramiko has dropped, which makes it unreachable otherwise |
+| Key exchange, ciphers, MACs, host keys | Tick-lists of what paramiko will negotiate. Very old kit offers only algorithms that have been dropped from the defaults, which makes it unreachable otherwise. Legacy entries are marked |
 | Confidence needed to act | A single-vendor estate can safely act on weaker identification. Floored at 0.4 — never zero |
 | Terminal lines sent as context | More context means better answers from the assistant and more tokens |
 | Log level | `DEBUG` is what support will ask for |

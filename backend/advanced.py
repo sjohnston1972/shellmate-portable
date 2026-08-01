@@ -40,7 +40,7 @@ class Setting:
     key: str
     label: str
     default: Any
-    #: "int" | "float" | "bool" | "text" | "choice"
+    #: "int" | "float" | "bool" | "text" | "choice" | "algorithms"
     kind: str
     summary: str
     #: The trade-off. Rendered as the row's tooltip.
@@ -49,6 +49,10 @@ class Setting:
     maximum: float | None = None
     unit: str = ""
     choices: tuple[str, ...] = ()
+    #: For "algorithms": the name of the paramiko list to offer, and which of
+    #: its entries are legacy. Enumerated at render time rather than written
+    #: out here, so the picker cannot list something paramiko will not accept.
+    algorithms: str = ""
     #: True when the value is read once at startup.
     restart: bool = False
 
@@ -67,6 +71,18 @@ class Setting:
         try:
             if self.kind == "bool":
                 return bool(value)
+            if self.kind == "algorithms":
+                # Stored as a comma-separated string so an existing
+                # settings.json keeps working and the value stays editable by
+                # hand. Anything paramiko does not offer is dropped rather than
+                # kept: a name that cannot match is indistinguishable from a
+                # typo, and silently disables everything else.
+                offered = set(available_algorithms(self.algorithms))
+                if isinstance(value, (list, tuple, set)):
+                    wanted = [str(v).strip() for v in value]
+                else:
+                    wanted = [p.strip() for p in str(value or "").split(",")]
+                return ",".join(w for w in wanted if w and w in offered)
             if self.kind == "choice":
                 text = str(value)
                 return text if text in self.choices else self.default
@@ -81,6 +97,63 @@ class Setting:
         if self.maximum is not None:
             number = min(self.maximum, number)
         return int(number) if self.kind == "int" else float(number)
+
+
+
+# ---------------------------------------------------------------------------
+# The algorithm lists
+#
+# Read from paramiko rather than written out here. A second copy would fall out
+# of step with whatever the installed version actually negotiates, and the whole
+# point of these settings is reaching a device that the defaults will not — a
+# picker offering a name paramiko does not know would be worse than the text
+# field it replaces.
+# ---------------------------------------------------------------------------
+
+#: Which paramiko Transport list backs each of the four negotiated sets.
+_ALGORITHM_LISTS = {
+    "kex":     "_preferred_kex",
+    "ciphers": "_preferred_ciphers",
+    "macs":    "_preferred_macs",
+    "keys":    "_preferred_keys",
+}
+
+#: Algorithms that exist for devices too old to offer anything better. Marked
+#: rather than hidden — they are the entire reason these settings exist, so
+#: this is a label, not a warning.
+LEGACY_ALGORITHMS = frozenset({
+    "diffie-hellman-group1-sha1",
+    "diffie-hellman-group14-sha1",
+    "diffie-hellman-group-exchange-sha1",
+    "3des-cbc",
+    "aes128-cbc", "aes192-cbc", "aes256-cbc",
+    "hmac-sha1", "hmac-sha1-96", "hmac-md5", "hmac-md5-96",
+    "ssh-rsa", "ssh-dss",
+})
+
+
+def available_algorithms(which: str) -> list[str]:
+    """
+    What paramiko will negotiate, in its own order of preference.
+
+    That order is meaningful, so it is preserved rather than sorted —
+    alphabetical would put the weakest first.
+
+    Returns an empty list if the attribute cannot be read. These are paramiko
+    internals: stable for years, but a picker with nothing in it is a better
+    failure than an exception, and the interface falls back to a plain text
+    field when the list is empty.
+    """
+    attribute = _ALGORITHM_LISTS.get(which)
+    if not attribute:
+        return []
+    try:
+        import paramiko
+
+        return list(getattr(paramiko.Transport, attribute))
+    except Exception as exc:                              # pragma: no cover
+        logger.info("Could not read paramiko's %s list: %s", which, exc)
+        return []
 
 
 CATEGORIES = {
@@ -138,17 +211,30 @@ SETTINGS: tuple[Setting, ...] = (
             "Trades responsiveness against idle CPU across many open tabs. "
             "Lower feels marginally snappier and costs more.",
             minimum=0.05, maximum=5, unit="s"),
-    Setting("ssh.kex_algorithms", "Key exchange algorithms", "", "text",
-            "Comma-separated, in order of preference. Blank means paramiko's own.",
+    Setting("ssh.kex_algorithms", "Key exchange algorithms", "", "algorithms",
+            "Nothing ticked offers paramiko's own set, which is what you want "
+            "unless a device refuses it.",
             "Legacy kit needs `diffie-hellman-group1-sha1`, which modern "
-            "paramiko will not offer by default — so those devices are currently "
-            "unreachable with no way to fix it.||Get this wrong and connections "
-            "fail with a negotiation error. Blank it to recover.",
-            restart=False),
-    Setting("ssh.ciphers", "Ciphers", "", "text",
-            "Comma-separated, in order of preference. Blank means the defaults.",
+            "paramiko will not offer by default — so those devices are "
+            "otherwise unreachable with no way to fix it.||Ticking anything at "
+            "all offers *only* what is ticked. Clear it to recover.",
+            algorithms="kex"),
+    Setting("ssh.ciphers", "Ciphers", "", "algorithms",
+            "Nothing ticked offers paramiko's own set.",
             "Same reason as the key exchange list: very old devices offer only "
-            "ciphers that have since been dropped."),
+            "ciphers that have since been dropped from the defaults.",
+            algorithms="ciphers"),
+    Setting("ssh.macs", "Message authentication codes", "", "algorithms",
+            "Nothing ticked offers paramiko's own set.",
+            "A device old enough to need a legacy key exchange frequently needs "
+            "`hmac-sha1` as well — fixing one and not the other leaves the same "
+            "device unreachable for a different reason.",
+            algorithms="macs"),
+    Setting("ssh.host_key_algorithms", "Host key algorithms", "", "algorithms",
+            "Nothing ticked offers paramiko's own set.",
+            "The last of the four negotiated lists. `ssh-rsa` is the one older "
+            "kit tends to need.",
+            algorithms="keys"),
     Setting("ssh.host_key_policy", "Unknown host keys", "auto-add", "choice",
             "What to do when a device's key has not been seen before.",
             "`auto-add` accepts and remembers it, which is what makes first "
@@ -441,6 +527,11 @@ def describe() -> dict:
                 "max":      s.maximum,
                 "unit":     s.unit,
                 "choices":  list(s.choices),
+                "algorithms": (
+                    [{"name": name, "legacy": name in LEGACY_ALGORITHMS}
+                     for name in available_algorithms(s.algorithms)]
+                    if s.kind == "algorithms" else []
+                ),
                 "restart":  s.restart,
             }
             for s in SETTINGS

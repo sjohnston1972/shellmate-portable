@@ -5550,3 +5550,71 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   letter-spacing: 0;
   color: var(--on-surface-dim);
 }
+
+/* --------------------------------------------------------------------------
+   Algorithm pickers in Stockton (#62)
+   -------------------------------------------------------------------------- */
+
+.stockton-stacked { align-items: stretch; }
+
+.stockton-algorithms {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.algorithm-summary {
+  margin-bottom: 6px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11.5px;
+  color: var(--on-surface-dim);
+}
+
+.algorithm-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 2px 14px;
+  padding: 8px 10px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+}
+
+.algorithm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.algorithm-row input[type="checkbox"] {
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.algorithm-row code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--on-surface);
+}
+
+/* The old ones are the point of the setting, so this is a label rather than
+   a warning — but it should still be the thing your eye lands on. */
+.algorithm-legacy {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--secondary);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

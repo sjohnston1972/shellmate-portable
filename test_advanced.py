@@ -227,6 +227,98 @@ def test_the_settings_reach_the_code() -> None:
           ssh._algorithm_overrides() == {})
 
 
+def test_algorithm_settings() -> None:
+    """
+    The four negotiated SSH lists, which are pickers rather than text fields.
+
+    These are the settings that exist to reach a device the defaults will not,
+    so a value that cannot match is the failure that matters: it disables
+    everything else while enabling nothing, and the device stays unreachable
+    for a new reason.
+    """
+    print("\n-- SSH algorithm lists --")
+    fresh()
+
+    keys = [s.key for s in advanced.SETTINGS if s.kind == "algorithms"]
+    check("all four negotiated lists are exposed",
+          set(keys) == {"ssh.kex_algorithms", "ssh.ciphers", "ssh.macs",
+                        "ssh.host_key_algorithms"},
+          f"got {sorted(keys)}")
+
+    for group in ("kex", "ciphers", "macs", "keys"):
+        offered = advanced.available_algorithms(group)
+        check(f"{group}: paramiko's list is readable", len(offered) >= 5,
+              f"got {len(offered)}")
+        check(f"{group}: in preference order, not sorted",
+              offered != sorted(offered) or len(offered) < 2,
+              "the list came back alphabetical, which puts the weakest first")
+
+    check("an unknown group yields nothing rather than raising",
+          advanced.available_algorithms("nonsense") == [])
+
+    # The legacy entries are the reason these settings exist, so they must be
+    # present and flagged rather than filtered out.
+    kex = advanced.available_algorithms("kex")
+    check("the legacy key exchange is offered",
+          "diffie-hellman-group1-sha1" in kex,
+          "the one algorithm the setting exists for is missing")
+    described = next(s for s in advanced.describe()["settings"]
+                     if s["key"] == "ssh.kex_algorithms")
+    legacy = [a["name"] for a in described["algorithms"] if a["legacy"]]
+    check("and marked as legacy", "diffie-hellman-group1-sha1" in legacy,
+          f"flagged: {legacy}")
+    check("while a modern one is not",
+          "curve25519-sha256@libssh.org" not in legacy)
+
+    # A name paramiko does not offer is dropped, not stored.
+    advanced.update({"ssh.kex_algorithms":
+                     "diffie-hellman-group1-sha1, not-a-real-kex, "})
+    check("a typo is dropped rather than kept",
+          advanced.get("ssh.kex_algorithms") == "diffie-hellman-group1-sha1",
+          f"got {advanced.get('ssh.kex_algorithms')!r}")
+
+    advanced.update({"ssh.ciphers": ["aes256-ctr", "aes128-cbc"]})
+    check("a list is accepted as well as a string",
+          advanced.get("ssh.ciphers") == "aes256-ctr,aes128-cbc",
+          f"got {advanced.get('ssh.ciphers')!r}")
+
+    advanced.update({"ssh.macs": "nothing-valid-at-all"})
+    check("a value with nothing valid in it becomes blank",
+          advanced.get("ssh.macs") == "",
+          f"got {advanced.get('ssh.macs')!r} — a non-empty value that matches "
+          f"nothing would disable every algorithm")
+
+
+def test_algorithms_reach_paramiko() -> None:
+    """paramiko takes the inverse: naming what you want disables the rest."""
+    print("\n-- What paramiko is actually told --")
+    fresh()
+    import backend.connections.ssh_handler as ssh
+
+    check("nothing chosen restricts nothing", ssh._algorithm_overrides() == {})
+
+    advanced.update({
+        "ssh.kex_algorithms": "diffie-hellman-group1-sha1",
+        "ssh.macs": "hmac-sha1",
+    })
+    disabled = ssh._algorithm_overrides().get("disabled_algorithms", {})
+
+    check("only the groups chosen are restricted",
+          set(disabled) == {"kex", "macs"}, f"got {sorted(disabled)}")
+    for group, wanted in (("kex", "diffie-hellman-group1-sha1"),
+                          ("macs", "hmac-sha1")):
+        check(f"{group}: the chosen algorithm is not disabled",
+              wanted not in disabled[group])
+        check(f"{group}: everything else is",
+              len(disabled[group]) == len(advanced.available_algorithms(group)) - 1,
+              f"disabled {len(disabled[group])} of "
+              f"{len(advanced.available_algorithms(group))}")
+
+    advanced.reset()
+    check("and resetting hands paramiko its defaults back",
+          ssh._algorithm_overrides() == {})
+
+
 def test_what_is_deliberately_absent() -> None:
     """The exclusions are part of the deliverable, not an omission."""
     print("\n-- Deliberately not here --")
@@ -275,6 +367,8 @@ def main() -> int:
         test_reset_at_three_granularities,
         test_reset_actually_removes_from_the_file,
         test_the_settings_reach_the_code,
+        test_algorithm_settings,
+        test_algorithms_reach_paramiko,
         test_what_is_deliberately_absent,
         test_describe_is_renderable,
     ):

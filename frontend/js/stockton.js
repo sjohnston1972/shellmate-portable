@@ -173,7 +173,9 @@
   function row(setting, showCategory) {
     const el = document.createElement('div');
     el.className = 'setting-row stockton-row'
-      + (setting.modified ? ' stockton-modified' : '');
+      + (setting.modified ? ' stockton-modified' : '')
+      // A tick-list is a block, not a control that sits beside its label.
+      + (setting.kind === 'algorithms' ? ' setting-row-stack stockton-stacked' : '');
 
     const text = document.createElement('div');
     text.className = 'stockton-text';
@@ -230,6 +232,9 @@
     wrap.className = 'setting-input-group stockton-control';
 
     let field;
+    if (setting.kind === 'algorithms') {
+      return algorithmPicker(setting);
+    }
     if (setting.kind === 'bool') {
       // The same switch the rest of Settings uses, rather than a bare
       // checkbox that would read as a different application.
@@ -293,6 +298,95 @@
       undo.title = `Back to ${format(setting.default)}`;
       undo.addEventListener('click', () => reset({ key: setting.key }));
       wrap.appendChild(undo);
+    }
+
+    return wrap;
+  }
+
+
+  /**
+   * A tick-list of the algorithms paramiko will actually negotiate.
+   *
+   * These were free-text, comma-separated — the wrong control for the two
+   * settings that exist to rescue a device you cannot currently reach. Nothing
+   * told you the valid names, `diffie-hellman-group1-sha1` is not a string
+   * anyone types from memory, and a typo was silently equivalent to naming
+   * nothing: the entry did not match, so the algorithm you wanted was disabled
+   * along with everything else.
+   *
+   * The order is paramiko's own preference order, not alphabetical — that
+   * order is meaningful and sorting would put the weakest first.
+   */
+  function algorithmPicker(setting) {
+    const wrap = document.createElement('div');
+    wrap.className = 'stockton-control stockton-algorithms';
+
+    // No list means paramiko's internals moved. Fall back to the text field
+    // rather than showing an empty picker somebody cannot use at all.
+    if (!setting.algorithms || !setting.algorithms.length) {
+      const field = document.createElement('input');
+      field.type = 'text';
+      field.className = 'setting-input';
+      field.id = fieldId(setting);
+      field.value = setting.value;
+      field.addEventListener('change', () => save(setting, field.value));
+      wrap.appendChild(field);
+      return wrap;
+    }
+
+    const chosen = new Set(
+      String(setting.value || '').split(',').map(s => s.trim()).filter(Boolean));
+
+    const list = document.createElement('div');
+    list.className = 'algorithm-list';
+
+    setting.algorithms.forEach(entry => {
+      const row = document.createElement('label');
+      row.className = 'algorithm-row';
+
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = chosen.has(entry.name);
+      box.dataset.name = entry.name;
+      box.addEventListener('change', () => {
+        const picked = [...list.querySelectorAll('input:checked')]
+          .map(b => b.dataset.name);
+        save(setting, picked.join(','));
+      });
+
+      const name = document.createElement('code');
+      name.textContent = entry.name;
+
+      row.append(box, name);
+
+      // Marked, not hidden. These are the entire reason the setting exists,
+      // so it is a label rather than a warning.
+      if (entry.legacy) {
+        const tag = document.createElement('span');
+        tag.className = 'algorithm-legacy';
+        tag.textContent = 'legacy';
+        row.appendChild(tag);
+      }
+
+      list.appendChild(row);
+    });
+
+    const summary = document.createElement('div');
+    summary.className = 'algorithm-summary';
+    summary.textContent = chosen.size
+      ? `${chosen.size} chosen — only these are offered`
+      : "Nothing chosen — paramiko's own set is offered";
+
+    wrap.append(summary, list);
+
+    if (chosen.size) {
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'btn-tertiary stockton-undo';
+      clear.textContent = 'Clear';
+      clear.title = 'Back to offering the defaults';
+      clear.addEventListener('click', () => reset({ key: setting.key }));
+      wrap.appendChild(clear);
     }
 
     return wrap;

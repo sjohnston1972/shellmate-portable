@@ -114,29 +114,39 @@ def _host_key_policy():
 
 def _algorithm_overrides() -> dict:
     """
-    Turn the user's preferred algorithm lists into paramiko's disabled_algorithms.
+    Turn the user's chosen algorithm lists into paramiko's disabled_algorithms.
 
     paramiko takes a list of what *not* to offer rather than what to prefer, so
-    naming what you want means disabling everything else. An empty setting
+    naming what you want means disabling everything else. Nothing chosen
     disables nothing, which is the default behaviour.
-    """
-    import paramiko
 
-    wanted_kex = _split(advanced("ssh.kex_algorithms"))
-    wanted_ciphers = _split(advanced("ssh.ciphers"))
-    if not wanted_kex and not wanted_ciphers:
+    All four negotiated lists are covered. A device old enough to need a legacy
+    key exchange usually needs a legacy MAC and host key algorithm too, and
+    fixing one of the four leaves the same device unreachable for a different
+    reason.
+    """
+    from backend.advanced import available_algorithms
+
+    disabled: dict[str, list[str]] = {}
+    chosen: dict[str, set[str]] = {}
+
+    for setting, group in (("ssh.kex_algorithms", "kex"),
+                           ("ssh.ciphers", "ciphers"),
+                           ("ssh.macs", "macs"),
+                           ("ssh.host_key_algorithms", "keys")):
+        wanted = _split(advanced(setting))
+        if not wanted:
+            continue
+        chosen[group] = wanted
+        disabled[group] = [
+            name for name in available_algorithms(group) if name not in wanted
+        ]
+
+    if not disabled:
         return {}
 
-    security = paramiko.Transport._preferred_kex, paramiko.Transport._preferred_ciphers
-    disabled: dict[str, list[str]] = {}
-
-    if wanted_kex:
-        disabled["kex"] = [k for k in security[0] if k not in wanted_kex]
-    if wanted_ciphers:
-        disabled["ciphers"] = [c for c in security[1] if c not in wanted_ciphers]
-
-    logger.info("Restricting SSH algorithms: kex=%s ciphers=%s",
-                wanted_kex or "default", wanted_ciphers or "default")
+    logger.info("Restricting SSH algorithms: %s",
+                "; ".join(f"{g}={sorted(v)}" for g, v in chosen.items()))
     return {"disabled_algorithms": disabled}
 
 
