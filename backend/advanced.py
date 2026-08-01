@@ -434,6 +434,20 @@ SETTINGS: tuple[Setting, ...] = (
             "A suggested `reload`, `write erase` or `shutdown` asks first.",
             "Which commands count is per-platform, under Platform Definitions. "
             "This is only the switch."),
+    Setting("ai.analyse_output", "Comment on output after an approved command", True, "bool",
+            "Sends the device's reply to the assistant on its own.",
+            "Approving a suggested command is a decision about the *device* — "
+            "run this. It also meant posting whatever came back to your AI "
+            "provider, which is a different decision that nobody made.||Off, "
+            "commands still run and are still suggested; you just have to ask "
+            "about the result. On a local model this costs nothing; on a cloud "
+            "one it is device output leaving the building."),
+    Setting("ai.analyse_output_lines", "Most lines sent for that", 200, "int",
+            "The cap on output shipped after an approved command.",
+            "The watcher collects everything the device says within its idle "
+            "window, so an approved `show running-config` on a large chassis "
+            "sent the whole thing. The most recent lines are the ones worth "
+            "having.", minimum=1, maximum=5000, unit="lines"),
     Setting("ai.redact_context", "Mask secrets in what is sent", True, "bool",
             "Apply the same redaction that covers session logs.",
             "Terminal output going to a third-party API is at least as "
@@ -548,7 +562,13 @@ NOT_EXPOSED: tuple[tuple[str, str], ...] = (
      "Nothing to gain by changing it."),
     ("Binding beyond 127.0.0.1",
      "There is no authentication, precisely because nothing but this machine "
-     "can reach the port. The two go together."),
+     "can reach the port. The two go together.||That holds against other "
+     "programs on the machine. It does not hold by itself against a web page "
+     "you visit — your browser is on this machine and will open a socket to "
+     "loopback on the page's behalf. Which is why the WebSocket handshake "
+     "checks its Origin: loopback-only is what makes no-authentication "
+     "acceptable, and that is only true while the browser cannot be used as "
+     "the courier."),
     ("Redaction in session logs",
      "Already an ordinary setting under Session Logging. A second switch for "
      "the same promise is a promise nobody can rely on."),

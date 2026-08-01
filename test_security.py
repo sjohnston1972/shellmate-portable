@@ -21,6 +21,9 @@ every screen and streams it back to whoever called.
 """
 
 import sys
+from pathlib import Path
+
+ROOT = Path(__file__).parent
 
 passed = 0
 failed: list[str] = []
@@ -142,6 +145,74 @@ def test_one_definition_of_an_allowed_origin() -> None:
           "the pattern is anchored at both ends for this reason")
 
 
+def test_approving_a_command_does_not_ship_the_reply_unasked() -> None:
+    """
+    Two decisions, not one.
+
+    Clicking Send on a suggested command is a decision about the *device* —
+    run this. It also meant posting whatever came back to Anthropic, OpenAI,
+    xAI or DeepSeek, which is a different decision that nobody made. The
+    prompt was composed in the browser from raw xterm output and arrived as an
+    ordinary user message, so `outbound.redact_text()` never saw it: an
+    approved `show running-config` sent the configuration, hashes and
+    community strings included.
+    """
+    print(chr(10) + "-- Output sent after an approved command --")
+    from backend import advanced
+    from backend.app import _auto_analysis_prompt
+
+    secret = "username admin privilege 15 secret 5 $1$abcd$EFGHijklMNOPqrst"
+    community = "snmp-server community S3cretString RO"
+    output = chr(10).join([f"interface Gi1/0/{n}" for n in range(400)]
+                          + [secret, community])
+
+    prompt = _auto_analysis_prompt({"command": "show running-config",
+                                    "output": output})
+
+    check("the password hash is masked", secret not in prompt,
+          "the whole point of composing this server-side")
+    check("and the community string", "S3cretString" not in prompt, prompt[-200:])
+    check("the command is still named", "show running-config" in prompt)
+
+    limit = advanced.get("ai.analyse_output_lines")
+    check("the output is capped", "earlier lines not sent" in prompt,
+          f"402 lines went with a {limit}-line cap")
+    check("keeping the most recent, which is the useful end",
+          "interface Gi1/0/399" in prompt)
+    check("and saying how much was dropped",
+          any(ch.isdigit() for ch in prompt.split("earlier lines")[0][-8:]),
+          "a silent truncation reads as the whole output")
+
+    check("there is a setting governing it at all",
+          "ai.analyse_output" in {s.key for s in advanced.SETTINGS},
+          "ai.suggest_commands governs whether commands are proposed and "
+          "nothing governed whether approving one also ships the result")
+
+
+def test_the_browser_is_not_the_guarantee() -> None:
+    """
+    A page left open must not keep sending after it is switched off.
+
+    The browser checks the setting too, which is a convenience. This is the
+    part that has to be true.
+    """
+    print(chr(10) + "-- Where the switch is enforced --")
+    source = (ROOT / "backend" / "app.py").read_text(encoding="utf-8")
+
+    check("the chat socket checks the setting before composing",
+          'advanced_setting("ai.analyse_output")' in source,
+          "only the browser decides, so a stale page keeps sending")
+    check("and the prompt is composed on this side",
+          "_auto_analysis_prompt" in source)
+
+    chat = (ROOT / "frontend" / "js" / "chat.js").read_text(encoding="utf-8")
+    check("the browser no longer builds the prompt",
+          "silentMsg" not in chat,
+          "a prompt built in the browser cannot be redacted by the server")
+    check("it sends the command and output as data",
+          "auto_analysis" in chat)
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Security")
@@ -149,7 +220,9 @@ def main() -> int:
 
     for test in (test_a_visited_page_cannot_open_a_websocket,
                  test_our_own_pages_still_work,
-                 test_one_definition_of_an_allowed_origin):
+                 test_one_definition_of_an_allowed_origin,
+                 test_approving_a_command_does_not_ship_the_reply_unasked,
+                 test_the_browser_is_not_the_guarantee):
         try:
             test()
         except Exception as exc:

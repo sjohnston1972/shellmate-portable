@@ -2573,6 +2573,42 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
 # WebSocket — AI chat
 # ---------------------------------------------------------------------------
 
+def _auto_analysis_prompt(auto: dict) -> str:
+    """
+    Compose the prompt for output that appeared after an approved command.
+
+    Built here rather than in the browser so the device's reply goes through
+    `outbound.redact_text()` like everything else that leaves the machine.
+    Composed in the browser it did not: the message arrived as an ordinary
+    user message with the configuration already inside it.
+
+    Also capped. The watcher collects everything within its idle window with
+    no limit, so an approved `show running-config` on a large chassis sent the
+    lot — worth bounding on its own, before considering what is in it.
+    """
+    from backend.session.outbound import redact_text
+
+    command = str(auto.get("command", ""))[:400]
+    output = str(auto.get("output", ""))
+
+    limit = int(advanced_setting("ai.analyse_output_lines"))
+    lines = output.splitlines()
+    trimmed = lines[-limit:] if limit and len(lines) > limit else lines
+    dropped = len(lines) - len(trimmed)
+
+    body = redact_text("\n".join(trimmed))
+    if dropped > 0:
+        body = f"[{dropped} earlier lines not sent]\n{body}"
+
+    return (
+        f"The user just ran `{command}` in the terminal and this output "
+        f"appeared:\n```\n{body}\n```\nAnalyse it naturally, as if you are "
+        f"watching the terminal in real time. Do not say \"you ran\" or "
+        f"reference receiving a message — just respond as an engineer who can "
+        f"see the screen."
+    )
+
+
 @app.websocket("/ws/chat")
 async def chat_websocket(websocket: WebSocket) -> None:
     """
@@ -2610,6 +2646,25 @@ async def chat_websocket(websocket: WebSocket) -> None:
             context_mode     = msg.get("context_mode", "active")
             open_session_ids = msg.get("open_session_ids") or None
             mode             = msg.get("mode") or None  # "learn" | "tshoot"
+
+            # Approving a suggested command used to also ship whatever the
+            # device said back to the provider, with no setting governing it
+            # and no redaction — the browser built the whole prompt from raw
+            # xterm output, so the server-side masking never saw it. An
+            # approved `show running-config` sent the configuration, hashes
+            # and community strings included.
+            #
+            # The browser now sends the command and the output as data, and
+            # the prompt is composed here, where the output can be recognised
+            # as device output and masked like anything else leaving the
+            # machine.
+            auto = msg.get("auto_analysis")
+            if auto:
+                if not advanced_setting("ai.analyse_output"):
+                    # Enforced here rather than in the browser. The browser
+                    # check is a convenience; this is the guarantee.
+                    continue
+                user_message = _auto_analysis_prompt(auto)
 
             if not user_message:
                 continue

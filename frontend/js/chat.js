@@ -314,9 +314,13 @@
     updateContextIndicator();
   }
 
-  function sendSilent(message, sessionId) {
+  function sendSilent(message, sessionId, autoAnalysis) {
     if (isStreaming) return;
     if (!chatWs || chatWs.readyState !== WebSocket.OPEN) return;
+    // A convenience, not the guarantee — the server enforces this too, so a
+    // page left open cannot keep shipping output after it is switched off.
+    if (autoAnalysis && window.shellmateAdvanced
+        && !window.shellmateAdvanced('ai.analyse_output', true)) return;
 
     const activeTab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
     const sid = sessionId || (activeTab ? activeTab.sessionId : null);
@@ -328,12 +332,17 @@
 
     const aiMode = typeof window.getShellmateMode === 'function' ? window.getShellmateMode() : 'tshoot';
     chatWs.send(JSON.stringify({
-      message,
-      session_id:   sid,
-      backend:      currentBackend,
-      model:        currentModel,
-      context_mode: contextMode,
-      mode:         aiMode,
+      message:       message || '',
+      // The command and the device's reply as data. The server composes the
+      // prompt from them, which is what lets it mask the output — composed
+      // here it arrived as an ordinary user message with the configuration
+      // already inside it.
+      auto_analysis: autoAnalysis || null,
+      session_id:    sid,
+      backend:       currentBackend,
+      model:         currentModel,
+      context_mode:  contextMode,
+      mode:          aiMode,
     }));
   }
 
@@ -526,10 +535,15 @@
       const clean = output.replace(/\x1b\[[0-9;]*[mGKHF]/g, '').trim();
       if (!clean) return;
 
-      // Send silently — no user bubble, AI responds as if it observed the output itself
-      const silentMsg = `The user just ran \`${cmd}\` in the terminal and this output appeared:\n\`\`\`\n${clean}\n\`\`\`\nAnalyse it naturally, as if you are watching the terminal in real time. Do not say "you ran" or reference receiving a message — just respond as an engineer who can see the screen.`;
-
-      setTimeout(() => sendSilent(silentMsg, sessionId), 300);
+      // The command and the device's reply go as *data*, not as a prompt
+      // composed here. Composed here, the message reached the provider as
+      // an ordinary user message with the output already inside it, so the
+      // server-side redaction never saw it — an approved
+      // `show running-config` sent the configuration, hashes and community
+      // strings included. The server composes it now, masks it, caps it,
+      // and decides whether to send it at all.
+      setTimeout(() => sendSilent(null, sessionId,
+                                  { command: cmd, output: clean }), 300);
     }
 
     function cleanup() {
