@@ -109,9 +109,11 @@
     // ------------------------------------------------------------------
     const fitAddon      = new window.FitAddon.FitAddon();
     const webLinksAddon = new window.WebLinksAddon.WebLinksAddon();
+    const searchAddon   = new window.SearchAddon.SearchAddon();
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
+    terminal.loadAddon(searchAddon);
 
     // ------------------------------------------------------------------
     // 3. Create the container div and mount xterm.js
@@ -304,6 +306,17 @@
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
 
+      // Ctrl+F → find in this terminal.
+      //
+      // It has to be here rather than on document: xterm's own key handling
+      // calls stopPropagation() for the keys it consumes, so a document-level
+      // listener never sees this one. Returning false also stops ^F being
+      // sent to the device, which is what would otherwise happen.
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'f') {
+        openSearch();
+        return false;
+      }
+
       // Ctrl+Shift+C → copy
       if (e.ctrlKey && e.shiftKey && e.key === 'C') {
         _copySelection();
@@ -403,8 +416,8 @@
     // ------------------------------------------------------------------
     // 9. Register instance so settings changes can be applied live
     // ------------------------------------------------------------------
-    _instances[sessionId] = { terminal, fitAddon, websocket, containerId,
-                              onWindowResize };
+    _instances[sessionId] = { terminal, fitAddon, searchAddon, websocket,
+                              containerId, onWindowResize };
 
     // Returns the character count of the last `n` lines — matches what the
     // backend sends to the AI via buf.get_text(n), so the context estimate is accurate.
@@ -520,6 +533,101 @@
       danger: true,
     }).then(reply).catch(() => reply(false));
   }
+
+
+  // -------------------------------------------------------------------------
+  // Searching the buffer in front of you
+  //
+  // History search answers a different question — "what did I change on the
+  // Glasgow core last Tuesday" — out of SQLite, from records written only
+  // once the transcript parser sees the next prompt. It cannot reach a
+  // `show run` still scrolling past, which is where somebody looks a hundred
+  // times a day, and it finds nothing at all when history.record is off.
+  //
+  // One bar, reused by whichever terminal is active, because a search box per
+  // tab is a box you have to find before you can use it.
+  // -------------------------------------------------------------------------
+
+  let _searchBar, _searchInput, _searchCount;
+
+  function activeSearchAddon() {
+    const tab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+    if (!tab) return null;
+    const entry = _instances[tab.sessionId];
+    return entry ? entry.searchAddon : null;
+  }
+
+  function initSearchBar() {
+    _searchBar   = document.getElementById('term-search');
+    _searchInput = document.getElementById('term-search-input');
+    _searchCount = document.getElementById('term-search-count');
+    if (!_searchBar) return;
+
+    const decorations = {
+      matchBackground:          '#4F46E5',
+      matchBorder:              '#C3C0FF',
+      matchOverviewRuler:       '#C3C0FF',
+      activeMatchBackground:    '#C3C0FF',
+      activeMatchBorder:        '#4F46E5',
+      activeMatchColorOverviewRuler: '#C3C0FF',
+    };
+
+    const find = (forward) => {
+      const addon = activeSearchAddon();
+      const term  = _searchInput.value;
+      if (!addon || !term) { _searchCount.textContent = ''; return; }
+      const options = { decorations, incremental: false };
+      const found = forward ? addon.findNext(term, options)
+                            : addon.findPrevious(term, options);
+      // xterm's addon reports found/not-found rather than a count, so say
+      // that rather than inventing a number it has not given us.
+      _searchCount.textContent = found ? '' : 'no matches';
+    };
+
+    _searchInput.addEventListener('input', () => find(true));
+    _searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); find(!e.shiftKey); }
+      if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
+    });
+    document.getElementById('term-search-next').addEventListener('click', () => find(true));
+    document.getElementById('term-search-prev').addEventListener('click', () => find(false));
+    document.getElementById('term-search-close').addEventListener('click', closeSearch);
+
+    // Focus outside a terminal — on the tab bar, say — still gets Ctrl+F,
+    // because "find in this terminal" is about the visible session rather
+    // than about what happens to hold focus. When focus *is* in a terminal
+    // the custom key handler above has already claimed it, so this never
+    // double-fires.
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && !e.shiftKey) {
+        if (!activeSearchAddon()) return;   // no session: leave it to the browser
+        if (_searchBar && !_searchBar.classList.contains('hidden')) return;
+        e.preventDefault();
+        openSearch();
+      }
+    });
+  }
+
+  function openSearch() {
+    if (!_searchBar) return;
+    _searchBar.classList.remove('hidden');
+    _searchInput.select();
+    _searchInput.focus();
+  }
+
+  function closeSearch() {
+    if (!_searchBar) return;
+    _searchBar.classList.add('hidden');
+    _searchCount.textContent = '';
+    const addon = activeSearchAddon();
+    if (addon) { try { addon.clearDecorations(); } catch (_) {} }
+    // Back to the device, which is where the next keystroke is meant to go.
+    const tab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+    const entry = tab && _instances[tab.sessionId];
+    if (entry) { try { entry.terminal.focus(); } catch (_) {} }
+  }
+
+  document.addEventListener('DOMContentLoaded', initSearchBar);
 
   window.initTerminal = initTerminal;
   window.forgetTerminal = forgetTerminal;

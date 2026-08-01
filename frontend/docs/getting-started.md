@@ -154,3 +154,16 @@ and the shipped defaults come back.
 
 `configs/` can be pointed anywhere, including a network share — see
 [History and drift](#history-and-drift).
+
+## Finding text in the terminal
+
+**Ctrl+F** searches the buffer in front of you — the whole scrollback, not
+just what is painted. Enter for the next match, Shift+Enter for the previous,
+Escape to close and go back to typing.
+
+This is a different question from **History**. History searches completed
+commands and their output out of the database — *what did I change on the
+Glasgow core last Tuesday*. It cannot reach a `show running-config` still
+scrolling past, because that record is only written once ShellMate sees the
+next prompt, and it finds nothing at all if recording is switched off.
+Ctrl+F is for the four thousand lines already on your screen.

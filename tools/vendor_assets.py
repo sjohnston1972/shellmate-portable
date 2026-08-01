@@ -42,6 +42,10 @@ SCRIPTS: dict[str, str] = {
     "xterm.js":                   "https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js",
     "xterm-addon-fit.js":         "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js",
     "xterm-addon-web-links.js":   "https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js",
+    # Searching the buffer in front of you. History search answers a different
+    # question — what did I change last Tuesday — out of SQLite, and cannot
+    # reach output still in the live scrollback.
+    "xterm-addon-search.js":      "https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js",
 }
 
 # The two Google Fonts stylesheets index.html requested. Weight sets are copied

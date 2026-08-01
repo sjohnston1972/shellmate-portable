@@ -6171,3 +6171,49 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 
 .btn-link:hover { opacity: 0.8; }
 .btn-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* ---------------------------------------------------------------------------
+   Find in terminal (#99)
+
+   Floats over the terminal rather than displacing it: a search bar that
+   reflows the buffer moves the thing you were looking at while you look for
+   it.
+   --------------------------------------------------------------------------- */
+#term-search {
+  position: absolute;
+  top: 8px;
+  right: 22px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--overlay-solid);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+}
+
+#term-search .material-symbols-outlined { font-size: 16px; color: var(--on-surface-dim); }
+
+#term-search-input {
+  width: 220px;
+  padding: 4px 6px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+#term-search-input:focus { outline: none; border-color: var(--primary); }
+
+#term-search-count {
+  min-width: 64px;
+  font-size: 11px;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+#term-search .icon-btn { padding: 2px; }
