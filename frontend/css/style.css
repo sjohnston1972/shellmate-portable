@@ -61,6 +61,24 @@
   /* Layout dimensions */
   --sidebar-width:     56px;
 
+  /* --- Icon scale ------------------------------------------------------
+     Icon size was set in 43 separate rules across nine sizes between 10px
+     and 20px, with no shared value — which is why they had drifted apart in
+     the first place, and why "make them larger" previously meant editing
+     every one and getting the same answer each time.
+
+     One multiplier, five steps. Changing the whole interface's icon size is
+     now `--icon-scale`, and a new component picks a step rather than a
+     number. The base values are the old sizes, so scale 1 reproduces exactly
+     what was there before this change. */
+  --icon-scale: 1.5;
+  --icon-xs: calc(10px * var(--icon-scale));
+  --icon-sm: calc(13px * var(--icon-scale));
+  --icon-md: calc(16px * var(--icon-scale));
+  --icon-lg: calc(18px * var(--icon-scale));
+  --icon-xl: calc(20px * var(--icon-scale));
+
+
   /* One height for a control that sits beside another control.
      Inputs took their height from their own padding and font size, buttons
      from theirs, and neither declared one — so a Browse button beside a path
@@ -199,7 +217,7 @@ a {
    -------------------------------------------------------------------------- */
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 20;
-  font-size: 20px;
+  font-size: var(--icon-xl);
   line-height: 1;
   user-select: none;
   display: inline-flex;
@@ -525,7 +543,7 @@ a {
 }
 
 #btn-new-tab .material-symbols-outlined {
-  font-size: 13px;
+  font-size: var(--icon-sm);
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
 }
 
@@ -560,7 +578,7 @@ a {
 }
 
 .chat-pill-btn .material-symbols-outlined {
-  font-size: 13px;
+  font-size: var(--icon-sm);
 }
 
 .chat-pill-btn:hover {
@@ -937,7 +955,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .cmd-block-actions .btn-primary .material-symbols-outlined {
-  font-size: 13px;
+  font-size: var(--icon-sm);
 }
 
 .cmd-block-actions .btn-secondary {
@@ -1008,7 +1026,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .quick-btn-del .material-symbols-outlined {
-  font-size: 10px;
+  font-size: var(--icon-xs);
   line-height: 1;
 }
 
@@ -1049,7 +1067,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #quick-btn-add .material-symbols-outlined {
-  font-size: 14px;
+  font-size: var(--icon-sm);
 }
 
 /* Chat input area */
@@ -1105,7 +1123,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #chat-send .material-symbols-outlined {
-  font-size: 16px;
+  font-size: var(--icon-md);
 }
 
 #chat-send:disabled {
@@ -1210,7 +1228,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .welcome-profile-delete .material-symbols-outlined {
-  font-size: 12px;
+  font-size: var(--icon-sm);
 }
 
 .welcome-profile-wrap:hover .welcome-profile-delete {
@@ -1406,7 +1424,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .btn-primary .material-symbols-outlined {
-  font-size: 16px;
+  font-size: var(--icon-md);
 }
 
 .btn-primary:hover {
@@ -1667,7 +1685,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #modal-close .material-symbols-outlined {
-  font-size: 18px;
+  font-size: var(--icon-lg);
 }
 
 /* --------------------------------------------------------------------------
@@ -2035,7 +2053,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .btn-tertiary .material-symbols-outlined {
-  font-size: 16px;
+  font-size: var(--icon-md);
 }
 
 /* --------------------------------------------------------------------------
@@ -2590,7 +2608,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .tab-context-menu button .material-symbols-outlined {
-  font-size: 16px;
+  font-size: var(--icon-md);
   color: var(--on-surface-muted);
 }
 
@@ -2710,7 +2728,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .highlight-remove .material-symbols-outlined {
-  font-size: 16px;
+  font-size: var(--icon-md);
 }
 
 /* The live preview spans the full width beneath its rule's controls. */
@@ -2859,7 +2877,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .drift-dismiss .material-symbols-outlined {
-  font-size: 16px;
+  font-size: var(--icon-md);
 }
 
 #diff-summary {
@@ -3276,7 +3294,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .sftp-action .material-symbols-outlined {
-  font-size: 18px;
+  font-size: var(--icon-lg);
 }
 
 .sftp-empty,
@@ -3507,7 +3525,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 #copy-toast .material-symbols-outlined {
-  font-size: 14px;
+  font-size: var(--icon-sm);
   color: var(--secondary);
 }
 
@@ -3568,7 +3586,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .jira-mode-btn .material-symbols-outlined {
-  font-size: 16px;
+  font-size: var(--icon-md);
 }
 
 .jira-mode-btn:hover {
@@ -3795,7 +3813,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .jira-selected-ticket > .material-symbols-outlined {
-  font-size: 18px;
+  font-size: var(--icon-lg);
   color: var(--secondary);
   flex-shrink: 0;
 }
@@ -3855,7 +3873,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .jira-tab-pill .material-symbols-outlined {
-  font-size: 13px;
+  font-size: var(--icon-sm);
   color: var(--primary);
 }
 
@@ -3886,7 +3904,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .jira-success .material-symbols-outlined {
-  font-size: 18px;
+  font-size: var(--icon-lg);
   color: var(--secondary);
   flex-shrink: 0;
 }
@@ -4002,8 +4020,11 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   vertical-align: middle;
   margin-left: 6px;
   padding: 0;
-  width: 16px;
-  height: 16px;
+  /* Sized from the icon it contains rather than pinned at 16px. Hard numbers
+     around a glyph are exactly what broke when the icon scale changed — the
+     badge stayed 16px while its icon grew to 24 and spilled out of it. */
+  width: var(--icon-md);
+  height: var(--icon-md);
   background: transparent;
   border: none;
   border-radius: var(--radius-full);
@@ -4012,7 +4033,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .tip-badge .material-symbols-outlined {
-  font-size: 15px;
+  font-size: var(--icon-md);
 }
 
 .tip-badge:hover,
@@ -4146,7 +4167,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   color: var(--error);
 }
 
-.saved-badge .material-symbols-outlined { font-size: 13px; }
+.saved-badge .material-symbols-outlined { font-size: var(--icon-sm); }
 
 .saved-badge button {
   background: none;
@@ -4285,7 +4306,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   border-bottom: 1px solid var(--outline);
 }
 
-.provider-row .material-symbols-outlined { font-size: 16px; margin-top: 1px; }
+.provider-row .material-symbols-outlined { font-size: var(--icon-md); margin-top: 1px; }
 .provider-ok    .material-symbols-outlined { color: #4ade80; }
 .provider-error .material-symbols-outlined { color: var(--error); }
 .provider-muted .material-symbols-outlined { color: var(--on-surface-muted); }
@@ -4386,7 +4407,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   font-weight: 600;
 }
 
-.settings-nav-item .material-symbols-outlined { font-size: 17px; flex: 0 0 auto; }
+.settings-nav-item .material-symbols-outlined { font-size: var(--icon-md); flex: 0 0 auto; }
 
 #settings-layout .panel-body,
 .settings-layout .panel-body { flex: 1; min-width: 0; overflow-y: auto; }
@@ -4427,7 +4448,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .alias-remove:hover { color: var(--error); }
-.alias-remove .material-symbols-outlined { font-size: 15px; }
+.alias-remove .material-symbols-outlined { font-size: var(--icon-md); }
 
 #alias-rows {
   max-height: 320px;
@@ -4510,7 +4531,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   color: var(--on-surface-dim);
 }
 
-.broadcast-result .material-symbols-outlined { font-size: 15px; }
+.broadcast-result .material-symbols-outlined { font-size: var(--icon-md); }
 .broadcast-ok .material-symbols-outlined    { color: #4ade80; }
 .broadcast-error .material-symbols-outlined { color: var(--error); }
 .broadcast-muted { color: var(--on-surface-muted); }
@@ -4577,7 +4598,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .docs-nav-item:hover { background: var(--surface-high); color: var(--on-surface); }
 .docs-nav-item.active { background: var(--surface-highest); color: var(--on-surface); font-weight: 600; }
 .docs-nav-item.hidden { display: none; }
-.docs-nav-item .material-symbols-outlined { font-size: 16px; }
+.docs-nav-item .material-symbols-outlined { font-size: var(--icon-md); }
 
 #docs-content {
   flex: 1;
@@ -4888,7 +4909,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   flex-shrink: 0;
 }
 
-.btn-browse .material-symbols-outlined { font-size: 16px; }
+.btn-browse .material-symbols-outlined { font-size: var(--icon-md); }
 
 /* Says out loud what storing a password in plain text means. Styled as a
    warning rather than a hint because it is not merely informational. */
@@ -4978,7 +4999,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   color: var(--on-surface);
 }
 
-.filepicker-row .material-symbols-outlined { font-size: 17px; flex: 0 0 auto; }
+.filepicker-row .material-symbols-outlined { font-size: var(--icon-md); flex: 0 0 auto; }
 .filepicker-dir .material-symbols-outlined { color: var(--primary); }
 
 .filepicker-name {
@@ -5146,7 +5167,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .snippet-delete:hover { color: var(--error); }
-.snippet-delete .material-symbols-outlined { font-size: 14px; }
+.snippet-delete .material-symbols-outlined { font-size: var(--icon-sm); }
 
 .broadcast-options {
   display: flex;
@@ -5185,7 +5206,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   gap: 5px;
 }
 
-.broadcast-options .btn-secondary .material-symbols-outlined { font-size: 15px; }
+.broadcast-options .btn-secondary .material-symbols-outlined { font-size: var(--icon-md); }
 
 .broadcast-target-num {
   font-family: 'JetBrains Mono', monospace;
@@ -5321,7 +5342,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   .alert-toast { animation: none; }
 }
 
-.alert-toast .material-symbols-outlined { font-size: 18px; flex-shrink: 0; }
+.alert-toast .material-symbols-outlined { font-size: var(--icon-lg); flex-shrink: 0; }
 
 /* The button on a toast that carries an offer — "Show me", "Set platform".
  *
@@ -5384,7 +5405,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 .alert-toast-close:hover { color: var(--on-surface); }
-.alert-toast-close .material-symbols-outlined { font-size: 15px; }
+.alert-toast-close .material-symbols-outlined { font-size: var(--icon-md); }
 
 /* --------------------------------------------------------------------------
    Interface preferences (see frontend/js/prefs.js)
@@ -5522,7 +5543,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   background: var(--surface-high);
 }
 
-.snippet-add .material-symbols-outlined { font-size: 15px; }
+.snippet-add .material-symbols-outlined { font-size: var(--icon-md); }
 
 /* --------------------------------------------------------------------------
    Panels that wear the Settings chrome
@@ -5986,7 +6007,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   font-size: 11px;
 }
 
-.btn-tiny .material-symbols-outlined { font-size: 14px; }
+.btn-tiny .material-symbols-outlined { font-size: var(--icon-sm); }
 
 .credential-danger:hover {
   border-color: var(--error);
@@ -6025,7 +6046,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 
 .discovery-notice .material-symbols-outlined {
   flex: 0 0 auto;
-  font-size: 18px;
+  font-size: var(--icon-lg);
   color: var(--warn);
 }
 
@@ -6149,7 +6170,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   box-shadow: 0 4px 16px rgba(0,0,0,0.35);
 }
 
-#term-search .material-symbols-outlined { font-size: 16px; color: var(--on-surface-dim); }
+#term-search .material-symbols-outlined { font-size: var(--icon-md); color: var(--on-surface-dim); }
 
 #term-search-input {
   width: 220px;
@@ -6285,7 +6306,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 
 #btn-ai-toggle:hover  { color: var(--on-surface); }
 #btn-ai-toggle.active { color: var(--primary); }
-#btn-ai-toggle .material-symbols-outlined { font-size: 18px; }
+#btn-ai-toggle .material-symbols-outlined { font-size: var(--icon-lg); }
 
 
 /* Dragging a side panel wider (#122).
@@ -6322,7 +6343,7 @@ body.resizing-panel * { cursor: ew-resize !important; }
 
 .snippet-quick:hover { color: var(--on-surface); }
 .snippet-quick.on    { color: var(--warn); }
-.snippet-quick .material-symbols-outlined { font-size: 15px; }
+.snippet-quick .material-symbols-outlined { font-size: var(--icon-md); }
 
 .ctx-quick-row {
   display: flex;
@@ -6849,7 +6870,7 @@ body.sidebar-labelled .sidebar-label {
 .group-tile-more:hover { color: var(--primary); }
 
 .group-tile-star .material-symbols-outlined,
-.group-tile-more .material-symbols-outlined { font-size: 16px; }
+.group-tile-more .material-symbols-outlined { font-size: var(--icon-md); }
 
 /* Filled when it is a favourite, outlined when it is not. The subsetter keeps
    the `.fill` glyph variants precisely so this axis works. */
@@ -6882,7 +6903,7 @@ body.sidebar-labelled .sidebar-label {
 }
 
 .group-back:hover { color: var(--primary); border-color: var(--primary-container); }
-.group-back .material-symbols-outlined { font-size: 15px; }
+.group-back .material-symbols-outlined { font-size: var(--icon-md); }
 
 .group-open-name {
   font-family: 'Space Grotesk', sans-serif;
