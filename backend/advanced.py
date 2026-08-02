@@ -172,15 +172,15 @@ def available_algorithms(which: str) -> list[str]:
 # actually hold: the timings and limits behind the feature, not the feature.
 CATEGORIES = {
     "identify":  "Device identification",
-    "ssh":       "SSH, telnet and serial",
-    "terminal":  "Terminal rendering",
+    "ssh":       "Timeouts, keepalive and algorithms",
+    "terminal":  "Rendering",
     "history":   "Recording and history",
     "capture":   "Capture timing and limits",
     "alerts":    "Alert timing and thresholds",
     "broadcast": "Broadcast",
-    "ai":        "AI tuning",
+    "ai":        "AI Assistant",
     "files":     "Files and panels",
-    "discovery": "Network discovery",
+    "discovery": "Network Discovery",
     "diag":      "Diagnostics",
 }
 

@@ -96,6 +96,30 @@
 
       const host = document.querySelector(`.settings-slot[data-category="${key}"]`)
                 || fallback;
+
+      // A slot inside a section renders as a subsection — the same rows, one
+      // heading fewer (#152). Only a slot standing on its own becomes a full
+      // section with a nav entry of its own; that is the difference between
+      // 24 headings and 16.
+      if (host !== fallback && host.closest('.settings-section')) {
+        const sub = document.createElement('div');
+        sub.className = 'settings-subgroup';
+
+        const heading = document.createElement('h4');
+        heading.className = 'settings-subsection-title';
+        heading.textContent = title;
+        sub.appendChild(heading);
+
+        const note = document.createElement('p');
+        note.className = 'settings-section-hint';
+        note.textContent = 'These apply as soon as you change them.';
+        sub.appendChild(note);
+
+        items.forEach(setting => sub.appendChild(row(setting, false)));
+        host.appendChild(sub);
+        return;
+      }
+
       const el = section(title, items, false);
 
       // These save as you change them, unlike everything above, which waits

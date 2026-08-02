@@ -7231,3 +7231,16 @@ body {
   border-radius: 50%;
   background: var(--ok);
 }
+
+/* A subsection inside a settings section (#152): merged advanced values and
+   the demoted Knowledge Base. Divided from what precedes it by a rule rather
+   than a heading weight, so the one h3 per section stays the only h3. */
+.settings-subgroup {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--outline);
+}
+
+.settings-subgroup .settings-subsection-title {
+  margin: 0 0 4px;
+}

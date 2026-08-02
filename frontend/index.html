@@ -797,6 +797,10 @@ GigEth0/2     unassigned    YES unset  down     down
               <span class="toggle-track"></span>
             </label>
           </div>
+        
+          <!-- Advanced values for this area render here as a
+               subsection (#152) — the same rows, one heading fewer. -->
+          <div class="settings-slot" data-category="terminal"></div>
         </section>
         <section class="settings-section">
           <h3 class="settings-section-title">Behavior</h3>
@@ -848,7 +852,6 @@ GigEth0/2     unassigned    YES unset  down     down
             <button type="button" id="highlight-reset" class="btn-tertiary">Reset to defaults</button>
           </div>
         </section>
-        <div class="settings-slot" data-category="terminal"></div>
 
         <!-- ===== Connections ===== -->
         <section class="settings-section">
@@ -881,6 +884,10 @@ GigEth0/2     unassigned    YES unset  down     down
             <input type="checkbox" id="setting-expand-aliases" class="setting-checkbox" />
           </div>
           <p class="settings-section-hint">Type <code>ints</code> and get the right interface command for whatever you are connected to. Only a bare alias on its own is expanded, and the terminal shows what was actually sent.</p>
+        
+          <!-- Advanced values for this area render here as a
+               subsection (#152) — the same rows, one heading fewer. -->
+          <div class="settings-slot" data-category="identify"></div>
         </section>
         <section class="settings-section">
           <h3 class="settings-section-title">Platform Definitions</h3>
@@ -945,7 +952,7 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
         </section>
         <section class="settings-section">
-          <h3 class="settings-section-title">Serial Defaults</h3>
+          <h3 class="settings-section-title">SSH &amp; Serial</h3>
           <p class="settings-section-hint">Starting values for a new serial connection, so the same settings are not re-entered every time. Cisco console is 9600 8-N-1 with no flow control.</p>
 
           <div class="setting-row">
@@ -983,6 +990,10 @@ GigEth0/2     unassigned    YES unset  down     down
               <option value="rtscts">RTS/CTS</option><option value="dsrdtr">DSR/DTR</option>
             </select>
           </div>
+        
+          <!-- Advanced values for this area render here as a
+               subsection (#152) — the same rows, one heading fewer. -->
+          <div class="settings-slot" data-category="ssh"></div>
         </section>
         <section class="settings-section">
           <h3 class="settings-section-title">Credentials Vault</h3>
@@ -1047,8 +1058,6 @@ GigEth0/2     unassigned    YES unset  down     down
             </button>
           </div>
         </section>
-        <div class="settings-slot" data-category="ssh"></div>
-        <div class="settings-slot" data-category="identify"></div>
 
         <!-- ===== Sessions ===== -->
         <section class="settings-section">
@@ -1081,6 +1090,10 @@ GigEth0/2     unassigned    YES unset  down     down
             <p class="settings-section-hint">A relative name goes in your data folder; an absolute path is used as given, so a network share works.</p>
             <p class="settings-section-hint resolved-path" id="log-dir-resolved"></p>
           </div>
+        
+          <!-- Advanced values for this area render here as a
+               subsection (#152) — the same rows, one heading fewer. -->
+          <div class="settings-slot" data-category="history"></div>
         </section>
         <section class="settings-section">
           <h3 class="settings-section-title">Configuration Capture</h3>
@@ -1152,9 +1165,11 @@ GigEth0/2     unassigned    YES unset  down     down
               <span class="setting-unit">MB</span>
             </div>
           </div>
+        
+          <!-- Advanced values for this area render here as a
+               subsection (#152) — the same rows, one heading fewer. -->
+          <div class="settings-slot" data-category="capture"></div>
         </section>
-        <div class="settings-slot" data-category="history"></div>
-        <div class="settings-slot" data-category="capture"></div>
 
         <!-- ===== AI ===== -->
         <section class="settings-section">
@@ -1202,9 +1217,9 @@ GigEth0/2     unassigned    YES unset  down     down
             <label class="setting-label" for="setting-ollama-host">Ollama host URL</label>
             <input type="text" id="setting-ollama-host" class="setting-input setting-input-full" autocomplete="off" placeholder="http://localhost:11434" />
           </div>
-        </section>
-        <section class="settings-section">
-          <h3 class="settings-section-title">Knowledge Base (Chroma DB)</h3>
+        
+          <div class="settings-subgroup">
+          <h4 class="settings-subsection-title">Knowledge Base (Chroma DB)</h4>
           <p class="settings-section-hint">Optional. When set, ShellMate queries this Chroma collection on every chat for design-guideline snippets and injects matches into the AI prompt. Leave blank to disable.</p>
 
           <div class="setting-row setting-row-stack">
@@ -1223,7 +1238,9 @@ GigEth0/2     unassigned    YES unset  down     down
               <button type="button" id="setting-chroma-test" class="btn-secondary chroma-test-btn">Test connection</button>
             </div>
           </div>
+        </div>
         </section>
+        
         <section class="settings-section" id="prompt-editor-block" hidden>
           <h3 class="settings-section-title">The system prompts</h3>
           <p class="settings-section-hint">What the assistant is told before it sees anything of yours. These are the largest single influence on how it answers, and they are yours to change — tell it to stop explaining things you already know, to always mention a change reference, or to answer in a house style.</p>
@@ -1447,6 +1464,10 @@ GigEth0/2     unassigned    YES unset  down     down
               <span class="toggle-track"></span>
             </label>
           </div>
+        
+          <!-- Advanced values for this area render here as a
+               subsection (#152) — the same rows, one heading fewer. -->
+          <div class="settings-slot" data-category="files"></div>
         </section>
         <section class="settings-section">
           <h3 class="settings-section-title">Alerts</h3>
@@ -1490,9 +1511,11 @@ GigEth0/2     unassigned    YES unset  down     down
             </label>
           </div>
           <p class="settings-section-hint">Replaces the flashing with a steady outline. Your system setting is honoured too.</p>
+        
+          <!-- Advanced values for this area render here as a
+               subsection (#152) — the same rows, one heading fewer. -->
+          <div class="settings-slot" data-category="alerts"></div>
         </section>
-        <div class="settings-slot" data-category="files"></div>
-        <div class="settings-slot" data-category="alerts"></div>
         <div class="settings-slot" data-category="broadcast"></div>
         <div class="settings-slot" data-category="discovery"></div>
 
