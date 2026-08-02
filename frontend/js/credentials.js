@@ -237,16 +237,44 @@
 
   // shellmateDialog replaced the native confirm()/prompt() everywhere; fall
   // back only so this panel still works if that script fails to load.
-  function confirmWith(title, body) {
-    if (window.shellmateDialog) return window.shellmateDialog.confirm(title, body);
-    return Promise.resolve(window.confirm(`${title}\n\n${body}`));
+  /**
+   * Confirm, through the shared dialog.
+   *
+   * These passed (title, body, danger) positionally while
+   * shellmateDialog.confirm takes a single options object — so `opts` was the
+   * title string, `opts.title` and `opts.body` were undefined, and the dialog
+   * rendered with no heading, no text and no danger styling. That is the "no
+   * banner" half of what was reported.
+   *
+   * The other half was worse: with nothing to render the promise did not
+   * resolve to true, so `if (!ok) return;` bailed and the action never ran.
+   * "Forget every plain-text credential" asked, was answered yes, and deleted
+   * nothing — the worst possible failure for the one control whose whole
+   * purpose is removing readable secrets from disk.
+   *
+   * Every confirm and prompt in this panel goes through these two helpers, so
+   * Change, Delete and forget-everything were all broken by one mistake.
+   */
+  function confirmWith(title, body, danger) {
+    if (window.shellmateDialog) {
+      return window.shellmateDialog.confirm({
+        title, body,
+        confirmLabel: danger ? 'Forget it' : 'Yes',
+        danger: Boolean(danger),
+      });
+    }
+    return Promise.resolve(window.confirm(`${title}
+
+${body}`));
   }
 
   function promptWith(title, body) {
     if (window.shellmateDialog) {
-      return window.shellmateDialog.prompt(title, body, { password: true });
+      return window.shellmateDialog.prompt({ title, body, password: true });
     }
-    return Promise.resolve(window.prompt(`${title}\n\n${body}`));
+    return Promise.resolve(window.prompt(`${title}
+
+${body}`));
   }
 
   // -------------------------------------------------------------------------
