@@ -165,6 +165,18 @@ DEFAULT_SETTINGS: dict = {
         # because it costs nothing when no groups exist — a tab with no
         # group is drawn exactly as before.
         "tab_groups": True,
+        # Interface font scale, the same shape as --icon-scale (#136). The
+        # terminal has been settable for a long time; the chrome around it
+        # was fixed at whatever looked right on one display.
+        "font_scale": 1.0,
+        # Where notifications appear, and how long they stay. One stack now,
+        # so this is one setting rather than one per overlay.
+        # "bottom-right" | "bottom-left" | "top-right" | "top-left"
+        "toast_position": "bottom-right",
+        # What Enter does in the chat box. "send" is how it has always
+        # behaved; "newline" suits anybody writing more than a sentence, and
+        # then Ctrl+Enter sends.
+        "chat_enter": "send",
         # Reopen the tabs that were open at quit. Off, and it stays off on
         # upgrade: this reconnects to devices nobody asked to connect to,
         # which is the same objection that keeps auto-reconnect off. It only

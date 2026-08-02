@@ -6987,3 +6987,40 @@ body.sidebar-labelled .sidebar-label {
   white-space: nowrap;
   flex-shrink: 0;
 }
+
+/* ---------------------------------------------------------------------------
+   Interface font scale, and where notifications sit (#126).
+
+   The terminal's font has been settable for a long time; the chrome around it
+   was fixed at whatever looked right on one display. Applied at the root so
+   every rem-based size follows, which is why the base is set here rather than
+   multiplying individual rules — the mistake the icon sizes made.
+--------------------------------------------------------------------------- */
+:root {
+  --font-scale: 1;
+}
+
+body {
+  font-size: calc(1rem * var(--font-scale));
+}
+
+/* The notification stack. One stack, so one rule per corner rather than the
+   three separate overlays this replaced. */
+:root[data-toast-position="bottom-left"] #alert-toasts {
+  right: auto;
+  left: 16px;
+}
+
+:root[data-toast-position="top-right"] #alert-toasts {
+  bottom: auto;
+  top: 16px;
+  flex-direction: column-reverse;
+}
+
+:root[data-toast-position="top-left"] #alert-toasts {
+  bottom: auto;
+  top: 16px;
+  right: auto;
+  left: 16px;
+  flex-direction: column-reverse;
+}

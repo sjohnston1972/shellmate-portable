@@ -274,6 +274,9 @@
     _val('setting-tab-label-width',   ui.max_tab_label_px || 160);
     _checked('setting-connection-dot',    ui.show_connection_dot !== false);
     _checked('setting-sidebar-labels',    ui.sidebar_labels === true);
+    _val('setting-font-scale',            ui.font_scale || 1);
+    _val('setting-toast-position',        ui.toast_position || 'bottom-right');
+    _val('setting-chat-enter',            ui.chat_enter || 'send');
     _renderTabMenuToggles(ui.tab_menu || {});
     _checked('setting-restore-tabs',      ui.restore_tabs === true);
     _val('setting-new-tab-opens',         ui.new_tab_opens || 'welcome');
@@ -407,6 +410,9 @@
         max_tab_label_px:    parseInt(_gval('setting-tab-label-width'), 10) || 160,
         show_connection_dot: _gchecked('setting-connection-dot'),
         sidebar_labels:      _gchecked('setting-sidebar-labels'),
+        font_scale:          parseFloat(_gval('setting-font-scale')) || 1,
+        toast_position:      _gval('setting-toast-position'),
+        chat_enter:          _gval('setting-chat-enter'),
         tab_menu:            _collectTabMenu(),
         restore_tabs:        _gchecked('setting-restore-tabs'),
         new_tab_opens:       _gval('setting-new-tab-opens'),

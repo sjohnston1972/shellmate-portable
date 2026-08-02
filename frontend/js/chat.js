@@ -114,7 +114,16 @@
     // Wire up events
     sendBtn.addEventListener('click', sendMessage);
     inputEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+      if (e.key !== 'Enter') return;
+      // Enter sends by default. Anybody writing more than a sentence to the
+      // assistant wants the opposite, and Shift+Enter alone is not enough
+      // when the whole message is three paragraphs.
+      const mode = ((window.shellmateSettings || {}).interface || {}).chat_enter;
+      const sendsOnEnter = mode !== 'newline';
+      if (sendsOnEnter ? !e.shiftKey : (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        sendMessage();
+      }
     });
 
     // Auto-resize textarea as user types

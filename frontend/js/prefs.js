@@ -117,6 +117,18 @@
     // widens and its items go from centred to left-aligned.
     document.body.classList.toggle('sidebar-labelled', s.sidebar_labels === true);
 
+    // The chrome's own font size, the same shape as the icon scale. The
+    // terminal has been settable for a long time; everything around it was
+    // fixed at whatever looked right on one display.
+    document.documentElement.style.setProperty(
+      '--font-scale', String(Number(s.font_scale) || 1));
+
+    // One notification stack, so one setting decides where it sits.
+    document.documentElement.setAttribute(
+      'data-toast-position',
+      ['bottom-right', 'bottom-left', 'top-right', 'top-left']
+        .includes(s.toast_position) ? s.toast_position : 'bottom-right');
+
     applyTabOrder(s);
     applyPanelTransition(s);
 
