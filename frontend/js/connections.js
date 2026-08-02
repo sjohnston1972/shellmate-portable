@@ -900,14 +900,25 @@
     if (!payload.hostname) return 'Hostname is required.';
 
     if (payload.connection_type === 'ssh') {
-      // Either field satisfies it: someone connecting with a key may well
-      // have given the account name beside the key rather than above.
-      if (!payload.username && !payload.private_key_username) {
+      // Three things satisfy it, not one. Someone connecting with a key may
+      // have given the account name beside the key rather than above — and a
+      // shared credential carries a username of its own, which is the whole
+      // reason for not typing one. That third case was added with the picker
+      // (#115) and never added here, so the dialog explained the feature and
+      // then refused to let it be used.
+      if (!payload.username && !payload.private_key_username
+          && !payload.credential_ref) {
         return 'Username is required.';
       }
       // A key counts as a credential in its own right, and so does one already
       // in the vault — the backend fills that in, so a blank box is fine.
-      if (!payload.password && !payload.private_key_path && !activeProfileHasCredentials) {
+      //
+      // A *shared* credential counts for the same reason and was missing here
+      // too. Fixing only the username rule left the dialog refusing on the
+      // next line instead, which is why this is one bug and not two: the
+      // picker satisfies both requirements, and neither knew about it.
+      if (!payload.password && !payload.private_key_path
+          && !payload.credential_ref && !activeProfileHasCredentials) {
         return 'Enter a password or choose a private key file.';
       }
     }
@@ -916,11 +927,24 @@
     return null;
   }
 
-  /** The subset of a payload worth persisting — never a secret. */
+  /**
+   * The subset of a payload worth persisting — never a secret.
+   *
+   * The open group is applied here, where the profile body is built, rather
+   * than in one caller. It was in autoSaveProfile, which runs only after a
+   * *successful connection* — so Save profile, and a connection that failed
+   * and was saved anyway, both missed it. Tagging attached to one of three
+   * ways a connection is created is the bug; every writer goes through this.
+   */
   function profileFrom(payload) {
+    const tags = [...(payload.tags || [])];
+    const openGroup = window.shellmateGroups
+      ? window.shellmateGroups.active() : '';
+    if (openGroup && !tags.includes(openGroup)) tags.push(openGroup);
+
     return {
       name:             payload.display_label || payload.hostname || payload.serial_port,
-      tags:             payload.tags || [],
+      tags,
       connection_type:  payload.connection_type,
       // Which of the two SSH forms this connection uses. Not part of its
       // identity — the same switch reached by key and by password is one
@@ -1053,21 +1077,6 @@
         body:    JSON.stringify(profileFrom(payload)),
       });
       if (created.ok) profile = await created.json();
-
-      // Saved while a group is open, so it lands in that group. Creating a
-      // connection from inside "Glasgow" and finding it outside would mean
-      // doing the filing twice.
-      const openGroup = window.shellmateGroups
-        ? window.shellmateGroups.active() : '';
-      if (openGroup && profile && profile.id) {
-        try {
-          await fetch(`/api/groups/${encodeURIComponent(openGroup)}/members`, {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ profile_id: profile.id, member: true }),
-          });
-        } catch (_) { /* the connection is saved either way */ }
-      }
 
       // A first-time connection has no profile id when it starts, so the
       // backend had nowhere to file the credentials. Now that the profile

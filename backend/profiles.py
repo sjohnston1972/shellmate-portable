@@ -704,7 +704,16 @@ def normalise_tags(value) -> list[str]:
         value = value.split(",")
     out: list[str] = []
     for item in value or []:
+        # A JavaScript value that reached here stringified rather than being
+        # dropped. "null" and "undefined" are not tags anybody types, and
+        # every tag is a group now — so one of these creates a junk group on
+        # the dashboard that has to be deleted by hand. "none" is deliberately
+        # not on this list: somebody may well mean it.
+        if item is None or item is False:
+            continue
         tag = " ".join(str(item).split()).strip().lower()
+        if tag in ("null", "undefined", "nan", "[object object]"):
+            continue
         if tag and tag not in out:
             out.append(tag)
     return out
