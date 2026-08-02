@@ -93,6 +93,9 @@
 
     statusEl = document.getElementById('status-alert');
 
+    // The two moments the dashboard comes and goes.
+    window.addEventListener('shellmate:dashboard-changed', syncVisibility);
+
     window.addEventListener('shellmate:pending-action', (e) => {
       const { sessionId, pending } = e.detail || {};
       if (!sessionId) return;
@@ -367,6 +370,32 @@
     return !active || active.sessionId === alert.sessionId;
   }
 
+  /**
+   * Hide the stack while the dashboard is in front (#168).
+   *
+   * shouldShow() only runs when a toast is *created*, so anything raised
+   * while connected carried on being painted when the dashboard opened over
+   * the pane — the dashboard covers #terminal-pane rather than replacing it,
+   * which is what keeps sessions alive, and the stack lives inside that pane
+   * above it.
+   *
+   * The host is hidden rather than the toasts removed: a sticky drift prompt
+   * or a reload countdown must still be there when you come back, and
+   * dismissing them to satisfy this would trade one fault for a worse one.
+   *
+   * **Except when something is waiting that must not be missed.** #164 lets a
+   * deadline or a critical alert through wherever somebody is looking;
+   * hiding the whole host would suppress exactly those, so the host stays
+   * visible whenever it holds one.
+   */
+  function syncVisibility() {
+    if (!toastHost) return;
+    const onDashboard = typeof window.dashboardVisible === 'function'
+      && window.dashboardVisible();
+    const holdsUrgent = toastHost.querySelector('.alert-critical, [data-urgent="1"]');
+    toastHost.classList.toggle('alerts-hidden', Boolean(onDashboard) && !holdsUrgent);
+  }
+
   function toast(alert) {
     if (!toastHost) return;
     if (!shouldShow(alert)) return;
@@ -398,7 +427,7 @@
     close.type = 'button';
     close.className = 'alert-toast-close';
     close.innerHTML = '<span class="material-symbols-outlined">close</span>';
-    close.addEventListener('click', () => el.remove());
+    close.addEventListener('click', () => { el.remove(); syncVisibility(); });
 
     el.append(icon, text);
 
@@ -431,7 +460,14 @@
       });
     }
 
+    // Marked so syncVisibility() can keep the stack up for it even on the
+    // dashboard — the same exemption shouldShow() applies on the way in.
+    if (alert.deadline_ms || alert.severity === 'critical') {
+      el.dataset.urgent = '1';
+    }
+
     toastHost.appendChild(el);
+    syncVisibility();
 
     // A stack that grows without limit stops being readable and starts being
     // a wall. Oldest goes first — the newest alert is the current one.

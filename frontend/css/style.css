@@ -7374,3 +7374,11 @@ body {
 }
 
 .tree-leaf-lock { margin-left: auto; flex-shrink: 0; }
+
+/* The notification stack while the dashboard is in front (#168). Hidden, not
+   emptied: a sticky drift prompt or a reload countdown must still be there
+   when you come back. */
+#alert-toasts.alerts-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}

@@ -250,6 +250,7 @@
     welcomeScreen.classList.add('hidden');
     if (terminalsContainer) terminalsContainer.classList.remove('behind-dashboard');
     _markSessionsLink(false);
+    window.dispatchEvent(new CustomEvent('shellmate:dashboard-changed'));
 
     activeTabIndex = index;
     _paintStatusGroup();
@@ -828,6 +829,8 @@
     welcomeScreen.classList.remove('hidden');
     if (terminalsContainer) terminalsContainer.classList.add('behind-dashboard');
     _markSessionsLink(true);
+    // The alert stack hides with it (#168) and has no other way to know.
+    window.dispatchEvent(new CustomEvent('shellmate:dashboard-changed'));
     if (typeof window.renderWelcomeProfiles === 'function') {
       window.renderWelcomeProfiles();
     }
@@ -842,6 +845,7 @@
     welcomeScreen.classList.add('hidden');
     if (terminalsContainer) terminalsContainer.classList.remove('behind-dashboard');
     _markSessionsLink(false);
+    window.dispatchEvent(new CustomEvent('shellmate:dashboard-changed'));
   }
 
   /** Whether the dashboard is currently in front. */
