@@ -1076,8 +1076,25 @@
       // do: seeing at a glance which session is production.
       { action: 'scheme', icon: 'palette', label: 'Colour scheme',
         setting: 'scheme', value: (tab) => _schemeLabel(tab) },
+      // Keep-alive is not free and not always wanted. The one session worth
+      // keeping is usually a console during an upgrade, and turning it on
+      // globally to protect one session is the wrong shape.
+      { action: 'keepalive', icon: 'refresh',
+        label: 'Keep this tab alive', setting: 'keep_alive',
+        value: (tab) => _keepAliveLabel(tab) },
+      { action: 'keepalive-all', icon: 'refresh',
+        label: 'Keep all tabs alive', setting: 'keep_alive' },
     ],
   ];
+
+  /** "on" / "off", so a toggle shows its state rather than only setting it. */
+  function _keepAliveLabel(tab) {
+    if (!tab) return '';
+    if (tab.keepAlive === true)  return 'on';
+    if (tab.keepAlive === false) return 'off';
+    const global = ((window.shellmateSettings || {}).terminal || {}).keep_alive;
+    return global ? 'on (setting)' : 'off (setting)';
+  }
 
   /** What scheme this tab is currently using, for the menu entry. */
   function _schemeLabel(tab) {
@@ -1210,6 +1227,8 @@
           case 'save-connection': _saveConnection(tab);  break;
           case 'duplicate': _duplicateSession(tab);   break;
           case 'scheme':    _chooseScheme(tab);       break;
+          case 'keepalive':     _toggleKeepAlive([tab]);          break;
+          case 'keepalive-all': _toggleKeepAlive(tabs.slice());   break;
           case 'pane':
             window.shellmateLayout.place(Number(btn.dataset.pane), tab.sessionId);
             break;
@@ -1235,6 +1254,45 @@
     // the DOM for the life of the page.
     document.querySelectorAll('.tab-context-menu').forEach(el => el.remove());
     _ctxMenu = null;
+  }
+
+  /**
+   * Turn keep-alive on or off for one tab, or for all of them.
+   *
+   * The state is held on the session server-side, because that is where the
+   * timer runs. The tab keeps a copy purely so the menu can show which way
+   * the toggle currently sits — a toggle that does not say whether it is on
+   * is a toggle nobody trusts.
+   */
+  function _toggleKeepAlive(list) {
+    const connected = list.filter(t => t.isConnected);
+    if (!connected.length) return;
+
+    // Toggling "all" follows the first tab, so the action has one outcome
+    // rather than inverting each tab independently and leaving a mixture.
+    const global = ((window.shellmateSettings || {}).terminal || {}).keep_alive === true;
+    const current = connected[0].keepAlive;
+    const wanted = !(current === undefined || current === null ? global : current);
+
+    connected.forEach(tab => {
+      tab.keepAlive = wanted;
+      try {
+        tab.websocket.send(JSON.stringify({ type: 'keep_alive', enabled: wanted }));
+      } catch (_) { /* a closed socket has nothing to keep alive */ }
+    });
+
+    if (window.shellmateAlerts) {
+      window.shellmateAlerts.notify({
+        icon: 'refresh',
+        title: wanted
+          ? `Keeping ${connected.length} session${connected.length === 1 ? '' : 's'} alive`
+          : `Stopped keeping ${connected.length} session${connected.length === 1 ? '' : 's'} alive`,
+        body: wanted
+          ? 'A space and a backspace are sent at a prompt when the session '
+            + 'goes quiet, which nets to nothing typed.'
+          : 'The device may now idle them out on its own timeout.',
+      });
+    }
   }
 
   /**

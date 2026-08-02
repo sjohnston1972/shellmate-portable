@@ -55,6 +55,20 @@ DEFAULT_SETTINGS: dict = {
         # Send the platform's paging-off command on connect, so nobody types
         # "terminal length 0" a hundred times a week.
         "auto_paging_off": True,
+        # Keep a session from being idled out by the *device* (#137).
+        #
+        # Off by default, and it must stay that way: this is the one feature
+        # that types into a live session on a timer. `ssh.keepalive_seconds`
+        # already handles the network half — a firewall or jump host dropping
+        # an idle TCP connection — but an SSH keepalive never reaches the
+        # shell, so it does nothing about `exec-timeout`, which is what
+        # actually closes the session on IOS. Only input the device sees
+        # resets that.
+        "keep_alive": False,
+        # How long a session must be silent before a nudge. Well under a
+        # typical `exec-timeout 5`, and long enough that an active session
+        # never triggers it.
+        "keep_alive_seconds": 120,
     },
     # Regex rules that colour terminal output. Applied to plain text only, so
     # colour a device sends itself is never disturbed.

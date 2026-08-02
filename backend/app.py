@@ -23,6 +23,7 @@ import json
 import logging
 import re
 import sys
+import time
 from pathlib import Path
 
 from fastapi import (
@@ -2814,6 +2815,13 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     if data and capture is not None and capture.state != "done":
                         capture.abort("you started typing")
 
+                    # Typing is activity. Without this the keep-alive would
+                    # measure only the device's silence, and nudge a session
+                    # somebody is actively working in but which has not
+                    # answered yet.
+                    if data:
+                        session["_last_activity"] = time.monotonic()
+
                     if data and handler.is_connected:
                         # Everything the user sends goes through the pipeline,
                         # which assembles keystrokes into lines and may rewrite
@@ -2858,6 +2866,17 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                             session["alerts"].observe_command(command)
                             for command in session["pipeline"].completed_commands
                         )
+
+                elif msg_type == "keep_alive":
+                    # Per-tab override (#138). None means "follow the setting";
+                    # True and False are this tab's own answer, which is the
+                    # point — the one session worth keeping is usually a
+                    # console during an upgrade, and turning it on globally to
+                    # protect one session is the wrong shape.
+                    wanted = msg.get("enabled")
+                    session["keep_alive"] = None if wanted is None else bool(wanted)
+                    session["_last_activity"] = time.monotonic()
+                    session["_keep_alive_told"] = False
 
                 elif msg_type == "logging_changed":
                     # Sent by the browser when session logging is saved. One
@@ -2985,6 +3004,63 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 handler.send, (summary["paging_command"] + "\r").encode()
             )
 
+    async def maybe_keep_alive() -> None:
+        """
+        Stop the *device* idling this session out.
+
+        `ssh.keepalive_seconds` already covers the network: an SSH keepalive
+        keeps a firewall or jump host from dropping the TCP connection. It
+        never reaches the shell, so it does nothing about `exec-timeout` —
+        which is what actually closes the session on IOS, and what people mean
+        when they ask for this. Only input the device *sees* resets that.
+
+        So this types, and what it types is chosen to net to nothing: a space
+        and then a backspace. The device counts two characters of input and
+        the input line is left exactly as it was found. A bare backspace would
+        be quieter but rings the bell on some platforms; a carriage return
+        would submit whatever is half-typed, which is unthinkable.
+
+        Three conditions, each of which is a way this goes wrong:
+
+        - **Only at a prompt.** `transcript.last_prompt` is the existing
+          "device is idle" signal. A nudge landing mid-command would insert a
+          space into what somebody is typing.
+        - **Only when the session has been quiet.** An active session never
+          needs it and must never be touched.
+        - **Only when asked for**, globally or for this tab. It is off by
+          default because it is the one feature that types on a timer.
+
+        Announced once per session rather than every time. ShellMate's rule is
+        that nothing is sent silently, and forty announcements an hour would
+        obey the letter of that while destroying its purpose.
+        """
+        wanted = session.get("keep_alive")
+        if wanted is None:
+            wanted = bool(get_settings().get("terminal", {}).get("keep_alive", False))
+        if not wanted or not handler.is_connected:
+            return
+
+        interval = float(get_settings().get("terminal", {})
+                         .get("keep_alive_seconds", 120)) or 120
+        now = time.monotonic()
+        last = session.get("_last_activity") or now
+        if now - last < interval:
+            return
+
+        # Mid-command is the one moment this must not happen.
+        if not session["transcript"].last_prompt:
+            return
+
+        session["_last_activity"] = now
+        await asyncio.to_thread(handler.send, b" ")
+
+        if not session.get("_keep_alive_told"):
+            session["_keep_alive_told"] = True
+            await websocket.send_text(json.dumps({
+                "type": "keep_alive_active",
+                "seconds": int(interval),
+            }))
+
     async def drive_live_capture() -> None:
         """
         Start or time out a capture running through the user's own session.
@@ -3030,6 +3106,10 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         await drive_live_capture()
                     except Exception as exc:
                         logger.warning("Live capture failed for %s: %s", session_id, exc)
+                    try:
+                        await maybe_keep_alive()
+                    except Exception as exc:
+                        logger.warning("Keep-alive failed for %s: %s", session_id, exc)
                     # An idle session is exactly where a reload deadline passes
                     # unnoticed, so retire it here rather than only when the
                     # device happens to say something.
@@ -3051,6 +3131,9 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     break
 
                 text = data_bytes.decode("utf-8", errors="replace")
+                # Real output means the session is not idle, so the keep-alive
+                # timer restarts. Without this it would nudge a busy session.
+                session["_last_activity"] = time.monotonic()
 
                 # A live capture takes its output here and nothing else sees
                 # it. This has to come before every consumer below, not after

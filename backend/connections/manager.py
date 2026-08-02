@@ -110,6 +110,10 @@ class SessionManager:
             # a key that sometimes exists is a KeyError waiting for the one
             # device that behaves differently.
             "live_capture":    None,
+            # Per-tab keep-alive (#138). None means "follow the setting"; a
+            # bool is this tab's own answer. Declared rather than created on
+            # demand, for the same reason live_capture is.
+            "keep_alive":      None,
             "fingerprint":     None,
             # Chokepoint for everything the user sends. Alias expansion today,
             # guardrails and paste throttling next.

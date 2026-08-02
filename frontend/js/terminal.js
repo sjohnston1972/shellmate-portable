@@ -266,6 +266,22 @@
           }));
           break;
 
+        case 'keep_alive_active':
+          // Said once per session, not every nudge. ShellMate's rule is that
+          // nothing is sent silently; forty announcements an hour would obey
+          // the letter of that and destroy its purpose.
+          if (window.shellmateAlerts) {
+            window.shellmateAlerts.notify({
+              icon: 'refresh',
+              title: 'Keeping this session alive',
+              body: `Quiet for ${msg.seconds}s, so a space and a backspace `
+                    + 'were sent at the prompt — nothing typed. This is the '
+                    + 'only way to reset what the device counts as idle.',
+              sessionId,
+            });
+          }
+          break;
+
         case 'guardrail_prompt':
           // A destructive command is being held. Nothing has reached the
           // device — the answer decides whether anything does.

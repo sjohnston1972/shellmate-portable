@@ -346,6 +346,8 @@
     _checked('setting-copy-on-select',    !!t.copy_on_select);
     _checked('setting-expand-aliases',    t.expand_aliases  !== false);
     _checked('setting-auto-paging',       t.auto_paging_off !== false);
+    _checked('setting-keep-alive',        t.keep_alive === true);
+    _val('setting-keep-alive-seconds',    t.keep_alive_seconds || 120);
     // Off unless explicitly on — the assistant is opt-in on a fresh install.
     // The row lives under Interface now, but the value stays under `ai` where
     // ai_panel.js and LEGACY_DEFAULTS already read it: moving a control is not
@@ -482,6 +484,8 @@
         copy_on_select:    _gchecked('setting-copy-on-select'),
         expand_aliases:    _gchecked('setting-expand-aliases'),
         auto_paging_off:   _gchecked('setting-auto-paging'),
+        keep_alive:        _gchecked('setting-keep-alive'),
+        keep_alive_seconds: parseInt(_gval('setting-keep-alive-seconds'), 10) || 120,
       },
       ai: {
         panel_enabled: _gchecked('setting-ai-enabled'),

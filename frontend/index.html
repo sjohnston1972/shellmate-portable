@@ -1032,6 +1032,20 @@ GigEth0/2     unassigned    YES unset  down     down
             <label class="setting-label" for="setting-auto-paging">Turn paging off on connect</label>
             <input type="checkbox" id="setting-auto-paging" class="setting-checkbox" />
           </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-keep-alive"
+                   data-tip="Stops the device idling your session out. A switch with `exec-timeout 5` closes a tab you left over lunch, and the first you know is a dead session.||This types a space and a backspace into the session — netting to nothing — because only input the device *sees* resets `exec-timeout`. An SSH keepalive never reaches the shell, so it keeps the network connection up and the session still expires. It only ever fires at a prompt, never mid-command, and only after the session has been silent.">Keep sessions alive</label>
+            <input type="checkbox" id="setting-keep-alive" class="setting-checkbox" />
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-keep-alive-seconds">Nudge after
+              <span class="setting-hint">How long a session must be silent first. Well under a typical <code>exec-timeout 5</code>.</span>
+            </label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-keep-alive-seconds" class="setting-input setting-input-sm" min="15" max="3600" step="15" />
+              <span class="setting-unit">s</span>
+            </div>
+          </div>
           <p class="settings-section-hint">Sends the right command for the platform — <code>terminal length 0</code>, <code>terminal pager 0</code>, <code>set cli screen-length 0</code> — so no more <code>--More--</code>. It is echoed like anything you typed, never sent silently. Off, or unidentified, means paging stays as the device left it.</p>
 
           <div class="setting-row">
