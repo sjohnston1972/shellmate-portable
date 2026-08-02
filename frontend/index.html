@@ -298,6 +298,11 @@
       <span id="status-connection">No active session</span>
       <span class="status-sep">|</span>
       <span id="status-device" title="Detected device platform">Device: —</span>
+      <!-- Which group this session belongs to (#149). The tab strip carries
+           it as a spine and a label on the first tab of a run, so the tab you
+           are actually *in* may show nothing — and this is where "what am I
+           connected to" already lives. -->
+      <span id="status-group" class="hidden"></span>
       <span class="status-sep">|</span>
       <span id="status-buffer">Buffer: 0L</span>
       <span class="status-sep hidden" id="status-uptime-sep">|</span>
@@ -616,6 +621,7 @@
       <div class="panel-body">
 
         <!-- Terminal Appearance -->
+                <!-- ===== Terminal ===== -->
         <section class="settings-section">
           <h3 class="settings-section-title">Terminal Appearance</h3>
 
@@ -792,8 +798,466 @@ GigEth0/2     unassigned    YES unset  down     down
             </label>
           </div>
         </section>
+        <section class="settings-section">
+          <h3 class="settings-section-title">Behavior</h3>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-scrollback"
+                   data-tip="How many lines of output each tab keeps before the oldest are dropped. This is what you can scroll back through and select — it is not the session log, which is written to disk and keeps everything.||Held in memory, per tab. A large value across a dozen open sessions is the one setting here that can make ShellMate feel slow, so raise it when you need to read back through a big `show run`, not as a matter of course.">Scrollback Lines</label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-scrollback" class="setting-input setting-input-sm" min="100" max="50000" step="100" />
+              <span class="setting-unit">lines</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-right-click-paste"
+                   data-tip="Right-clicking pastes the clipboard straight into the session, the way PuTTY does. A paste of several lines still raises the confirmation first.||Off, right-click opens the browser's own menu instead.">Right-click Paste</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-right-click-paste" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-copy-on-select"
+                   data-tip="Selecting text copies it immediately, with no Ctrl+C — again, the PuTTY behaviour.||The trade-off is that it replaces your clipboard whenever you drag across the terminal, including by accident. If you copy a command somewhere else and then select terminal output before pasting it, the command is gone.">Copy on Select</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-copy-on-select" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3 class="settings-section-title">Output Colours</h3>
+          <p class="settings-section-hint">Colour terminal text by pattern, so the line that matters stands out of a wall of output. Patterns are regular expressions.</p>
 
-        <!-- Interface -->
+          <div class="setting-row">
+            <label class="setting-label" for="setting-highlight-enabled">Enable highlighting</label>
+            <input type="checkbox" id="setting-highlight-enabled" class="setting-checkbox" />
+          </div>
+
+          <div id="highlight-rules"></div>
+
+          <div class="setting-row">
+            <button type="button" id="highlight-add-rule" class="btn-secondary">
+              <span class="material-symbols-outlined">add</span>
+              Add rule
+            </button>
+            <button type="button" id="highlight-open-builder" class="btn-secondary">
+              <span class="material-symbols-outlined">science</span>
+              Pattern builder
+            </button>
+            <button type="button" id="highlight-reset" class="btn-tertiary">Reset to defaults</button>
+          </div>
+        </section>
+        <div class="settings-slot" data-category="terminal"></div>
+
+        <!-- ===== Connections ===== -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Device Awareness</h3>
+          <p class="settings-section-hint">On connect, ShellMate works out what it is talking to — from the login banner, or failing that from the shape of the prompt — and adapts to it. <strong>Both settings below depend on that succeeding <em>confidently</em>.</strong> A banner naming the software is conclusive; a prompt on its own usually is not, because <code>hostname(config)#</code> is printed identically by IOS, NX-OS, ASA and EOS, and they do not share a paging command. When ShellMate is not sure, it sends nothing at all rather than guess, and says so in the corner of the terminal.</p>
+          <p class="settings-section-hint">That case is common — a legal banner replacing the version string, or a device reached through a terminal server. When it happens, click the device name in the status bar and say what it is; both settings then apply immediately.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-auto-paging">Turn paging off on connect</label>
+            <input type="checkbox" id="setting-auto-paging" class="setting-checkbox" />
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-keep-alive"
+                   data-tip="Stops the device idling your session out. A switch with `exec-timeout 5` closes a tab you left over lunch, and the first you know is a dead session.||This types a space and a backspace into the session — netting to nothing — because only input the device *sees* resets `exec-timeout`. An SSH keepalive never reaches the shell, so it keeps the network connection up and the session still expires. It only ever fires at a prompt, never mid-command, and only after the session has been silent.">Keep sessions alive</label>
+            <input type="checkbox" id="setting-keep-alive" class="setting-checkbox" />
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-keep-alive-seconds">Nudge after
+              <span class="setting-hint">How long a session must be silent first. Well under a typical <code>exec-timeout 5</code>.</span>
+            </label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-keep-alive-seconds" class="setting-input setting-input-sm" min="15" max="3600" step="15" />
+              <span class="setting-unit">s</span>
+            </div>
+          </div>
+          <p class="settings-section-hint">Sends the right command for the platform — <code>terminal length 0</code>, <code>terminal pager 0</code>, <code>set cli screen-length 0</code> — so no more <code>--More--</code>. It is echoed like anything you typed, never sent silently. Off, or unidentified, means paging stays as the device left it.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-expand-aliases">Expand command aliases</label>
+            <input type="checkbox" id="setting-expand-aliases" class="setting-checkbox" />
+          </div>
+          <p class="settings-section-hint">Type <code>ints</code> and get the right interface command for whatever you are connected to. Only a bare alias on its own is expanded, and the terminal shows what was actually sent.</p>
+        </section>
+        <section class="settings-section">
+          <h3 class="settings-section-title">Platform Definitions</h3>
+          <p class="settings-section-hint">What ShellMate knows about each kind of device: which command turns paging off, how to fetch the running config, and the aliases available on it. Adding a platform here is how ShellMate learns a device it has never seen.</p>
+          <p class="settings-section-hint">These are stored as <code>platforms.json</code> in your data folder, and this editor writes that file. Editing it by hand is worth knowing about for bulk changes, or to carry your definitions to another machine — delete it to restore the built-in set.</p>
+
+          <div id="platform-editor">
+            <div class="setting-row setting-row-stack">
+              <label class="setting-label" for="platform-select">Platform</label>
+              <select id="platform-select" class="setting-input setting-input-full"></select>
+            </div>
+
+            <div class="setting-row setting-row-stack">
+              <label class="setting-label" for="platform-name">Display name</label>
+              <input type="text" id="platform-name" class="setting-input setting-input-full" />
+            </div>
+
+            <div class="setting-row setting-row-stack">
+              <label class="setting-label" for="platform-paging">Turn paging off with</label>
+              <input type="text" id="platform-paging" class="setting-input setting-input-full" placeholder="terminal length 0" />
+              <p class="settings-section-hint">Leave blank to send nothing on connect.</p>
+            </div>
+
+            <div class="setting-row setting-row-stack">
+              <label class="setting-label" for="platform-showrun">Show running config with</label>
+              <input type="text" id="platform-showrun" class="setting-input setting-input-full" placeholder="show running-config" />
+            </div>
+
+            <div class="setting-row setting-row-stack">
+              <label class="setting-label" for="platform-version">Show version with</label>
+              <input type="text" id="platform-version" class="setting-input setting-input-full" placeholder="show version" />
+            </div>
+
+            <div class="setting-row setting-row-stack">
+              <label class="setting-label" for="platform-signatures">Identify by</label>
+              <input type="text" id="platform-signatures" class="setting-input setting-input-full" placeholder="cisco ios software, ios-xe" />
+              <p class="settings-section-hint">Comma-separated text found in the device's banner or version output. The longest match wins, so be specific.</p>
+            </div>
+
+            <div class="setting-row setting-row-stack">
+              <label class="setting-label" for="platform-dangerous">Commands to confirm before sending</label>
+              <input type="text" id="platform-dangerous" class="setting-input setting-input-full" placeholder="reload, write erase, shutdown" />
+            </div>
+
+            <div class="setting-row setting-row-stack">
+              <label class="setting-label">Aliases</label>
+              <p class="settings-section-hint">Type the short name and get the command. Only a bare alias on its own is expanded, and the terminal shows what was actually sent.</p>
+              <div id="alias-rows"></div>
+              <button type="button" id="btn-alias-add" class="btn-tertiary">
+                <span class="material-symbols-outlined">add</span>
+                Add alias
+              </button>
+            </div>
+
+            <div class="setting-row">
+              <button type="button" id="btn-platform-save" class="btn-secondary">Save platform</button>
+              <button type="button" id="btn-platform-reload" class="btn-tertiary">Reload</button>
+              <button type="button" id="btn-platform-delete" class="btn-tertiary hidden">Delete</button>
+              <button type="button" id="btn-platform-reset" class="btn-tertiary">Reset all to defaults</button>
+            </div>
+            <p id="platform-status" class="settings-section-hint"></p>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3 class="settings-section-title">Serial Defaults</h3>
+          <p class="settings-section-hint">Starting values for a new serial connection, so the same settings are not re-entered every time. Cisco console is 9600 8-N-1 with no flow control.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-serial-baud">Baud rate</label>
+            <select id="setting-serial-baud" class="setting-input">
+              <option>1200</option><option>2400</option><option>4800</option>
+              <option>9600</option><option>19200</option><option>38400</option>
+              <option>57600</option><option>115200</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-serial-databits">Data bits</label>
+            <select id="setting-serial-databits" class="setting-input">
+              <option>5</option><option>6</option><option>7</option><option>8</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-serial-parity">Parity</label>
+            <select id="setting-serial-parity" class="setting-input">
+              <option value="N">None</option><option value="E">Even</option>
+              <option value="O">Odd</option><option value="M">Mark</option>
+              <option value="S">Space</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-serial-stopbits">Stop bits</label>
+            <select id="setting-serial-stopbits" class="setting-input">
+              <option>1</option><option>1.5</option><option>2</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-serial-flow">Flow control</label>
+            <select id="setting-serial-flow" class="setting-input">
+              <option value="none">None</option><option value="xonxoff">XON/XOFF</option>
+              <option value="rtscts">RTS/CTS</option><option value="dsrdtr">DSR/DTR</option>
+            </select>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3 class="settings-section-title">Credentials Vault</h3>
+          <p class="settings-section-hint">API keys and remembered device passwords are encrypted on disk — unless you asked for a particular one to be kept as readable text, which the list below marks and lets you undo.</p>
+
+          <div class="setting-row">
+            <span class="setting-label">Status</span>
+            <span id="vault-status-text" class="setting-value">Checking…</span>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="vault-mode-select">Protected by</label>
+            <select id="vault-mode-select" class="setting-input setting-input-full">
+              <option value="dpapi">This Windows account (no password to type)</option>
+              <option value="password">A master password (works on any machine)</option>
+            </select>
+            <p class="settings-section-hint" id="vault-mode-hint"></p>
+          </div>
+
+          <div class="setting-row setting-row-stack hidden" id="vault-password-row">
+            <label class="setting-label" for="vault-new-password">Master password</label>
+            <input type="password" id="vault-new-password" class="setting-input setting-input-full" autocomplete="new-password" />
+            <label class="setting-label" for="vault-confirm-password">Confirm</label>
+            <input type="password" id="vault-confirm-password" class="setting-input setting-input-full" autocomplete="new-password" />
+          </div>
+
+          <div class="setting-row">
+            <button type="button" id="vault-apply-mode" class="btn-secondary">Apply</button>
+            <span id="vault-mode-result" class="setting-value"></span>
+          </div>
+
+          <!-- Credentials several connections share.
+               A credential used to belong to exactly one profile, so "use the
+               login I already have" could not be expressed at all — which is
+               fine for one device and wrong for the forty a scan finds. -->
+          <h4 class="settings-subsection-title">Shared credentials</h4>
+          <p class="settings-section-hint">A login several connections use. They point at it rather than each keeping a copy, so changing it here fixes every device using it.</p>
+          <div id="credential-sets" class="credentials-list"></div>
+          <div class="setting-row">
+            <button type="button" id="credential-set-add" class="btn-secondary">
+              <span class="material-symbols-outlined">add_circle</span>
+              New shared credential
+            </button>
+          </div>
+
+          <!-- What is actually saved.
+               Until this existed, a remembered password was invisible from the
+               moment it was saved: nothing listed them, nothing changed one,
+               and removing one meant reconnecting to the device with the box
+               unticked. -->
+          <h4 class="settings-subsection-title">Saved device credentials</h4>
+          <p class="settings-section-hint" id="credentials-note"></p>
+          <div id="credentials-list" class="credentials-list"></div>
+          <div class="setting-row">
+            <button type="button" id="credentials-refresh" class="btn-secondary">
+              <span class="material-symbols-outlined">refresh</span>
+              Refresh
+            </button>
+            <button type="button" id="credentials-forget-plain" class="btn-danger">
+              <span class="material-symbols-outlined">delete_forever</span>
+              Forget everything in plain text
+            </button>
+          </div>
+        </section>
+        <div class="settings-slot" data-category="ssh"></div>
+        <div class="settings-slot" data-category="identify"></div>
+
+        <!-- ===== Sessions ===== -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Session Logging</h3>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-logging-enabled">Enable File Logging</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-logging-enabled" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-redact-secrets"
+                   data-tip="Masks passwords, keys, community strings and hashes in anything written to disk — session logs and captured configurations both.||Devices echo what you type, and a session log is written to be handed to somebody else. The terminal in front of you always shows the truth; this only changes the file.||Pattern-based, so treat it as a strong habit rather than a guarantee: read a log before sending it somewhere it cannot be recalled from.">Obscure passwords and secrets</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-redact-secrets" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <p class="settings-section-hint">Masks credentials in written logs — devices echo, and a session log is meant to be handed to someone else. The terminal itself always shows the truth.</p>
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-log-dir">Log Directory</label>
+            <div class="setting-input-group setting-input-group-full">
+              <input type="text" id="setting-log-dir" class="setting-input setting-input-full" placeholder="logs" />
+              <button type="button" class="btn-secondary btn-browse" data-target="setting-log-dir" data-pick="folder">
+                <span class="material-symbols-outlined">folder_open</span>
+                Browse
+              </button>
+            </div>
+            <p class="settings-section-hint">A relative name goes in your data folder; an absolute path is used as given, so a network share works.</p>
+            <p class="settings-section-hint resolved-path" id="log-dir-resolved"></p>
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3 class="settings-section-title">Configuration Capture</h3>
+          <p class="settings-section-hint">On connect, ShellMate fetches the device's running configuration on a <strong>second channel</strong> — invisibly, never in the session you are typing in — and keeps it. Every login becomes a change check, with nothing to remember.</p>
+          <p class="settings-section-hint">Skipped, quietly, where it cannot be done without disturbing you: serial and telnet cannot open a second channel, and some switches allow only one session at a time. It never falls back to typing into your terminal.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-capture-configs"
+                   data-tip="Off, no configuration is fetched at all — which also turns off the drift check and stops the configuration history growing. The captures already stored are kept.">Capture the configuration on connect</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-capture-configs" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-diff-on-connect"
+                   data-tip="Compares what was just captured against the previous visit and offers the difference — `this device has changed since you last logged in`. Offered, not forced open: a prompt in the corner with a button, which fades if you ignore it.">Offer a diff when it has changed</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-diff-on-connect" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-save-config-files"
+                   data-tip="Captures are always stored in ShellMate's own database, which is what the diff reads. This additionally writes each one out as a plain `.cfg` file you can mail, grep or attach to a change record.||Only a configuration that has actually changed is written, so a folder of them is a record of changes rather than one copy per login.">Also save each capture as a file</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-save-config-files" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <p class="settings-section-hint">Files are masked by the same “Obscure passwords and secrets” setting above — a running configuration carries hashes, keys and community strings, and this folder may well be a share.</p>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-config-dir">Save them in</label>
+            <div class="setting-input-group setting-input-group-full">
+              <input type="text" id="setting-config-dir" class="setting-input setting-input-full" placeholder="configs" />
+              <button type="button" class="btn-secondary btn-browse" data-target="setting-config-dir" data-pick="folder">
+                <span class="material-symbols-outlined">folder_open</span>
+                Browse
+              </button>
+            </div>
+            <p class="settings-section-hint">Kept apart from session logs on purpose: a capture is a thing as it was, a log is a record of what you did. A relative name goes in your data folder; an absolute path is used as given, so a network share works.</p>
+            <p class="settings-section-hint" id="config-archive-status"></p>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-config-keep"
+                   data-tip="The newest this many captures of each device are kept. Older ones are removed as new ones arrive.">Keep per device</label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-config-keep" class="setting-input setting-input-sm" min="0" max="500" step="1" />
+              <span class="setting-unit">captures</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-config-age"
+                   data-tip="Anything older than this is removed, whichever device it came from. Zero means never remove by age.">Discard after</label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-config-age" class="setting-input setting-input-sm" min="0" max="3650" step="1" />
+              <span class="setting-unit">days</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-config-size"
+                   data-tip="A ceiling on the whole archive. When it is exceeded the oldest captures go first, since the newest of each device is the one the diff compares against. Zero means no limit.">Total size limit</label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-config-size" class="setting-input setting-input-sm" min="0" max="100000" step="10" />
+              <span class="setting-unit">MB</span>
+            </div>
+          </div>
+        </section>
+        <div class="settings-slot" data-category="history"></div>
+        <div class="settings-slot" data-category="capture"></div>
+
+        <!-- ===== AI ===== -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">AI Providers</h3>
+
+          <!-- Where the prompt editor went.
+               It moved to Stockton, and this is the section somebody opens
+               while looking for it — so without a line here it reads as
+               having been deleted. Settings search does find it, but only if
+               you think to search rather than scan the headings, which is not
+               what people do when looking for something they have seen. -->
+          <p class="settings-section-hint" id="prompt-editor-signpost">
+            The <strong>system prompts</strong> — what the assistant is told before it sees
+            anything of yours — are in Stockton, under AI assistant.
+            <button type="button" id="open-prompt-editor" class="btn-link">Open them</button>
+          </p>
+
+          <div class="setting-row">
+            <button type="button" id="btn-test-providers" class="btn-secondary">
+              <span class="material-symbols-outlined">check_circle</span>
+              Test connections &amp; refresh models
+            </button>
+            <span id="provider-test-status" class="setting-value"></span>
+          </div>
+          <div id="provider-results"></div>
+          <p class="settings-section-hint">API keys and endpoints. Keys are stored in the encrypted vault above; anything saved here overrides the matching <code>.env</code> variable. Leaving a field empty falls back to <code>.env</code>.</p>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-anthropic-key">Anthropic API key</label>
+            <input type="password" id="setting-anthropic-key" class="setting-input setting-input-full" autocomplete="off" />
+          </div>
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-openai-key">OpenAI API key</label>
+            <input type="password" id="setting-openai-key" class="setting-input setting-input-full" autocomplete="off" />
+          </div>
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-xai-key">xAI (Grok) API key</label>
+            <input type="password" id="setting-xai-key" class="setting-input setting-input-full" autocomplete="off" />
+          </div>
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-deepseek-key">DeepSeek API key</label>
+            <input type="password" id="setting-deepseek-key" class="setting-input setting-input-full" autocomplete="off" />
+          </div>
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-ollama-host">Ollama host URL</label>
+            <input type="text" id="setting-ollama-host" class="setting-input setting-input-full" autocomplete="off" placeholder="http://localhost:11434" />
+          </div>
+        </section>
+        <section class="settings-section">
+          <h3 class="settings-section-title">Knowledge Base (Chroma DB)</h3>
+          <p class="settings-section-hint">Optional. When set, ShellMate queries this Chroma collection on every chat for design-guideline snippets and injects matches into the AI prompt. Leave blank to disable.</p>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-chroma-url">Chroma URL</label>
+            <input type="text" id="setting-chroma-url" class="setting-input setting-input-full" autocomplete="off" placeholder="http://localhost:8000" />
+          </div>
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-chroma-collection">Collection name</label>
+            <input type="text" id="setting-chroma-collection" class="setting-input setting-input-full" autocomplete="off" placeholder="design_guidelines" />
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">Status</label>
+            <div class="setting-chroma-status">
+              <span id="setting-chroma-status-dot" class="chroma-dot chroma-dot-unknown"></span>
+              <span id="setting-chroma-status-text">Not tested</span>
+              <button type="button" id="setting-chroma-test" class="btn-secondary chroma-test-btn">Test connection</button>
+            </div>
+          </div>
+        </section>
+        <section class="settings-section" id="prompt-editor-block" hidden>
+          <h3 class="settings-section-title">The system prompts</h3>
+          <p class="settings-section-hint">What the assistant is told before it sees anything of yours. These are the largest single influence on how it answers, and they are yours to change — tell it to stop explaining things you already know, to always mention a change reference, or to answer in a house style.</p>
+          <p class="settings-section-hint">Stored as <code>prompts.json</code> in your data folder, so they can be edited by hand, kept in version control or carried to another machine. Delete the file to restore the shipped text.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="prompt-mode-select">Editing</label>
+            <select id="prompt-mode-select" class="setting-input">
+              <option value="tshoot">Troubleshoot — terse, fix it now</option>
+              <option value="learn">Learn — explains the why</option>
+            </select>
+            <span id="prompt-modified" class="setting-value"></span>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <textarea id="prompt-body" rows="18" spellcheck="false"
+                      aria-label="System prompt"></textarea>
+            <p class="settings-section-hint" id="prompt-marker-hint"></p>
+          </div>
+
+          <div class="setting-row">
+            <button type="button" id="prompt-save" class="btn-secondary">
+              <span class="material-symbols-outlined">save</span>
+              Save prompt
+            </button>
+            <button type="button" id="prompt-reset" class="btn-tertiary">Reset this one</button>
+            <button type="button" id="prompt-reset-all" class="btn-tertiary">Reset both</button>
+          </div>
+          <p id="prompt-status" class="settings-section-hint"></p>
+
+        </section>
+        <div class="settings-slot" data-category="ai"></div>
+
+        <!-- ===== Interface ===== -->
         <section class="settings-section">
           <h3 class="settings-section-title">ShellMate Interface</h3>
           <p class="settings-section-hint">These are kept in <code>settings.json</code> in your data folder, so they travel with it — and are the same whether you use the window or open ShellMate in a browser.</p>
@@ -984,8 +1448,6 @@ GigEth0/2     unassigned    YES unset  down     down
             </label>
           </div>
         </section>
-
-        <!-- Alerts -->
         <section class="settings-section">
           <h3 class="settings-section-title">Alerts</h3>
           <p class="settings-section-hint">ShellMate watches for things that will happen to a device unless someone intervenes — <code>reload in 10</code>, or a Junos <code>commit confirmed</code> waiting to be confirmed. The countdown on the tab and in the status bar is always shown; these control how loudly it interrupts you.</p>
@@ -1029,479 +1491,18 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
           <p class="settings-section-hint">Replaces the flashing with a steady outline. Your system setting is honoured too.</p>
         </section>
+        <div class="settings-slot" data-category="files"></div>
+        <div class="settings-slot" data-category="alerts"></div>
+        <div class="settings-slot" data-category="broadcast"></div>
+        <div class="settings-slot" data-category="discovery"></div>
 
-        <!-- Terminal Behavior -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Behavior</h3>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-scrollback"
-                   data-tip="How many lines of output each tab keeps before the oldest are dropped. This is what you can scroll back through and select — it is not the session log, which is written to disk and keeps everything.||Held in memory, per tab. A large value across a dozen open sessions is the one setting here that can make ShellMate feel slow, so raise it when you need to read back through a big `show run`, not as a matter of course.">Scrollback Lines</label>
-            <div class="setting-input-group">
-              <input type="number" id="setting-scrollback" class="setting-input setting-input-sm" min="100" max="50000" step="100" />
-              <span class="setting-unit">lines</span>
-            </div>
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-right-click-paste"
-                   data-tip="Right-clicking pastes the clipboard straight into the session, the way PuTTY does. A paste of several lines still raises the confirmation first.||Off, right-click opens the browser's own menu instead.">Right-click Paste</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-right-click-paste" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-copy-on-select"
-                   data-tip="Selecting text copies it immediately, with no Ctrl+C — again, the PuTTY behaviour.||The trade-off is that it replaces your clipboard whenever you drag across the terminal, including by accident. If you copy a command somewhere else and then select terminal output before pasting it, the command is gone.">Copy on Select</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-copy-on-select" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-        </section>
+        <!-- ===== Diagnostics ===== -->
+        <div class="settings-slot" data-category="diag"></div>
 
-        <!-- AI Providers -->
-        <!-- Device awareness -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Device Awareness</h3>
-          <p class="settings-section-hint">On connect, ShellMate works out what it is talking to — from the login banner, or failing that from the shape of the prompt — and adapts to it. <strong>Both settings below depend on that succeeding <em>confidently</em>.</strong> A banner naming the software is conclusive; a prompt on its own usually is not, because <code>hostname(config)#</code> is printed identically by IOS, NX-OS, ASA and EOS, and they do not share a paging command. When ShellMate is not sure, it sends nothing at all rather than guess, and says so in the corner of the terminal.</p>
-          <p class="settings-section-hint">That case is common — a legal banner replacing the version string, or a device reached through a terminal server. When it happens, click the device name in the status bar and say what it is; both settings then apply immediately.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-auto-paging">Turn paging off on connect</label>
-            <input type="checkbox" id="setting-auto-paging" class="setting-checkbox" />
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-keep-alive"
-                   data-tip="Stops the device idling your session out. A switch with `exec-timeout 5` closes a tab you left over lunch, and the first you know is a dead session.||This types a space and a backspace into the session — netting to nothing — because only input the device *sees* resets `exec-timeout`. An SSH keepalive never reaches the shell, so it keeps the network connection up and the session still expires. It only ever fires at a prompt, never mid-command, and only after the session has been silent.">Keep sessions alive</label>
-            <input type="checkbox" id="setting-keep-alive" class="setting-checkbox" />
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-keep-alive-seconds">Nudge after
-              <span class="setting-hint">How long a session must be silent first. Well under a typical <code>exec-timeout 5</code>.</span>
-            </label>
-            <div class="setting-input-group">
-              <input type="number" id="setting-keep-alive-seconds" class="setting-input setting-input-sm" min="15" max="3600" step="15" />
-              <span class="setting-unit">s</span>
-            </div>
-          </div>
-          <p class="settings-section-hint">Sends the right command for the platform — <code>terminal length 0</code>, <code>terminal pager 0</code>, <code>set cli screen-length 0</code> — so no more <code>--More--</code>. It is echoed like anything you typed, never sent silently. Off, or unidentified, means paging stays as the device left it.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-expand-aliases">Expand command aliases</label>
-            <input type="checkbox" id="setting-expand-aliases" class="setting-checkbox" />
-          </div>
-          <p class="settings-section-hint">Type <code>ints</code> and get the right interface command for whatever you are connected to. Only a bare alias on its own is expanded, and the terminal shows what was actually sent.</p>
-        </section>
-
-        <!-- Platform definitions (#20, #21) -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Platform Definitions</h3>
-          <p class="settings-section-hint">What ShellMate knows about each kind of device: which command turns paging off, how to fetch the running config, and the aliases available on it. Adding a platform here is how ShellMate learns a device it has never seen.</p>
-          <p class="settings-section-hint">These are stored as <code>platforms.json</code> in your data folder, and this editor writes that file. Editing it by hand is worth knowing about for bulk changes, or to carry your definitions to another machine — delete it to restore the built-in set.</p>
-
-          <div id="platform-editor">
-            <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-select">Platform</label>
-              <select id="platform-select" class="setting-input setting-input-full"></select>
-            </div>
-
-            <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-name">Display name</label>
-              <input type="text" id="platform-name" class="setting-input setting-input-full" />
-            </div>
-
-            <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-paging">Turn paging off with</label>
-              <input type="text" id="platform-paging" class="setting-input setting-input-full" placeholder="terminal length 0" />
-              <p class="settings-section-hint">Leave blank to send nothing on connect.</p>
-            </div>
-
-            <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-showrun">Show running config with</label>
-              <input type="text" id="platform-showrun" class="setting-input setting-input-full" placeholder="show running-config" />
-            </div>
-
-            <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-version">Show version with</label>
-              <input type="text" id="platform-version" class="setting-input setting-input-full" placeholder="show version" />
-            </div>
-
-            <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-signatures">Identify by</label>
-              <input type="text" id="platform-signatures" class="setting-input setting-input-full" placeholder="cisco ios software, ios-xe" />
-              <p class="settings-section-hint">Comma-separated text found in the device's banner or version output. The longest match wins, so be specific.</p>
-            </div>
-
-            <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-dangerous">Commands to confirm before sending</label>
-              <input type="text" id="platform-dangerous" class="setting-input setting-input-full" placeholder="reload, write erase, shutdown" />
-            </div>
-
-            <div class="setting-row setting-row-stack">
-              <label class="setting-label">Aliases</label>
-              <p class="settings-section-hint">Type the short name and get the command. Only a bare alias on its own is expanded, and the terminal shows what was actually sent.</p>
-              <div id="alias-rows"></div>
-              <button type="button" id="btn-alias-add" class="btn-tertiary">
-                <span class="material-symbols-outlined">add</span>
-                Add alias
-              </button>
-            </div>
-
-            <div class="setting-row">
-              <button type="button" id="btn-platform-save" class="btn-secondary">Save platform</button>
-              <button type="button" id="btn-platform-reload" class="btn-tertiary">Reload</button>
-              <button type="button" id="btn-platform-delete" class="btn-tertiary hidden">Delete</button>
-              <button type="button" id="btn-platform-reset" class="btn-tertiary">Reset all to defaults</button>
-            </div>
-            <p id="platform-status" class="settings-section-hint"></p>
-          </div>
-        </section>
-
-        <!-- Serial defaults (#13) -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Serial Defaults</h3>
-          <p class="settings-section-hint">Starting values for a new serial connection, so the same settings are not re-entered every time. Cisco console is 9600 8-N-1 with no flow control.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-serial-baud">Baud rate</label>
-            <select id="setting-serial-baud" class="setting-input">
-              <option>1200</option><option>2400</option><option>4800</option>
-              <option>9600</option><option>19200</option><option>38400</option>
-              <option>57600</option><option>115200</option>
-            </select>
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-serial-databits">Data bits</label>
-            <select id="setting-serial-databits" class="setting-input">
-              <option>5</option><option>6</option><option>7</option><option>8</option>
-            </select>
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-serial-parity">Parity</label>
-            <select id="setting-serial-parity" class="setting-input">
-              <option value="N">None</option><option value="E">Even</option>
-              <option value="O">Odd</option><option value="M">Mark</option>
-              <option value="S">Space</option>
-            </select>
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-serial-stopbits">Stop bits</label>
-            <select id="setting-serial-stopbits" class="setting-input">
-              <option>1</option><option>1.5</option><option>2</option>
-            </select>
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-serial-flow">Flow control</label>
-            <select id="setting-serial-flow" class="setting-input">
-              <option value="none">None</option><option value="xonxoff">XON/XOFF</option>
-              <option value="rtscts">RTS/CTS</option><option value="dsrdtr">DSR/DTR</option>
-            </select>
-          </div>
-        </section>
-
-        <!-- Output highlighting -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Output Colours</h3>
-          <p class="settings-section-hint">Colour terminal text by pattern, so the line that matters stands out of a wall of output. Patterns are regular expressions.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-highlight-enabled">Enable highlighting</label>
-            <input type="checkbox" id="setting-highlight-enabled" class="setting-checkbox" />
-          </div>
-
-          <div id="highlight-rules"></div>
-
-          <div class="setting-row">
-            <button type="button" id="highlight-add-rule" class="btn-secondary">
-              <span class="material-symbols-outlined">add</span>
-              Add rule
-            </button>
-            <button type="button" id="highlight-open-builder" class="btn-secondary">
-              <span class="material-symbols-outlined">science</span>
-              Pattern builder
-            </button>
-            <button type="button" id="highlight-reset" class="btn-tertiary">Reset to defaults</button>
-          </div>
-        </section>
-
-        <!-- Stockton's sections are rendered in here (#135). They were a
-             second panel with its own nav, search and mental model; the
-             registry that generates them is unchanged, only the panel is
-             gone. -->
-        <section class="settings-section" id="prompt-editor-block" hidden>
-          <h3 class="settings-section-title">The system prompts</h3>
-          <p class="settings-section-hint">What the assistant is told before it sees anything of yours. These are the largest single influence on how it answers, and they are yours to change — tell it to stop explaining things you already know, to always mention a change reference, or to answer in a house style.</p>
-          <p class="settings-section-hint">Stored as <code>prompts.json</code> in your data folder, so they can be edited by hand, kept in version control or carried to another machine. Delete the file to restore the shipped text.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="prompt-mode-select">Editing</label>
-            <select id="prompt-mode-select" class="setting-input">
-              <option value="tshoot">Troubleshoot — terse, fix it now</option>
-              <option value="learn">Learn — explains the why</option>
-            </select>
-            <span id="prompt-modified" class="setting-value"></span>
-          </div>
-
-          <div class="setting-row setting-row-stack">
-            <textarea id="prompt-body" rows="18" spellcheck="false"
-                      aria-label="System prompt"></textarea>
-            <p class="settings-section-hint" id="prompt-marker-hint"></p>
-          </div>
-
-          <div class="setting-row">
-            <button type="button" id="prompt-save" class="btn-secondary">
-              <span class="material-symbols-outlined">save</span>
-              Save prompt
-            </button>
-            <button type="button" id="prompt-reset" class="btn-tertiary">Reset this one</button>
-            <button type="button" id="prompt-reset-all" class="btn-tertiary">Reset both</button>
-          </div>
-          <p id="prompt-status" class="settings-section-hint"></p>
-
-        </section>
-
+        <!-- Any advanced category without a slot above lands here, so a new
+             one added to CATEGORIES is never invisible — only unsorted. -->
         <div id="settings-advanced"></div>
 
-        <!-- Credentials vault -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Credentials Vault</h3>
-          <p class="settings-section-hint">API keys and remembered device passwords are encrypted on disk — unless you asked for a particular one to be kept as readable text, which the list below marks and lets you undo.</p>
-
-          <div class="setting-row">
-            <span class="setting-label">Status</span>
-            <span id="vault-status-text" class="setting-value">Checking…</span>
-          </div>
-
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="vault-mode-select">Protected by</label>
-            <select id="vault-mode-select" class="setting-input setting-input-full">
-              <option value="dpapi">This Windows account (no password to type)</option>
-              <option value="password">A master password (works on any machine)</option>
-            </select>
-            <p class="settings-section-hint" id="vault-mode-hint"></p>
-          </div>
-
-          <div class="setting-row setting-row-stack hidden" id="vault-password-row">
-            <label class="setting-label" for="vault-new-password">Master password</label>
-            <input type="password" id="vault-new-password" class="setting-input setting-input-full" autocomplete="new-password" />
-            <label class="setting-label" for="vault-confirm-password">Confirm</label>
-            <input type="password" id="vault-confirm-password" class="setting-input setting-input-full" autocomplete="new-password" />
-          </div>
-
-          <div class="setting-row">
-            <button type="button" id="vault-apply-mode" class="btn-secondary">Apply</button>
-            <span id="vault-mode-result" class="setting-value"></span>
-          </div>
-
-          <!-- Credentials several connections share.
-               A credential used to belong to exactly one profile, so "use the
-               login I already have" could not be expressed at all — which is
-               fine for one device and wrong for the forty a scan finds. -->
-          <h4 class="settings-subsection-title">Shared credentials</h4>
-          <p class="settings-section-hint">A login several connections use. They point at it rather than each keeping a copy, so changing it here fixes every device using it.</p>
-          <div id="credential-sets" class="credentials-list"></div>
-          <div class="setting-row">
-            <button type="button" id="credential-set-add" class="btn-secondary">
-              <span class="material-symbols-outlined">add_circle</span>
-              New shared credential
-            </button>
-          </div>
-
-          <!-- What is actually saved.
-               Until this existed, a remembered password was invisible from the
-               moment it was saved: nothing listed them, nothing changed one,
-               and removing one meant reconnecting to the device with the box
-               unticked. -->
-          <h4 class="settings-subsection-title">Saved device credentials</h4>
-          <p class="settings-section-hint" id="credentials-note"></p>
-          <div id="credentials-list" class="credentials-list"></div>
-          <div class="setting-row">
-            <button type="button" id="credentials-refresh" class="btn-secondary">
-              <span class="material-symbols-outlined">refresh</span>
-              Refresh
-            </button>
-            <button type="button" id="credentials-forget-plain" class="btn-danger">
-              <span class="material-symbols-outlined">delete_forever</span>
-              Forget everything in plain text
-            </button>
-          </div>
-        </section>
-
-        <section class="settings-section">
-          <h3 class="settings-section-title">AI Providers</h3>
-
-          <!-- Where the prompt editor went.
-               It moved to Stockton, and this is the section somebody opens
-               while looking for it — so without a line here it reads as
-               having been deleted. Settings search does find it, but only if
-               you think to search rather than scan the headings, which is not
-               what people do when looking for something they have seen. -->
-          <p class="settings-section-hint" id="prompt-editor-signpost">
-            The <strong>system prompts</strong> — what the assistant is told before it sees
-            anything of yours — are in Stockton, under AI assistant.
-            <button type="button" id="open-prompt-editor" class="btn-link">Open them</button>
-          </p>
-
-          <div class="setting-row">
-            <button type="button" id="btn-test-providers" class="btn-secondary">
-              <span class="material-symbols-outlined">check_circle</span>
-              Test connections &amp; refresh models
-            </button>
-            <span id="provider-test-status" class="setting-value"></span>
-          </div>
-          <div id="provider-results"></div>
-          <p class="settings-section-hint">API keys and endpoints. Keys are stored in the encrypted vault above; anything saved here overrides the matching <code>.env</code> variable. Leaving a field empty falls back to <code>.env</code>.</p>
-
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-anthropic-key">Anthropic API key</label>
-            <input type="password" id="setting-anthropic-key" class="setting-input setting-input-full" autocomplete="off" />
-          </div>
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-openai-key">OpenAI API key</label>
-            <input type="password" id="setting-openai-key" class="setting-input setting-input-full" autocomplete="off" />
-          </div>
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-xai-key">xAI (Grok) API key</label>
-            <input type="password" id="setting-xai-key" class="setting-input setting-input-full" autocomplete="off" />
-          </div>
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-deepseek-key">DeepSeek API key</label>
-            <input type="password" id="setting-deepseek-key" class="setting-input setting-input-full" autocomplete="off" />
-          </div>
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-ollama-host">Ollama host URL</label>
-            <input type="text" id="setting-ollama-host" class="setting-input setting-input-full" autocomplete="off" placeholder="http://localhost:11434" />
-          </div>
-        </section>
-
-        <!-- Knowledge base (Chroma) -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Knowledge Base (Chroma DB)</h3>
-          <p class="settings-section-hint">Optional. When set, ShellMate queries this Chroma collection on every chat for design-guideline snippets and injects matches into the AI prompt. Leave blank to disable.</p>
-
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-chroma-url">Chroma URL</label>
-            <input type="text" id="setting-chroma-url" class="setting-input setting-input-full" autocomplete="off" placeholder="http://localhost:8000" />
-          </div>
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-chroma-collection">Collection name</label>
-            <input type="text" id="setting-chroma-collection" class="setting-input setting-input-full" autocomplete="off" placeholder="design_guidelines" />
-          </div>
-          <div class="setting-row">
-            <label class="setting-label">Status</label>
-            <div class="setting-chroma-status">
-              <span id="setting-chroma-status-dot" class="chroma-dot chroma-dot-unknown"></span>
-              <span id="setting-chroma-status-text">Not tested</span>
-              <button type="button" id="setting-chroma-test" class="btn-secondary chroma-test-btn">Test connection</button>
-            </div>
-          </div>
-        </section>
-
-        <!-- Logging -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Session Logging</h3>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-logging-enabled">Enable File Logging</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-logging-enabled" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-redact-secrets"
-                   data-tip="Masks passwords, keys, community strings and hashes in anything written to disk — session logs and captured configurations both.||Devices echo what you type, and a session log is written to be handed to somebody else. The terminal in front of you always shows the truth; this only changes the file.||Pattern-based, so treat it as a strong habit rather than a guarantee: read a log before sending it somewhere it cannot be recalled from.">Obscure passwords and secrets</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-redact-secrets" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-          <p class="settings-section-hint">Masks credentials in written logs — devices echo, and a session log is meant to be handed to someone else. The terminal itself always shows the truth.</p>
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-log-dir">Log Directory</label>
-            <div class="setting-input-group setting-input-group-full">
-              <input type="text" id="setting-log-dir" class="setting-input setting-input-full" placeholder="logs" />
-              <button type="button" class="btn-secondary btn-browse" data-target="setting-log-dir" data-pick="folder">
-                <span class="material-symbols-outlined">folder_open</span>
-                Browse
-              </button>
-            </div>
-            <p class="settings-section-hint">A relative name goes in your data folder; an absolute path is used as given, so a network share works.</p>
-            <p class="settings-section-hint resolved-path" id="log-dir-resolved"></p>
-          </div>
-        </section>
-
-        <!-- Configuration capture (#41) and diff on connect (#42) -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Configuration Capture</h3>
-          <p class="settings-section-hint">On connect, ShellMate fetches the device's running configuration on a <strong>second channel</strong> — invisibly, never in the session you are typing in — and keeps it. Every login becomes a change check, with nothing to remember.</p>
-          <p class="settings-section-hint">Skipped, quietly, where it cannot be done without disturbing you: serial and telnet cannot open a second channel, and some switches allow only one session at a time. It never falls back to typing into your terminal.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-capture-configs"
-                   data-tip="Off, no configuration is fetched at all — which also turns off the drift check and stops the configuration history growing. The captures already stored are kept.">Capture the configuration on connect</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-capture-configs" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-diff-on-connect"
-                   data-tip="Compares what was just captured against the previous visit and offers the difference — `this device has changed since you last logged in`. Offered, not forced open: a prompt in the corner with a button, which fades if you ignore it.">Offer a diff when it has changed</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-diff-on-connect" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-save-config-files"
-                   data-tip="Captures are always stored in ShellMate's own database, which is what the diff reads. This additionally writes each one out as a plain `.cfg` file you can mail, grep or attach to a change record.||Only a configuration that has actually changed is written, so a folder of them is a record of changes rather than one copy per login.">Also save each capture as a file</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-save-config-files" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-          <p class="settings-section-hint">Files are masked by the same “Obscure passwords and secrets” setting above — a running configuration carries hashes, keys and community strings, and this folder may well be a share.</p>
-
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-config-dir">Save them in</label>
-            <div class="setting-input-group setting-input-group-full">
-              <input type="text" id="setting-config-dir" class="setting-input setting-input-full" placeholder="configs" />
-              <button type="button" class="btn-secondary btn-browse" data-target="setting-config-dir" data-pick="folder">
-                <span class="material-symbols-outlined">folder_open</span>
-                Browse
-              </button>
-            </div>
-            <p class="settings-section-hint">Kept apart from session logs on purpose: a capture is a thing as it was, a log is a record of what you did. A relative name goes in your data folder; an absolute path is used as given, so a network share works.</p>
-            <p class="settings-section-hint" id="config-archive-status"></p>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-config-keep"
-                   data-tip="The newest this many captures of each device are kept. Older ones are removed as new ones arrive.">Keep per device</label>
-            <div class="setting-input-group">
-              <input type="number" id="setting-config-keep" class="setting-input setting-input-sm" min="0" max="500" step="1" />
-              <span class="setting-unit">captures</span>
-            </div>
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-config-age"
-                   data-tip="Anything older than this is removed, whichever device it came from. Zero means never remove by age.">Discard after</label>
-            <div class="setting-input-group">
-              <input type="number" id="setting-config-age" class="setting-input setting-input-sm" min="0" max="3650" step="1" />
-              <span class="setting-unit">days</span>
-            </div>
-          </div>
-          <div class="setting-row">
-            <label class="setting-label" for="setting-config-size"
-                   data-tip="A ceiling on the whole archive. When it is exceeded the oldest captures go first, since the newest of each device is the one the diff compares against. Zero means no limit.">Total size limit</label>
-            <div class="setting-input-group">
-              <input type="number" id="setting-config-size" class="setting-input setting-input-sm" min="0" max="100000" step="10" />
-              <span class="setting-unit">MB</span>
-            </div>
-          </div>
-        </section>
 
         <!-- The system-prompt editor used to sit here. It moved into the
              Stockton panel's markup (#64) because a .settings-section inside

@@ -257,7 +257,16 @@ def test_the_prompt_editor_is_visible_where_it_is_advertised() -> None:
             time.sleep(1.8)
 
             # It lives inside the AI section, which shows one at a time.
-            page.evaluate("() => window.openSettingsSection('AI assistant')")
+            # Found by key rather than by title: the heading was renamed to
+            # disambiguate it from the hand-written AI Providers section
+            # (#151), and a test that hardcodes a title breaks on a rename
+            # while telling you the editor is missing.
+            page.evaluate("""() => {
+              const el = document.getElementById('prompt-editor-block');
+              const section = el && el.closest('.settings-section:not(#prompt-editor-block)');
+              const title = section && section.querySelector('.settings-section-title');
+              if (title) window.openSettingsSection(title.textContent.trim());
+            }""")
             time.sleep(1.2)
 
             # Stockton is gone (#135): the advanced sections live in Settings,

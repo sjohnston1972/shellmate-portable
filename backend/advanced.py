@@ -165,16 +165,21 @@ def available_algorithms(which: str) -> list[str]:
         return []
 
 
+# Headings, and they now sit beside the hand-written settings sections rather
+# than in a panel of their own (#135, #151). Two of them collided with a
+# section that was already there — "Alerts" and "Configuration capture" —
+# which read as the same thing listed twice. Renamed to say what they
+# actually hold: the timings and limits behind the feature, not the feature.
 CATEGORIES = {
     "identify":  "Device identification",
     "ssh":       "SSH, telnet and serial",
-    "terminal":  "Terminal and rendering",
+    "terminal":  "Terminal rendering",
     "history":   "Recording and history",
-    "capture":   "Configuration capture",
-    "alerts":    "Alerts",
+    "capture":   "Capture timing and limits",
+    "alerts":    "Alert timing and thresholds",
     "broadcast": "Broadcast",
-    "ai":        "AI assistant",
-    "files":     "Files and interface",
+    "ai":        "AI tuning",
+    "files":     "Files and panels",
     "discovery": "Network discovery",
     "diag":      "Diagnostics",
 }

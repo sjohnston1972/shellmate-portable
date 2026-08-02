@@ -416,7 +416,12 @@
     // Critical alerts linger, because the point of the last warning is that it
     // is still there when someone looks back at the machine. Not forever
     // though: one pinned across the screen an hour later is only in the way.
-    setTimeout(() => el.remove(), alert.severity === 'critical' ? 120000 : A('alerts.toast_seconds', 12) * 1000);
+    // `seconds` lets one notice outlive the rest without being permanent —
+    // an offer worth noticing but not worth living in the corner (#148).
+    const life = alert.severity === 'critical'
+      ? 120
+      : (Number(alert.seconds) || A('alerts.toast_seconds', 12));
+    setTimeout(() => el.remove(), life * 1000);
     return el;
   }
 

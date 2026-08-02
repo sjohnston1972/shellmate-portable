@@ -171,6 +171,10 @@
     sortTabs();
     _rememberOpenTabs();
     _paintGroups();
+    // The dashboard shows how many of each group are open (#146), and it is
+    // somewhere you return to with sessions running — so a count that only
+    // updated when the dashboard was rebuilt would be wrong most of the time.
+    window.dispatchEvent(new CustomEvent('shellmate:sessions-changed'));
     // A device marked red stays red on reconnect — that is the point of
     // marking it.
     _restoreScheme(tabObj);
@@ -248,6 +252,7 @@
     _markSessionsLink(false);
 
     activeTabIndex = index;
+    _paintStatusGroup();
 
     // Which terminals are on screen is the layout's business, not this
     // module's — under a tiled layout several are visible at once and the tab
@@ -461,6 +466,7 @@
     // Remove from array
     tabs.splice(index, 1);
     _rememberOpenTabs();
+    window.dispatchEvent(new CustomEvent('shellmate:sessions-changed'));
 
     // Free the pane it occupied before anything is asked to re-render, so a
     // tiled layout pulls in a waiting session rather than leaving a hole.
@@ -972,6 +978,33 @@
   // header is not a tab and must never become index 0.
   // -------------------------------------------------------------------------
 
+  /**
+   * Name the active tab's group in the status bar (#149).
+   *
+   * Reuses the group already resolved for the strip rather than resolving it
+   * again — a device can be in several groups, and two places picking
+   * differently would be worse than neither showing it.
+   */
+  async function _paintStatusGroup() {
+    const el = document.getElementById('status-group');
+    if (!el) return;
+
+    const tab = getActiveTab();
+    const key = tab ? (_tagCache.get(tab.sessionId) || '') : '';
+    if (!key) {
+      el.classList.add('hidden');
+      el.textContent = '';
+      return;
+    }
+
+    const colours = await _loadGroupColours();
+    el.className = `status-group group-${colours[key] || 'slate'}`;
+    // The leaf of a nested name: "site-3/access" reads as "access" here,
+    // where the space is tight and the parent is on the tab strip anyway.
+    el.textContent = key.split('/').pop();
+    el.title = `In the "${key}" group`;
+  }
+
   /** Whether to show grouping at all. */
   function _groupStripe() {
     const prefs = (window.shellmateSettings || {}).interface || {};
@@ -1038,6 +1071,8 @@
       name.textContent = group;
       el.insertBefore(name, el.firstChild);
     });
+
+    _paintStatusGroup();
   }
 
   // -------------------------------------------------------------------------

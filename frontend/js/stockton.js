@@ -79,14 +79,23 @@
    * not see them is no longer needed for these.
    */
   function render() {
-    const host = document.getElementById('settings-advanced');
-    if (!host || !registry.settings) return;
-    host.innerHTML = '';
+    const fallback = document.getElementById('settings-advanced');
+    if (!fallback || !registry.settings) return;
+
+    // Each category renders into the slot for its family (#151), so the
+    // advanced values sit beside the hand-written settings they belong with
+    // rather than in a block of their own at the end. A category with no slot
+    // lands in the fallback — a new one added to CATEGORIES is then unsorted
+    // rather than invisible, which is the failure worth avoiding.
+    document.querySelectorAll('.settings-slot').forEach(s => { s.innerHTML = ''; });
+    fallback.innerHTML = '';
 
     Object.entries(registry.categories).forEach(([key, title]) => {
       const items = registry.settings.filter(s => s.category === key);
       if (!items.length) return;
 
+      const host = document.querySelector(`.settings-slot[data-category="${key}"]`)
+                || fallback;
       const el = section(title, items, false);
 
       // These save as you change them, unlike everything above, which waits
@@ -119,11 +128,11 @@
       host.appendChild(el);
     });
 
-    // What is deliberately not exposed, and why — otherwise an absent
-    // setting just sends somebody hunting through the JSON.
-    if (registry.not_exposed && registry.not_exposed.length) {
-      host.appendChild(exclusions());
-    }
+    // The "Deliberately not here" section was rendered here (#150). The
+    // reasoning it carried has not gone — NOT_EXPOSED in advanced.py still
+    // pairs every excluded value with why, where the decision is actually
+    // made and where whoever maintains it will look. It simply stopped
+    // explaining itself to people who never asked.
 
     // The nav is built from the sections present, so it has to be told.
     window.dispatchEvent(new CustomEvent('shellmate:sections-changed'));
@@ -385,40 +394,6 @@
    * looking for the vault's key-derivation parameters in settings.json and
    * concludes they were forgotten.
    */
-  function exclusions() {
-    const el = document.createElement('section');
-    el.className = 'settings-section';
-
-    const heading = document.createElement('h3');
-    heading.className = 'settings-section-title';
-    heading.textContent = 'Deliberately not here';
-    el.appendChild(heading);
-
-    const intro = document.createElement('p');
-    intro.className = 'settings-section-hint';
-    intro.textContent =
-      'Each of these could break something rather than merely degrade it, ' +
-      'which is the line everything above stays on the right side of.';
-    el.appendChild(intro);
-
-    (registry.not_exposed || []).forEach(entry => {
-      const row = document.createElement('div');
-      row.className = 'setting-row setting-row-stack stockton-excluded';
-
-      const label = document.createElement('span');
-      label.className = 'setting-label';
-      label.textContent = entry.label;
-
-      const why = document.createElement('p');
-      why.className = 'settings-section-hint';
-      why.textContent = entry.why;
-
-      row.append(label, why);
-      el.appendChild(row);
-    });
-
-    return el;
-  }
 
   async function save(setting, value) {
     try {

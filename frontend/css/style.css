@@ -7195,3 +7195,35 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The active session's group, in the status bar (#149). */
+.status-group {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--group-colour, var(--outline));
+  color: var(--group-colour, var(--on-surface-muted));
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+/* Open sessions from a group (#146). Distinguished from the total by colour
+   and a dot, so two numbers side by side do not read as one. */
+.tree-chip-live {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: var(--ok);
+  background: var(--ok-tint);
+  flex-shrink: 0;
+}
+
+.tree-chip-live::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+}

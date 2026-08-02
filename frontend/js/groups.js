@@ -35,6 +35,13 @@
   // State
   // -------------------------------------------------------------------------
 
+  // Recount the live badges when a session opens or closes.
+  window.addEventListener('shellmate:sessions-changed', () => {
+    if (typeof window.renderWelcomeProfiles === 'function') {
+      window.renderWelcomeProfiles();
+    }
+  });
+
   function active() { return activeGroup; }
 
   function activeName() {
@@ -75,6 +82,7 @@
       activeGroup = '';
     }
 
+    await _loadLive();
     renderTree(profiles || []);
   }
 
@@ -136,6 +144,40 @@
     });
 
     return roots;
+  }
+
+  /** Session keys ("address:port") that are open right now. */
+  let liveKeys = new Set();
+
+  async function _loadLive() {
+    try {
+      const res = await fetch('/api/sessions');
+      const list = res.ok ? await res.json() : [];
+      liveKeys = new Set(list
+        .filter(s => s.is_connected)
+        .map(s => `${(s.address || s.hostname || '').toLowerCase()}:${s.port || 0}`));
+    } catch (_) {
+      liveKeys = new Set();
+    }
+  }
+
+  /**
+   * How many connections in this branch are open.
+   *
+   * Matched on address and port exactly, not loosely. #124 is the cautionary
+   * tale: matching a session to a profile approximately is how restore
+   * connected to the wrong device. Counting is harmless where connecting is
+   * not, but the two should still agree about what "this device" means.
+   */
+  function _liveUnder(node) {
+    let total = 0;
+    if (node.group) {
+      total += profileCache.filter(p =>
+        (p.tags || []).includes(node.key) &&
+        liveKeys.has(`${(p.hostname || '').toLowerCase()}:${p.port || 0}`)).length;
+    }
+    node.children.forEach(child => { total += _liveUnder(child); });
+    return total;
   }
 
   /** Everything in this branch, including nested groups. */
@@ -222,6 +264,19 @@
     const count = document.createElement('span');
     count.className = 'tree-chip-count';
     count.textContent = _countUnder(node);
+
+    // How many are open right now, which is the more useful number in the
+    // moment (#146). Shown only when it is not zero — a "0 live" on every
+    // group would be noise on a dashboard opened before connecting to
+    // anything.
+    const live = _liveUnder(node);
+    if (live) {
+      const badge = document.createElement('span');
+      badge.className = 'tree-chip-live';
+      badge.textContent = live;
+      badge.title = `${live} open now`;
+      chip.appendChild(badge);
+    }
 
     chip.append(name, count);
     chip.addEventListener('click', () => {

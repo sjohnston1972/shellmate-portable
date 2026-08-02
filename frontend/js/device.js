@@ -225,6 +225,13 @@
    * record of what the device said, and injecting our own commentary into it
    * would corrupt the very transcript the evidence pack depends on.
    */
+  /** How long an actionable device notice stays: a multiple of the ordinary. */
+  function _noticeSeconds() {
+    const base = window.shellmateAdvanced
+      ? Number(window.shellmateAdvanced('alerts.toast_seconds', 12)) : 12;
+    return Math.round((base || 12) * 2.5);
+  }
+
   function note(text, kind, opts) {
     if (!window.shellmateAlerts || !window.shellmateAlerts.notify) return;
     opts = opts || {};
@@ -240,9 +247,23 @@
     window.shellmateAlerts.notify({
       icon:  kind === 'alias' ? 'edit' : 'smart_toy',
       title: text,
-      // Interactive notes wait to be used; the rest let themselves out on the
-      // shared timer. An offer that withdraws itself is worse than no offer.
-      sticky: Boolean(opts.offerOverride),
+      // It times out either way (#148).
+      //
+      // This used to be sticky whenever it carried the override button, on
+      // the reasoning that an offer which withdraws itself is worse than no
+      // offer. That holds for the drift prompt — a question with a
+      // consequence, which somebody must answer — and not here.
+      // Identification is best-effort, most people will never set a platform,
+      // and the notice became a permanent fixture in the corner.
+      //
+      // Nothing is lost by it going: the device chip in the status bar is
+      // permanent, says the platform is unconfirmed, and opens the same
+      // chooser on click. The offer has a home; this was only its
+      // announcement.
+      sticky: false,
+      // Longer than an ordinary toast, because it does carry an action —
+      // long enough to notice and act on, not long enough to live there.
+      seconds: opts.offerOverride ? _noticeSeconds() : undefined,
       action: opts.offerOverride
         ? { label: 'Set platform', onClick: () => openChooser() }
         : null,
