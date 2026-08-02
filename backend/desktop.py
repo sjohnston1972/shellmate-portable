@@ -178,10 +178,14 @@ class Tray:
     loop of their own, and the window has to own the main thread.
     """
 
-    def __init__(self, port: int, on_show, on_quit):
+    def __init__(self, port: int, on_show, on_quit, on_restart=None):
         self.port = port
         self._on_show = on_show
         self._on_quit = on_quit
+        # Restart is not a quit — it confirms, then hands over to a fresh
+        # copy — so it gets its own callback rather than overloading the one
+        # whose contract is "this process ends".
+        self._on_restart = on_restart
         self._icon = None
         self._thread = None
 
@@ -197,6 +201,16 @@ class Tray:
             menu = pystray.Menu(
                 pystray.MenuItem("Open ShellMate", self._show, default=True),
                 pystray.MenuItem("Open in browser", self._browser),
+                pystray.Menu.SEPARATOR,
+                # Restarting used to mean quitting and finding the executable
+                # again — a poor answer for the action most likely to be
+                # wanted after changing something (#142). Only offered when
+                # it can actually be done: from source without a resolvable
+                # script, can_restart() is false and a menu entry that does
+                # nothing is worse than none.
+                pystray.MenuItem("Restart", self._restart,
+                                 visible=lambda item: self._on_restart is not None
+                                                      and can_restart()),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Quit", self._quit),
             )
@@ -219,6 +233,30 @@ class Tray:
 
     def _browser(self, icon=None, item=None):
         webbrowser.open(f"http://localhost:{self.port}")
+
+    def _restart(self, icon=None, item=None):
+        """
+        Relaunch, asking first when devices are connected.
+
+        A restart drops every session in the process, which is the thing the
+        desktop design otherwise avoids doing by accident — closing the window
+        only hides it precisely because sessions live here. A tray menu is one
+        careless click away, so this gets the same confirmation Quit has, and
+        for the same reason.
+
+        The mechanism is the one built for the settings that need a restart:
+        it strips the _PYI_* bootloader variables, without which the new copy
+        inherits the dying one's unpack directory and comes up with no files,
+        and it releases the listening socket first, because a Windows
+        SO_REUSEADDR bind succeeds against a port that is still listening and
+        the new copy came up on 8766 with nothing pointing at it.
+        """
+        if self._on_restart is None:
+            return
+        try:
+            self._on_restart()
+        except Exception as exc:
+            logger.warning("Restart failed: %s", exc)
 
     def _quit(self, icon=None, item=None):
         # The confirmation has to happen before the icon is destroyed, or a
@@ -311,7 +349,8 @@ class Desktop:
 
     def run(self) -> None:
         """Show the UI and block until the user quits."""
-        self._tray = Tray(self.port, self._show_window, self.quit)
+        self._tray = Tray(self.port, self._show_window, self.quit,
+                          on_restart=self.restart_from_tray)
         has_tray = self._tray.start()
 
         if self._run_native():
@@ -325,6 +364,32 @@ class Desktop:
         if not has_tray:
             logger.info("No window manager and no tray; press Ctrl+C to stop.")
         self._quit.wait()
+
+    def restart_from_tray(self) -> bool:
+        """
+        Confirm, then relaunch.
+
+        A restart drops every session in the process — the very thing the
+        desktop design otherwise avoids by accident, since closing the window
+        only hides it precisely because sessions live here. A tray menu is one
+        careless click, so it asks the same question Quit asks, naming the
+        devices that would go.
+
+        The relaunch itself is the mechanism built for the settings that need
+        one: it strips the _PYI_* bootloader variables, without which the new
+        copy inherits the dying one's unpack directory and comes up with no
+        files, and it releases the listening socket first, because a Windows
+        SO_REUSEADDR bind succeeds against a port that is still listening —
+        which is how the restarted copy once came up on 8766 with nothing
+        pointing at it.
+        """
+        if not self._confirm_quit(action="restart"):
+            logger.info("Restart cancelled — sessions are still open.")
+            return False
+
+        self._remember_geometry()
+        logger.info("Restarting from the tray.")
+        return restart(self)
 
     def quit(self, confirm: bool = False) -> bool:
         """
@@ -359,7 +424,7 @@ class Desktop:
         # on the GUI thread that is still unwinding underneath us.
         os._exit(0)
 
-    def _confirm_quit(self) -> bool:
+    def _confirm_quit(self, action: str = "quit") -> bool:
         """
         Ask before dropping live sessions. True means go ahead.
 
@@ -390,11 +455,22 @@ class Desktop:
         if len(names) > 10:
             listed += f"\n  · and {len(names) - 10} more"
 
+        # Worded for what is about to happen. A restart drops the sessions
+        # just as surely as a quit, but says something different about what
+        # comes next, and a dialog reading 'quit' when you pressed Restart
+        # is the kind of thing that gets clicked through without reading.
+        restarting = action == "restart"
+        if restarting:
+            tail = ("Restarting disconnects them and opens a fresh copy. "
+                    "Closing the window instead leaves everything running "
+                    "in the tray.\n\nRestart anyway?")
+        else:
+            tail = ("Quitting disconnects them. Closing the window instead "
+                    "leaves everything running in the tray.\n\nQuit anyway?")
+
         message = (
             f"{len(names)} session{'' if len(names) == 1 else 's'} still connected:\n\n"
-            f"{listed}\n\n"
-            "Quitting disconnects them. Closing the window instead leaves "
-            "everything running in the tray.\n\nQuit anyway?"
+            f"{listed}\n\n" + tail
         )
 
         if sys.platform == "win32":
@@ -402,7 +478,7 @@ class Desktop:
                 import ctypes
                 # MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND; IDYES == 6.
                 answer = ctypes.windll.user32.MessageBoxW(
-                    None, message, f"{WINDOW_TITLE} — quit?", 0x04 | 0x30 | 0x10000,
+                    None, message, f"{WINDOW_TITLE} — {'restart' if restarting else 'quit'}?", 0x04 | 0x30 | 0x10000,
                 )
                 return answer == 6
             except Exception as exc:
