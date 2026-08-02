@@ -78,14 +78,6 @@
         <span class="material-symbols-outlined">settings</span>
         <span class="sidebar-label">Settings</span>
       </a>
-      <!-- Stockton. Not explained by name on purpose: the notice on the panel
-           says what it is, which is all a user needs. Directly under Settings
-           because they are two halves of one thing — Settings picks what,
-           Stockton tunes how much. -->
-      <a href="#" id="sidebar-link-stockton" class="sidebar-link" title="Stockton — settings for the tinkerer">
-        <span class="material-symbols-outlined">tune</span>
-        <span class="sidebar-label">Advanced</span>
-      </a>
       <button id="btn-theme-toggle" class="sidebar-link" title="Toggle light/dark theme">
         <span class="material-symbols-outlined" id="theme-icon">light_mode</span>
         <span class="sidebar-label">Theme</span>
@@ -1183,6 +1175,44 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
         </section>
 
+        <!-- Stockton's sections are rendered in here (#135). They were a
+             second panel with its own nav, search and mental model; the
+             registry that generates them is unchanged, only the panel is
+             gone. -->
+        <section class="settings-section" id="prompt-editor-block" hidden>
+          <h3 class="settings-section-title">The system prompts</h3>
+          <p class="settings-section-hint">What the assistant is told before it sees anything of yours. These are the largest single influence on how it answers, and they are yours to change — tell it to stop explaining things you already know, to always mention a change reference, or to answer in a house style.</p>
+          <p class="settings-section-hint">Stored as <code>prompts.json</code> in your data folder, so they can be edited by hand, kept in version control or carried to another machine. Delete the file to restore the shipped text.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="prompt-mode-select">Editing</label>
+            <select id="prompt-mode-select" class="setting-input">
+              <option value="tshoot">Troubleshoot — terse, fix it now</option>
+              <option value="learn">Learn — explains the why</option>
+            </select>
+            <span id="prompt-modified" class="setting-value"></span>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <textarea id="prompt-body" rows="18" spellcheck="false"
+                      aria-label="System prompt"></textarea>
+            <p class="settings-section-hint" id="prompt-marker-hint"></p>
+          </div>
+
+          <div class="setting-row">
+            <button type="button" id="prompt-save" class="btn-secondary">
+              <span class="material-symbols-outlined">save</span>
+              Save prompt
+            </button>
+            <button type="button" id="prompt-reset" class="btn-tertiary">Reset this one</button>
+            <button type="button" id="prompt-reset-all" class="btn-tertiary">Reset both</button>
+          </div>
+          <p id="prompt-status" class="settings-section-hint"></p>
+
+        </section>
+
+        <div id="settings-advanced"></div>
+
         <!-- Credentials vault -->
         <section class="settings-section">
           <h3 class="settings-section-title">Credentials Vault</h3>
@@ -1574,73 +1604,7 @@ GigEth0/2     unassigned    YES unset  down     down
        sections with the same title/row/hint vocabulary. Fifty-three settings
        across ten categories is precisely the case a rail exists to solve.
   ================================================================ -->
-  <div id="stockton-overlay" class="panel-overlay hidden">
-    <div id="stockton-panel" class="side-panel settings-like">
-      <div class="panel-header">
-        <div class="panel-title-group">
-          <h2 class="panel-title">Stockton</h2>
-          <span class="panel-subtitle">Settings for the tinkerer</span>
-        </div>
-        <button id="stockton-close" class="icon-btn" aria-label="Close">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </div>
 
-      <p id="stockton-notice">
-        Everything here was a constant in the source until now. Each has a sensible default and a range it is held to, so the worst you can do is make ShellMate work less well — never stop it starting. Stuck? Run once with <code>--reset-advanced</code>.
-      </p>
-
-      <div class="settings-search-wrap">
-        <input type="search" id="stockton-search" class="settings-search"
-               placeholder="Search advanced settings…" autocomplete="off" />
-      </div>
-
-      <div class="settings-layout">
-        <nav id="stockton-nav" class="settings-nav"></nav>
-        <div class="panel-body" id="stockton-body"></div>
-      </div>
-
-        <section class="settings-section" id="prompt-editor-block" hidden>
-          <h3 class="settings-section-title">The system prompts</h3>
-          <p class="settings-section-hint">What the assistant is told before it sees anything of yours. These are the largest single influence on how it answers, and they are yours to change — tell it to stop explaining things you already know, to always mention a change reference, or to answer in a house style.</p>
-          <p class="settings-section-hint">Stored as <code>prompts.json</code> in your data folder, so they can be edited by hand, kept in version control or carried to another machine. Delete the file to restore the shipped text.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="prompt-mode-select">Editing</label>
-            <select id="prompt-mode-select" class="setting-input">
-              <option value="tshoot">Troubleshoot — terse, fix it now</option>
-              <option value="learn">Learn — explains the why</option>
-            </select>
-            <span id="prompt-modified" class="setting-value"></span>
-          </div>
-
-          <div class="setting-row setting-row-stack">
-            <textarea id="prompt-body" rows="18" spellcheck="false"
-                      aria-label="System prompt"></textarea>
-            <p class="settings-section-hint" id="prompt-marker-hint"></p>
-          </div>
-
-          <div class="setting-row">
-            <button type="button" id="prompt-save" class="btn-secondary">
-              <span class="material-symbols-outlined">save</span>
-              Save prompt
-            </button>
-            <button type="button" id="prompt-reset" class="btn-tertiary">Reset this one</button>
-            <button type="button" id="prompt-reset-all" class="btn-tertiary">Reset both</button>
-          </div>
-          <p id="prompt-status" class="settings-section-hint"></p>
-
-        </section>
-
-      <div class="panel-footer settings-footer">
-        <span id="stockton-count" class="settings-footer-note"></span>
-        <button type="button" id="stockton-reset-all" class="btn-secondary">
-          <span class="material-symbols-outlined">settings_backup_restore</span>
-          Reset everything
-        </button>
-      </div>
-    </div>
-  </div>
 
   <!-- ================================================================
        SSH KEYS (#55)

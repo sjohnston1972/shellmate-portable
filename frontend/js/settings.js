@@ -88,12 +88,13 @@
     document.getElementById('settings-save')
       .addEventListener('click', saveSettings);
 
-    // The prompt editor lives in Stockton. This is the section people open
-    // while looking for it, so it says where it went and takes them there.
+    // The prompt editor is in this panel now (#135), further down. It was
+    // reported as deleted once when it moved, so the signpost stays and
+    // simply scrolls rather than opening a second panel.
     const signpost = document.getElementById('open-prompt-editor');
     if (signpost) signpost.addEventListener('click', () => {
-      closeSettings();
-      if (typeof window.openStockton === 'function') window.openStockton('ai');
+      const target = document.getElementById('prompt-editor-block');
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
     // Typing a path, or picking one with Browse, updates the line underneath

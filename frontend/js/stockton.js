@@ -20,185 +20,113 @@
 (function () {
   'use strict';
 
-  /** The pseudo-category for the "not exposed" list, kept last in the rail. */
-  const EXCLUSIONS = '__excluded__';
-
-  const ICONS = {
-    identify:  'smart_toy',
-    ssh:       'cable',
-    terminal:  'terminal',
-    history:   'search',
-    capture:   'save',
-    alerts:    'warning',
-    broadcast: 'send',
-    ai:        'smart_toy',
-    files:     'description',
-    diag:      'help',
-  };
-
-  let overlay, navEl, bodyEl, searchEl, countEl;
+  /** Everything /api/advanced knows: the settings, their categories, the
+   *  exclusions and which values have been moved off their defaults. */
   let registry = { settings: [], categories: {}, not_exposed: [] };
-  let active = null;
-  /** Set once a setting that cannot be reapplied has been changed. */
-  let pendingRestart = false;
-
-  document.addEventListener('DOMContentLoaded', () => {
-    overlay = document.getElementById('stockton-overlay');
-    if (!overlay) return;
-
-    navEl    = document.getElementById('stockton-nav');
-    bodyEl   = document.getElementById('stockton-body');
-    searchEl = document.getElementById('stockton-search');
-    countEl  = document.getElementById('stockton-count');
-
-    const link = document.getElementById('sidebar-link-stockton');
-    if (link) link.addEventListener('click', (e) => { e.preventDefault(); open(); });
-
-    document.getElementById('stockton-close').addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !overlay.classList.contains('hidden')) close();
-    });
-
-    searchEl.addEventListener('input', render);
-    document.getElementById('stockton-reset-all')
-      .addEventListener('click', () => reset({}));
-  });
 
   /**
-   * Open Stockton, optionally at a named category.
+   * No panel of its own any more (#135) — the sections live in Settings.
    *
-   * The category argument is what makes a signpost from elsewhere land on the
-   * thing it is pointing at rather than wherever Stockton was last left. The
-   * system-prompt editor is the case it exists for: it is in here, people
-   * look for it in Settings, and "it is in Stockton somewhere" is not an
-   * answer.
+   * `openStockton(category)` is kept as a signpost. Several places still send
+   * people here by name, and a function that silently does nothing is worse
+   * than one that opens the right place.
    */
-  async function open(category) {
-    if (category) active = category;
-    overlay.classList.remove('hidden');
-    await load();
+  document.addEventListener('DOMContentLoaded', () => {
+    load();
+    // Rebuilt on save, because a reset or a changed value alters what the
+    // "modified" marks say.
+    window.addEventListener('shellmate:settings-changed', load);
+  });
 
-    // Focus the search box only when nothing specific was asked for —
-    // arriving at a category and stealing focus into a search box reads as
-    // having been sent to the wrong place.
-    if (!category) {
-      setTimeout(() => searchEl && searchEl.focus(), 60);
-    } else {
-      setTimeout(() => {
-        const target = bodyEl && bodyEl.firstElementChild;
-        if (target) target.scrollIntoView({ block: 'start' });
-      }, 60);
+  async function open(category) {
+    if (typeof window.openSettings === 'function') window.openSettings();
+    await load();
+    if (category && typeof window.openSettingsSection === 'function') {
+      const heading = (registry.categories || {})[category];
+      if (heading) window.openSettingsSection(heading);
     }
   }
-
-  function close() { overlay.classList.add('hidden'); }
 
   async function load() {
     try {
       const res = await fetch('/api/advanced');
       registry = await res.json();
-      // Only when nothing has chosen one — open(category) sets it first.
-      if (!active) active = Object.keys(registry.categories)[0];
-      buildNav();
       render();
     } catch (e) {
       report('Could not read the advanced settings: ' + e.message, true);
     }
   }
 
-  function buildNav() {
-    navEl.innerHTML = '';
-
-    const entries = Object.keys(registry.categories)
-      .map(id => [id, registry.categories[id]]);
-    // The exclusions read as a category from the rail's point of view, and
-    // belong at the end where somebody looking for a missing setting finds
-    // them after failing to find it anywhere else.
-    entries.push([EXCLUSIONS, 'Deliberately not here']);
-
-    entries.forEach(([id, label]) => {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = 'settings-nav-item' + (id === active ? ' active' : '');
-
-      const icon = document.createElement('span');
-      icon.className = 'material-symbols-outlined';
-      icon.textContent = id === EXCLUSIONS ? 'block' : (ICONS[id] || 'tune');
-
-      const text = document.createElement('span');
-      text.textContent = label;
-
-      item.append(icon, text);
-      item.addEventListener('click', () => {
-        active = id;
-        searchEl.value = '';
-        buildNav();
-        render();
-      });
-      navEl.appendChild(item);
-    });
-  }
-
+  /**
+   * Render every category into the Settings panel (#135).
+   *
+   * Stockton was a second panel with its own nav, its own search and its own
+   * mental model, and the standing question of which of the two a setting
+   * lived in. The split has done its job — the values are exposed, bounded
+   * and documented — and now costs more than it returns.
+   *
+   * **The registry is not what was removed.** advanced.py still makes the
+   * declaration the default: ssh_handler.py calls
+   * advanced("ssh.connect_timeout") rather than holding its own copy, and
+   * these rows still render from that same list. Sixty hand-written rows
+   * against sixty constants would drift silently, with the label describing
+   * what the code no longer does. Only the *panel* is gone.
+   *
+   * Each category becomes a `.settings-section` with a
+   * `.settings-section-title`, which is exactly what settings_nav.js builds
+   * its nav and its search from — so they are listed and findable without
+   * being told about, and the EXTRAS list that existed because search could
+   * not see them is no longer needed for these.
+   */
   function render() {
-    const query = (searchEl.value || '').trim().toLowerCase();
-    bodyEl.innerHTML = '';
-    bodyEl.scrollTop = 0;
+    const host = document.getElementById('settings-advanced');
+    if (!host || !registry.settings) return;
+    host.innerHTML = '';
 
-    const changed = registry.settings.filter(s => s.modified).length;
-    if (countEl) {
-      countEl.textContent = changed
-        ? `${changed} of ${registry.settings.length} changed from the default`
-        : `${registry.settings.length} settings, all at their defaults`;
-    }
+    Object.entries(registry.categories).forEach(([key, title]) => {
+      const items = registry.settings.filter(s => s.category === key);
+      if (!items.length) return;
 
-    // Searching drops the categories entirely — the point of a search is
-    // finding a setting without knowing which one it lives under.
-    if (query) {
-      navEl.querySelectorAll('.settings-nav-item')
-        .forEach(i => i.classList.remove('active'));
+      const el = section(title, items, false);
 
-      const matches = registry.settings.filter(s =>
-        s.label.toLowerCase().includes(query) ||
-        s.key.toLowerCase().includes(query) ||
-        (s.summary || '').toLowerCase().includes(query) ||
-        (s.tip || '').toLowerCase().includes(query));
+      // These save as you change them, unlike everything above, which waits
+      // for Save Settings. Saying so beats letting somebody close the panel
+      // believing they had discarded something.
+      const note = document.createElement('p');
+      note.className = 'settings-section-hint';
+      note.textContent = 'These apply as soon as you change them, and each '
+                       + 'says what it is for. Anything you have moved off '
+                       + 'its default is marked.';
+      el.insertBefore(note, el.children[1] || null);
 
-      if (!matches.length) {
-        bodyEl.appendChild(emptyState('Nothing matches.'));
-        return;
+      // The prompt editor is not a scalar with a default and a range, so it
+      // cannot be a registry entry — it is two kilobytes of prose in a
+      // different file with its own reset. Moved rather than rebuilt, so
+      // prompts_editor.js keeps working untouched.
+      if (key === 'ai') {
+        const editor = document.getElementById('prompt-editor-block');
+        if (editor) {
+          editor.hidden = false;
+          // Belt as well as braces. The attribute is what the markup carries;
+          // the class is what any section-hiding code reaches for, and
+          // clearing only one is how this block spent a while being present,
+          // correctly built and invisible.
+          editor.classList.remove('hidden');
+          el.appendChild(editor);
+        }
       }
-      bodyEl.appendChild(section('Search results', matches, true));
-      return;
+
+      host.appendChild(el);
+    });
+
+    // What is deliberately not exposed, and why — otherwise an absent
+    // setting just sends somebody hunting through the JSON.
+    if (registry.not_exposed && registry.not_exposed.length) {
+      host.appendChild(exclusions());
     }
 
-    if (active === EXCLUSIONS) {
-      bodyEl.appendChild(exclusions());
-      return;
-    }
-
-    const items = registry.settings.filter(s => s.category === active);
-    bodyEl.appendChild(section(registry.categories[active], items, false));
-
-    // The prompt editor is not a scalar with a default and a range, so it
-    // cannot be a registry entry — it is two kilobytes of prose stored in a
-    // different file with its own reset. It lives here anyway, because
-    // rewriting what the assistant is told is tinkering by any definition.
-    //
-    // One bespoke section, moved rather than rebuilt, so prompts_editor.js
-    // keeps working untouched.
-    if (active === 'ai') {
-      const editor = document.getElementById('prompt-editor-block');
-      if (editor) {
-        editor.hidden = false;
-        // Belt as well as braces. The attribute is what the markup carries;
-        // the class is what any section-hiding code reaches for, and clearing
-        // only one of them is how this block spent a while being present,
-        // correctly built and invisible.
-        editor.classList.remove('hidden');
-        bodyEl.appendChild(editor);
-      }
-    }
+    // The nav is built from the sections present, so it has to be told.
+    window.dispatchEvent(new CustomEvent('shellmate:sections-changed'));
   }
 
   function section(title, items, showCategory) {
@@ -630,20 +558,20 @@
     setTimeout(tick, 1500);
   }
 
+  /**
+   * Say what happened to a change.
+   *
+   * Used the panel's own footer, which no longer exists — the shared toast
+   * stack is where every other confirmation goes, and one of those is
+   * exactly what this is.
+   */
   function report(text, isError) {
-    if (!countEl) return;
-    const note = document.getElementById('stockton-message');
-    if (note) note.remove();
-
-    if (!text) return;
-    const el = document.createElement('span');
-    el.id = 'stockton-message';
-    el.className = 'settings-footer-note' + (isError ? ' field-warn' : '');
-    el.textContent = text;
-    countEl.after(el);
-    // The count is the steady state; a message is transient and should not
-    // sit there for the rest of the session pretending to be current.
-    setTimeout(() => el.remove(), 6000);
+    if (!text || !window.shellmateAlerts) return;
+    window.shellmateAlerts.notify({
+      severity: isError ? 'warning' : 'info',
+      icon: isError ? 'error' : 'check_circle',
+      title: text,
+    });
   }
 
   window.openStockton = open;

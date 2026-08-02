@@ -67,7 +67,9 @@
     const body = panel.querySelector('.panel-body');
     if (body) {
       new MutationObserver(() => {
-        if (body.querySelectorAll('.settings-section').length !== sections.length) build();
+        const top = [...body.querySelectorAll('.settings-section')]
+          .filter(el => !el.parentElement.closest('.settings-section'));
+        if (top.length !== sections.length) build();
       }).observe(body, { childList: true });
     }
   });
@@ -82,7 +84,14 @@
     const body = panel.querySelector('.panel-body');
     if (!body) return;
 
-    sections = [...body.querySelectorAll('.settings-section')];
+    // Top-level sections only. A section nested inside another is a block
+    // belonging to its parent, not a destination of its own — and treating it
+    // as one hides it, because show() hides every section that is not the
+    // active one. That is precisely how the prompt editor came to be present,
+    // correctly built and invisible once before; it now sits inside the AI
+    // section, so this is the rule that keeps it visible.
+    sections = [...body.querySelectorAll('.settings-section')]
+      .filter(el => !el.parentElement.closest('.settings-section'));
     if (!sections.length) return;
 
     // Search box and nav rail, created once.
@@ -196,80 +205,62 @@
       section.classList.toggle('hidden', !anyVisible && !titleMatches);
     });
 
-    showStocktonMatches(query);
+    showExtras(query);
   }
 
   /**
-   * Surface matching advanced settings, badged, at the end of the results.
+   * The advanced settings need no special case in search any more (#135).
    *
-   * They live in their own panel, which is the point — but somebody searching
-   * "keepalive" here should be told it exists rather than concluding it does
-   * not. The badge says where it is; clicking opens it.
+   * They lived in their own panel, so a search here fetched /api/advanced and
+   * offered badged "Also in Stockton" results pointing at the other place.
+   * They are ordinary `.settings-section` elements with ordinary
+   * `.setting-row` children now, so the filter above finds them exactly as it
+   * finds everything else — and a second search path that could disagree with
+   * the first is the drift worth removing.
+   *
+   * EXTRAS survives for the prompt editor alone: it is prose in prompts.json
+   * rather than a registry entry, so nothing generates a row for it, and
+   * somebody searching "prompt" must not simply find nothing.
    */
-  async function showStocktonMatches(query) {
+  function showExtras(query) {
     const body = panel.querySelector('.panel-body');
     if (!body) return;
 
-    const existing = document.getElementById('settings-stockton-results');
+    const existing = document.getElementById('settings-extra-results');
     if (existing) existing.remove();
     if (query.length < 2) return;
 
-    let matches = [];
-    try {
-      const res = await fetch('/api/advanced');
-      const data = await res.json();
-      matches = (data.settings || []).filter(s =>
-        s.label.toLowerCase().includes(query) ||
-        s.key.toLowerCase().includes(query) ||
-        (s.summary || '').toLowerCase().includes(query));
-    } catch (_) { /* the extras below are still worth offering */ }
-
-    // Things that live in Stockton without being registry settings. The
-    // prompt editor moved there and is not a scalar, so /api/advanced does
-    // not know about it — and somebody who had learned where it was must not
-    // simply find nothing.
-    // Unshifted, not pushed. Somebody typing "prompt" means the prompt
-    // editor, not the three settings whose summaries happen to contain the
-    // word "prompt" — an exact intent outranks a substring.
-    EXTRAS.forEach(extra => {
-      if (extra.terms.some(term => term.includes(query) || query.includes(term))) {
-        matches.unshift({ key: extra.key, label: extra.label });
-      }
-    });
-
+    const matches = EXTRAS.filter(extra =>
+      extra.terms.some(term => term.includes(query) || query.includes(term)));
     if (!matches.length) return;
 
-    // Deliberately NOT class "settings-section": the observer below rebuilds
-    // the whole nav whenever that count changes, and rebuilding calls show(),
+    // Deliberately NOT class "settings-section": the observer rebuilds the
+    // whole nav whenever that count changes, and rebuilding calls show(),
     // which removes this block again. It ate its own results.
     const block = document.createElement('section');
     block.className = 'settings-extra-results';
-    block.id = 'settings-stockton-results';
+    block.id = 'settings-extra-results';
 
     const heading = document.createElement('h3');
     heading.className = 'settings-section-title';
-    heading.textContent = 'Also in Stockton';
+    heading.textContent = 'Elsewhere in Settings';
     block.appendChild(heading);
 
-    matches.slice(0, 12).forEach(setting => {
+    matches.forEach(extra => {
       const row = document.createElement('div');
       row.className = 'setting-row';
 
       const label = document.createElement('span');
       label.className = 'setting-label';
-      label.textContent = setting.label;
-
-      const badge = document.createElement('span');
-      badge.className = 'snippet-tag stockton-badge';
-      badge.textContent = 'Stockton';
-      label.appendChild(badge);
+      label.textContent = extra.label;
 
       const go = document.createElement('button');
       go.type = 'button';
       go.className = 'btn-tertiary';
-      go.textContent = 'Open';
+      go.textContent = 'Show me';
       go.addEventListener('click', () => {
-        if (typeof window.openStockton === 'function') window.openStockton();
+        const target = document.getElementById('prompt-editor-block');
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
 
       row.append(label, go);

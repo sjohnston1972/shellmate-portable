@@ -594,13 +594,6 @@ SETTINGS: tuple[Setting, ...] = (
             "number for both meant a row labelled *upload* quietly governing "
             "how much RSS a download could take.",
             minimum=1, maximum=10240, unit="MB"),
-    Setting("files.note_seconds", "How long a device note stays", 3.5, "float",
-            "The line in the corner saying what was sent on connect.",
-            "Long enough to read is the only requirement, and reading speed "
-            "differs.", minimum=0.5, maximum=60, unit="s"),
-    Setting("files.drift_banner_seconds", "How long an unchanged-config note stays", 8, "int",
-            "A changed configuration always waits to be dismissed.",
-            "", minimum=1, maximum=120, unit="s"),
     Setting("files.panel_ms", "How long a panel takes to open", 180, "int",
             "The duration of the transition chosen in Settings.",
             "Under about 120ms reads as a jump rather than a movement; over "
@@ -678,6 +671,14 @@ SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}
 
 
 #: What was left out, and why. Shown in the panel so nobody goes looking.
+# `files.note_seconds` and `files.drift_banner_seconds` used to be declared
+# above. Each timed one of two bespoke floating notices — the device note and
+# the drift banner — and both are alert toasts now, governed by
+# `alerts.toast_seconds` along with everything else. Two settings for two
+# overlays became one setting for one stack, which is what merging them was
+# for. A settings.json still carrying the old keys is harmless: they are read
+# by nothing, which is exactly what test_advanced.py checks for.
+
 NOT_EXPOSED: tuple[tuple[str, str], ...] = (
     ("Vault key-derivation parameters",
      "Lowering them weakens every stored credential, and changing them at all "
