@@ -256,10 +256,17 @@ def test_the_prompt_editor_is_visible_where_it_is_advertised() -> None:
             page.eval_on_selector("#open-prompt-editor", "e => e.click()")
             time.sleep(1.8)
 
-            active = page.query_selector("#stockton-nav .settings-nav-item.active")
-            check("it lands on the right category",
-                  active and "AI assistant" in active.inner_text(),
-                  active.inner_text() if active else "nothing active")
+            # It lives inside the AI section, which shows one at a time.
+            page.evaluate("() => window.openSettingsSection('AI assistant')")
+            time.sleep(1.2)
+
+            # Stockton is gone (#135): the advanced sections live in Settings,
+            # so the signpost scrolls rather than opening a second panel. The
+            # guard below is the one that matters and is unchanged.
+            active = page.query_selector(".settings-nav-item.active")
+            check("Settings is open on a section",
+                  active is not None,
+                  "nothing active")
 
             block = page.query_selector("#prompt-editor-block")
             check("the editor is on screen", bool(block) and block.is_visible(),
