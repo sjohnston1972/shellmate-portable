@@ -290,58 +290,10 @@
   // gives — do not help you find core-sw-04 among two hundred siblings.
   // -------------------------------------------------------------------------
 
-  /** The tag currently filtering the grid, or "" for everything. */
-  let activeTag = '';
-
-  async function renderTagFilter(profiles) {
-    const host = document.getElementById('welcome-tags');
-    if (!host) return;
-
-    const counts = new Map();
-    profiles.forEach(p => (p.tags || []).forEach(tag => {
-      counts.set(tag, (counts.get(tag) || 0) + 1);
-    }));
-
-    if (!counts.size) {
-      host.classList.add('hidden');
-      host.innerHTML = '';
-      activeTag = '';
-      return;
-    }
-
-    host.classList.remove('hidden');
-    host.innerHTML = '';
-
-    const chip = (label, tag, count) => {
-      const el = document.createElement('button');
-      el.type = 'button';
-      el.className = 'welcome-tag' + (activeTag === tag ? ' active' : '');
-      el.textContent = count === null ? label : `${label} ${count}`;
-      el.addEventListener('click', () => {
-        activeTag = (activeTag === tag) ? '' : tag;
-        renderWelcomeProfiles();
-      });
-      return el;
-    };
-
-    host.appendChild(chip('All', '', profiles.length));
-    [...counts.entries()].sort().forEach(([tag, count]) => {
-      host.appendChild(chip(tag, tag, count));
-    });
-
-    // Opening a whole group is the point of having one. Only offered when a
-    // group is actually selected, because "connect all" over an unfiltered
-    // list of two hundred is not something to put one click away.
-    if (activeTag) {
-      const open = document.createElement('button');
-      open.type = 'button';
-      open.className = 'btn-secondary btn-tiny welcome-tag-connect';
-      open.textContent = `Open all ${counts.get(activeTag)}`;
-      open.addEventListener('click', () => connectTag(activeTag,
-                                                      counts.get(activeTag)));
-      host.appendChild(open);
-    }
-  }
+  // The tag chip row lived here. It filtered the grid by tag, which is
+  // exactly what a group tile does — so it went rather than sitting beside
+  // the groups as a second way to do one thing. groups.js owns which group is
+  // open; this file only asks.
 
   /**
    * Open a session to every device carrying a tag.
@@ -350,6 +302,8 @@
    * something to do on a mis-click — and the backend paces the handshakes so
    * a bastion is not buried by them.
    */
+  window.connectTag = connectTag;
+
   async function connectTag(tag, count) {
     const ok = await (window.shellmateDialog
       ? window.shellmateDialog.confirm({
@@ -401,9 +355,13 @@
       failedRecently.clear();
       grid.innerHTML = '';
 
-      renderTagFilter(profiles);
-      const shown = activeTag
-        ? profiles.filter(p => (p.tags || []).includes(activeTag))
+      // The group row replaces the tag chips: both filtered the grid by tag,
+      // so keeping the two would have been one job done twice.
+      if (window.shellmateGroups) await window.shellmateGroups.render(profiles);
+      const openGroup = window.shellmateGroups
+        ? window.shellmateGroups.active() : '';
+      const shown = openGroup
+        ? profiles.filter(p => (p.tags || []).includes(openGroup))
         : profiles;
 
       shown.forEach(p => {
@@ -412,6 +370,14 @@
 
         const card = document.createElement('button');
         card.className = 'welcome-profile-card';
+        // Dropped onto a group tile, this joins that group. Its own type, not
+        // text/plain, so a group being dragged and a connection being dragged
+        // cannot be mistaken for one another.
+        card.draggable = true;
+        card.addEventListener('dragstart', (e) => {
+          e.dataTransfer.effectAllowed = 'copy';
+          e.dataTransfer.setData('application/x-shellmate-profile', p.id);
+        });
         card.title = `${profileTarget(p)} (${(p.connection_type || 'ssh').toUpperCase()})`;
         card.innerHTML = `
           <span class="material-symbols-outlined welcome-profile-icon">
@@ -1087,6 +1053,21 @@
         body:    JSON.stringify(profileFrom(payload)),
       });
       if (created.ok) profile = await created.json();
+
+      // Saved while a group is open, so it lands in that group. Creating a
+      // connection from inside "Glasgow" and finding it outside would mean
+      // doing the filing twice.
+      const openGroup = window.shellmateGroups
+        ? window.shellmateGroups.active() : '';
+      if (openGroup && profile && profile.id) {
+        try {
+          await fetch(`/api/groups/${encodeURIComponent(openGroup)}/members`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ profile_id: profile.id, member: true }),
+          });
+        } catch (_) { /* the connection is saved either way */ }
+      }
 
       // A first-time connection has no profile id when it starts, so the
       // backend had nowhere to file the credentials. Now that the profile

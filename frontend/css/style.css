@@ -6208,26 +6208,6 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   margin: 0 0 14px;
 }
 
-.welcome-tag {
-  padding: 3px 10px;
-  background: var(--surface-high);
-  border: 1px solid var(--outline);
-  border-radius: 999px;
-  color: var(--on-surface-dim);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.welcome-tag:hover { border-color: var(--primary-container); }
-
-.welcome-tag.active {
-  background: var(--primary-tint);
-  border-color: var(--primary-edge);
-  color: var(--primary);
-}
-
-.welcome-tag-connect { margin-left: 6px; }
-
 /* ---------------------------------------------------------------------------
    Multi-field dialogs (#106, #107, #109)
 
@@ -6782,3 +6762,155 @@ body.sidebar-labelled .sidebar-label {
   visibility: hidden;
   pointer-events: none;
 }
+
+/* ---------------------------------------------------------------------------
+   Groups on the dashboard (#134)
+
+   Colours are named, and each is defined for both themes. A hex value chosen
+   against the dark theme is unreadable in the light one — the exact failure
+   test_contrast.py exists to catch — so a group's colour is a token pair, not
+   a value the user picks off a wheel.
+--------------------------------------------------------------------------- */
+#welcome-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 18px;
+  min-height: 34px;
+}
+
+.welcome-groups-hint {
+  font-size: 12px;
+  color: var(--on-surface-muted);
+  align-self: center;
+}
+
+#welcome-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* --- a tile ------------------------------------------------------------- */
+.group-tile {
+  display: flex;
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--outline);
+  /* The colour reads as a spine down the left rather than a wash behind the
+     text, so a group is identifiable without the label losing contrast. */
+  border-left: 3px solid var(--group-colour, var(--outline));
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: grab;
+}
+
+.group-tile:hover { border-color: var(--primary-container); }
+.group-tile.group-dragging { opacity: 0.45; }
+.group-tile.group-drop { border-color: var(--primary); background: var(--surface-high); }
+
+.group-tile-open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 4px 7px 11px;
+  background: none;
+  border: none;
+  color: var(--on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.group-tile-name { font-weight: 500; }
+
+.group-tile-count {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--on-surface-muted);
+  background: var(--surface-high);
+}
+
+.group-tile-star,
+.group-tile-more {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  background: none;
+  border: none;
+  color: var(--on-surface-muted);
+  cursor: pointer;
+}
+
+.group-tile-star:hover,
+.group-tile-more:hover { color: var(--primary); }
+
+.group-tile-star .material-symbols-outlined,
+.group-tile-more .material-symbols-outlined { font-size: 16px; }
+
+/* Filled when it is a favourite, outlined when it is not. The subsetter keeps
+   the `.fill` glyph variants precisely so this axis works. */
+.group-favourite .group-tile-star { color: var(--group-colour, var(--primary)); }
+.group-favourite .group-tile-star .material-symbols-outlined {
+  font-variation-settings: 'FILL' 1;
+}
+
+/* --- inside a group ------------------------------------------------------ */
+.group-open-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.group-back {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface-muted);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.group-back:hover { color: var(--primary); border-color: var(--primary-container); }
+.group-back .material-symbols-outlined { font-size: 15px; }
+
+.group-open-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  padding-left: 9px;
+  border-left: 3px solid var(--group-colour, var(--outline));
+}
+
+.group-open-count { font-size: 12px; color: var(--on-surface-muted); }
+
+.group-menu .ctx-danger { color: var(--error); }
+
+/* --- the palette, both themes -------------------------------------------- */
+.group-slate  { --group-colour: #8A8FA3; }
+.group-blue   { --group-colour: #6E9BFF; }
+.group-green  { --group-colour: #67B978; }
+.group-amber  { --group-colour: #D9A441; }
+.group-red    { --group-colour: #E0736B; }
+.group-purple { --group-colour: #A98BEA; }
+.group-teal   { --group-colour: #4FB3B3; }
+.group-pink   { --group-colour: #DB7BAF; }
+
+:root[data-theme="light"] .group-slate  { --group-colour: #5B6070; }
+:root[data-theme="light"] .group-blue   { --group-colour: #2F5FC4; }
+:root[data-theme="light"] .group-green  { --group-colour: #2C7A42; }
+:root[data-theme="light"] .group-amber  { --group-colour: #8A5B00; }
+:root[data-theme="light"] .group-red    { --group-colour: #B03A32; }
+:root[data-theme="light"] .group-purple { --group-colour: #6742B8; }
+:root[data-theme="light"] .group-teal   { --group-colour: #17706F; }
+:root[data-theme="light"] .group-pink   { --group-colour: #A63B78; }

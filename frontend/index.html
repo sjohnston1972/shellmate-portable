@@ -147,18 +147,27 @@
           <div id="welcome-content">
             <h1><img src="/static/Untitled-removebg-preview.png" alt="" id="welcome-logo" />ShellMate Portable</h1>
 
-            <!-- Groupings, when there are any. Tags rather than folders,
-                 because the useful ones overlap: a device is both "glasgow"
-                 and "production" and "access". -->
-            <div id="welcome-tags" class="hidden"></div>
+            <!-- Groups. Tags rather than folders, because the useful ones
+                 overlap: a device is both "glasgow" and "production" and
+                 "access". A group is one of those tags given a name, a
+                 colour and a place — see groups.js. This replaced the tag
+                 chip row, which filtered the grid by tag and was therefore
+                 the same feature without the colour. -->
+            <div id="welcome-groups"></div>
 
             <!-- Saved session quick-launch grid -->
             <div id="welcome-profiles-grid"></div>
 
-            <button id="btn-welcome-connect" class="btn-primary">
-              <span class="material-symbols-outlined">add_circle</span>
-              New Connection
-            </button>
+            <div id="welcome-actions">
+              <button id="btn-welcome-connect" class="btn-primary">
+                <span class="material-symbols-outlined">add_circle</span>
+                New Connection
+              </button>
+              <button id="btn-new-group" class="btn-secondary">
+                <span class="material-symbols-outlined">folder</span>
+                New Group
+              </button>
+            </div>
             <div class="shortcuts-hint">
               <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>T</kbd> New tab</span>
               <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>W</kbd> Close tab</span>
@@ -2168,6 +2177,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/dialog.js"></script>
   <script src="/static/js/prefs.js"></script>
   <script src="/static/js/connections.js"></script>
+  <script src="/static/js/groups.js"></script>
   <script src="/static/js/filepicker.js"></script>
   <!-- Before tabs.js, which starts a session clock as each tab is created. -->
   <script src="/static/js/uptime.js"></script>
