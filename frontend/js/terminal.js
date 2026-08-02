@@ -92,6 +92,62 @@
     };
   }
 
+  /**
+   * Per-session colour scheme overrides, keyed by session id (#139).
+   *
+   * The point is being able to see at a glance which tab is production. One
+   * scheme for every terminal is the one thing a scheme could not do.
+   */
+  const _schemeOverride = {};
+
+  /**
+   * Give one live terminal its own scheme.
+   *
+   * `terminal.options.theme` is assignable on a live instance —
+   * applySettingsToAll already does exactly this to every terminal — so the
+   * applying is trivial. The care is in not being undone: that function
+   * overwrites every terminal's theme on every save, so without the skip
+   * below, changing the font size would silently revert every per-tab colour.
+   */
+  function setSessionScheme(sessionId, schemeName) {
+    if (schemeName) _schemeOverride[sessionId] = schemeName;
+    else delete _schemeOverride[sessionId];
+
+    const entry = _instances[sessionId];
+    if (!entry) return;
+    const theme = _themeFor(sessionId);
+    if (theme) {
+      try { entry.terminal.options.theme = theme; } catch (_) { /* disposed */ }
+    }
+  }
+
+  function sessionScheme(sessionId) {
+    return _schemeOverride[sessionId] || '';
+  }
+
+  /** The theme a session should use: its override, or the global scheme. */
+  function _themeFor(sessionId) {
+    const settings = window.shellmateSettings || {};
+    const appearance = settings.appearance || {};
+    const name = _schemeOverride[sessionId] || appearance.color_scheme;
+    const scheme = typeof window.getColorScheme === 'function'
+      ? window.getColorScheme(name) : null;
+    if (!scheme) return null;
+
+    const theme = Object.assign({}, scheme.theme);
+    // A per-tab scheme is the whole point of the override, so the global
+    // foreground/background overrides do not apply on top of it — they belong
+    // to the scheme somebody chose globally.
+    if (!_schemeOverride[sessionId]) {
+      if (appearance.foreground_override) theme.foreground = appearance.foreground_override;
+      if (appearance.background_override) theme.background = appearance.background_override;
+    }
+    const terminalSettings = settings.terminal || {};
+    if (terminalSettings.cursor_colour)    theme.cursor = terminalSettings.cursor_colour;
+    if (terminalSettings.selection_colour) theme.selectionBackground = terminalSettings.selection_colour;
+    return theme;
+  }
+
   /** Fallback theme used before settings.js has loaded. */
   function _fallbackTheme() {
     return {
@@ -472,12 +528,21 @@
     Object.entries(_instances).forEach(([sessionId, { terminal, fitAddon }]) => {
       try {
         if (schemeObj) {
-          const theme = Object.assign({}, schemeObj.theme);
-          if (a.foreground_override) theme.foreground = a.foreground_override;
-          if (a.background_override) theme.background = a.background_override;
-          if (s.cursor_colour)    theme.cursor = s.cursor_colour;
-          if (s.selection_colour) theme.selectionBackground = s.selection_colour;
-          terminal.options.theme = theme;
+          // A session carrying its own scheme keeps it. Without this, saving
+          // any setting at all — a font size — would silently revert every
+          // per-tab colour, because this loop rewrites the theme of every
+          // terminal on every save.
+          const own = _themeFor(sessionId);
+          if (_schemeOverride[sessionId] && own) {
+            terminal.options.theme = own;
+          } else {
+            const theme = Object.assign({}, schemeObj.theme);
+            if (a.foreground_override) theme.foreground = a.foreground_override;
+            if (a.background_override) theme.background = a.background_override;
+            if (s.cursor_colour)    theme.cursor = s.cursor_colour;
+            if (s.selection_colour) theme.selectionBackground = s.selection_colour;
+            terminal.options.theme = theme;
+          }
         }
         if (s.font_size)    terminal.options.fontSize    = s.font_size;
         if (s.font_family)  terminal.options.fontFamily   = s.font_family;
@@ -670,6 +735,8 @@
     });
   });
 
+  window.setSessionScheme = setSessionScheme;
+  window.sessionScheme    = sessionScheme;
   window.initTerminal = initTerminal;
   window.forgetTerminal = forgetTerminal;
 

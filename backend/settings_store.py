@@ -141,6 +141,12 @@ DEFAULT_SETTINGS: dict = {
         # outcome of making them configurable. The keys are declared by
         # TAB_MENU_GROUPS in tabs.js; absent means on.
         "tab_menu": {},
+        # Per-device terminal colour schemes, keyed "address:port" (#139).
+        # Against the address rather than the session, because a session id
+        # does not survive a reconnect and the thing being marked is the
+        # device — and because an ad-hoc connection with no saved profile
+        # should be markable too.
+        "tab_schemes": {},
         # Reopen the tabs that were open at quit. Off, and it stays off on
         # upgrade: this reconnects to devices nobody asked to connect to,
         # which is the same objection that keeps auto-reconnect off. It only

@@ -908,6 +908,10 @@
 
   // Public API
   window.getColorScheme     = (name) => COLOR_SCHEMES[name] || COLOR_SCHEMES.deep_space;
+  // The names and labels, so the per-tab picker offers exactly what the
+  // global one does rather than keeping its own list to fall out of step.
+  window.colorSchemeList    = () => Object.entries(COLOR_SCHEMES)
+    .map(([value, scheme]) => ({ value, label: scheme.label || value }));
   window.getAllColorSchemes  = () => COLOR_SCHEMES;
   window.openSettings       = openSettings;
   window.reloadSettings     = loadSettings;

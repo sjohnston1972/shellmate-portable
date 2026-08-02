@@ -170,6 +170,9 @@
     _learnTag(tabObj);
     sortTabs();
     _rememberOpenTabs();
+    // A device marked red stays red on reconnect — that is the point of
+    // marking it.
+    _restoreScheme(tabObj);
 
     // The session clock. connected_at is stamped by the backend, so the count
     // is from when the device answered rather than from when this ran.
@@ -1068,7 +1071,20 @@
       { action: 'duplicate', icon: 'tab_duplicate', label: 'Duplicate session',
         setting: 'duplicate' },
     ],
+    [
+      // Colour-coding a tab is the thing a single global scheme could never
+      // do: seeing at a glance which session is production.
+      { action: 'scheme', icon: 'palette', label: 'Colour scheme',
+        setting: 'scheme', value: (tab) => _schemeLabel(tab) },
+    ],
   ];
+
+  /** What scheme this tab is currently using, for the menu entry. */
+  function _schemeLabel(tab) {
+    if (!tab || typeof window.sessionScheme !== 'function') return '';
+    const own = window.sessionScheme(tab.sessionId);
+    return own ? own.replace(/_/g, ' ') : '';
+  }
 
   /** The two sections that are not simple rows, so they can be toggled too. */
   const TAB_MENU_SECTIONS = [
@@ -1193,6 +1209,7 @@
           case 'copy-address': _copyAddress(tab);      break;
           case 'save-connection': _saveConnection(tab);  break;
           case 'duplicate': _duplicateSession(tab);   break;
+          case 'scheme':    _chooseScheme(tab);       break;
           case 'pane':
             window.shellmateLayout.place(Number(btn.dataset.pane), tab.sessionId);
             break;
@@ -1218,6 +1235,68 @@
     // the DOM for the life of the page.
     document.querySelectorAll('.tab-context-menu').forEach(el => el.remove());
     _ctxMenu = null;
+  }
+
+  /**
+   * Give this tab its own colour scheme.
+   *
+   * Remembered against the address rather than the session, because a session
+   * id does not survive a reconnect and the thing being marked is the
+   * *device*. Keyed the same way the detected-hostname map is, so an ad-hoc
+   * connection with no saved profile is colour-coded just as well as a saved
+   * one — which matters, since the tab you most want marked red is often the
+   * one you opened in a hurry.
+   */
+  async function _chooseScheme(tab) {
+    const schemes = typeof window.colorSchemeList === 'function'
+      ? window.colorSchemeList() : [];
+    const current = typeof window.sessionScheme === 'function'
+      ? window.sessionScheme(tab.sessionId) : '';
+
+    const answer = await window.shellmateDialog.form({
+      title: `Colour scheme for ${tab.label}`,
+      body:  'Applies to this tab only, and to this device next time you '
+             + 'connect to it.',
+      note:  'The global scheme under Settings keeps its own value — changing '
+             + 'it will not undo this.',
+      confirmLabel: 'Apply',
+      fields: [
+        { name: 'scheme', label: 'Scheme', type: 'select', value: current,
+          options: [{ value: '', label: 'Follow the global setting' },
+                    ...schemes] },
+      ],
+    });
+    if (!answer) return;
+
+    if (typeof window.setSessionScheme === 'function') {
+      window.setSessionScheme(tab.sessionId, answer.scheme);
+    }
+    _rememberScheme(tab, answer.scheme);
+  }
+
+  /** The key a per-device scheme is filed under. */
+  function _schemeKey(tab) {
+    const address = tab.address || tab.hostname || '';
+    return address ? `${address}:${tab.port || 0}` : '';
+  }
+
+  function _rememberScheme(tab, scheme) {
+    const key = _schemeKey(tab);
+    if (!key || !window.shellmatePrefs) return;
+    const all = { ...(((window.shellmateSettings || {}).interface || {}).tab_schemes || {}) };
+    if (scheme) all[key] = scheme;
+    else delete all[key];
+    window.shellmatePrefs.set('tab_schemes', all);
+  }
+
+  /** Apply a remembered scheme when a tab opens. */
+  function _restoreScheme(tab) {
+    const key = _schemeKey(tab);
+    if (!key) return;
+    const all = ((window.shellmateSettings || {}).interface || {}).tab_schemes || {};
+    if (all[key] && typeof window.setSessionScheme === 'function') {
+      window.setSessionScheme(tab.sessionId, all[key]);
+    }
   }
 
   /**
