@@ -170,6 +170,7 @@
     _learnTag(tabObj);
     sortTabs();
     _rememberOpenTabs();
+    _paintGroups();
     // A device marked red stays red on reconnect — that is the point of
     // marking it.
     _restoreScheme(tabObj);
@@ -903,6 +904,7 @@
 
     tabs.length = 0;
     sorted.forEach(t => { tabs.push(t); tabList.appendChild(t.tabEl); });
+    _paintGroups();
 
     // The array indices just changed underneath the active-tab index.
     if (active) {
@@ -920,7 +922,11 @@
    * one is at least stable.
    */
   async function _learnTag(tab) {
-    if (_order !== 'tag' || _tagCache.has(tab.sessionId)) return;
+    // Learned whenever the strip is grouped *or* sorted by group. Gated on
+    // the sort order alone, a tab opened while merely showing groups had no
+    // group to show.
+    const wanted = _order === 'tag' || _groupStripe();
+    if (!wanted || _tagCache.has(tab.sessionId)) return;
     try {
       const profile = await _profileFor(tab);
       const tag = ((profile || {}).tags || [])[0] || '';
@@ -929,6 +935,7 @@
       _tagCache.set(tab.sessionId, '');
     }
     sortTabs();
+    _paintGroups();
   }
 
   /** Set the mode and apply it. Called by prefs.js on load and on save. */
@@ -950,6 +957,87 @@
   /** Whether dragging should be offered. Sorted tabs cannot be rearranged. */
   function tabOrderIsManual() {
     return _order === 'manual';
+  }
+
+  // -------------------------------------------------------------------------
+  // Showing the grouping, not just sorting by it (#140)
+  //
+  // Tab ordering could already group tabs together; nothing said *why* they
+  // were adjacent. Twelve tabs across three estates read as twelve things.
+  //
+  // A coloured spine and a label on the first tab of each run, rather than
+  // header elements inserted into the strip. That is deliberate: sortTabs()
+  // keeps the `tabs` array and the DOM in step, and Ctrl+1..9, closeTab's
+  // neighbour selection and the drag handler all index into that array. A
+  // header is not a tab and must never become index 0.
+  // -------------------------------------------------------------------------
+
+  /** Whether to show grouping at all. */
+  function _groupStripe() {
+    const prefs = (window.shellmateSettings || {}).interface || {};
+    return prefs.tab_groups !== false;
+  }
+
+  /** Group colours, so the strip and the dashboard agree. */
+  let _groupColours = null;
+
+  async function _loadGroupColours() {
+    if (_groupColours) return _groupColours;
+    try {
+      const res = await fetch('/api/groups');
+      const data = res.ok ? await res.json() : { groups: [] };
+      _groupColours = {};
+      (data.groups || []).forEach(g => { _groupColours[g.key] = g.colour; });
+    } catch (_) {
+      _groupColours = {};
+    }
+    return _groupColours;
+  }
+
+  window.addEventListener('shellmate:groups-changed', () => {
+    _groupColours = null;
+    _paintGroups();
+  });
+
+  /**
+   * Mark each run of same-group tabs.
+   *
+   * Only where tabs are actually adjacent. Showing a group label on scattered
+   * tabs would claim a grouping the strip is not showing — with a manual
+   * order, the honest thing is the colour alone.
+   */
+  async function _paintGroups() {
+    const show = _groupStripe();
+    const colours = show ? await _loadGroupColours() : {};
+
+    tabs.forEach((tab, index) => {
+      const el = tab.tabEl;
+      el.classList.remove('tab-group-start', 'tab-group-member');
+      el.removeAttribute('data-group');
+      [...el.classList].filter(c => c.startsWith('group-'))
+        .forEach(c => el.classList.remove(c));
+      const label = el.querySelector('.tab-group-label');
+      if (label) label.remove();
+      if (!show) return;
+
+      const group = _tagCache.get(tab.sessionId) || '';
+      if (!group) return;
+
+      el.classList.add('tab-group-member', `group-${colours[group] || 'slate'}`);
+      el.dataset.group = group;
+
+      const previous = tabs[index - 1];
+      const sameAsPrevious = previous
+        && (_tagCache.get(previous.sessionId) || '') === group;
+      if (sameAsPrevious) return;
+
+      // First of a run: it carries the name.
+      el.classList.add('tab-group-start');
+      const name = document.createElement('span');
+      name.className = 'tab-group-label';
+      name.textContent = group;
+      el.insertBefore(name, el.firstChild);
+    });
   }
 
   // -------------------------------------------------------------------------

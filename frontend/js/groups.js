@@ -432,6 +432,9 @@
     if (typeof window.renderWelcomeProfiles === 'function') {
       window.renderWelcomeProfiles();
     }
+    // The tab strip carries group colours too (#140), and it has no other way
+    // to know a colour changed.
+    window.dispatchEvent(new CustomEvent('shellmate:groups-changed'));
   }
 
   function _colourName(key) {

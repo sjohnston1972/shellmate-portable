@@ -161,6 +161,10 @@ DEFAULT_SETTINGS: dict = {
         # device — and because an ad-hoc connection with no saved profile
         # should be markable too.
         "tab_schemes": {},
+        # Show which group each tab belongs to in the strip (#140). On,
+        # because it costs nothing when no groups exist — a tab with no
+        # group is drawn exactly as before.
+        "tab_groups": True,
         # Reopen the tabs that were open at quit. Off, and it stays off on
         # upgrade: this reconnects to devices nobody asked to connect to,
         # which is the same objection that keeps auto-reconnect off. It only

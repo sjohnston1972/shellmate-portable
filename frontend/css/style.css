@@ -6961,3 +6961,29 @@ body.sidebar-labelled .sidebar-label {
 }
 
 .tab-menu-toggle:hover { color: var(--on-surface); }
+
+/* Tab grouping in the strip (#140).
+ *
+ * A spine and a label on the first tab of a run, rather than header elements
+ * inserted between tabs. sortTabs() keeps the `tabs` array and the DOM in
+ * step, and Ctrl+1..9, closeTab's neighbour selection and the drag handler
+ * all index into that array — a header is not a tab and must never become
+ * index 0. */
+.tab.tab-group-member {
+  border-bottom: 2px solid var(--group-colour, transparent);
+}
+
+.tab.tab-group-start {
+  border-left: 2px solid var(--group-colour, transparent);
+  padding-left: 8px;
+}
+
+.tab-group-label {
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--group-colour, var(--on-surface-muted));
+  margin-right: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
