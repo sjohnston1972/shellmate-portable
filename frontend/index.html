@@ -622,15 +622,12 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div class="setting-row">
             <label class="setting-label" for="setting-color-scheme">Color Scheme</label>
-            <select id="setting-color-scheme" class="setting-input">
-              <option value="deep_space">Deep Space (Default)</option>
-              <option value="solarized_dark">Solarized Dark</option>
-              <option value="nord">Nord</option>
-              <option value="one_dark">One Dark</option>
-              <option value="gruvbox">Gruvbox Dark</option>
-              <option value="dracula">Dracula</option>
-              <option value="monokai">Monokai</option>
-            </select>
+            <!-- Filled from /api/schemes, so a scheme added to schemes.json
+                 appears here without a rebuild. Hardcoding the list was a
+                 third copy of it — after the object in settings.js and the
+                 table in the backend — and the one most likely to be
+                 forgotten. -->
+            <select id="setting-color-scheme" class="setting-input"></select>
           </div>
           <div class="setting-row">
             <label class="setting-label">Font Color</label>

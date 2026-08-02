@@ -9,8 +9,21 @@
   let panel, overlay;
   let currentSettings = {};
 
-  // Color scheme definitions (xterm.js theme objects)
-  const COLOR_SCHEMES = {
+  /**
+   * Colour schemes, loaded from the backend (#128).
+   *
+   * These were seven hardcoded objects here, so a house scheme — or one
+   * matching the rest of somebody's tooling — meant editing the source and
+   * rebuilding. They live in schemes.json in the data folder now, following
+   * platforms.json and snippets.json: data, not code, and they travel with
+   * the folder.
+   *
+   * Seeded with the default alone so that anything asking for a scheme
+   * before the fetch returns gets a real theme rather than undefined. A
+   * terminal drawn in the wrong colours for 200ms is a far better failure
+   * than one that will not draw.
+   */
+  let COLOR_SCHEMES = {
     deep_space: {
       label: 'Deep Space (Default)',
       theme: {
@@ -18,177 +31,47 @@
         foreground:    '#E5E2E1',
         cursor:        '#C3C0FF',
         cursorAccent:  '#0E0E0E',
-        black:         '#2A2A2A',
-        red:           '#FFB4AB',
-        green:         '#B7C8E1',
-        yellow:        '#F9E2AF',
-        blue:          '#C3C0FF',
-        magenta:       '#CBA6F7',
-        cyan:          '#89DCEB',
-        white:         '#E5E2E1',
-        brightBlack:   '#353535',
-        brightRed:     '#FFB4AB',
-        brightGreen:   '#B7C8E1',
-        brightYellow:  '#F9E2AF',
-        brightBlue:    '#C3C0FF',
-        brightMagenta: '#CBA6F7',
-        brightCyan:    '#89DCEB',
-        brightWhite:   '#FFFFFF',
-      },
-    },
-    solarized_dark: {
-      label: 'Solarized Dark',
-      theme: {
-        background:    '#002B36',
-        foreground:    '#839496',
-        cursor:        '#839496',
-        cursorAccent:  '#002B36',
-        black:         '#073642',
-        red:           '#DC322F',
-        green:         '#859900',
-        yellow:        '#B58900',
-        blue:          '#268BD2',
-        magenta:       '#D33682',
-        cyan:          '#2AA198',
-        white:         '#EEE8D5',
-        brightBlack:   '#002B36',
-        brightRed:     '#CB4B16',
-        brightGreen:   '#586E75',
-        brightYellow:  '#657B83',
-        brightBlue:    '#839496',
-        brightMagenta: '#6C71C4',
-        brightCyan:    '#93A1A1',
-        brightWhite:   '#FDF6E3',
-      },
-    },
-    nord: {
-      label: 'Nord',
-      theme: {
-        background:    '#2E3440',
-        foreground:    '#D8DEE9',
-        cursor:        '#D8DEE9',
-        cursorAccent:  '#2E3440',
-        black:         '#3B4252',
-        red:           '#BF616A',
-        green:         '#A3BE8C',
-        yellow:        '#EBCB8B',
-        blue:          '#81A1C1',
-        magenta:       '#B48EAD',
-        cyan:          '#88C0D0',
-        white:         '#E5E9F0',
-        brightBlack:   '#4C566A',
-        brightRed:     '#BF616A',
-        brightGreen:   '#A3BE8C',
-        brightYellow:  '#EBCB8B',
-        brightBlue:    '#81A1C1',
-        brightMagenta: '#B48EAD',
-        brightCyan:    '#8FBCBB',
-        brightWhite:   '#ECEFF4',
-      },
-    },
-    one_dark: {
-      label: 'One Dark',
-      theme: {
-        background:    '#282C34',
-        foreground:    '#ABB2BF',
-        cursor:        '#528BFF',
-        cursorAccent:  '#282C34',
-        black:         '#3F4451',
-        red:           '#E06C75',
-        green:         '#98C379',
-        yellow:        '#E5C07B',
-        blue:          '#61AFEF',
-        magenta:       '#C678DD',
-        cyan:          '#56B6C2',
-        white:         '#ABB2BF',
-        brightBlack:   '#4F5666',
-        brightRed:     '#BE5046',
-        brightGreen:   '#98C379',
-        brightYellow:  '#E5C07B',
-        brightBlue:    '#61AFEF',
-        brightMagenta: '#C678DD',
-        brightCyan:    '#56B6C2',
-        brightWhite:   '#FFFFFF',
-      },
-    },
-    gruvbox: {
-      label: 'Gruvbox Dark',
-      theme: {
-        background:    '#282828',
-        foreground:    '#EBDBB2',
-        cursor:        '#EBDBB2',
-        cursorAccent:  '#282828',
-        black:         '#282828',
-        red:           '#CC241D',
-        green:         '#98971A',
-        yellow:        '#D79921',
-        blue:          '#458588',
-        magenta:       '#B16286',
-        cyan:          '#689D6A',
-        white:         '#A89984',
-        brightBlack:   '#928374',
-        brightRed:     '#FB4934',
-        brightGreen:   '#B8BB26',
-        brightYellow:  '#FABD2F',
-        brightBlue:    '#83A598',
-        brightMagenta: '#D3869B',
-        brightCyan:    '#8EC07C',
-        brightWhite:   '#EBDBB2',
-      },
-    },
-    dracula: {
-      label: 'Dracula',
-      theme: {
-        background:    '#282A36',
-        foreground:    '#F8F8F2',
-        cursor:        '#F8F8F2',
-        cursorAccent:  '#282A36',
-        black:         '#21222C',
-        red:           '#FF5555',
-        green:         '#50FA7B',
-        yellow:        '#F1FA8C',
-        blue:          '#BD93F9',
-        magenta:       '#FF79C6',
-        cyan:          '#8BE9FD',
-        white:         '#F8F8F2',
-        brightBlack:   '#6272A4',
-        brightRed:     '#FF6E6E',
-        brightGreen:   '#69FF94',
-        brightYellow:  '#FFFFA5',
-        brightBlue:    '#D6ACFF',
-        brightMagenta: '#FF92DF',
-        brightCyan:    '#A4FFFF',
-        brightWhite:   '#FFFFFF',
-      },
-    },
-    monokai: {
-      label: 'Monokai',
-      theme: {
-        background:    '#272822',
-        foreground:    '#F8F8F2',
-        cursor:        '#F8F8F2',
-        cursorAccent:  '#272822',
-        black:         '#272822',
-        red:           '#F92672',
-        green:         '#A6E22E',
-        yellow:        '#F4BF75',
-        blue:          '#66D9E8',
-        magenta:       '#AE81FF',
-        cyan:          '#A1EFE4',
-        white:         '#F8F8F2',
-        brightBlack:   '#75715E',
-        brightRed:     '#F92672',
-        brightGreen:   '#A6E22E',
-        brightYellow:  '#F4BF75',
-        brightBlue:    '#66D9E8',
-        brightMagenta: '#AE81FF',
-        brightCyan:    '#A1EFE4',
-        brightWhite:   '#F9F8F5',
       },
     },
   };
 
+  /** The colour keys a scheme carries, from the backend. */
+  let SCHEME_KEYS = [];
+
+  async function loadSchemes() {
+    try {
+      const res = await fetch('/api/schemes');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.schemes && Object.keys(data.schemes).length) {
+        COLOR_SCHEMES = data.schemes;
+      }
+      SCHEME_KEYS = data.keys || [];
+      _fillSchemeChoices();
+      // Anything already on screen was drawn from the seed.
+      window.dispatchEvent(new CustomEvent('shellmate:schemes-loaded'));
+    } catch (_) {
+      /* the seed is a working scheme; the picker simply offers less */
+    }
+  }
+
+  /** Keep the scheme picker in step with what actually exists. */
+  function _fillSchemeChoices() {
+    const select = document.getElementById('setting-color-scheme');
+    if (!select) return;
+    const chosen = select.value;
+    select.innerHTML = '';
+    Object.entries(COLOR_SCHEMES).forEach(([value, scheme]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = scheme.label || value;
+      select.appendChild(option);
+    });
+    if (chosen && COLOR_SCHEMES[chosen]) select.value = chosen;
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
+    loadSchemes();
     panel   = document.getElementById('settings-panel');
     overlay = document.getElementById('settings-overlay');
 
@@ -692,7 +575,7 @@
       return;
     }
 
-    const scheme = COLOR_SCHEMES[_gval('setting-scheme')] || COLOR_SCHEMES.deep_space;
+    const scheme = COLOR_SCHEMES[_gval('setting-color-scheme')] || COLOR_SCHEMES.deep_space;
     const fromScheme = scheme && scheme.theme && scheme.theme[themeKey];
     el.value = _isValidHex(fromScheme || '') ? fromScheme : '#c3c0ff';
     el.dataset.unset = '1';

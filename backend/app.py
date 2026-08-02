@@ -37,6 +37,7 @@ from pydantic import BaseModel
 
 from backend import auth, config_archive, desktop, paths
 from backend import groups as groups_module
+from backend import schemes as schemes_module
 from backend.configs import capture_config, diff_snapshots, drift_report
 from backend.connections.base import ConnectionError_, ConnectionParams
 from backend.connections import sftp
@@ -1345,6 +1346,54 @@ class GroupMemberRequest(BaseModel):
 
     profile_id: str
     member: bool = True
+
+
+# ---------------------------------------------------------------------------
+# REST — Terminal colour schemes
+# ---------------------------------------------------------------------------
+
+
+class SchemeRequest(BaseModel):
+    """A custom colour scheme."""
+
+    name: str
+    label: str = ""
+    theme: dict = {}
+
+
+@app.get("/api/schemes")
+async def list_schemes() -> dict:
+    """Every scheme, built-in and custom, with the keys a theme needs."""
+    schemes = await asyncio.to_thread(schemes_module.all_schemes)
+    return {"schemes": schemes, "keys": list(schemes_module.KEYS),
+            "default": schemes_module.DEFAULT}
+
+
+@app.post("/api/schemes")
+async def save_scheme(request: SchemeRequest) -> dict:
+    """
+    Create or replace a custom scheme.
+
+    Forgiving about the theme it is handed: unknown keys are dropped and
+    missing ones inherit from the default, because somebody pasting a scheme
+    from elsewhere should not have it refused over a stray field.
+    """
+    try:
+        scheme = await asyncio.to_thread(
+            schemes_module.save_scheme, request.name, request.label, request.theme)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Reported, never enforced — see schemes.contrast.
+    scheme["contrast"] = schemes_module.contrast(scheme["theme"])
+    return scheme
+
+
+@app.delete("/api/schemes/{name}")
+async def delete_scheme(name: str) -> dict:
+    """Remove a custom scheme. A built-in can only be shadowed, not deleted."""
+    if not await asyncio.to_thread(schemes_module.delete_scheme, name):
+        raise HTTPException(status_code=404, detail="No such custom scheme")
+    return {"status": "ok"}
 
 
 @app.get("/api/groups")
