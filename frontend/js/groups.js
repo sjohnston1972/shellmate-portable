@@ -204,12 +204,39 @@
 
     const prefs = _prefs();
     const right = prefs.group_tree_side === 'right';
+    const collapsed = prefs.group_tree_collapsed === true;
     // One mechanism only: `order` on the panel itself. There used to be a
     // second — row-reverse on the container — and the pair cancelled out, so
     // the dock button changed the setting and moved nothing (reported as
     // "clicking the icon with the arrows does nothing").
     panel.classList.toggle('group-tree-right', right);
-    panel.classList.toggle('group-tree-collapsed', prefs.group_tree_collapsed === true);
+    panel.classList.toggle('group-tree-collapsed', collapsed);
+
+    // The dragged width applies only while expanded. The collapsed 44px
+    // comes from a class rule, and an inline width would beat it silently —
+    // a rail stuck at 300px is this bug's second act.
+    const width = Number(prefs.group_tree_width) || 0;
+    panel.style.width = (!collapsed && width >= 180) ? `${width}px` : '';
+
+    // The chevron points the way it will act (#153): collapsing shrinks the
+    // panel toward its own edge, expanding grows it away from it. Up/down
+    // said neither.
+    const collapseBtn = document.getElementById('group-tree-collapse');
+    if (collapseBtn) {
+      const icon = collapseBtn.querySelector('.material-symbols-outlined');
+      const toward = right ? 'keyboard_arrow_right' : 'keyboard_arrow_left';
+      const away = right ? 'keyboard_arrow_left' : 'keyboard_arrow_right';
+      if (icon) icon.textContent = collapsed ? away : toward;
+      collapseBtn.title = collapsed ? 'Show the groups' : 'Collapse';
+    }
+
+    // The collapsed rail names itself and carries the count — a 44px strip
+    // with two tiny buttons read as a border, not a thing that opens.
+    const rail = document.getElementById('group-tree-rail');
+    if (rail) {
+      rail.classList.toggle('hidden', !collapsed);
+      rail.textContent = `Groups · ${groupCache.length}`;
+    }
 
     body.innerHTML = '';
     _tree(groupCache).forEach(node => body.appendChild(_branch(node)));
@@ -361,16 +388,92 @@
   // Docking and collapsing
   // -------------------------------------------------------------------------
 
+  /**
+   * Drag the tree's inner edge to resize it (#153).
+   *
+   * The same shape as panel_resize.js — clamp, persist on mouse-up so a drag
+   * is one write rather than one per frame, double-click to reset — but not
+   * that module: it is hardwired to right-anchored overlay panels, and this
+   * panel is docked left or right by preference, so the drag direction flips
+   * with the side.
+   */
+  function _bindResize() {
+    const handle = document.getElementById('group-tree-handle');
+    const panel = document.getElementById('group-tree');
+    if (!handle || !panel) return;
+
+    const MIN = 180;
+    const MAX = 520;
+    let startX = 0;
+    let startWidth = 0;
+    // What the drag decided. Persisted from here rather than re-measured at
+    // mouse-up: a re-render between the last move and the release resets the
+    // inline width, and the measurement then saves the width it had *before*
+    // the drag — which is how a 400px drag stored 260.
+    let dragged = 0;
+
+    const onMove = (e) => {
+      const right = _prefs().group_tree_side === 'right';
+      const delta = right ? (startX - e.clientX) : (e.clientX - startX);
+      dragged = Math.round(Math.min(Math.max(startWidth + delta, MIN), MAX));
+      panel.style.width = `${dragged}px`;
+    };
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('resizing-panel');
+      if (dragged && window.shellmatePrefs) {
+        window.shellmatePrefs.set('group_tree_width', dragged);
+      }
+    };
+
+    handle.addEventListener('mousedown', (e) => {
+      if (_prefs().group_tree_collapsed === true) return;
+      e.preventDefault();
+      e.stopPropagation();
+      startX = e.clientX;
+      startWidth = panel.getBoundingClientRect().width;
+      dragged = 0;
+      document.body.classList.add('resizing-panel');
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    // Double-click goes back to the stylesheet width — the way out of having
+    // dragged it somewhere useless.
+    handle.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      panel.style.width = '';
+      if (window.shellmatePrefs) window.shellmatePrefs.set('group_tree_width', 0);
+    });
+  }
+
   function _bindPanelControls() {
+    // Anywhere on the collapsed rail expands it — not only the chevron.
+    // Somebody who did not knowingly collapse it should not need to find
+    // one 16px button to undo it.
+    const panel = document.getElementById('group-tree');
+    if (panel) panel.addEventListener('click', () => {
+      if (_prefs().group_tree_collapsed === true) {
+        if (window.shellmatePrefs) window.shellmatePrefs.set('group_tree_collapsed', false);
+        renderTree(profileCache);
+      }
+    });
+
+    _bindResize();
+
     const dock = document.getElementById('group-tree-dock');
-    if (dock) dock.addEventListener('click', () => {
+    if (dock) dock.addEventListener('click', (e) => {
+      e.stopPropagation();
       const side = _prefs().group_tree_side === 'right' ? 'left' : 'right';
       if (window.shellmatePrefs) window.shellmatePrefs.set('group_tree_side', side);
       renderTree(profileCache);
     });
 
     const collapse = document.getElementById('group-tree-collapse');
-    if (collapse) collapse.addEventListener('click', () => {
+    if (collapse) collapse.addEventListener('click', (e) => {
+      e.stopPropagation();
       const now = !(_prefs().group_tree_collapsed === true);
       if (window.shellmatePrefs) window.shellmatePrefs.set('group_tree_collapsed', now);
       renderTree(profileCache);

@@ -169,6 +169,8 @@ DEFAULT_SETTINGS: dict = {
         # whether it is collapsed. "left" | "right".
         "group_tree_side": "left",
         "group_tree_collapsed": False,
+        # Dragged width of the tree (#153). 0 means the stylesheet default.
+        "group_tree_width": 0,
         # Interface font scale, the same shape as --icon-scale (#136). The
         # terminal has been settable for a long time; the chrome around it
         # was fixed at whatever looked right on one display.

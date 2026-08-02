@@ -7244,3 +7244,55 @@ body {
 .settings-subgroup .settings-subsection-title {
   margin: 0 0 4px;
 }
+
+/* The collapsed rail names itself (#153): a vertical "Groups · 7" where a
+   bare 44px strip read as a border rather than a thing that opens. */
+#group-tree { position: relative; }
+
+#group-tree-rail {
+  flex: 1;
+  writing-mode: vertical-rl;
+  padding: 12px 0;
+  background: none;
+  border: none;
+  color: var(--on-surface-muted);
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#group-tree.group-tree-collapsed { cursor: pointer; }
+#group-tree.group-tree-collapsed:hover #group-tree-rail { color: var(--primary); }
+#group-tree.group-tree-collapsed #group-tree-head {
+  flex-direction: column;
+  padding: 8px 0;
+  border-bottom: none;
+}
+
+/* The dock button is meaningless while collapsed — moving a 44px strip to
+   the other side of an expand-on-click rail is not a choice worth offering,
+   and its click would fight the rail's. */
+#group-tree.group-tree-collapsed #group-tree-dock { display: none; }
+
+/* Drag the inner edge (#153). Sits on whichever side faces the content. */
+#group-tree-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* Inside the panel, not straddling its edge. #group-tree is
+     `overflow: hidden` — which the tree needs while it animates its width —
+     so a handle at `right: -3px` was clipped away and the mouse landed on
+     the panel behind it. The hit area is the same size; it just lives in. */
+  right: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+#group-tree.group-tree-right #group-tree-handle { right: auto; left: 0; }
+#group-tree.group-tree-collapsed #group-tree-handle { display: none; }
+#group-tree-handle:hover { background: var(--primary-container); opacity: 0.4; }

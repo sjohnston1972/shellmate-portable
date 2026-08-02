@@ -157,6 +157,15 @@
               </button>
             </div>
             <div id="group-tree-body"></div>
+            <!-- What the collapsed rail says (#153). A 44px strip with two
+                 tiny buttons read as a decorative sliver and a missing
+                 feature — this names it and carries the count, and the whole
+                 rail expands on click. -->
+            <button id="group-tree-rail" class="hidden" type="button"
+                    title="Show the groups"></button>
+            <!-- Drag to resize. Same pattern as the side panels: clamp,
+                 persist on mouse-up, double-click to reset. -->
+            <div id="group-tree-handle" title="Drag to resize"></div>
           </aside>
 
           <div id="welcome-content">
