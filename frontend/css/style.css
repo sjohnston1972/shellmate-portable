@@ -7359,3 +7359,18 @@ body {
 .tab.tab-filtered-out {
   display: none;
 }
+
+/* A stored credential (#171). Marks which connections will just open and
+   which will ask — deliberately not distinguishing encrypted from plain
+   text here, since a padlock implying encryption over a readable password
+   would be worse than no icon at all. The vault is where that distinction
+   is made and stated. */
+.welcome-profile-lock,
+.tree-leaf-lock {
+  font-size: var(--icon-xs);
+  color: var(--on-surface-muted);
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+.tree-leaf-lock { margin-left: auto; flex-shrink: 0; }

@@ -279,20 +279,43 @@ def test_orphaned_credentials_are_not_left_behind() -> None:
           profiles.has_credentials(stored[0]["id"]))
 
 
-def test_listing_tidies_up() -> None:
-    print("\n-- Reading the list --")
+def test_listing_does_not_mutate() -> None:
+    """
+    Reading the list must never change it.
+
+    This asserted the opposite — that get_profiles() collapsed two entries
+    into one — and that behaviour was a data-loss bug at any size above a lab.
+    Five thousand connections to one address became one the first time
+    anything listed them, because identity() is host, port, username and
+    transport, and a terminal server fronting fifty devices is one address.
+
+    Merging still happens where it belongs: on save, and when asked.
+    """
+    print(chr(10) + "-- Reading the list --")
     reset([
-        {"id": "p1", "hostname": "10.3.3.3", "port": 22, "username": "u",
-         "connection_type": "ssh"},
-        {"id": "p2", "hostname": "10.3.3.3", "port": 22, "username": "u",
-         "connection_type": "ssh"},
+        {"id": "p1", "name": "first", "hostname": "10.3.3.3", "port": 22,
+         "username": "u", "connection_type": "ssh"},
+        {"id": "p2", "name": "second", "hostname": "10.3.3.3", "port": 22,
+         "username": "u", "connection_type": "ssh"},
     ])
     listed = profiles.get_profiles()
-    check("the welcome screen sees one tile, not two", len(listed) == 1)
+    check("both connections survive being listed", len(listed) == 2,
+          f"{len(listed)} came back - reading deleted one")
+
+    on_disk = json.loads(paths.profiles_file().read_text(encoding="utf-8"))
+    check("and the file is untouched", len(on_disk) == 2,
+          f"{len(on_disk)} left on disk")
+
     check("each carries the credential flag",
           all("has_saved_credentials" in p for p in listed))
     check("and where they are kept",
           all("credential_storage" in p for p in listed))
+
+    # The explicit action still merges, which is the half worth keeping.
+    removed = profiles.dedupe_existing()
+    check("dedupe_existing() still merges when asked", removed == 1,
+          f"removed {removed}")
+    check("leaving one", len(profiles.get_profiles()) == 1)
 
 
 def test_a_secret_still_cannot_reach_the_file() -> None:
@@ -766,7 +789,7 @@ def main() -> int:
                  test_existing_duplicates_are_merged,
                  test_merge_keeps_what_the_discarded_entry_knew,
                  test_orphaned_credentials_are_not_left_behind,
-                 test_listing_tidies_up,
+                 test_listing_does_not_mutate,
                  test_a_secret_still_cannot_reach_the_file,
                  test_what_is_saved_can_be_listed,
                  test_a_plaintext_credential_can_be_read_back,

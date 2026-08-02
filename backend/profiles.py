@@ -228,7 +228,8 @@ def attach_credential_set(profile_id: str, set_id: str) -> bool:
     return False
 
 
-def _resolve_owner(profile_id: str) -> str:
+def _resolve_owner(profile_id: str, profiles: list[dict] | None = None,
+                   plaintext: dict | None = None) -> str:
     """
     Whose credentials a profile actually uses.
 
@@ -236,11 +237,11 @@ def _resolve_owner(profile_id: str) -> str:
     password on this specific device meant it for this specific device — most
     obviously the one switch in the lab whose password was changed.
     """
-    for profile in _load():
+    for profile in (profiles if profiles is not None else _load()):
         if profile.get("id") != profile_id:
             continue
         own = any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS)
-        if own or _load_plaintext().get(profile_id):
+        if own or (plaintext if plaintext is not None else _load_plaintext()).get(profile_id):
             return profile_id
         reference = profile.get("credential_ref") or ""
         return set_owner(reference) if reference else profile_id
@@ -302,7 +303,48 @@ def _read_credentials(owner: str) -> dict:
     return out or _load_plaintext().get(owner, {})
 
 
-def has_credentials(owner: str) -> bool:
+def _has_for_profile(profile: dict, plaintext: dict) -> bool:
+    """
+    Whether this profile can connect without being asked, given the profile.
+
+    Takes the record rather than an id on purpose. `_resolve_owner()` finds it
+    by scanning the whole list, which is fine for one lookup and quadratic
+    when the caller is already iterating every profile — listing 5,000
+    connections was 25 million comparisons, and the loop had the record in its
+    hand the entire time.
+    """
+    profile_id = profile.get("id", "")
+    if any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS):
+        return True
+    if plaintext.get(profile_id):
+        return True
+
+    reference = profile.get("credential_ref") or ""
+    if not reference:
+        return False
+    owner = set_owner(reference)
+    return _has_directly(owner, plaintext)
+
+
+def _storage_for_profile(profile: dict, plaintext: dict) -> str:
+    """Which store holds this profile's credentials, without re-scanning."""
+    profile_id = profile.get("id", "")
+    if any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS):
+        return "vault"
+    if plaintext.get(profile_id):
+        return "plaintext"
+
+    reference = profile.get("credential_ref") or ""
+    if not reference:
+        return ""
+    owner = set_owner(reference)
+    if any(vault.has(_credential_key(owner, f)) for f in CREDENTIAL_FIELDS):
+        return "vault"
+    return "plaintext" if plaintext.get(owner) else ""
+
+
+def has_credentials(owner: str, profiles: list[dict] | None = None,
+                    plaintext: dict | None = None) -> bool:
     """
     True when any credential is remembered, either way.
 
@@ -311,14 +353,14 @@ def has_credentials(owner: str) -> bool:
     a scan report itself as ready to connect.
     """
     if owner.startswith("set:"):
-        return _has_directly(owner)
-    return _has_directly(_resolve_owner(owner))
+        return _has_directly(owner, plaintext)
+    return _has_directly(_resolve_owner(owner, profiles, plaintext), plaintext)
 
 
-def _has_directly(owner: str) -> bool:
+def _has_directly(owner: str, plaintext: dict | None = None) -> bool:
     if any(vault.has(_credential_key(owner, f)) for f in CREDENTIAL_FIELDS):
         return True
-    return bool(_load_plaintext().get(owner))
+    return bool((plaintext if plaintext is not None else _load_plaintext()).get(owner))
 
 
 def credential_storage(owner: str) -> str:
@@ -663,8 +705,12 @@ def dedupe_existing() -> int:
     Merge duplicates already sitting in profiles.json.
 
     Refusing new ones does not remove the ones anybody using ShellMate already
-    has. This runs when the list is read and writes only when it actually
-    removes something.
+    has, so this exists to clean up after the fact.
+
+    **Deliberately not called on read any more.** It was, and it meant listing
+    connections deleted them — see `get_profiles()`. It is an action somebody
+    chooses, which can then say what it merged, rather than a silent
+    correction applied to data nobody asked it to touch.
 
     Which entry survives matters more than it looks: credentials are keyed by
     profile id, so keeping the wrong one loses the saved password and leaves
@@ -797,16 +843,29 @@ def get_profiles() -> list[dict]:
 
     The flag is a boolean and never the credential itself — the UI only needs
     to know whether to ask for a password.
-    """
-    dedupe_existing()
 
+    **This does not deduplicate.** It used to open with `dedupe_existing()`,
+    which merges profiles sharing an identity and rewrites the file — so
+    listing connections deleted them. Five thousand connections to one lab
+    address became one, and the 62 seconds it took was the 4,999 credential
+    forgets on the way out.
+
+    Merging on save is right and still happens, via `find_matching()`. Merging
+    on *read* means any two connections to the same address, as the same user,
+    over the same transport quietly become one the next time anything lists
+    them — and a terminal server fronting fifty devices is one address. A read
+    must never mutate.
+    """
     profiles = _load()
+    # Read once and shared, not re-read per profile. _resolve_owner() called
+    # _load() for every connection, so listing 5,000 of them parsed a 1.6 MB
+    # file 5,000 times — 63 seconds, and quadratic in the size of the estate.
+    plaintext = _load_plaintext()
     for profile in profiles:
-        profile_id = profile.get("id", "")
-        profile["has_saved_credentials"] = has_credentials(profile_id)
+        profile["has_saved_credentials"] = _has_for_profile(profile, plaintext)
         # Which store, so the dialog can show the right option already ticked
         # and not quietly move a password from one to the other.
-        profile["credential_storage"] = credential_storage(profile_id)
+        profile["credential_storage"] = _storage_for_profile(profile, plaintext)
     return profiles
 
 

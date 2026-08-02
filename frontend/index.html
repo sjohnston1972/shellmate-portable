@@ -358,9 +358,15 @@
         </div>
 
         <div class="form-group">
-          <label for="field-tags">Tags <span class="optional">(optional)</span></label>
-          <input type="text" id="field-tags" placeholder="glasgow, production, access" />
-          <p class="field-hint">Comma-separated. Groups the welcome screen and lets you open a whole set at once. A device can carry several — they overlap on purpose.</p>
+          <!-- Groups, not "tags" (#172). They have always been the same thing —
+               a group is a tag with a name, a colour and a place — but the
+               field said tags, offered no help, and nothing connected it to
+               the tree somebody had just been looking at. -->
+          <label for="field-tags">Groups <span class="optional">(optional)</span></label>
+          <input type="text" id="field-tags" list="known-groups"
+                 placeholder="glasgow, glasgow/access" autocomplete="off" />
+          <datalist id="known-groups"></datalist>
+          <p class="field-hint">Comma-separated, and it completes as you type. A connection can be in several — they overlap on purpose. Use <code>parent/child</code> for a subgroup. Prefilled when you create a connection from inside a group.</p>
         </div>
 
         <!-- Transport picker. Switching this shows/hides the field groups

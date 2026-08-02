@@ -1029,6 +1029,13 @@
 
   window.addEventListener('shellmate:groups-changed', () => {
     _groupColours = null;
+    // The learned group per session goes too (#169). It was written once and
+    // never invalidated, so moving an open device to another group left its
+    // tab showing — and being grouped under — the one it had left, for the
+    // life of the session. The membership had changed; only the tab had not
+    // heard.
+    _tagCache.clear();
+    tabs.forEach(_learnTag);
     _paintGroups();
   });
 

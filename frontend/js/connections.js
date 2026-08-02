@@ -124,6 +124,7 @@
   // -------------------------------------------------------------------------
 
   function showConnectionDialog(prefill) {
+    loadGroupChoices();
     clearError();
     form.reset();
     loadCredentialChoices();
@@ -393,6 +394,18 @@
         // Set via textContent, not innerHTML — a profile name is user input
         // and must never be parsed as markup.
         card.querySelector('.welcome-profile-name').textContent = p.name || '';
+
+        // A padlock where a credential is already stored (#171), so the
+        // connections that will just open are distinguishable from the ones
+        // that will ask. has_saved_credentials is a boolean the backend
+        // already sends — never the credential itself.
+        if (p.has_saved_credentials) {
+          const lock = document.createElement('span');
+          lock.className = 'material-symbols-outlined welcome-profile-lock';
+          lock.textContent = 'key';
+          lock.title = 'A saved credential is stored for this connection';
+          card.querySelector('.welcome-profile-name').appendChild(lock);
+        }
         card.querySelector('.welcome-profile-host').textContent =
           p.connection_type === 'serial' ? (p.serial_port || '') : (p.hostname || '');
         card.addEventListener('click', () => openProfile(p, card));
@@ -674,6 +687,38 @@
       const row = box.closest('.checkbox-row');
       if (row) row.classList.toggle('field-superseded', usingSaved);
     });
+  }
+
+  /**
+   * Offer the groups that exist, and prefill the one being looked at (#172).
+   *
+   * A connection could only be filed after it was made — dragged onto a
+   * group, or created while one was open. The field for it existed and was
+   * called "tags", which is what they are but not what anybody was looking
+   * for.
+   */
+  async function loadGroupChoices() {
+    const list = document.getElementById('known-groups');
+    const field = document.getElementById('field-tags');
+    if (!list || !field) return;
+
+    try {
+      const res = await fetch('/api/groups');
+      const data = res.ok ? await res.json() : { groups: [] };
+      list.innerHTML = '';
+      (data.groups || []).forEach(group => {
+        const option = document.createElement('option');
+        option.value = group.key;
+        option.label = `${group.name} (${group.count})`;
+        list.appendChild(option);
+      });
+    } catch (_) { /* the field still takes free text */ }
+
+    // Prefilled from the group on screen, so creating a connection from
+    // inside one files it there without a second action. Only when the field
+    // is empty: an explicit answer always wins over a helpful guess.
+    const open = window.shellmateGroups ? window.shellmateGroups.active() : '';
+    if (open && !field.value.trim()) field.value = open;
   }
 
   async function loadCredentialChoices() {

@@ -330,6 +330,18 @@
       _refresh();
     });
 
+    // Right-click gets the same menu the tune button opens (#170). Members
+    // gained one for #167 and groups did not, so the discoverable gesture did
+    // nothing on the thing that most looks like it should respond to it.
+    //
+    // stopPropagation as well as preventDefault: the chip's own click selects
+    // the group, and without it a right-click would also filter the dashboard.
+    chip.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (node.group) _tileMenu(e, node.group);
+    });
+
     // A group tile could be dropped onto; so can a branch.
     _bindTreeDrop(chip, node);
 
@@ -383,6 +395,14 @@
     label.textContent = profile.name || profile.hostname || '';
 
     leaf.append(dot, label);
+
+    if (profile.has_saved_credentials) {
+      const lock = document.createElement('span');
+      lock.className = 'material-symbols-outlined tree-leaf-lock';
+      lock.textContent = 'key';
+      lock.title = 'A saved credential is stored for this connection';
+      leaf.appendChild(lock);
+    }
     leaf.addEventListener('click', () => {
       if (typeof window.connectProfile === 'function') window.connectProfile(profile);
       else if (typeof window.showConnectionDialog === 'function') {
@@ -500,6 +520,10 @@
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ profile_id: profileId, member }),
       });
+      // Membership changed, not just presentation — the tab strip caches
+      // which group each open session belongs to and has no other way to
+      // learn it has moved (#169).
+      window.dispatchEvent(new CustomEvent('shellmate:groups-changed'));
     } catch (_) { /* the refresh showing nothing changed is the report */ }
   }
 
@@ -867,6 +891,7 @@
           body:    JSON.stringify({ profile_id: profileId, member: true }),
         });
       if (!res.ok) throw new Error('Could not add it.');
+      window.dispatchEvent(new CustomEvent('shellmate:groups-changed'));
       _refresh();
       if (window.shellmateAlerts) {
         window.shellmateAlerts.notify({
