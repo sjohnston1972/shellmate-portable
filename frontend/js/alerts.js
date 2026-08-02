@@ -336,8 +336,40 @@
     toast({ severity: 'info', icon: 'check_circle', ...what });
   }
 
+  /**
+   * Whether this alert should be on screen right now (#164).
+   *
+   * Two rules, and the exception is the point of the feature:
+   *
+   * - **Not over the dashboard.** Notifications belong to the terminal view.
+   *   The stack lives inside #terminal-pane and the dashboard covers that
+   *   pane rather than replacing it, which is why they showed through.
+   * - **Not from another session** — *unless it carries a deadline*. A
+   *   pending reload countdown reaches somebody looking at a different tab
+   *   deliberately; that is the whole reason the popup channel exists, and
+   *   suppressing it would hide the one alert that most needs to travel.
+   */
+  function shouldShow(alert) {
+    // The exemption comes first, and deliberately outranks the dashboard
+    // rule as well as the other-tab one. A device is about to reload; where
+    // somebody happens to be looking does not make that less true, and a
+    // countdown suppressed because the dashboard was open is the single
+    // worst outcome available here.
+    if (alert.deadline_ms || alert.severity === 'critical') return true;
+
+    if (typeof window.dashboardVisible === 'function' && window.dashboardVisible()) {
+      return false;
+    }
+    if (!alert.sessionId) return true;
+
+    const active = typeof window.getActiveTab === 'function'
+      ? window.getActiveTab() : null;
+    return !active || active.sessionId === alert.sessionId;
+  }
+
   function toast(alert) {
     if (!toastHost) return;
+    if (!shouldShow(alert)) return;
 
     const el = document.createElement('div');
     el.className = `alert-toast alert-${alert.severity}`;

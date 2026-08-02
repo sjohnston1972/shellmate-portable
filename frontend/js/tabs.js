@@ -1054,6 +1054,21 @@
       if (!show) return;
 
       const group = _tagCache.get(tab.sessionId) || '';
+
+      // Selecting a group on the dashboard narrows the strip to it (#165).
+      //
+      // Hiding a live session is a stronger thing than filtering a list of
+      // shortcuts, so the array is never filtered — only the DOM. Ctrl+1..9,
+      // closeTab's neighbour selection and the drag handler all index into
+      // that array, and #140 was careful to keep the two in step: a keystroke
+      // must not silently change meaning because of a selection made on
+      // another screen, and a device must not become unreachable by the route
+      // somebody's fingers already know.
+      const selected = window.shellmateGroups
+        ? window.shellmateGroups.active() : '';
+      el.classList.toggle('tab-filtered-out',
+                          Boolean(selected) && group !== selected);
+
       if (!group) return;
 
       el.classList.add('tab-group-member', `group-${colours[group] || 'slate'}`);
@@ -2273,6 +2288,7 @@
   window.updateTabLabel   = updateTabLabel;
   window.setTabOrder      = setTabOrder;
   window.tabMenuItems     = tabMenuItems;
+  window.repaintTabGroups = _paintGroups;
   window.showDashboard    = showDashboard;
   window.hideDashboard    = hideDashboard;
   window.dashboardVisible = dashboardVisible;

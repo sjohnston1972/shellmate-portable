@@ -7327,3 +7327,35 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Pinned groups sit above a rule (#162), so pinning is a visible position
+   rather than a reordering nobody notices at five groups. */
+.tree-pin-divider {
+  height: 1px;
+  margin: 8px 4px;
+  background: var(--outline);
+}
+
+/* Whether a group member is open (#166). Same vocabulary as the tab dot —
+   one fact should not have two visual languages. */
+.tree-leaf-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--outline);
+  border: 1px solid var(--on-surface-muted);
+}
+
+.tree-leaf-dot.tree-leaf-live {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+/* A tab outside the selected group (#165). Hidden from the strip, never
+   removed from the tabs array — Ctrl+1..9 and the drag handler index into
+   that array, and a keystroke must not change meaning because of a
+   selection made on another screen. */
+.tab.tab-filtered-out {
+  display: none;
+}

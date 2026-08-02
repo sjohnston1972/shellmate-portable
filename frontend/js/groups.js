@@ -239,7 +239,23 @@
     }
 
     body.innerHTML = '';
-    _tree(groupCache).forEach(node => body.appendChild(_branch(node)));
+
+    // Pinned groups first, then a divider (#162). "Add to favourites" sorted
+    // them to the front and said so nowhere — at a handful of groups the
+    // reordering is invisible, so the action appeared to do nothing. A rule
+    // makes the effect a position rather than a subtlety, and the menu now
+    // names it for what it does: "Pin to the top".
+    const roots = _tree(groupCache);
+    const pinned = roots.filter(n => n.group && n.group.favourite);
+    const rest = roots.filter(n => !(n.group && n.group.favourite));
+
+    pinned.forEach(node => body.appendChild(_branch(node)));
+    if (pinned.length && rest.length) {
+      const rule = document.createElement('div');
+      rule.className = 'tree-pin-divider';
+      body.appendChild(rule);
+    }
+    rest.forEach(node => body.appendChild(_branch(node)));
 
     // "Everything", so there is always a way back to the whole list without
     // hunting for which group is currently selected.
@@ -352,22 +368,139 @@
     leaf.style.setProperty('--depth', String(node.depth + 1));
     leaf.title = profile.hostname || '';
 
-    const icon = document.createElement('span');
-    icon.className = 'material-symbols-outlined';
-    icon.textContent = 'terminal';
+    // Whether this device is open right now (#166). The same address:port
+    // match the group counts use, so a member's light and its group's live
+    // badge cannot disagree about what "this device" means.
+    const key = `${(profile.hostname || '').toLowerCase()}:${profile.port || 0}`;
+    const live = liveKeys.has(key);
+
+    const dot = document.createElement('span');
+    dot.className = 'tree-leaf-dot' + (live ? ' tree-leaf-live' : '');
+    dot.title = live ? 'Connected' : 'Not open';
 
     const label = document.createElement('span');
     label.className = 'tree-leaf-name';
     label.textContent = profile.name || profile.hostname || '';
 
-    leaf.append(icon, label);
+    leaf.append(dot, label);
     leaf.addEventListener('click', () => {
       if (typeof window.connectProfile === 'function') window.connectProfile(profile);
       else if (typeof window.showConnectionDialog === 'function') {
         window.showConnectionDialog(profile);
       }
     });
+    leaf.addEventListener('contextmenu', (e) => _memberMenu(e, profile, node));
     return leaf;
+  }
+
+  /**
+   * What can be done to a connection from inside a group (#167).
+   *
+   * Move and copy are genuinely different here rather than one operation
+   * with a flag: membership is overlapping, so copying adds a tag and moving
+   * adds one *and takes away the one it was listed under*. Move is the first
+   * thing in this feature that removes a connection from a group, so it says
+   * so plainly.
+   */
+  function _memberMenu(event, profile, node) {
+    event.preventDefault();
+    event.stopPropagation();
+    document.querySelectorAll('.group-menu').forEach(el => el.remove());
+
+    const menu = document.createElement('div');
+    menu.className = 'tab-context-menu group-menu';
+
+    const item = (icon, text, onClick, danger) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      if (danger) button.className = 'ctx-danger';
+      button.innerHTML = '<span class="material-symbols-outlined">' + icon + '</span>';
+      button.appendChild(document.createTextNode(text));
+      button.addEventListener('click', () => { menu.remove(); onClick(); });
+      return button;
+    };
+
+    menu.appendChild(item('content_copy', 'Copy to group...',
+                          () => _moveMember(profile, node, false)));
+    menu.appendChild(item('tab_duplicate', 'Move to group...',
+                          () => _moveMember(profile, node, true)));
+
+    const sep = document.createElement('div');
+    sep.className = 'ctx-sep';
+    menu.appendChild(sep);
+
+    menu.appendChild(item('backspace', 'Remove from "' + node.label + '"',
+                          () => _removeMember(profile, node)));
+    // Named unmistakably. In a tree of groups "delete" reads as "remove from
+    // this group", and it would actually delete the saved connection, which
+    // is not undoable.
+    menu.appendChild(item('delete_forever', 'Delete this connection...',
+                          () => _deleteMember(profile), true));
+
+    document.body.appendChild(menu);
+    menu.style.left = event.clientX + 'px';
+    menu.style.top = event.clientY + 'px';
+    setTimeout(() => {
+      document.addEventListener('click', () => menu.remove(), { once: true });
+    }, 0);
+  }
+
+  async function _moveMember(profile, node, removeFromCurrent) {
+    const choices = groupCache
+      .filter(g => g.key !== node.key)
+      .map(g => ({ value: g.key, label: g.name }));
+    if (!choices.length) {
+      _warn('No other group to use', 'Make another group first.');
+      return;
+    }
+
+    const answer = await window.shellmateDialog.form({
+      title: (removeFromCurrent ? 'Move ' : 'Copy ') + profile.name,
+      body:  removeFromCurrent
+        ? 'It leaves "' + node.label + '" and joins the group you pick.'
+        : 'It joins the group you pick and stays in "' + node.label
+          + '" - a connection belongs to as many groups as you like.',
+      confirmLabel: removeFromCurrent ? 'Move it' : 'Copy it',
+      fields: [{ name: 'group', label: 'Group', type: 'select', options: choices }],
+    });
+    if (!answer) return;
+
+    await _setMembership(profile.id, answer.group, true);
+    if (removeFromCurrent) await _setMembership(profile.id, node.key, false);
+    _refresh();
+  }
+
+  async function _removeMember(profile, node) {
+    await _setMembership(profile.id, node.key, false);
+    _refresh();
+  }
+
+  async function _deleteMember(profile) {
+    const ok = await window.shellmateDialog.confirm({
+      title: 'Delete the connection "' + profile.name + '"?',
+      body:  'This deletes the saved connection itself, not just its place in '
+             + 'this group. Any credentials saved against it go with it, and it '
+             + 'cannot be undone.',
+      confirmLabel: 'Delete it',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await fetch('/api/profiles/' + profile.id, { method: 'DELETE' });
+      _refresh();
+    } catch (e) {
+      _warn('Could not delete it', e.message);
+    }
+  }
+
+  async function _setMembership(profileId, key, member) {
+    try {
+      await fetch('/api/groups/' + encodeURIComponent(key) + '/members', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ profile_id: profileId, member }),
+      });
+    } catch (_) { /* the refresh showing nothing changed is the report */ }
   }
 
   function _bindTreeDrop(chip, node) {
@@ -518,6 +651,44 @@
     }
   }
 
+  /**
+   * A group inside another (#163).
+   *
+   * The parent is prefilled and the separator applied here, so nobody has to
+   * know the convention in order to use it.
+   */
+  async function newSubgroup(parent) {
+    const answer = await window.shellmateDialog.form({
+      title: 'New group inside "' + parent.name + '"',
+      body:  'It appears as a branch under the parent, and the parent counts '
+             + 'everything beneath it.',
+      confirmLabel: 'Create',
+      fields: [
+        { name: 'name', label: 'Name', required: true, placeholder: 'access',
+          hint: 'Stored as "' + parent.name + '/...", which is what makes it nest.' },
+        { name: 'colour', label: 'Colour', type: 'select',
+          options: colours.map(c => ({ value: c, label: _colourName(c) })) },
+      ],
+    });
+    if (!answer) return;
+
+    try {
+      const res = await fetch('/api/groups', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ name: parent.name + '/' + answer.name,
+                                  colour: answer.colour }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Could not create it.');
+      const group = await res.json();
+      expanded.add(parent.key);
+      activeGroup = group.key;
+      _refresh();
+    } catch (e) {
+      _warn('Could not create the subgroup', e.message);
+    }
+  }
+
   async function editGroup(group) {
     const answer = await window.shellmateDialog.form({
       title: `Edit "${group.name}"`,
@@ -527,8 +698,9 @@
           hint: 'Renaming re-tags every connection in the group.' },
         { name: 'colour', label: 'Colour', type: 'select', value: group.colour,
           options: colours.map(c => ({ value: c, label: _colourName(c) })) },
-        { name: 'favourite', label: 'Favourite', type: 'checkbox',
-          value: group.favourite, hint: 'Favourites sit at the front.' },
+        { name: 'favourite', label: 'Pinned to the top', type: 'checkbox',
+          value: group.favourite,
+          hint: 'Pinned groups are listed first, above a divider.' },
       ],
     });
     if (!answer) return;
@@ -608,9 +780,13 @@
     };
 
     menu.appendChild(item('tune', 'Rename or recolour…', () => editGroup(group)));
+    // Nesting was already rendered - a group named "site-3/access" becomes
+    // a branch under "site-3" - but the only way to make one was typing the
+    // separator by hand into the name field, which nothing explained (#163).
+    menu.appendChild(item('add', 'New subgroup...', () => newSubgroup(group)));
     menu.appendChild(item(
       'bookmark_add',
-      group.favourite ? 'Remove from favourites' : 'Add to favourites',
+      group.favourite ? 'Unpin from the top' : 'Pin to the top',
       () => _update(group.key, { favourite: !group.favourite })));
 
     const sep = document.createElement('div');
@@ -711,6 +887,9 @@
     if (typeof window.renderWelcomeProfiles === 'function') {
       window.renderWelcomeProfiles();
     }
+    // The tab strip narrows to the selected group (#165) and has no other
+    // way to hear that the selection changed.
+    if (typeof window.repaintTabGroups === 'function') window.repaintTabGroups();
     // The tab strip carries group colours too (#140), and it has no other way
     // to know a colour changed.
     window.dispatchEvent(new CustomEvent('shellmate:groups-changed'));
