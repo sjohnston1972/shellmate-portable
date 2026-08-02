@@ -35,6 +35,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend import auth, config_archive, desktop, paths
+from backend import groups as groups_module
 from backend.configs import capture_config, diff_snapshots, drift_report
 from backend.connections.base import ConnectionError_, ConnectionParams
 from backend.connections import sftp
@@ -1313,6 +1314,105 @@ async def discovery_save(request: DiscoverySaveRequest) -> dict:
 class TagsRequest(BaseModel):
     """Body for PUT /api/profiles/{profile_id}/tags."""
     tags: list[str] = []
+
+
+# ---------------------------------------------------------------------------
+# REST — Groups on the dashboard
+#
+# A group is a tag with presentation. Membership goes through the tag
+# endpoints above; these carry only the name, colour, favourite and position.
+# ---------------------------------------------------------------------------
+
+
+class GroupRequest(BaseModel):
+    """Body for creating or updating a group."""
+
+    name: str = ""
+    colour: str = ""
+    favourite: bool | None = None
+    order: int | None = None
+
+
+class GroupOrderRequest(BaseModel):
+    """The hand-arranged order of the dashboard, front to back."""
+
+    keys: list[str] = []
+
+
+class GroupMemberRequest(BaseModel):
+    """Put a connection in a group, or take it out."""
+
+    profile_id: str
+    member: bool = True
+
+
+@app.get("/api/groups")
+async def list_groups_endpoint() -> dict:
+    """Every group, including tags that have never been given a colour."""
+    return {"groups": await asyncio.to_thread(groups_module.list_groups),
+            "colours": list(groups_module.COLOURS)}
+
+
+@app.post("/api/groups")
+async def create_group_endpoint(request: GroupRequest) -> dict:
+    """Create a group, or adopt an existing tag as one."""
+    try:
+        return await asyncio.to_thread(
+            groups_module.create_group, request.name,
+            request.colour or groups_module.DEFAULT_COLOUR)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/groups/order")
+async def set_group_order_endpoint(request: GroupOrderRequest) -> dict:
+    """
+    Store the dashboard arrangement.
+
+    Declared **before** the /{key} route below. FastAPI matches in declaration
+    order, so the other way round this path is read as a group named "order" —
+    and PUT /api/groups/order would try to rename it, retagging connections.
+    """
+    return {"groups": await asyncio.to_thread(groups_module.set_order, request.keys)}
+
+
+@app.put("/api/groups/{key}")
+async def update_group_endpoint(key: str, request: GroupRequest) -> dict:
+    """Rename, recolour, favourite or reposition a group."""
+    changes = request.model_dump(exclude_none=True)
+    # An empty string is "not given" for these two, but False is a real value
+    # for `favourite` — which exclude_none already keeps.
+    if not changes.get("name"):
+        changes.pop("name", None)
+    if not changes.get("colour"):
+        changes.pop("colour", None)
+    try:
+        return await asyncio.to_thread(groups_module.update_group, key, changes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/groups/{key}")
+async def delete_group_endpoint(key: str) -> dict:
+    """
+    Remove a group. The connections in it survive — see groups.delete_group.
+    """
+    return await asyncio.to_thread(groups_module.delete_group, key)
+
+
+@app.post("/api/groups/{key}/members")
+async def set_group_member_endpoint(key: str, request: GroupMemberRequest) -> dict:
+    """
+    Add a connection to a group, or remove it.
+
+    Adding, never moving: a connection carries as many groups as it has tags.
+    """
+    try:
+        tags = await asyncio.to_thread(
+            groups_module.set_membership, request.profile_id, key, request.member)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "ok", "tags": tags}
 
 
 @app.get("/api/profiles/tags")
