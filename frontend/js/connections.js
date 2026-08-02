@@ -653,15 +653,54 @@
    * Never values: the backend resolves the reference the same way it resolves
    * a profile id, which is what keeps a saved password out of the browser.
    */
+  /**
+   * Show which of the two is actually in force.
+   *
+   * Picking a saved credential makes the typed password irrelevant — it is
+   * dropped on submit (`remember_credentials: !value('field-credential')`)
+   * and the backend resolves the reference instead. That was correct and
+   * completely invisible: you could type a password, choose a credential, and
+   * watch what you typed be ignored with nothing to say so.
+   *
+   * Disabled rather than hidden. A field that vanishes suggests it was never
+   * relevant; one that greys out says it has been superseded, which is what
+   * has happened.
+   */
+  function _syncCredentialChoice() {
+    const select = document.getElementById('field-credential');
+    const password = document.getElementById('field-password');
+    if (!select || !password) return;
+
+    const usingSaved = Boolean(select.value);
+    password.disabled = usingSaved;
+    password.placeholder = usingSaved
+      ? 'not needed — the saved credential supplies it'
+      : '';
+    password.classList.toggle('field-superseded', usingSaved);
+  }
+
   async function loadCredentialChoices() {
     const row = document.getElementById('field-credential-row');
     const select = document.getElementById('field-credential');
     if (!row || !select) return;
 
+    // Bound once. The list is rebuilt every time the dialog opens, and
+    // rebinding on each would stack a listener per open.
+    if (!select.dataset.bound) {
+      select.dataset.bound = '1';
+      select.addEventListener('change', _syncCredentialChoice);
+    }
+
     select.innerHTML = '';
     const none = document.createElement('option');
     none.value = '';
-    none.textContent = 'the password above';
+    // "or use the password above" cancelled itself out: "or use" offers an
+    // alternative and "the password above" is the thing the alternative
+    // replaces, so the default state of the selector was phrased as if it
+    // were one of the choices. Named for its consequence instead, which is
+    // the pattern the scanner's save dialog already uses ("None — ask me on
+    // first connect").
+    none.textContent = 'None — use the password above';
     select.appendChild(none);
 
     try {
@@ -687,6 +726,12 @@
       });
 
       row.hidden = !usable.length && !data.vault_locked;
+      const hint = document.getElementById('field-credential-hint');
+      // Shown with the row, because the row is hidden until somebody owns a
+      // shared credential — so the first sight of it is also the first time
+      // they might wonder what one is.
+      if (hint) hint.hidden = row.hidden;
+      _syncCredentialChoice();
     } catch (e) {
       row.hidden = true;
     }

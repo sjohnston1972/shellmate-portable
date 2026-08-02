@@ -6741,3 +6741,32 @@ body.sidebar-labelled .sidebar-label {
   font-size: 10.5px;
   color: var(--on-surface-muted);
 }
+
+/* A password field superseded by a saved credential (#131).
+ *
+ * Greyed rather than hidden: a field that vanishes suggests it was never
+ * relevant, one that dims says it has been superseded — which is what has
+ * actually happened, since the typed value is dropped on submit. */
+#field-password.field-superseded {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   The hidden attribute must win.
+
+   `[hidden] { display: none }` comes from the user-agent stylesheet, so any
+   author rule that sets `display` outranks it — and the class always does.
+   `#field-credential-row` is `.setting-input-group`, which is `display: flex`,
+   so `row.hidden = true` did nothing and the shared-credential picker showed
+   on every connection dialog whether or not a shared credential existed. It
+   appeared unannounced, containing only "None — use the password above",
+   which is most of why nobody could tell what it was for (#131).
+
+   Applied once, globally, rather than patched per element: the markup uses
+   the attribute in a couple of dozen places and every one of them is a
+   display rule away from the same silent failure.
+--------------------------------------------------------------------------- */
+[hidden] {
+  display: none !important;
+}

@@ -389,9 +389,13 @@
                  the value is resolved server-side, exactly as it is for a
                  saved profile. -->
             <div class="setting-input-group" id="field-credential-row" hidden>
-              <label class="field-inline-label" for="field-credential">or use</label>
+              <label class="field-inline-label" for="field-credential">Saved credential</label>
               <select id="field-credential" class="setting-input"></select>
             </div>
+            <p class="field-hint" id="field-credential-hint" hidden>
+              A username and password kept in the vault under a name and shared
+              by several connections — change it once and they all follow.
+            </p>
             <p class="field-hint" data-for="telnet">
               Optional. If given, ShellMate answers the device's login prompts for you.
             </p>
