@@ -252,6 +252,78 @@ class SSHHandler(ConnectionHandler):
     # Connection
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _wants_interactive_login(params) -> bool:
+        """
+        Whether the user asked to log in at the device rather than here.
+
+        Expressed by leaving everything blank: no password, no key, no
+        credential reference. Anything supplied is a statement of how they
+        intend to authenticate, and is honoured.
+        """
+        return not any((params.password, params.private_key_path,
+                        getattr(params, "credential_ref", "")))
+
+    def _connect_interactive(self, params, username, sock, disabled) -> bool:
+        """
+        Open a shell with no authentication, if the device permits it.
+
+        Returns True when a shell is open. False means the device wants
+        credentials after all, and the caller falls through to the ordinary
+        path so the failure is reported the way every other failure is.
+
+        Serial and telnet have always worked like this — no credential in the
+        dialog, login happening in the terminal — so this is SSH being allowed
+        to do what the other two transports already do.
+        """
+        import socket as _socket
+
+        try:
+            raw = sock or _socket.create_connection(
+                (params.hostname, params.port), advanced("ssh.connect_timeout"))
+            transport = paramiko.Transport(raw, disabled_algorithms=(
+                disabled or {}).get("disabled_algorithms"))
+            transport.start_client(timeout=advanced("ssh.banner_timeout"))
+
+            # auth_none returns the methods still required. An empty list is
+            # the device saying "come in".
+            remaining = transport.auth_none(username)
+            if remaining:
+                logger.info(
+                    "%s will not accept an unauthenticated login (wants %s)",
+                    params.target(), ", ".join(remaining))
+                transport.close()
+                return False
+
+            # Handed to the SSHClient rather than held separately, so every
+            # existing path works unchanged: is_connected reads the transport
+            # off the client, disconnect() closes the client, and
+            # open_secondary_channel() asks the client for it. A detached
+            # transport would have reported the session dead the instant it
+            # opened.
+            self._client._transport = transport
+
+            keepalive = advanced("ssh.keepalive_seconds")
+            if keepalive:
+                transport.set_keepalive(int(keepalive))
+
+            self._channel = transport.open_session()
+            self._channel.get_pty(term="xterm-256color", width=80, height=24)
+            self._channel.invoke_shell()
+            self._channel.settimeout(advanced("ssh.read_timeout"))
+            params.scrub_secrets()
+            logger.info("Connected to %s with no authentication; the device "
+                        "will do its own asking", params.target())
+            return True
+        except Exception as exc:
+            logger.info("Unauthenticated login to %s did not work (%s); "
+                        "falling back", params.target(), exc)
+            try:
+                transport.close()
+            except Exception:
+                pass
+            return False
+
     def connect(self) -> None:
         """Establish the SSH connection and open an interactive shell."""
         params = self.params
@@ -299,6 +371,22 @@ class SSHHandler(ConnectionHandler):
             discover_keys = bool(advanced("ssh.look_for_keys"))
             if params.password and not params.private_key_path:
                 discover_keys = False
+
+            # No credentials at all: let the device do the asking (#132).
+            #
+            # Console and terminal servers commonly accept SSH with no
+            # authentication and then present their own `Username:` prompt in
+            # the shell — which is the login that matters. paramiko's
+            # SSHClient.connect() cannot express that, since it always
+            # authenticates, so this path drives the transport directly.
+            #
+            # **Nothing is invented.** No agent key, no discovered key, no
+            # remembered password. Somebody who asked for an interactive login
+            # and got three failed attempts against a TACACS policy without
+            # typing anything would have every right to be furious.
+            if self._wants_interactive_login(params):
+                if self._connect_interactive(params, username, sock, disabled):
+                    return
 
             self._client.connect(
                 hostname=params.hostname,
