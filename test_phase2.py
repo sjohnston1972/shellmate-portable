@@ -2,12 +2,69 @@
 test_phase2.py — Playwright UI tests for ShellMate Phase 2 (AI chat pane).
 Tests the split-screen layout, chat UI, WebSocket streaming, command blocks,
 context indicator, and divider drag.
+
+Three things this file used to get wrong, all of which kept it permanently
+red without anybody noticing (#129):
+
+- **It tested whatever was running on 8765.** It started no server, so it ran
+  against the user's own ShellMate — their settings, their sessions, their
+  data folder — and could leave changes behind in a real installation. Every
+  other test in the suite starts uvicorn on a spare port with a temp data
+  directory; this one now does too.
+
+- **It assumed the AI panel was on.** `ai.panel_enabled` became opt-in on a
+  fresh install and this file predates that, so 42 of its checks failed with
+  "chat-pane visible: expected to be visible" and none of them was telling us
+  anything about the chat. Testing the chat pane requires the chat pane —
+  that is setup, not a change to what is under test.
+
+- **It could not report its own failure.** `fail()` printed the Playwright
+  error verbatim, which contains U+21B5; under the Windows console's cp1252
+  that raised UnicodeEncodeError *while reporting a failure*, so the run died
+  mid-output and the summary never printed. A test that cannot say what went
+  wrong stays broken quietly.
 """
 import asyncio
 import json
-from playwright.async_api import async_playwright, expect
+import os
+import sys
+import tempfile
+import threading
+import time
+from pathlib import Path
 
-BASE = "http://127.0.0.1:8765"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from backend import paths  # noqa: E402
+
+_TEMP = Path(tempfile.mkdtemp(prefix="shellmate-phase2-"))
+paths._data_dir_cache = _TEMP
+assert paths.data_dir() == _TEMP, (
+    f"refusing to run: this would use {paths.data_dir()}")
+
+import uvicorn  # noqa: E402
+from playwright.async_api import async_playwright, expect  # noqa: E402
+
+from backend.app import app  # noqa: E402
+from backend.settings_store import update_settings  # noqa: E402
+
+# The pane under test has to exist for any of this to mean anything.
+update_settings({"ai": {"panel_enabled": True}})
+
+PORT = 8766
+BASE = f"http://127.0.0.1:{PORT}"
+
+_server = uvicorn.Server(uvicorn.Config(
+    app, host="127.0.0.1", port=PORT, log_level="error"))
+threading.Thread(target=_server.run, daemon=True).start()
+time.sleep(3)
+
+# Playwright errors carry U+21B5 and the Windows console is cp1252. Without
+# this, printing a failure raises and takes the run with it.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:                                        # pragma: no cover
+    pass
 
 
 async def run():
@@ -92,10 +149,14 @@ async def run():
             await expect(page.locator("#ai-backend-select")).to_be_visible()
             opts = await page.locator("#ai-backend-select option").all()
             vals = [await o.get_attribute("value") for o in opts]
-            assert "ollama" in vals and "claude" in vals, f"options: {vals}"
-            ok("backend selector has ollama + claude options")
+            # The selector lists provider:model pairs now, not bare provider
+            # names — it gained a model picker after this was written. What
+            # matters is unchanged: both backends are reachable from it.
+            providers = {v.split(":", 1)[0] for v in vals if v}
+            assert "ollama" in providers and "claude" in providers, f"options: {vals}"
+            ok("backend selector offers both ollama and claude")
         except Exception as e:
-            fail("backend selector has ollama + claude options", str(e))
+            fail("backend selector offers both ollama and claude", str(e))
 
         try:
             await expect(page.locator("#chat-messages")).to_be_visible()
