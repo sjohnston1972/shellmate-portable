@@ -6935,3 +6935,29 @@ body.sidebar-labelled .sidebar-label {
 :root[data-theme="light"] .group-purple { --group-colour: #6742B8; }
 :root[data-theme="light"] .group-teal   { --group-colour: #17706F; }
 :root[data-theme="light"] .group-pink   { --group-colour: #A63B78; }
+
+/* Tab right-click menu toggles (#141).
+ *
+ * A grid rather than a stack: eight entries in a column would dominate the
+ * Interface section, and they are a set of peers rather than a sequence. */
+.setting-row-block {
+  display: block;
+}
+
+#tab-menu-toggles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 4px 14px;
+  margin-top: 8px;
+}
+
+.tab-menu-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--on-surface-dim);
+  cursor: pointer;
+}
+
+.tab-menu-toggle:hover { color: var(--on-surface); }

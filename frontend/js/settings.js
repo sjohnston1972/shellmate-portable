@@ -388,6 +388,7 @@
     _val('setting-tab-label-width',   ui.max_tab_label_px || 160);
     _checked('setting-connection-dot',    ui.show_connection_dot !== false);
     _checked('setting-sidebar-labels',    ui.sidebar_labels === true);
+    _renderTabMenuToggles(ui.tab_menu || {});
     _checked('setting-restore-tabs',      ui.restore_tabs === true);
     _val('setting-new-tab-opens',         ui.new_tab_opens || 'welcome');
     _fillProfileChoices(ui.new_tab_profile || '');
@@ -518,6 +519,7 @@
         max_tab_label_px:    parseInt(_gval('setting-tab-label-width'), 10) || 160,
         show_connection_dot: _gchecked('setting-connection-dot'),
         sidebar_labels:      _gchecked('setting-sidebar-labels'),
+        tab_menu:            _collectTabMenu(),
         restore_tabs:        _gchecked('setting-restore-tabs'),
         new_tab_opens:       _gval('setting-new-tab-opens'),
         new_tab_profile:     _gval('setting-new-tab-profile'),
@@ -758,6 +760,46 @@
     const mode = document.getElementById('setting-new-tab-opens');
     if (mode) mode.addEventListener('change', _syncNewTabRow);
   });
+
+  /**
+   * The tab-menu toggles, rendered from the menu's own list.
+   *
+   * tabs.js owns what the menu can offer; this asks it. Two hand-maintained
+   * lists of the same entries would drift, and the drift would be silent —
+   * a toggle for an entry that no longer exists, or an entry with no toggle.
+   */
+  function _renderTabMenuToggles(current) {
+    const host = document.getElementById('tab-menu-toggles');
+    if (!host) return;
+    host.innerHTML = '';
+
+    const items = typeof window.tabMenuItems === 'function'
+      ? window.tabMenuItems() : [];
+
+    items.forEach(item => {
+      const row = document.createElement('label');
+      row.className = 'tab-menu-toggle';
+
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.dataset.menuSetting = item.setting;
+      // Absent means on, matching the menu's own reading of it.
+      box.checked = current[item.setting] !== false;
+
+      const text = document.createElement('span');
+      text.textContent = item.label;
+
+      row.append(box, text);
+      host.appendChild(row);
+    });
+  }
+
+  function _collectTabMenu() {
+    const out = {};
+    document.querySelectorAll('#tab-menu-toggles input[type=checkbox]')
+      .forEach(box => { out[box.dataset.menuSetting] = box.checked; });
+    return out;
+  }
 
   function _isValidHex(h) { return /^#[0-9A-Fa-f]{6}$/.test(h); }
 

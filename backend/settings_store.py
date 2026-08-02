@@ -135,6 +135,12 @@ DEFAULT_SETTINGS: dict = {
         # one setting away rather than a redesign — off by default, because
         # the rail is deliberately narrow and most people learn the icons.
         "sidebar_labels": False,
+        # Which entries the tab right-click menu offers. Every one defaults to
+        # on, so an existing installation loses nothing — an upgrade that
+        # silently removed menu items people use would be the worst possible
+        # outcome of making them configurable. The keys are declared by
+        # TAB_MENU_GROUPS in tabs.js; absent means on.
+        "tab_menu": {},
         # Reopen the tabs that were open at quit. Off, and it stays off on
         # upgrade: this reconnects to devices nobody asked to connect to,
         # which is the same objection that keeps auto-reconnect off. It only

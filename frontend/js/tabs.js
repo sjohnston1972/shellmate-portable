@@ -1027,15 +1027,74 @@
    * Show the context menu near the cursor for a given session.
    */
   /**
-   * Escape text bound for innerHTML.
+   * What the tab menu can offer, as data.
    *
-   * The address comes from the connection dialog, so it is user input on its
-   * way into markup. Everything else in this menu is a literal.
+   * This was a hand-written innerHTML template. Making the entries
+   * configurable (#141) turns them into a list, which is the same move
+   * advanced.py made for settings and for the same reason: two
+   * hand-maintained lists of one thing drift, and the drift is silent. A new
+   * entry is one row here — the menu and its Settings toggles both render
+   * from it.
+   *
+   * Grouped, because **separators are derived, not placed**. A separator
+   * written between two entries becomes a stray line the moment either is
+   * switched off; a separator between two *groups that rendered something*
+   * cannot.
+   *
+   * `when` is applicability — Reconnect on a live tab is meaningless whatever
+   * the preference says. The setting is a second, independent condition.
    */
-  function _escapeHtml(value) {
-    const box = document.createElement('div');
-    box.textContent = value == null ? '' : String(value);
-    return box.innerHTML;
+  const TAB_MENU_GROUPS = [
+    [
+      { action: 'reconnect', icon: 'add_circle', label: 'Reconnect',
+        setting: 'reconnect', when: (tab) => tab && !tab.isConnected },
+    ],
+    [
+      { action: 'clear', icon: 'backspace', label: 'Clear console',
+        setting: 'clear' },
+      { action: 'copy', icon: 'content_copy', label: 'Copy history',
+        setting: 'copy' },
+      // The address is what you need somewhere else: a ticket, a chat, a
+      // firewall rule. The tab shows the device's *name* once it announces
+      // itself, which is exactly when the address stops being on screen.
+      { action: 'copy-address', icon: 'lan', label: 'Copy address',
+        setting: 'copy_address', value: (tab) => _addressOf(tab) },
+    ],
+    [
+      // An ad-hoc connection could not be kept: the only way was to retype
+      // the whole thing into the dialog.
+      { action: 'save-connection', icon: 'bookmark_add',
+        label: 'Save this connection', setting: 'save_connection' },
+      { action: 'duplicate', icon: 'tab_duplicate', label: 'Duplicate session',
+        setting: 'duplicate' },
+    ],
+  ];
+
+  /** The two sections that are not simple rows, so they can be toggled too. */
+  const TAB_MENU_SECTIONS = [
+    { setting: 'panes', label: 'Move to pane' },
+    { setting: 'quick_broadcast', label: 'Quick broadcast' },
+  ];
+
+  /** Every toggleable entry, for the Settings panel to render itself from. */
+  function tabMenuItems() {
+    return [
+      ...TAB_MENU_GROUPS.flat().map(i => ({ setting: i.setting, label: i.label })),
+      ...TAB_MENU_SECTIONS.map(s => ({ setting: s.setting, label: s.label })),
+    ];
+  }
+
+  /** Whether an entry is switched on. Absent means on — see the defaults. */
+  function _menuEnabled(setting) {
+    const prefs = ((window.shellmateSettings || {}).interface || {}).tab_menu || {};
+    return prefs[setting] !== false;
+  }
+
+  function _addressOf(tab) {
+    const address = tab ? (tab.address || tab.hostname || '') : '';
+    if (!address) return '';
+    return (tab.port && tab.port !== 22 && tab.connectionType === 'ssh')
+      ? `${address}:${tab.port}` : address;
   }
 
   function _showTabContextMenu(e, sessionId) {
@@ -1044,61 +1103,51 @@
     _ctxSessionId = sessionId;
 
     const tab = tabs.find(t => t.sessionId === sessionId);
-    const disconnected = tab && !tab.isConnected;
-
-    // Shown on the entry itself. "Copy address" tells you the action; it does
-    // not tell you *which* address you are about to copy, and on a tab named
-    // after the device that is the one thing you cannot see anywhere else.
-    // Escaped: it reaches innerHTML, and it originates from the connection
-    // dialog rather than from us.
-    const address = tab ? (tab.address || tab.hostname || '') : '';
-    const addressLabel = _escapeHtml(
-      address && tab && tab.port && tab.port !== 22 && tab.connectionType === 'ssh'
-        ? `${address}:${tab.port}`
-        : address);
 
     _ctxMenu = document.createElement('div');
     _ctxMenu.className = 'tab-context-menu';
-    _ctxMenu.innerHTML = `
-      ${disconnected ? `
-      <button data-action="reconnect">
-        <span class="material-symbols-outlined">add_circle</span>
-        Reconnect
-      </button>
-      <div class="ctx-sep"></div>` : ''}
-      <button data-action="clear">
-        <span class="material-symbols-outlined">backspace</span>
-        Clear console
-      </button>
-      <button data-action="copy">
-        <span class="material-symbols-outlined">content_copy</span>
-        Copy history
-      </button>
-      <!-- The address is what you need somewhere else: a ticket, a chat, a
-           firewall rule. The tab shows the device's *name* once it announces
-           itself, which is exactly when the address stops being on screen. -->
-      <button data-action="copy-address">
-        <span class="material-symbols-outlined">lan</span>
-        Copy address
-        ${addressLabel ? `<span class="ctx-value">${addressLabel}</span>` : ''}
-      </button>
-      <div class="ctx-sep"></div>
-      <!-- An ad-hoc connection could not be kept: the only way was to retype
-           the whole thing into the dialog. -->
-      <button data-action="save-connection">
-        <span class="material-symbols-outlined">bookmark_add</span>
-        Save this connection
-      </button>
-      <button data-action="duplicate">
-        <span class="material-symbols-outlined">tab_duplicate</span>
-        Duplicate session
-      </button>
-    `;
+
+    // Built with createElement rather than innerHTML. The address is user
+    // input from the connection dialog, and this way it cannot be markup at
+    // all rather than being escaped on the way in.
+    let rendered = 0;
+    TAB_MENU_GROUPS.forEach(group => {
+      const visible = group.filter(item =>
+        _menuEnabled(item.setting) && (!item.when || item.when(tab)));
+      if (!visible.length) return;
+
+      if (rendered) {
+        const sep = document.createElement('div');
+        sep.className = 'ctx-sep';
+        _ctxMenu.appendChild(sep);
+      }
+      rendered += 1;
+
+      visible.forEach(item => {
+        const button = document.createElement('button');
+        button.dataset.action = item.action;
+
+        const icon = document.createElement('span');
+        icon.className = 'material-symbols-outlined';
+        icon.textContent = item.icon;
+        button.appendChild(icon);
+        button.appendChild(document.createTextNode(item.label));
+
+        const value = item.value ? item.value(tab) : '';
+        if (value) {
+          const shown = document.createElement('span');
+          shown.className = 'ctx-value';
+          shown.textContent = value;
+          button.appendChild(shown);
+        }
+        _ctxMenu.appendChild(button);
+      });
+    });
 
     // Only offered when there is more than one pane to choose between —
     // "move to pane 1" on a single layout is a menu entry that does nothing.
     const panes = window.shellmateLayout ? window.shellmateLayout.panes() : 1;
-    if (panes > 1) {
+    if (panes > 1 && _menuEnabled('panes')) {
       const sep = document.createElement('div');
       sep.className = 'ctx-sep';
       _ctxMenu.appendChild(sep);
@@ -1124,7 +1173,7 @@
     document.body.appendChild(_ctxMenu);
 
     // Filled in behind the menu, so a right-click never waits on a request.
-    _appendQuickBroadcast(_ctxMenu, tab);
+    if (_menuEnabled('quick_broadcast')) _appendQuickBroadcast(_ctxMenu, tab);
 
     // Position near cursor, clamped to viewport
     const x = Math.min(e.clientX, window.innerWidth  - 200);
@@ -1641,9 +1690,15 @@
     const snippets = await _loadQuick();
     if (!menu.isConnected) return;          // menu already dismissed
 
-    const sep = document.createElement('div');
-    sep.className = 'ctx-sep';
-    menu.appendChild(sep);
+    // Only when there is something above to be divided from. With every
+    // other entry switched off (#141) this section is the whole menu, and an
+    // unconditional separator would lead with a stray line — the same
+    // derived-not-placed rule the groups follow.
+    if (menu.children.length) {
+      const sep = document.createElement('div');
+      sep.className = 'ctx-sep';
+      menu.appendChild(sep);
+    }
 
     const heading = document.createElement('div');
     heading.className = 'ctx-heading';
@@ -1957,6 +2012,7 @@
   window.getActiveTab     = getActiveTab;
   window.updateTabLabel   = updateTabLabel;
   window.setTabOrder      = setTabOrder;
+  window.tabMenuItems     = tabMenuItems;
   window.showDashboard    = showDashboard;
   window.hideDashboard    = hideDashboard;
   window.dashboardVisible = dashboardVisible;
