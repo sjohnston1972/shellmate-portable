@@ -106,6 +106,35 @@ def set_owner(set_id: str) -> str:
     return f"set:{set_id}"
 
 
+def resolve_set(set_id: str) -> dict:
+    """
+    Everything a connection needs from a named credential: its secrets **and
+    its username**.
+
+    The username lives on the set entry and the secrets live in the vault, so
+    a caller reading one store gets half a credential. That is exactly what
+    happened: session creation iterated CREDENTIAL_FIELDS — passwords and
+    passphrases — applied the password, never looked at the username, and
+    asked the device to log in as "". The failure read "refused the saved
+    password for ." and blamed the password.
+
+    One function returning both halves, so the next caller cannot take one and
+    miss the other.
+    """
+    if not set_id:
+        return {}
+
+    entry = next((s for s in _load_sets() if s.get("id") == set_id), None)
+    if entry is None:
+        return {}
+
+    resolved = dict(_read_credentials(set_owner(set_id)))
+    username = (entry.get("username") or "").strip()
+    if username:
+        resolved["username"] = username
+    return resolved
+
+
 def credential_sets() -> list[dict]:
     """
     Every named credential, with no values.
@@ -251,8 +280,16 @@ def load_credentials(profile_id: str) -> dict:
     Resolves a shared credential when the profile references one, so nothing
     above this has to know whether the password belongs to this device alone
     or to the forty that came off the same scan.
+
+    When it does resolve to a set, the set's **username** comes with it. The
+    secrets live in the vault and the username lives on the set entry, so
+    reading only the vault returns half a credential — which is how a saved
+    connection using a shared login came to authenticate as "".
     """
-    return _read_credentials(_resolve_owner(profile_id))
+    owner = _resolve_owner(profile_id)
+    if owner.startswith("set:"):
+        return resolve_set(owner[len("set:"):])
+    return _read_credentials(owner)
 
 
 def _read_credentials(owner: str) -> dict:

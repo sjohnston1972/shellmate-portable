@@ -423,8 +423,11 @@ async def create_session(request: CreateSessionRequest) -> dict:
     # Filled first so a password typed in the dialog still wins over it, the
     # same precedence a profile's own saved credentials have.
     if request.credential_ref and not request.password:
-        owner = profiles_module.set_owner(request.credential_ref)
-        for field, value in profiles_module._read_credentials(owner).items():
+        # resolve_set, not _read_credentials: the secrets are in the vault and
+        # the username is on the set entry, so reading one store yields half a
+        # credential — the password applied, the username left blank, and the
+        # device asked to log in as "".
+        for field, value in profiles_module.resolve_set(request.credential_ref).items():
             if not getattr(params, field, ""):
                 setattr(params, field, value)
                 if field == "password":
