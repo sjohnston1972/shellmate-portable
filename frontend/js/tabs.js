@@ -41,6 +41,17 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     tabList            = document.getElementById('tab-list');
+
+    // The Sessions rail link had no handler at all — permanently marked
+    // active and doing nothing. It is the way back to the dashboard now.
+    const sessionsLink = document.getElementById('sidebar-link-sessions');
+    if (sessionsLink) {
+      sessionsLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (dashboardVisible() && tabs.length) hideDashboard();
+        else showDashboard();
+      });
+    }
     welcomeScreen      = document.getElementById('welcome-screen');
     terminalsContainer = document.getElementById('terminals-container');
 
@@ -202,8 +213,10 @@
     // Drag to reorder
     _bindDrag(tabEl, session_id);
 
-    // Hide the welcome screen now that we have a tab
+    // A new tab takes you to it, so the dashboard steps aside.
     welcomeScreen.classList.add('hidden');
+    if (terminalsContainer) terminalsContainer.classList.remove('behind-dashboard');
+    _markSessionsLink(false);
 
     // Switch to the new tab.
     //
@@ -225,8 +238,10 @@
   function switchToTab(index) {
     if (index < 0 || index >= tabs.length) return;
 
-    // Hide welcome screen when switching to a real tab
+    // Selecting a tab is the way back from the dashboard.
     welcomeScreen.classList.add('hidden');
+    if (terminalsContainer) terminalsContainer.classList.remove('behind-dashboard');
+    _markSessionsLink(false);
 
     activeTabIndex = index;
 
@@ -782,6 +797,51 @@
     } catch (_) {
       return null;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // The dashboard as a place you can go back to
+  //
+  // It used to be purely an empty state: shown when the last tab closed,
+  // hidden the moment one opened, with no way to reach it in between. Groups
+  // change that — you cannot dive in and out of a group you can only see when
+  // nothing is connected.
+  //
+  // Terminals are hidden, never destroyed. That is the Phase 1 rule and it is
+  // the whole reason this is safe: a session mid-reload keeps running, keeps
+  // receiving, and is exactly where it was when you come back.
+  // -------------------------------------------------------------------------
+
+  /** Show the dashboard over the terminals, leaving every session alone. */
+  function showDashboard() {
+    if (!welcomeScreen) return;
+    welcomeScreen.classList.remove('hidden');
+    if (terminalsContainer) terminalsContainer.classList.add('behind-dashboard');
+    _markSessionsLink(true);
+    if (typeof window.renderWelcomeProfiles === 'function') {
+      window.renderWelcomeProfiles();
+    }
+  }
+
+  /** Go back to the terminals. */
+  function hideDashboard() {
+    if (!welcomeScreen) return;
+    // Only when there is something to go back to. With no tabs open the
+    // dashboard is the empty state again and hiding it would leave a void.
+    if (!tabs.length) return;
+    welcomeScreen.classList.add('hidden');
+    if (terminalsContainer) terminalsContainer.classList.remove('behind-dashboard');
+    _markSessionsLink(false);
+  }
+
+  /** Whether the dashboard is currently in front. */
+  function dashboardVisible() {
+    return Boolean(welcomeScreen) && !welcomeScreen.classList.contains('hidden');
+  }
+
+  function _markSessionsLink(active) {
+    const link = document.getElementById('sidebar-link-sessions');
+    if (link) link.classList.toggle('active', active);
   }
 
   // -------------------------------------------------------------------------
@@ -1897,6 +1957,9 @@
   window.getActiveTab     = getActiveTab;
   window.updateTabLabel   = updateTabLabel;
   window.setTabOrder      = setTabOrder;
+  window.showDashboard    = showDashboard;
+  window.hideDashboard    = hideDashboard;
+  window.dashboardVisible = dashboardVisible;
   window.openNewTabTarget = openNewTabTarget;
   window.restoreTabs      = _restoreTabs;
   // ShellMate saw the `reload` go in, so when the session drops it knows why

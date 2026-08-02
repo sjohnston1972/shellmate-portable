@@ -6770,3 +6770,15 @@ body.sidebar-labelled .sidebar-label {
 [hidden] {
   display: none !important;
 }
+
+/* Terminals while the dashboard is in front (#134).
+ *
+ * visibility, not display:none, and never removal. The Phase 1 rule is that an
+ * inactive terminal keeps existing and keeps receiving — a device mid-reload
+ * must still be there when you come back. display:none would also collapse
+ * xterm's measured geometry, so every terminal would need refitting on return.
+ */
+#terminals-container.behind-dashboard {
+  visibility: hidden;
+  pointer-events: none;
+}
