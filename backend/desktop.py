@@ -560,6 +560,38 @@ class Desktop:
             storage = paths.data_dir() / "window-storage"
             storage.mkdir(parents=True, exist_ok=True)
 
+            # Stop WebView2 fetching components a terminal will never call.
+            #
+            # Measured before this existed: 77 MB of a 78 MB data folder was
+            # WebView2's, against about 1 MB of actual settings, vault,
+            # history and snippets. 22 MB of it was Widevine — DRM for
+            # playing protected video — 12 MB ad-blocking filter lists, and
+            # 2.6 MB speech recognition.
+            #
+            # Two reasons it matters here and would not in an installed app.
+            # ShellMate-Data is the folder that *travels*: carrying 77 MB of
+            # somebody else's cache on a stick to hold 1 MB of settings is
+            # the opposite of portable. And these are downloaded, so a build
+            # described as working air-gapped spent its first launch reaching
+            # out to Microsoft for a DRM module — "no CDN in the frontend"
+            # was never the whole of that claim.
+            #
+            # Set as an environment variable because that is the only hook
+            # the WebView2 loader offers; it is read when the environment is
+            # created, so it must be set before the window is.
+            #
+            # GrShaderCache and the profile itself are left alone. The shader
+            # cache is what stops the terminal recompiling shaders on every
+            # launch, and a cache that rebuilds each time is worse than one
+            # that persists.
+            os.environ.setdefault(
+                "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+                "--disable-features=msWidevineCdm,SubresourceFilter,"
+                "OptimizationGuideModelDownloading,MediaFoundationClearPlayback "
+                "--disable-component-update "
+                "--disable-speech-api",
+            )
+
             # On Windows the window and taskbar icons come from the
             # executable, which build.spec now sets — so this only takes
             # effect under GTK/Qt, where pywebview honours it. Passed anyway
