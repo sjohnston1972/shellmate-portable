@@ -7319,3 +7319,11 @@ body {
 #group-tree.group-tree-right #group-tree-handle { right: auto; left: 0; }
 #group-tree.group-tree-collapsed #group-tree-handle { display: none; }
 #group-tree-handle:hover { background: var(--primary-container); opacity: 0.4; }
+
+/* A "remember" option superseded by a saved credential (#160). Same
+   vocabulary as the superseded password field: dimmed rather than hidden,
+   because vanishing suggests it was never relevant. */
+.checkbox-row.field-superseded {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

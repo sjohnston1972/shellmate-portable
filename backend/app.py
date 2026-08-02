@@ -1033,6 +1033,31 @@ class CredentialSetRequest(BaseModel):
     id: str = ""
 
 
+class AttachSetRequest(BaseModel):
+    """Body for PUT /api/profiles/{profile_id}/credential-set."""
+
+    credential_ref: str = ""
+
+
+@app.put("/api/profiles/{profile_id}/credential-set")
+async def attach_credential_set_endpoint(
+        profile_id: str, request: AttachSetRequest) -> dict:
+    """
+    Point a saved connection at a named credential, or at nothing.
+
+    `attach_credential_set` already existed and only the scanner could reach
+    it, so a connection saved any other way could never be given a shared
+    login without editing profiles.json. A reference, never a copy: forty
+    copies of one lab password is forty entries to update the day it changes,
+    with nothing recording they were ever the same credential.
+    """
+    ok = await asyncio.to_thread(
+        profiles_module.attach_credential_set, profile_id, request.credential_ref)
+    if not ok:
+        raise HTTPException(status_code=404, detail="No such connection")
+    return {"status": "ok", "credential_ref": request.credential_ref}
+
+
 @app.get("/api/credential-sets")
 async def list_credential_sets() -> dict:
     """

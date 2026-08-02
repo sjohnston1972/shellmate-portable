@@ -636,6 +636,20 @@
    * relevant; one that greys out says it has been superseded, which is what
    * has happened.
    */
+  /** A reference waiting for the picker's options to arrive (#159). */
+  let _pendingCredentialRef = '';
+
+  function _applyPendingCredential() {
+    const select = document.getElementById('field-credential');
+    if (!select) return;
+    if (_pendingCredentialRef &&
+        [...select.options].some(o => o.value === _pendingCredentialRef)) {
+      select.value = _pendingCredentialRef;
+      _pendingCredentialRef = '';
+    }
+    _syncCredentialChoice();
+  }
+
   function _syncCredentialChoice() {
     const select = document.getElementById('field-credential');
     const password = document.getElementById('field-password');
@@ -647,6 +661,19 @@
       ? 'not needed — the saved credential supplies it'
       : '';
     password.classList.toggle('field-superseded', usingSaved);
+
+    // Remembering is meaningless once a saved credential is chosen (#160):
+    // there is nothing typed to remember, and the credential is already
+    // stored. Offering it invites keeping a second copy of the very thing
+    // that exists so it is kept once.
+    ['field-remember', 'field-remember-plain'].forEach(id => {
+      const box = document.getElementById(id);
+      if (!box) return;
+      box.disabled = usingSaved;
+      if (usingSaved) box.checked = false;
+      const row = box.closest('.checkbox-row');
+      if (row) row.classList.toggle('field-superseded', usingSaved);
+    });
   }
 
   async function loadCredentialChoices() {
@@ -701,7 +728,9 @@
       // shared credential — so the first sight of it is also the first time
       // they might wonder what one is.
       if (hint) hint.hidden = row.hidden;
-      _syncCredentialChoice();
+      // The options exist now, so a reference recorded before they arrived
+      // can finally be selected.
+      _applyPendingCredential();
     } catch (e) {
       row.hidden = true;
     }
@@ -728,6 +757,17 @@
     setField('field-parity', p.parity || 'N');
     setField('field-stopbits', p.stop_bits || 1);
     setField('field-flow', p.flow_control || 'none');
+
+    // The saved credential this connection uses (#159). The reference was
+    // stored and read back correctly all along — nothing restored it into
+    // the picker, so reopening showed "None" and the choice looked lost.
+    //
+    // Recorded rather than applied: loadCredentialChoices() fills the options
+    // from a fetch, and a value set before they exist is discarded silently.
+    // A one-tick defer is not enough either — it has to be the loader that
+    // applies it, once there is something to select.
+    _pendingCredentialRef = p.credential_ref || '';
+    _applyPendingCredential();
 
     // Nothing to open any more: the key form is its own connection type
     // rather than a drawer, so restoring a key profile shows its fields.
@@ -1046,6 +1086,10 @@
         jump_private_key_passphrase: payload.jump_private_key_passphrase || '',
       };
       const wantsRemember = payload.remember_credentials;
+      // Offered before the dialog closes, while the fields it prefills from
+      // are still on screen (#161).
+      const sharedName = wantsRemember
+        ? await offerToNameCredential(payload) : '';
 
       hideConnectionDialog();
       if (typeof window.createTab === 'function') {
@@ -1055,7 +1099,7 @@
       }
 
       await autoSaveProfile(payload, wantsRemember, credentials,
-                            payload.credential_storage);
+                            payload.credential_storage, sharedName);
 
     } catch (err) {
       showError(err.message || 'Could not connect. Check the address and credentials.');
@@ -1068,7 +1112,37 @@
    * Skipped when an equivalent profile already exists, or the list would fill
    * with duplicates of the device someone reconnects to twenty times a day.
    */
-  async function autoSaveProfile(payload, wantsRemember, credentials, storage) {
+  /**
+   * Offer to make these credentials a named, shared one (#161).
+   *
+   * Remembering stores them against this connection alone. The same login
+   * usually covers several devices, so without this somebody ends up with
+   * the same password stored many times and no way to change it once.
+   *
+   * Optional on purpose: connecting to one device once should not make
+   * anybody name anything, so an empty name simply keeps the old behaviour.
+   */
+  async function offerToNameCredential(payload) {
+    if (!window.shellmateDialog || !payload.username || !payload.password) return '';
+
+    const answer = await window.shellmateDialog.form({
+      title: 'Remember these credentials',
+      body:  `Saved for ${payload.hostname || 'this device'}. If other devices `
+             + 'share this login, give it a name and they can all point at it.',
+      note:  'Naming it means changing the password once updates every '
+             + 'connection using it. Leave the name blank to keep it for this '
+             + 'connection only.',
+      confirmLabel: 'Save',
+      fields: [
+        { name: 'name', label: 'Name (optional)', placeholder: 'Lab admin',
+          hint: 'What you will recognise when picking it later.' },
+      ],
+    });
+    return answer ? (answer.name || '').trim() : '';
+  }
+
+  async function autoSaveProfile(payload, wantsRemember, credentials, storage,
+                                 sharedName) {
     try {
       // No duplicate check here any more. save_profile() returns the existing
       // profile rather than appending a second one, so posting unconditionally
@@ -1085,6 +1159,31 @@
       // A first-time connection has no profile id when it starts, so the
       // backend had nowhere to file the credentials. Now that the profile
       // exists, store them against it.
+      // A named set, referenced by this connection — so the next device
+      // sharing the login points at the same one rather than storing it
+      // again (#161).
+      if (sharedName && profile && profile.id) {
+        try {
+          const made = await fetch('/api/credential-sets', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ name: sharedName,
+                                      username: payload.username,
+                                      password: payload.password,
+                                      storage: storage || 'vault' }),
+          });
+          if (made.ok) {
+            const set = await made.json();
+            await fetch(`/api/profiles/${profile.id}/credential-set`, {
+              method:  'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body:    JSON.stringify({ credential_ref: set.id }),
+            });
+            return;   // the set holds them; no per-profile copy needed
+          }
+        } catch (_) { /* fall through to the per-connection save */ }
+      }
+
       if (wantsRemember && profile && profile.id && !payload.profile_id) {
         if (Object.values(credentials).some(Boolean)) {
           await fetch(`/api/profiles/${profile.id}/credentials`, {
