@@ -24,6 +24,7 @@ The credential is a *reference*, not five thousand copies — which is also the
 thing the reference mechanism exists to prove at scale.
 """
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -75,11 +76,20 @@ def main() -> int:
 
     started = time.monotonic()
 
-    # One credential, referenced by everything. No password is set: the point
-    # is the reference and the username, and a seeding script should not be
-    # carrying a real one.
+    # One credential, referenced by everything.
+    #
+    # It needs a real password or the estate cannot connect to anything —
+    # which is most of the point of aiming it at a real device. Taken from
+    # the environment rather than an argument so it stays out of shell
+    # history and out of this file, the same way test_credentials.py does it.
+    password = os.environ.get("SEED_PASSWORD", "")
+    if not password:
+        print("note: SEED_PASSWORD is not set, so the credential will hold no\n"
+              "      password and nothing will be able to connect. Set it to\n"
+              "      make the estate usable:\n"
+              "        SEED_PASSWORD=... python tools/seed_estate.py --into ...")
     credential = pm.save_credential_set(args.credential, args.username,
-                                        "", storage="vault")
+                                        password, storage="vault")
     print(f"credential set: {args.credential} ({credential['id'][:8]}) "
           f"as {args.username}")
 
@@ -120,9 +130,12 @@ def main() -> int:
                     "port": 22,
                     "connection_type": args.transport,
                     "username": args.username,
-                    # Both the site and the role, because membership overlaps
-                    # — the estate is browsable by either.
-                    "tags": [site, key],
+                    # The subgroup only (#176). Tagging the site as well
+                    # listed every device twice — once under the site and
+                    # again under its role — and the site view became a wall.
+                    # The parent aggregates its children's counts anyway, so
+                    # nothing is lost by not saying it twice.
+                    "tags": [key],
                     "credential_ref": credential["id"],
                 })
                 total += 1

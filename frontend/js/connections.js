@@ -15,7 +15,7 @@
   'use strict';
 
   let overlay, form, errorBox, connectBtn, connectLabel, connectSpinner;
-  let profilesList, typeSelect, serialPortSelect, serialPortHint;
+  let typeSelect, serialPortSelect, serialPortHint;
 
   /** Default TCP port per transport, applied when the type changes. */
   const DEFAULT_PORTS = { ssh: 22, 'ssh-key': 22, telnet: 23 };
@@ -57,7 +57,6 @@
     connectBtn       = document.getElementById('btn-connect');
     connectLabel     = document.getElementById('btn-connect-label');
     connectSpinner   = document.getElementById('btn-connect-spinner');
-    profilesList     = document.getElementById('saved-profiles-list');
     typeSelect       = document.getElementById('field-conntype');
     serialPortSelect = document.getElementById('field-serial-port');
     serialPortHint   = document.getElementById('serial-port-hint');
@@ -141,7 +140,6 @@
 
     if (prefill) fillFromProfile(prefill);
     updateRememberHint();
-    loadProfiles();
     overlay.classList.remove('hidden');
 
     // Prefilled means the details are known and only the secret is missing,
@@ -249,16 +247,6 @@
   // Profiles
   // -------------------------------------------------------------------------
 
-  async function loadProfiles() {
-    if (!profilesList) return;
-    try {
-      const res = await fetch('/api/profiles');
-      renderProfiles(await res.json());
-    } catch (e) {
-      profilesList.innerHTML = '';
-    }
-  }
-
   /** Where a profile points, for tooltips and card subtitles. */
   function profileTarget(p) {
     if (p.connection_type === 'serial') return `${p.serial_port || '?'} @ ${p.baud_rate || 9600}`;
@@ -365,9 +353,22 @@
       if (window.shellmateGroups) await window.shellmateGroups.render(profiles);
       const openGroup = window.shellmateGroups
         ? window.shellmateGroups.active() : '';
-      const shown = openGroup
+
+      _paintHero();
+
+      // Tiles only for a group with nothing below it (#177).
+      //
+      // The grid used to fall back to every profile when nothing was
+      // selected, which at five thousand made the first paint the slowest
+      // thing in the application — and a wall of tiles nobody could read is
+      // not a view of anything. The tree is how a connection is found now.
+      const leaf = window.shellmateGroups
+        ? window.shellmateGroups.showsTiles() : Boolean(openGroup);
+      const shown = leaf
         ? profiles.filter(p => (p.tags || []).includes(openGroup))
-        : profiles;
+        : [];
+
+      _paintEmptyState(leaf, openGroup, profiles.length);
 
       shown.forEach(p => {
         const wrap = document.createElement('div');
@@ -439,42 +440,72 @@
     } catch (e) { /* silently skip if API unavailable */ }
   }
 
-  function renderProfiles(profiles) {
-    if (!profilesList) return;
-    profilesList.innerHTML = '';
-    if (!profiles.length) {
-      profilesList.innerHTML = '<span class="profiles-empty">No saved connections</span>';
+  /**
+   * Name the selection in the heading (#179).
+   *
+   * The group key already carries the path — `site-004/firewalls` — so both
+   * halves are in it and this only has to split it. The last part is the
+   * heading and everything above it is the trail, which is what makes a
+   * subgroup called "firewalls" mean something on its own.
+   */
+  function _paintHero() {
+    const title = document.getElementById('welcome-title');
+    const trail = document.getElementById('welcome-breadcrumb');
+    if (!title || !trail) return;
+
+    const logo = document.getElementById('welcome-logo');
+    const glyph = document.getElementById('welcome-hero-icon');
+    const path = window.shellmateGroups ? window.shellmateGroups.activePath() : [];
+
+    if (!path.length) {
+      title.textContent = 'ShellMate Portable';
+      trail.classList.add('hidden');
+      trail.textContent = '';
+      if (logo) logo.classList.remove('hidden');
+      if (glyph) glyph.classList.add('hidden');
       return;
     }
-    profiles.forEach(p => {
-      const chip = document.createElement('div');
-      chip.className = 'profile-chip';
 
-      const label = document.createElement('span');
-      label.className = 'profile-chip-label';
-      label.title = profileTarget(p);
-      label.textContent = p.name || '';
-      label.addEventListener('click', () => {
-        typeSelect.value = pickerValue(p);
-        applyConnectionType(typeSelect.value);
-        fillFromProfile(p);
-      });
+    // The group's own icon takes the logo's place. The logo is the
+    // application saying its name, which is not what the heading is about
+    // once it is naming a group instead.
+    if (logo) logo.classList.add('hidden');
+    if (glyph) {
+      glyph.textContent = (window.shellmateGroups.activeIcon() || 'folder');
+      glyph.classList.remove('hidden');
+    }
 
-      const del = document.createElement('button');
-      del.className = 'profile-chip-delete';
-      del.title = 'Delete';
-      del.textContent = 'x';
-      del.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await fetch(`/api/profiles/${p.id}`, { method: 'DELETE' });
-        await loadProfiles();
-        renderWelcomeProfiles();
-      });
+    title.textContent = path[path.length - 1];
+    if (path.length > 1) {
+      trail.textContent = path.slice(0, -1).join(' / ');
+      trail.classList.remove('hidden');
+    } else {
+      trail.classList.add('hidden');
+      trail.textContent = '';
+    }
+  }
 
-      chip.appendChild(label);
-      chip.appendChild(del);
-      profilesList.appendChild(chip);
-    });
+  /**
+   * What appears where the tiles are not (#177).
+   *
+   * An empty panel reads as broken, and "select a group" is the one thing
+   * somebody landing on an empty dashboard needs told.
+   */
+  function _paintEmptyState(leaf, openGroup, total) {
+    const box = document.getElementById('welcome-empty');
+    if (!box) return;
+
+    if (leaf) {
+      box.classList.add('hidden');
+      box.textContent = '';
+      return;
+    }
+
+    box.classList.remove('hidden');
+    box.textContent = openGroup
+      ? 'Pick a subgroup on the left to see the connections in it.'
+      : `${total} saved connection${total === 1 ? '' : 's'}. `
+        + 'Pick a group on the left to see them.';
   }
 
   /**
@@ -749,7 +780,12 @@
       const res = await fetch('/api/credential-sets');
       if (!res.ok) throw new Error();
       const data = await res.json();
-      const usable = (data.sets || []).filter(s => s.has_credentials);
+      // Every set, not only the ones already holding a secret. Filtering
+      // meant a credential created but not yet given a password was simply
+      // absent from the dialog, with nothing saying why — and the seeded
+      // estate shipped in exactly that state (#175). An option you can see
+      // and are told about beats one that is not there.
+      const usable = data.sets || [];
 
       if (data.vault_locked) {
         // Saying so beats presenting an empty list as "nothing saved".
@@ -763,7 +799,8 @@
       usable.forEach(s => {
         const option = document.createElement('option');
         option.value = s.id;
-        option.textContent = s.username ? `${s.name} (${s.username})` : s.name;
+        option.textContent = (s.username ? `${s.name} (${s.username})` : s.name)
+                           + (s.has_credentials ? '' : ' — no password saved yet');
         select.appendChild(option);
       });
 
@@ -974,7 +1011,6 @@
       activeProfileHasCredentials = false;
       activeProfileStorage = '';
       updateRememberHint();
-      await loadProfiles();
       renderWelcomeProfiles();
     } catch (e) {
       showError('Could not forget the saved password.');
@@ -1068,7 +1104,6 @@
         body:    JSON.stringify(profileFrom(payload)),
       });
       const saved = r.ok ? await r.json() : null;
-      await loadProfiles();
       renderWelcomeProfiles();
 
       // The backend returns the existing profile rather than appending a
@@ -1239,7 +1274,6 @@
         }
       }
 
-      await loadProfiles();
       renderWelcomeProfiles();
     } catch (_) { /* non-fatal */ }
   }

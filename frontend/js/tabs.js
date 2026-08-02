@@ -2281,6 +2281,10 @@
     sessionId:      t.sessionId,
     label:          t.label,
     hostname:       t.hostname,
+    // Address alone does not identify a device — a lab of containers behind
+    // one address is distinguished only by port, which is why the group
+    // counts match on both. Anything matching sessions to profiles needs it.
+    port:           t.port || 0,
     connectionType: t.connectionType,
     isConnected:    t.isConnected,
   }));
@@ -2295,6 +2299,17 @@
     if (idx !== -1) switchToTab(idx);
   };
   window.closeTab         = closeTab;
+  /**
+   * Close a tab by its session, rather than by where it currently sits.
+   *
+   * Closing several in a row shifts every index behind the one that went, so
+   * a caller holding a list of indices closes the wrong tabs from the second
+   * one onwards. The session id does not move (#181).
+   */
+  window.closeTabBySessionId = (sessionId, options) => {
+    const idx = tabs.findIndex(t => t.sessionId === sessionId);
+    return idx === -1 ? Promise.resolve() : closeTab(idx, options);
+  };
   window.getActiveTab     = getActiveTab;
   window.updateTabLabel   = updateTabLabel;
   window.setTabOrder      = setTabOrder;

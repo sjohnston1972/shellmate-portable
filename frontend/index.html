@@ -169,11 +169,18 @@
           </aside>
 
           <div id="welcome-content">
-            <h1><img src="/static/Untitled-removebg-preview.png" alt="" id="welcome-logo" />ShellMate Portable</h1>
-
+            <!-- The heading names whatever is selected (#179). The parent
+                 path sits above it, so a subgroup reads as its position in
+                 the tree rather than as a bare word. -->
+            <div id="welcome-breadcrumb" class="hidden"></div>
+            <h1><img src="/static/Untitled-removebg-preview.png" alt="" id="welcome-logo" /><span class="material-symbols-outlined hidden" id="welcome-hero-icon">folder</span><span id="welcome-title">ShellMate Portable</span></h1>
 
             <!-- Saved session quick-launch grid -->
             <div id="welcome-profiles-grid"></div>
+
+            <!-- What stands in for the grid when the selection is not a
+                 subgroup (#177): tiles are the destination, not the map. -->
+            <div id="welcome-empty" class="hidden"></div>
 
             <div id="welcome-actions">
               <button id="btn-welcome-connect" class="btn-primary">
@@ -344,13 +351,10 @@
 
       <form id="connection-form" autocomplete="off">
 
-        <!-- Saved profiles -->
-        <div id="saved-profiles-section">
-          <div class="profiles-header">
-            <span class="profiles-label">Saved Connections</span>
-          </div>
-          <div id="saved-profiles-list"></div>
-        </div>
+        <!-- The saved-connection chooser was here (#184). At five thousand it
+             filled the dialog and buried the form it sat on top of; the tree
+             and the dashboard are how a saved connection is picked now, and
+             this dialog is for making a new one. -->
 
         <div class="form-group">
           <label for="field-label">Display name <span class="optional">(optional)</span></label>

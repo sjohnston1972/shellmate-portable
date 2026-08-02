@@ -125,6 +125,20 @@ def _assigned_icons() -> set[str]:
     return names
 
 
+def _backend_icons() -> set[str]:
+    """
+    Icon names declared in Python, not in the frontend.
+
+    `groups.ICONS` is the group icon picker's whole vocabulary (#180), fixed
+    precisely so nothing outside the font can be stored. Declaring it in the
+    backend put all of it outside the subset instead, because the subsetter
+    read only `frontend/` — the failure the fixed list existed to prevent,
+    relocated one directory. Both this and the subsetter now read it.
+    """
+    from backend.groups import ICONS
+    return set(ICONS)
+
+
 def test_the_font_is_there() -> None:
     print("\n-- The shipped icon font --")
     font = _icon_font()
@@ -154,7 +168,7 @@ def test_every_icon_the_interface_uses_renders() -> None:
               "-r requirements-dev.txt)")
         return
 
-    wanted = _markup_icons() | _assigned_icons()
+    wanted = _markup_icons() | _assigned_icons() | _backend_icons()
     check("icons were found to check", len(wanted) > 20,
           f"only {len(wanted)} — the scan is probably not matching anything")
 

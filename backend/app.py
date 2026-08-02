@@ -1359,6 +1359,7 @@ class GroupRequest(BaseModel):
 
     name: str = ""
     colour: str = ""
+    icon: str = ""
     favourite: bool | None = None
     order: int | None = None
 
@@ -1428,7 +1429,11 @@ async def delete_scheme(name: str) -> dict:
 async def list_groups_endpoint() -> dict:
     """Every group, including tags that have never been given a colour."""
     return {"groups": await asyncio.to_thread(groups_module.list_groups),
-            "colours": list(groups_module.COLOURS)}
+            "colours": list(groups_module.COLOURS),
+            # The picker's options come from here rather than from a list in
+            # the frontend, so there is one place a name can be added and it
+            # is the place the font is subsetted from (#180).
+            "icons": list(groups_module.ICONS)}
 
 
 @app.post("/api/groups")
@@ -1437,7 +1442,7 @@ async def create_group_endpoint(request: GroupRequest) -> dict:
     try:
         return await asyncio.to_thread(
             groups_module.create_group, request.name,
-            request.colour or groups_module.DEFAULT_COLOUR)
+            request.colour or groups_module.DEFAULT_COLOUR, request.icon)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1454,31 +1459,22 @@ async def set_group_order_endpoint(request: GroupOrderRequest) -> dict:
     return {"groups": await asyncio.to_thread(groups_module.set_order, request.keys)}
 
 
-@app.put("/api/groups/{key}")
-async def update_group_endpoint(key: str, request: GroupRequest) -> dict:
-    """Rename, recolour, favourite or reposition a group."""
-    changes = request.model_dump(exclude_none=True)
-    # An empty string is "not given" for these two, but False is a real value
-    # for `favourite` — which exclude_none already keeps.
-    if not changes.get("name"):
-        changes.pop("name", None)
-    if not changes.get("colour"):
-        changes.pop("colour", None)
-    try:
-        return await asyncio.to_thread(groups_module.update_group, key, changes)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+# A group key can contain a slash.
+#
+# Nesting is expressed in the name — `site-004/firewalls` is a branch under
+# `site-004` — so the key reaching these routes is a path, not a segment.
+# `encodeURIComponent` sends it as %2F, but the server decodes the path before
+# routing, so `{key}` matched nothing and every one of these 404'd for any
+# subgroup: rename, recolour, pin, delete, membership, connect-all. The
+# failure was silent from the interface, which showed the change and then
+# re-read the unchanged group.
+#
+# `{key:path}` matches across the slash. The `/members` route is declared
+# first so its literal suffix wins over the greedy match.
 
 
-@app.delete("/api/groups/{key}")
-async def delete_group_endpoint(key: str) -> dict:
-    """
-    Remove a group. The connections in it survive — see groups.delete_group.
-    """
-    return await asyncio.to_thread(groups_module.delete_group, key)
-
-
-@app.post("/api/groups/{key}/members")
+@app.post("/api/groups/{key:path}/members")
 async def set_group_member_endpoint(key: str, request: GroupMemberRequest) -> dict:
     """
     Add a connection to a group, or remove it.
@@ -1491,6 +1487,32 @@ async def set_group_member_endpoint(key: str, request: GroupMemberRequest) -> di
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"status": "ok", "tags": tags}
+
+
+@app.put("/api/groups/{key:path}")
+async def update_group_endpoint(key: str, request: GroupRequest) -> dict:
+    """Rename, recolour, favourite or reposition a group."""
+    changes = request.model_dump(exclude_none=True)
+    # An empty string is "not given" for these two, but False is a real value
+    # for `favourite` — which exclude_none already keeps.
+    if not changes.get("name"):
+        changes.pop("name", None)
+    if not changes.get("colour"):
+        changes.pop("colour", None)
+    if not changes.get("icon"):
+        changes.pop("icon", None)
+    try:
+        return await asyncio.to_thread(groups_module.update_group, key, changes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/groups/{key:path}")
+async def delete_group_endpoint(key: str) -> dict:
+    """
+    Remove a group. The connections in it survive — see groups.delete_group.
+    """
+    return await asyncio.to_thread(groups_module.delete_group, key)
 
 
 @app.get("/api/profiles/tags")
@@ -1507,7 +1529,9 @@ async def set_profile_tags(profile_id: str, request: TagsRequest) -> dict:
                 profiles_module.set_tags, profile_id, request.tags)}
 
 
-@app.post("/api/tags/{tag}/connect")
+# Same reason as the group routes above: a tag is a group key, and a
+# nested one carries a slash.
+@app.post("/api/tags/{tag:path}/connect")
 async def connect_tag(tag: str) -> dict:
     """
     Open a session to every connection carrying a tag.

@@ -43,6 +43,8 @@
    * @param {object} opts
    * @param {string} opts.title         The question. Required.
    * @param {string} [opts.body]        A paragraph beneath it.
+   * @param {Node}   [opts.content]     An element beneath that, for a choice
+   *                                    a field cannot express.
    * @param {Array}  [opts.list]        Lines to show as a list — what the
    *                                    native version had to fake with "\n".
    * @param {string} [opts.confirmLabel] Defaults to "Confirm".
@@ -149,6 +151,12 @@
     if (opts.list && opts.list.length) {
       box.appendChild(renderList(opts.list));
     }
+
+    // An element the caller built, for when the thing being chosen is not a
+    // field. The icon picker (#180) is a grid of glyphs; expressed as a
+    // `select` it would be a dropdown of the words "router" and "security",
+    // which is the one thing an icon picker must not be.
+    if (opts.content instanceof Node) box.appendChild(opts.content);
 
     let input = null;
     if (opts.kind === 'prompt') {

@@ -21,9 +21,33 @@
   /** The group currently opened, by key. '' means the whole dashboard. */
   let activeGroup = '';
 
+  /** What the tree is filtered to (#183). '' shows everything. */
+  let query = '';
+
+  /**
+   * Which branches a search forces open.
+   *
+   * A match deep in the tree is unreachable unless its ancestors are shown,
+   * and that is the whole difference between filtering a tree and filtering a
+   * list. Kept apart from `expanded` so a search never disturbs the shape
+   * somebody arranged by hand — clearing the box puts it back as it was.
+   */
+  let matchOpen = new Set();
+
   /** Cached so a re-render does not wait on a request. */
   let groupCache = [];
   let colours = ['slate'];
+
+  /**
+   * The icons a group may carry (#180).
+   *
+   * Fetched rather than written here, because the list the picker offers and
+   * the list the font is subsetted from have to be the same list — an icon
+   * outside the subset renders as its own name in plain text and reports
+   * nothing. `folder` alone until the fetch lands, which is the fallback the
+   * backend uses too.
+   */
+  let icons = ['folder'];
 
   document.addEventListener('DOMContentLoaded', () => {
     const button = document.getElementById('btn-new-group');
@@ -43,6 +67,33 @@
   });
 
   function active() { return activeGroup; }
+
+  /**
+   * Whether the selection should paint device tiles (#177).
+   *
+   * Only a group with nothing below it. The tree is the navigation and the
+   * tiles are the destination: painting five thousand of them at the top
+   * level, or a whole site's worth for a parent, made the first paint the
+   * slowest thing in the application and told nobody anything.
+   */
+  function showsTiles() {
+    if (!activeGroup) return false;
+    const node = _findNode(activeGroup);
+    return Boolean(node) && node.children.length === 0;
+  }
+
+  /** The selected group's icon, for the hero (#179, #180). */
+  function activeIcon() {
+    const group = groupCache.find(x => x.key === activeGroup);
+    return group ? (group.icon || 'folder') : '';
+  }
+
+  /** ['site-004', 'firewalls'] — the selection's position, for the hero (#179). */
+  function activePath() {
+    if (!activeGroup) return [];
+    const group = groupCache.find(x => x.key === activeGroup);
+    return (group ? group.name : activeGroup).split(SEPARATOR).filter(Boolean);
+  }
 
   function activeName() {
     const group = groupCache.find(g => g.key === activeGroup);
@@ -72,6 +123,7 @@
       const data = res.ok ? await res.json() : { groups: [] };
       groupCache = data.groups || [];
       if (data.colours && data.colours.length) colours = data.colours;
+      if (data.icons && data.icons.length) icons = data.icons;
     } catch (_) {
       groupCache = [];
     }
@@ -180,6 +232,32 @@
     return total;
   }
 
+  /** Does this group, or a connection in it, match the search? */
+  function _matches(node) {
+    if (!query) return true;
+    if (node.key.toLowerCase().includes(query)) return true;
+    // The devices inside it too, so searching a hostname finds its group.
+    return profileCache.some(p =>
+      (p.tags || []).includes(node.key) &&
+      ((p.name || '').toLowerCase().includes(query) ||
+       (p.hostname || '').toLowerCase().includes(query)));
+  }
+
+  /** True when this branch, or anything beneath it, matches. */
+  function _branchMatches(node) {
+    return _matches(node) || node.children.some(_branchMatches);
+  }
+
+  /** The tree node for a key, so a menu can ask about its children. */
+  function _findNode(key) {
+    let found = null;
+    const walk = (nodes) => nodes.forEach(n => {
+      if (n.key === key) found = n; else walk(n.children);
+    });
+    walk(_tree(groupCache));
+    return found;
+  }
+
   /** Everything in this branch, including nested groups. */
   function _countUnder(node) {
     let total = node.group ? node.group.count : 0;
@@ -240,12 +318,25 @@
 
     body.innerHTML = '';
 
+    body.appendChild(_searchBox());
+
     // Pinned groups first, then a divider (#162). "Add to favourites" sorted
     // them to the front and said so nowhere — at a handful of groups the
     // reordering is invisible, so the action appeared to do nothing. A rule
     // makes the effect a position rather than a subtlety, and the menu now
     // names it for what it does: "Pin to the top".
-    const roots = _tree(groupCache);
+    let roots = _tree(groupCache);
+    if (query) {
+      // Only branches with a match somewhere beneath them, each one forced
+      // open so the match is actually reachable.
+      roots = roots.filter(_branchMatches);
+      matchOpen = new Set();
+      const mark = (n) => {
+        if (n.children.some(_branchMatches)) matchOpen.add(n.key);
+        n.children.forEach(mark);
+      };
+      roots.forEach(mark);
+    }
     const pinned = roots.filter(n => n.group && n.group.favourite);
     const rest = roots.filter(n => !(n.group && n.group.favourite));
 
@@ -267,6 +358,41 @@
     body.insertBefore(all, body.firstChild);
   }
 
+  /** The tree's own search (#183). */
+  function _searchBox() {
+    const wrap = document.createElement('div');
+    wrap.className = 'tree-search';
+
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.id = 'tree-search-input';
+    input.placeholder = 'Search groups and devices';
+    input.autocomplete = 'off';
+    input.value = query;
+
+    let debounce = null;
+    input.addEventListener('input', () => {
+      clearTimeout(debounce);
+      // Matching a device means walking every profile, which at five thousand
+      // is not something to do per keystroke.
+      debounce = setTimeout(() => {
+        query = input.value.trim().toLowerCase();
+        if (!query) matchOpen = new Set();
+        renderTree(profileCache);
+        // The box is rebuilt by that render, so the caret has to be put back
+        // or typing a second character types it somewhere else.
+        const again = document.getElementById('tree-search-input');
+        if (again) {
+          again.focus();
+          again.setSelectionRange(again.value.length, again.value.length);
+        }
+      }, 200);
+    });
+
+    wrap.appendChild(input);
+    return wrap;
+  }
+
   /** One branch: the group chip, its children, and its connections. */
   function _branch(node) {
     const wrap = document.createElement('div');
@@ -277,7 +403,7 @@
     row.className = 'tree-row';
 
     const hasChildren = node.children.length > 0;
-    const open = expanded.has(node.key);
+    const open = expanded.has(node.key) || matchOpen.has(node.key);
 
     const twist = document.createElement('button');
     twist.type = 'button';
@@ -300,6 +426,13 @@
                    + (node.group && node.group.favourite ? ' group-favourite' : '');
     chip.dataset.key = node.key;
 
+    // The group's face (#180). A branch with no group of its own — a path
+    // segment that exists only because something below it is named after it —
+    // gets the plain folder, which is what it is.
+    const glyph = document.createElement('span');
+    glyph.className = 'material-symbols-outlined tree-chip-icon';
+    glyph.textContent = (node.group && node.group.icon) || 'folder';
+
     const name = document.createElement('span');
     name.className = 'tree-chip-name';
     name.textContent = node.group ? node.group.name.split(SEPARATOR).pop() : node.label;
@@ -321,7 +454,7 @@
       chip.appendChild(badge);
     }
 
-    chip.append(name, count);
+    chip.append(glyph, name, count);
     chip.addEventListener('click', () => {
       // Selecting filters the grid; it no longer replaces the view, so the
       // rest of the tree stays visible beside what it filtered to.
@@ -361,7 +494,8 @@
 
     if (!open) return wrap;
 
-    node.children.forEach(child => wrap.appendChild(_branch(child)));
+    node.children.filter(c => !query || _branchMatches(c))
+                 .forEach(child => wrap.appendChild(_branch(child)));
 
     // The connections themselves, which is the half a tile could never show.
     if (node.group) {
@@ -637,6 +771,76 @@
     });
   }
 
+  function _expandAll(node, open) {
+    const walk = (n) => {
+      if (open) expanded.add(n.key); else expanded.delete(n.key);
+      n.children.forEach(walk);
+    };
+    walk(node);
+    renderTree(profileCache);
+  }
+
+  /**
+   * Open every connection in a group (#181).
+   *
+   * Through connectTag, which paces the handshakes and reports per device
+   * rather than skipping failures silently. It confirms with a count, which
+   * matters more here than on a tile: a subgroup is five devices, a site is
+   * fifty.
+   */
+  function _connectAll(group) {
+    const count = profileCache.filter(
+      p => (p.tags || []).includes(group.key)).length;
+    if (!count) {
+      _warn('Nothing to connect', `"${group.name}" has no connections in it.`);
+      return;
+    }
+    if (typeof window.connectTag === 'function') {
+      window.connectTag(group.key, count);
+    }
+  }
+
+  /**
+   * Close every open session belonging to a group.
+   *
+   * Confirmed, and the count named, because this drops live sessions — the
+   * one thing the interface is otherwise careful never to do by accident.
+   * Closing the window only hides it for exactly that reason.
+   */
+  async function _disconnectAll(group) {
+    // The same address:port match the live badges use, so what gets closed
+    // and what was counted agree about what "this device" means.
+    const keys = new Set(profileCache
+      .filter(p => (p.tags || []).includes(group.key))
+      .map(p => `${(p.hostname || '').toLowerCase()}:${p.port || 0}`));
+
+    const tabs = (typeof window.getOpenTabs === 'function' ? window.getOpenTabs() : [])
+      .filter(tab => keys.has(`${(tab.hostname || '').toLowerCase()}:${tab.port || 0}`));
+
+    if (!tabs.length) {
+      _warn('Nothing to disconnect', `No open sessions from "${group.name}".`);
+      return;
+    }
+
+    const ok = await window.shellmateDialog.confirm({
+      title: `Disconnect ${tabs.length} session${tabs.length === 1 ? '' : 's'} `
+             + `from "${group.name}"?`,
+      body:  'They close on the device as well as here, and anything running '
+             + 'in them stops.',
+      confirmLabel: 'Disconnect them',
+      danger: true,
+    });
+    if (!ok) return;
+
+    for (const tab of tabs) {
+      if (typeof window.closeTabBySessionId === 'function') {
+        // force: the count above was the confirmation. Asking again per tab
+        // would be fifty dialogs for one decision already taken.
+        await window.closeTabBySessionId(tab.sessionId, { force: true });
+      }
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Creating and editing
   // -------------------------------------------------------------------------
@@ -710,6 +914,56 @@
       _refresh();
     } catch (e) {
       _warn('Could not create the subgroup', e.message);
+    }
+  }
+
+  /**
+   * Choose a group's icon (#180).
+   *
+   * A grid of the ones that ship, not a text field. The font carries only
+   * what the source names, so anything typed would be a coin toss between an
+   * icon and the word itself printed on the dashboard.
+   */
+  async function pickIcon(group) {
+    const current = group.icon || 'folder';
+
+    const grid = document.createElement('div');
+    grid.className = 'icon-picker';
+    let chosen = current;
+
+    icons.forEach(name => {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'icon-picker-cell' + (name === current ? ' chosen' : '');
+      cell.title = name.replace(/_/g, ' ');
+      cell.innerHTML = '<span class="material-symbols-outlined">' + name + '</span>';
+      cell.addEventListener('click', () => {
+        chosen = name;
+        grid.querySelectorAll('.icon-picker-cell')
+            .forEach(c => c.classList.remove('chosen'));
+        cell.classList.add('chosen');
+      });
+      grid.appendChild(cell);
+    });
+
+    const ok = await window.shellmateDialog.confirm({
+      title: 'Icon for "' + group.name + '"',
+      body:  'It appears beside the name in the tree and on the tab strip.',
+      confirmLabel: 'Use it',
+      content: grid,
+    });
+    if (!ok) return;
+
+    try {
+      const res = await fetch('/api/groups/' + encodeURIComponent(group.key), {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ icon: chosen }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Could not save it.');
+      _refresh();
+    } catch (e) {
+      _warn('Could not change the icon', e.message);
     }
   }
 
@@ -804,10 +1058,29 @@
     };
 
     menu.appendChild(item('tune', 'Rename or recolour…', () => editGroup(group)));
+    menu.appendChild(item('palette', 'Change the icon...', () => pickIcon(group)));
     // Nesting was already rendered - a group named "site-3/access" becomes
     // a branch under "site-3" - but the only way to make one was typing the
     // separator by hand into the name field, which nothing explained (#163).
     menu.appendChild(item('add', 'New subgroup...', () => newSubgroup(group)));
+
+    // At 100 sites of 10 subgroups, opening a tree by hand is not a thing
+    // anybody is going to do (#182).
+    const node = _findNode(group.key);
+    if (node && node.children.length) {
+      menu.appendChild(item('unfold_more', 'Expand all below',
+                            () => _expandAll(node, true)));
+      menu.appendChild(item('unfold_less', 'Collapse all below',
+                            () => _expandAll(node, false)));
+    }
+
+    const sweep = document.createElement('div');
+    sweep.className = 'ctx-sep';
+    menu.appendChild(sweep);
+    menu.appendChild(item('add_circle', 'Connect all',
+                          () => _connectAll(group)));
+    menu.appendChild(item('stop_circle', 'Disconnect all',
+                          () => _disconnectAll(group), true));
     menu.appendChild(item(
       'bookmark_add',
       group.favourite ? 'Unpin from the top' : 'Pin to the top',
@@ -933,6 +1206,7 @@
   }
 
   window.shellmateGroups = {
-    render, active, activeName, open, newGroup, editGroup, deleteGroup,
+    render, active, activeName, activePath, activeIcon, showsTiles,
+    open, newGroup, editGroup, deleteGroup,
   };
 })();

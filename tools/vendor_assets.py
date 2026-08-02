@@ -171,6 +171,8 @@ def used_icon_names(available: set[str] | None = None) -> set[str]:
         if available:
             names.update(t for t in token.findall(text) if t in available)
 
+    names.update(_backend_icon_names())
+
     # The font names its ordinary characters too, in the usual PostScript way,
     # and several of those names are also ordinary English words that turn up
     # in comments. "space" is the one that bites: it is a real glyph name, so
@@ -178,6 +180,32 @@ def used_icon_names(available: set[str] | None = None) -> set[str]:
     # ligature and the shaping check then reports it as broken. Dropping them
     # here keeps that check meaningful instead of teaching it to ignore things.
     return names - NON_ICON_GLYPHS
+
+
+def _backend_icon_names() -> set[str]:
+    """
+    Icon names declared in Python rather than in the frontend.
+
+    Group icons (#180) are a fixed list in `backend/groups.py`, precisely so a
+    free-text field cannot store a glyph the font does not carry. But the scan
+    above only reads `frontend/`, so declaring them there put every one of
+    them outside the subset — the exact failure the fixed list was meant to
+    prevent, moved one file along.
+
+    Read as text rather than imported: this script runs before anything is
+    installed, and it must not need the application to be importable.
+    """
+    source = REPO_ROOT / "backend" / "groups.py"
+    if not source.exists():
+        return set()
+
+    text = source.read_text(encoding="utf-8")
+    block = re.search(r"^ICONS\s*=\s*\((.*?)\)", text, re.S | re.M)
+    if not block:
+        print("    ! backend/groups.py has no ICONS tuple — group icons may "
+              "not be in the subset")
+        return set()
+    return set(re.findall(r'"([a-z][a-z0-9_]{2,30})"', block.group(1)))
 
 
 def subset_icon_font(font_path: Path, icon_names: set[str]) -> None:
