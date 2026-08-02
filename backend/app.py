@@ -452,7 +452,8 @@ async def create_session(request: CreateSessionRequest) -> dict:
 
     try:
         # Every transport blocks while connecting, so run it off the event loop.
-        session = await asyncio.to_thread(session_manager.create_session, params)
+        session = await asyncio.to_thread(session_manager.create_session, params,
+                                          request.profile_id)
     except ConnectionError_ as exc:
         # Already phrased for the user by the handler.
         logger.info("Connection failed: %s", exc)
@@ -1570,7 +1571,8 @@ async def connect_tag(tag: str) -> dict:
 
             try:
                 session = await asyncio.to_thread(
-                    session_manager.create_session, params)
+                    session_manager.create_session, params,
+                    profile.get("id", ""))
                 results.append({"ok": True, "name": profile.get("name", ""),
                                 "session": session})
             except Exception as exc:

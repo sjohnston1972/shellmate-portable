@@ -509,6 +509,86 @@ def test_end_to_end_session() -> None:
         server.close()
 
 
+def test_a_session_records_which_connection_opened_it() -> None:
+    """
+    A session carries its profile id, and returns it.
+
+    Without this the interface had to match a session back to a saved
+    connection by address and port, which is not an identity. An estate behind
+    one jump host, a lab of containers on one address, or two profiles for one
+    switch with different credentials all collide — and they did: one open
+    session lit the connected indicator on five thousand connections, tabs
+    took a neighbouring group's name, and clicking any disconnected device
+    switched to the tab already open rather than connecting, so only the first
+    device in an estate could ever be reached (#187, #190, #192, #193).
+
+    The id was already being sent for credentials and then thrown away by
+    `to_params()`. This checks it survives to the response, and that a session
+    opened without one still says so rather than inventing an answer.
+    """
+    print("\n-- A session knows which connection it is --")
+    from fastapi.testclient import TestClient
+
+    from backend.app import app, session_manager
+
+    # One peer each: the fake listens for a single connection, and this test
+    # opens two sessions on purpose.
+    server = FakeTelnetServer(b"\r\nswitch01> ")
+    adhoc_server = FakeTelnetServer(b"\r\nswitch02> ")
+    opened: list[str] = []
+    try:
+        with TestClient(app) as client:
+            body = {"connection_type": "telnet", "hostname": "127.0.0.1",
+                    "port": server.port, "display_label": "lab-switch"}
+
+            named = client.post("/api/sessions",
+                                json={**body, "profile_id": "abc-123"})
+            check("a session opened from a profile is created",
+                  named.status_code == 200, f"{named.status_code}: {named.text}")
+            if named.status_code == 200:
+                opened.append(named.json()["session_id"])
+                check("and returns the profile it came from",
+                      named.json().get("profile_id") == "abc-123",
+                      f"got {named.json().get('profile_id')!r} — without this "
+                      f"the interface can only guess from the address")
+
+            adhoc = client.post("/api/sessions",
+                                json={**body, "port": adhoc_server.port})
+            check("a session opened from the dialog is created",
+                  adhoc.status_code == 200, f"{adhoc.status_code}: {adhoc.text}")
+            if adhoc.status_code == 200:
+                opened.append(adhoc.json()["session_id"])
+                # Empty, not absent and not a guess. Callers fall back to the
+                # address match for exactly these, and only for these.
+                check("and reports no profile rather than guessing one",
+                      adhoc.json().get("profile_id") == "",
+                      f"got {adhoc.json().get('profile_id')!r}")
+
+            listed = client.get("/api/sessions")
+            by_id = {s["session_id"]: s for s in listed.json()}
+            check("the listing carries it too",
+                  all("profile_id" in s for s in listed.json()),
+                  "GET /api/sessions is what the dashboard polls for live state")
+            if opened and opened[0] in by_id:
+                check("and it is the same id the create returned",
+                      by_id[opened[0]]["profile_id"] == "abc-123",
+                      f"got {by_id[opened[0]].get('profile_id')!r}")
+
+            # It is an id, never a credential — the whole design depends on
+            # nothing secret travelling this way.
+            for session in listed.json():
+                check("no credential rides along with it",
+                      not any(k in session for k in
+                              ("password", "params", "passphrase", "handler")),
+                      f"keys: {sorted(session)}")
+                break
+    finally:
+        for session_id in opened:
+            session_manager.destroy_session(session_id)
+        server.close()
+        adhoc_server.close()
+
+
 def test_unknown_connection_type_rejected() -> None:
     """An unsupported transport should fail cleanly, not with a 500."""
     print("\n-- Unknown transport --")
@@ -723,6 +803,7 @@ def main() -> int:
         test_handler_registry,
         test_secrets_are_scrubbed,
         test_end_to_end_session,
+        test_a_session_records_which_connection_opened_it,
         test_unknown_connection_type_rejected,
         test_a_password_stops_paramiko_offering_keys,
         test_a_failure_says_what_actually_happened,

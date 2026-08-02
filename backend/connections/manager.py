@@ -62,7 +62,8 @@ class SessionManager:
     # Session creation
     # ------------------------------------------------------------------
 
-    def create_session(self, params: ConnectionParams) -> dict[str, Any]:
+    def create_session(self, params: ConnectionParams,
+                       profile_id: str = "") -> dict[str, Any]:
         """
         Create a session, connect to the device, and store it.
 
@@ -72,6 +73,17 @@ class SessionManager:
         Args:
             params: Connection details. Credentials are scrubbed by the
                     handler once the connection is established.
+            profile_id: The saved connection this was opened from, if any.
+                    **This is the session's identity as far as the interface
+                    is concerned.** Without it, everything downstream had to
+                    guess from the address, and address is not an identity:
+                    an estate behind one jump host, a lab of containers on one
+                    address, or two profiles for one switch with different
+                    credentials all collide. One open session then lit the
+                    indicator on five thousand connections, labelled tabs with
+                    the wrong group, and made every device after the first
+                    unopenable because clicking it switched to the tab already
+                    there (#187, #190, #192, #193).
 
         Returns:
             Public session metadata (no handler, no credentials).
@@ -122,6 +134,11 @@ class SessionManager:
             # yet — a pending reload, a commit waiting to be confirmed.
             "alerts":          AlertTracker(),
             "params":          params,
+            # Which saved connection this came from. Empty for a session
+            # opened straight from the dialog, which genuinely has no profile
+            # — callers fall back to the address match for those, and only
+            # for those.
+            "profile_id":      profile_id or "",
             # What the device calls itself. Overwritten with the detected
             # hostname once it says — deliberately, because config snapshots
             # are keyed by it and the same device should file under one name
@@ -237,6 +254,10 @@ class SessionManager:
         """
         return {
             "session_id":      session["session_id"],
+            # Safe to return: an id, not a credential. It is what lets the
+            # interface say "this tab is that connection" without inferring it
+            # from the address.
+            "profile_id":      session.get("profile_id", ""),
             "hostname":        session["hostname"],
             # Both, because they answer different questions and callers have
             # been getting the wrong one.

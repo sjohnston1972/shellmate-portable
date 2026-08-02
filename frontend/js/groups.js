@@ -102,9 +102,23 @@
 
   function open(key) {
     activeGroup = (activeGroup === key) ? '' : key;
-    if (typeof window.renderWelcomeProfiles === 'function') {
-      window.renderWelcomeProfiles();
-    }
+    _select();
+  }
+
+  /**
+   * Redraw for a new selection, without reloading anything (#188).
+   *
+   * Everything a selection changes is already in memory: which chip is
+   * highlighted, which tiles are painted, which tabs the strip shows. Going
+   * back to the server for it made choosing a group the slowest thing in the
+   * application.
+   */
+  function _select() {
+    // Through renderWelcomeTiles rather than renderTree directly: the tiles
+    // and the tree are two halves of one view of the selection, and drawing
+    // one without the other is how they got out of step before.
+    if (typeof window.renderWelcomeTiles === 'function') window.renderWelcomeTiles();
+    if (typeof window.repaintTabGroups === 'function') window.repaintTabGroups();
   }
 
   // -------------------------------------------------------------------------
@@ -117,15 +131,33 @@
    * Called from renderWelcomeProfiles with the profiles it already fetched,
    * so this costs one request for the groups rather than two for everything.
    */
+  /**
+   * Whether the caches need refilling (#188).
+   *
+   * Selecting a group changes nothing on the server, but every click
+   * re-fetched `/api/groups` three times and re-downloaded 1.64 MB of
+   * profiles — 788ms before anything moved. The events that mean the data
+   * really did change already exist and already fire; this just stops
+   * pretending every click is one of them.
+   */
+  let groupsStale = true;
+  let liveStale = true;
+
+  window.addEventListener('shellmate:groups-changed', () => { groupsStale = true; });
+  window.addEventListener('shellmate:sessions-changed', () => { liveStale = true; });
+
   async function render(profiles) {
-    try {
-      const res = await fetch('/api/groups');
-      const data = res.ok ? await res.json() : { groups: [] };
-      groupCache = data.groups || [];
-      if (data.colours && data.colours.length) colours = data.colours;
-      if (data.icons && data.icons.length) icons = data.icons;
-    } catch (_) {
-      groupCache = [];
+    if (groupsStale) {
+      try {
+        const res = await fetch('/api/groups');
+        const data = res.ok ? await res.json() : { groups: [] };
+        groupCache = data.groups || [];
+        if (data.colours && data.colours.length) colours = data.colours;
+        if (data.icons && data.icons.length) icons = data.icons;
+        groupsStale = false;
+      } catch (_) {
+        groupCache = [];
+      }
     }
 
     // A group that was open and has since been deleted must not leave the
@@ -134,7 +166,7 @@
       activeGroup = '';
     }
 
-    await _loadLive();
+    if (liveStale) await _loadLive();
     renderTree(profiles || []);
   }
 
@@ -198,35 +230,56 @@
     return roots;
   }
 
-  /** Session keys ("address:port") that are open right now. */
+  /**
+   * What is open right now, in both the terms it can be asked about.
+   *
+   * `liveProfiles` is the answer where a session recorded which saved
+   * connection opened it (#187). `liveKeys` remains for sessions opened
+   * straight from the dialog, which have no profile to name — but it is now
+   * the fallback rather than the mechanism. As the mechanism it claimed every
+   * device sharing an address was connected, which across a site behind one
+   * jump host is all of them.
+   */
+  let liveProfiles = new Set();
   let liveKeys = new Set();
 
   async function _loadLive() {
     try {
       const res = await fetch('/api/sessions');
       const list = res.ok ? await res.json() : [];
-      liveKeys = new Set(list
-        .filter(s => s.is_connected)
+      const open = list.filter(s => s.is_connected);
+      liveStale = false;
+      liveProfiles = new Set(open.map(s => s.profile_id).filter(Boolean));
+      liveKeys = new Set(open
+        .filter(s => !s.profile_id)
         .map(s => `${(s.address || s.hostname || '').toLowerCase()}:${s.port || 0}`));
     } catch (_) {
+      liveProfiles = new Set();
       liveKeys = new Set();
     }
+  }
+
+  /** Is this saved connection open right now? */
+  function _isLive(profile) {
+    if (profile.id && liveProfiles.has(profile.id)) return true;
+    if (!liveKeys.size) return false;
+    return liveKeys.has(
+      `${(profile.hostname || '').toLowerCase()}:${profile.port || 0}`);
   }
 
   /**
    * How many connections in this branch are open.
    *
-   * Matched on address and port exactly, not loosely. #124 is the cautionary
-   * tale: matching a session to a profile approximately is how restore
-   * connected to the wrong device. Counting is harmless where connecting is
-   * not, but the two should still agree about what "this device" means.
+   * Matched on identity, not resemblance. #124 is the cautionary tale:
+   * matching a session to a profile approximately is how restore connected to
+   * the wrong device. Counting is harmless where connecting is not, but the
+   * two should still agree about what "this device" means — and they now
+   * agree on `_isLive`.
    */
   function _liveUnder(node) {
     let total = 0;
     if (node.group) {
-      total += profileCache.filter(p =>
-        (p.tags || []).includes(node.key) &&
-        liveKeys.has(`${(p.hostname || '').toLowerCase()}:${p.port || 0}`)).length;
+      total += (_byTag.get(node.key) || []).filter(_isLive).length;
     }
     node.children.forEach(child => { total += _liveUnder(child); });
     return total;
@@ -237,10 +290,9 @@
     if (!query) return true;
     if (node.key.toLowerCase().includes(query)) return true;
     // The devices inside it too, so searching a hostname finds its group.
-    return profileCache.some(p =>
-      (p.tags || []).includes(node.key) &&
-      ((p.name || '').toLowerCase().includes(query) ||
-       (p.hostname || '').toLowerCase().includes(query)));
+    return (_byTag.get(node.key) || []).some(p =>
+      (p.name || '').toLowerCase().includes(query) ||
+      (p.hostname || '').toLowerCase().includes(query));
   }
 
   /** True when this branch, or anything beneath it, matches. */
@@ -265,12 +317,33 @@
     return total;
   }
 
+  /**
+   * Connections by tag, rebuilt whenever the profiles change (#188).
+   *
+   * `_liveUnder` and the search both used to filter every profile per node.
+   * At 1,100 groups against 5,000 connections that is five and a half million
+   * comparisons for one render, repeated on every click. One pass to build
+   * this costs 5,000.
+   */
+  const _byTag = new Map();
+
+  function _indexProfiles() {
+    _byTag.clear();
+    profileCache.forEach(profile => {
+      (profile.tags || []).forEach(tag => {
+        const bucket = _byTag.get(tag);
+        if (bucket) bucket.push(profile); else _byTag.set(tag, [profile]);
+      });
+    });
+  }
+
   function renderTree(profiles) {
     const panel = document.getElementById('group-tree');
     const body = document.getElementById('group-tree-body');
     if (!panel || !body) return;
 
     profileCache = profiles || [];
+    _indexProfiles();
 
     // Nothing to show is nothing to show. An empty rail taking a fifth of the
     // dashboard on a fresh install would be the tiles' mistake again.
@@ -354,7 +427,7 @@
     all.type = 'button';
     all.className = 'tree-all' + (activeGroup ? '' : ' tree-active');
     all.textContent = `All connections (${profileCache.length})`;
-    all.addEventListener('click', () => { activeGroup = ''; _refresh(); });
+    all.addEventListener('click', () => { activeGroup = ''; _select(); });
     body.insertBefore(all, body.firstChild);
   }
 
@@ -414,7 +487,7 @@
     twist.addEventListener('click', (e) => {
       e.stopPropagation();
       if (open) expanded.delete(node.key); else expanded.add(node.key);
-      _refresh();
+      _select();
     });
 
     // The chip, kept from the tiles — that part was right.
@@ -460,7 +533,7 @@
       // rest of the tree stays visible beside what it filtered to.
       activeGroup = (activeGroup === node.key) ? '' : node.key;
       expanded.add(node.key);
-      _refresh();
+      _select();
     });
 
     // Right-click gets the same menu the tune button opens (#170). Members
@@ -499,8 +572,7 @@
 
     // The connections themselves, which is the half a tile could never show.
     if (node.group) {
-      profileCache
-        .filter(p => (p.tags || []).includes(node.key))
+      (_byTag.get(node.key) || [])
         .forEach(profile => wrap.appendChild(_leaf(profile, node)));
     }
     return wrap;
@@ -514,11 +586,10 @@
     leaf.style.setProperty('--depth', String(node.depth + 1));
     leaf.title = profile.hostname || '';
 
-    // Whether this device is open right now (#166). The same address:port
-    // match the group counts use, so a member's light and its group's live
-    // badge cannot disagree about what "this device" means.
-    const key = `${(profile.hostname || '').toLowerCase()}:${profile.port || 0}`;
-    const live = liveKeys.has(key);
+    // Whether this device is open right now (#166). The same test the group
+    // counts use, so a member's light and its group's live badge cannot
+    // disagree about what "this device" means.
+    const live = _isLive(profile);
 
     const dot = document.createElement('span');
     dot.className = 'tree-leaf-dot' + (live ? ' tree-leaf-live' : '');
@@ -789,8 +860,7 @@
    * fifty.
    */
   function _connectAll(group) {
-    const count = profileCache.filter(
-      p => (p.tags || []).includes(group.key)).length;
+    const count = (_byTag.get(group.key) || []).length;
     if (!count) {
       _warn('Nothing to connect', `"${group.name}" has no connections in it.`);
       return;
@@ -810,12 +880,15 @@
   async function _disconnectAll(group) {
     // The same address:port match the live badges use, so what gets closed
     // and what was counted agree about what "this device" means.
-    const keys = new Set(profileCache
-      .filter(p => (p.tags || []).includes(group.key))
-      .map(p => `${(p.hostname || '').toLowerCase()}:${p.port || 0}`));
+    const members = _byTag.get(group.key) || [];
+    const ids = new Set(members.map(p => p.id));
+    const keys = new Set(members.map(
+      p => `${(p.hostname || '').toLowerCase()}:${p.port || 0}`));
 
     const tabs = (typeof window.getOpenTabs === 'function' ? window.getOpenTabs() : [])
-      .filter(tab => keys.has(`${(tab.hostname || '').toLowerCase()}:${tab.port || 0}`));
+      .filter(tab => (tab.profileId
+        ? ids.has(tab.profileId)
+        : keys.has(`${(tab.hostname || '').toLowerCase()}:${tab.port || 0}`)));
 
     if (!tabs.length) {
       _warn('Nothing to disconnect', `No open sessions from "${group.name}".`);
@@ -1182,6 +1255,11 @@
   // -------------------------------------------------------------------------
 
   function _refresh() {
+    // Before the redraw, not after. The event below used to be dispatched
+    // last, so the render it was meant to invalidate had already run against
+    // the cache it was meant to expire.
+    groupsStale = true;
+    liveStale = true;
     if (typeof window.renderWelcomeProfiles === 'function') {
       window.renderWelcomeProfiles();
     }

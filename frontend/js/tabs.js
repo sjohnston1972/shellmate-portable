@@ -134,6 +134,16 @@
 
     const tabObj = {
       sessionId:        session_id,
+      // The saved connection this session was opened from (#187).
+      //
+      // The identity everything else keys on. Before this, a tab was matched
+      // back to a connection by address and port, which is not an identity —
+      // five thousand devices behind one address all matched, so one session
+      // lit every indicator, tabs took the wrong group's name, and clicking
+      // any device switched to the tab already open instead of connecting.
+      // Empty for a session opened straight from the dialog, which genuinely
+      // has no profile.
+      profileId:        sessionData.profile_id || '',
       label,
       // When this tab was opened. The array order answers the same question
       // until somebody drags or sorts, at which point it no longer does.
@@ -871,6 +881,21 @@
   // not reflected.
   // -------------------------------------------------------------------------
 
+  /**
+   * Does a tab's group fall within the selected one (#191)?
+   *
+   * A prefix test, not equality. Selecting a site used to hide every tab in
+   * it, because their group is `site-001/core switches` and the selection is
+   * `site-001` — so the parent showed nothing, which is the opposite of what
+   * the tree does, where a parent aggregates everything beneath it.
+   *
+   * The separator matters: `site-1` must not swallow `site-10`.
+   */
+  function _within(group, selected) {
+    if (!selected) return true;
+    return group === selected || group.startsWith(`${selected}/`);
+  }
+
   /** The current mode. 'manual' means this module does nothing at all. */
   let _order = 'manual';
 
@@ -990,6 +1015,11 @@
    * differently would be worse than neither showing it.
    */
   async function _paintStatusGroup() {
+    // First, and outside the early return below — the brand has to go back to
+    // plain "ShellMate Portable" when the selection is cleared, which is
+    // exactly the case that returns early.
+    _paintBrand();
+
     const el = document.getElementById('status-group');
     if (!el) return;
 
@@ -1009,6 +1039,34 @@
     el.title = `In the "${key}" group`;
   }
 
+  /**
+   * The site on the brand, and on the window title (#190).
+   *
+   * A tab is too narrow for `site-001/core switches`, so it carries the
+   * subgroup alone — which leaves nothing anywhere saying *which site*. The
+   * top-level group goes here instead, where there is room for it and where
+   * it is true of the whole view rather than of one tab.
+   *
+   * Taken from the selection when there is one, and otherwise from the active
+   * tab, so it still reads correctly for somebody who never touches the tree.
+   */
+  function _paintBrand() {
+    const brand = document.getElementById('tab-bar-brand');
+
+    const selected = window.shellmateGroups ? window.shellmateGroups.active() : '';
+    const tab = getActiveTab();
+    const key = selected || (tab ? (_tagCache.get(tab.sessionId) || '') : '');
+    const site = key ? key.split('/')[0] : '';
+
+    if (brand) {
+      brand.textContent = site ? `ShellMate Portable — ${site}` : 'ShellMate Portable';
+      brand.title = site ? `Home — showing ${site}` : 'Home / Quick connect';
+    }
+    // The native window's own title bar, which is the only place the site
+    // shows when the window is not focused.
+    document.title = site ? `ShellMate Portable — ${site}` : 'ShellMate Portable';
+  }
+
   /** Whether to show grouping at all. */
   function _groupStripe() {
     const prefs = (window.shellmateSettings || {}).interface || {};
@@ -1019,6 +1077,9 @@
   let _groupColours = null;
 
   async function _loadGroupColours() {
+    // Already invalidated on 'shellmate:groups-changed' below, so a cache hit
+    // here is correct rather than merely cheap — and it takes two of the
+    // three /api/groups fetches a single click was making off the wire (#188).
     if (_groupColours) return _groupColours;
     try {
       const res = await fetch('/api/groups');
@@ -1078,7 +1139,7 @@
       const selected = window.shellmateGroups
         ? window.shellmateGroups.active() : '';
       el.classList.toggle('tab-filtered-out',
-                          Boolean(selected) && group !== selected);
+                          Boolean(selected) && !_within(group, selected));
 
       if (!group) return;
 
@@ -1090,11 +1151,16 @@
         && (_tagCache.get(previous.sessionId) || '') === group;
       if (sameAsPrevious) return;
 
-      // First of a run: it carries the name.
+      // First of a run: it carries the name — the subgroup's, not the whole
+      // path (#190). "site-001/core switches" is wider than the tab it sits
+      // on, so the path was truncated to the site and every group in a site
+      // read identically. The tree renders only the last segment on its chips
+      // for the same reason; the site is on the window title instead.
       el.classList.add('tab-group-start');
       const name = document.createElement('span');
       name.className = 'tab-group-label';
-      name.textContent = group;
+      name.textContent = group.split('/').pop();
+      name.title = group;
       el.insertBefore(name, el.firstChild);
     });
 
@@ -1770,6 +1836,15 @@
       return null;
     }
 
+    // Asked and answered, when the session recorded where it came from
+    // (#187). The scoring below is a good guess and a guess is all it is:
+    // across an estate sharing one address it returned whichever profile was
+    // saved first, so tabs were labelled with another subgroup's name.
+    if (tab.profileId) {
+      const exact = profiles.find(p => p.id === tab.profileId);
+      if (exact) return exact;
+    }
+
     const type = tab.connectionType || 'ssh';
     const score = (p) => {
       if ((p.connection_type || 'ssh') !== type) return -1;
@@ -2279,6 +2354,7 @@
    */
   window.getOpenTabs = () => tabs.map(t => ({
     sessionId:      t.sessionId,
+    profileId:      t.profileId || '',
     label:          t.label,
     hostname:       t.hostname,
     // Address alone does not identify a device — a lab of containers behind

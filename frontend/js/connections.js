@@ -339,13 +339,33 @@
     }
   }
 
+  /**
+   * Every saved connection, fetched once and kept (#188).
+   *
+   * 1.64 MB and ~190ms to build at estate size, re-downloaded on every group
+   * click even though selecting a group cannot change it. Refilled when
+   * something actually changes a profile, which is what
+   * `renderWelcomeProfiles()` now means.
+   */
+  let profileCache = [];
+
   async function renderWelcomeProfiles() {
+    try {
+      const res = await fetch('/api/profiles');
+      profileCache = await res.json();
+    } catch (e) {
+      return;   // silently skip if API unavailable
+    }
+    failedRecently.clear();
+    await renderWelcomeTiles();
+  }
+
+  /** Draw from what is already loaded. No fetches. */
+  async function renderWelcomeTiles() {
     const grid = document.getElementById('welcome-profiles-grid');
     if (!grid) return;
     try {
-      const res = await fetch('/api/profiles');
-      const profiles = await res.json();
-      failedRecently.clear();
+      const profiles = profileCache;
       grid.innerHTML = '';
 
       // The group row replaces the tag chips: both filtered the grid by tag,
@@ -631,6 +651,19 @@
 
   /** True when a live session and a profile point at the same device. */
   function sameTarget(session, profile) {
+    // Identity first, where the session recorded one (#187).
+    //
+    // The resemblance test below is what this was, and on an estate where
+    // every device sits behind one address it matched all of them: clicking a
+    // disconnected device found somebody else's open session and switched to
+    // that tab instead of connecting, so only the first device in an estate
+    // could ever be opened (#192, #193).
+    //
+    // A session naming a *different* profile is decisively not this one, so
+    // the resemblance test must not get a second opinion. It stays only for
+    // sessions opened straight from the dialog, which have no profile.
+    if (session.profile_id) return session.profile_id === profile.id;
+
     const type = profile.connection_type || 'ssh';
     if (session.connection_type !== type) return false;
     if (type === 'serial') return session.hostname === profile.serial_port;
@@ -1303,5 +1336,7 @@
   window.showConnectionDialog  = showConnectionDialog;
   window.hideConnectionDialog  = hideConnectionDialog;
   window.renderWelcomeProfiles = renderWelcomeProfiles;
+  // Redraw without reloading — what a selection change needs (#188).
+  window.renderWelcomeTiles = renderWelcomeTiles;
 
 })();
