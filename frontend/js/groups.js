@@ -28,6 +28,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const button = document.getElementById('btn-new-group');
     if (button) button.addEventListener('click', () => newGroup());
+    _bindPanelControls();
   });
 
   // -------------------------------------------------------------------------
@@ -53,15 +54,12 @@
   // -------------------------------------------------------------------------
 
   /**
-   * Draw the group row.
+   * Load the groups and draw the tree.
    *
-   * Called from renderWelcomeProfiles with the profiles it already fetched, so
-   * this costs one request for the groups rather than two for everything.
+   * Called from renderWelcomeProfiles with the profiles it already fetched,
+   * so this costs one request for the groups rather than two for everything.
    */
   async function render(profiles) {
-    const host = document.getElementById('welcome-groups');
-    if (!host) return;
-
     try {
       const res = await fetch('/api/groups');
       const data = res.ok ? await res.json() : { groups: [] };
@@ -77,130 +75,251 @@
       activeGroup = '';
     }
 
-    host.innerHTML = '';
-
-    if (activeGroup) {
-      host.appendChild(_insideGroup(profiles));
-      return;
-    }
-
-    if (!groupCache.length) {
-      host.classList.add('welcome-groups-empty');
-      const hint = document.createElement('span');
-      hint.className = 'welcome-groups-hint';
-      hint.textContent = 'No groups yet — make one to arrange your connections.';
-      host.appendChild(hint);
-      return;
-    }
-
-    host.classList.remove('welcome-groups-empty');
-    groupCache.forEach(group => host.appendChild(_tile(group)));
+    renderTree(profiles || []);
   }
 
-  /** One group tile. */
-  function _tile(group) {
-    const tile = document.createElement('div');
-    tile.className = `group-tile group-${group.colour}`
-                   + (group.favourite ? ' group-favourite' : '');
-    tile.dataset.key = group.key;
-    tile.draggable = true;
+  // -------------------------------------------------------------------------
+  // The tree (#147)
+  //
+  // Replaced a wrapped row of tiles. The tiles were not broken — they were the
+  // wrong shape: they grew sideways into a wall at a dozen groups, their
+  // counts were too small to scan, and diving into one replaced the whole
+  // view, so comparing two meant visiting them one at a time.
+  //
+  // A tree grows downwards, holds its shape as it fills, and shows a group's
+  // contents without hiding everything else. The chip styling is kept —
+  // that part was right.
+  //
+  // **Nesting comes from the name.** `site-3/access` is a branch under
+  // `site-3`, and a group is still exactly a tag: no parent field, no
+  // migration, and both names stay independently usable. If nobody nests, the
+  // separator never appears and nothing was added to carry it.
+  // -------------------------------------------------------------------------
 
-    const name = document.createElement('button');
-    name.type = 'button';
-    name.className = 'group-tile-open';
-    name.addEventListener('click', () => open(group.key));
+  const SEPARATOR = '/';
 
-    const label = document.createElement('span');
-    label.className = 'group-tile-name';
-    // textContent — a group name is user input.
-    label.textContent = group.name;
+  /** Which branches are open, by full key. */
+  let expanded = new Set();
+
+  /** Connections, so a branch can list what is in it without another fetch. */
+  let profileCache = [];
+
+  function _prefs() {
+    return (window.shellmateSettings || {}).interface || {};
+  }
+
+  /** Build the nested shape from flat group keys. */
+  function _tree(groups) {
+    const roots = [];
+    const byPath = new Map();
+
+    // Sorted so a parent is always created before its children.
+    [...groups].sort((a, b) => a.key.localeCompare(b.key)).forEach(group => {
+      const parts = group.key.split(SEPARATOR).filter(Boolean);
+      let path = '';
+      let siblings = roots;
+      let parent = null;
+
+      parts.forEach((part, depth) => {
+        path = path ? `${path}${SEPARATOR}${part}` : part;
+        let node = byPath.get(path);
+        if (!node) {
+          node = { key: path, label: part, depth, children: [],
+                   group: null, parent };
+          byPath.set(path, node);
+          siblings.push(node);
+        }
+        if (depth === parts.length - 1) node.group = group;
+        siblings = node.children;
+        parent = node;
+      });
+    });
+
+    return roots;
+  }
+
+  /** Everything in this branch, including nested groups. */
+  function _countUnder(node) {
+    let total = node.group ? node.group.count : 0;
+    node.children.forEach(child => { total += _countUnder(child); });
+    return total;
+  }
+
+  function renderTree(profiles) {
+    const panel = document.getElementById('group-tree');
+    const body = document.getElementById('group-tree-body');
+    if (!panel || !body) return;
+
+    profileCache = profiles || [];
+
+    // Nothing to show is nothing to show. An empty rail taking a fifth of the
+    // dashboard on a fresh install would be the tiles' mistake again.
+    if (!groupCache.length) {
+      panel.classList.add('hidden');
+      return;
+    }
+    panel.classList.remove('hidden');
+
+    const prefs = _prefs();
+    const right = prefs.group_tree_side === 'right';
+    panel.classList.toggle('group-tree-right', right);
+    // The container reverses too, or the panel would order itself after the
+    // content while still sitting on the left.
+    const screen = document.getElementById('welcome-screen');
+    if (screen) screen.classList.toggle('tree-docked-right', right);
+    panel.classList.toggle('group-tree-collapsed', prefs.group_tree_collapsed === true);
+
+    body.innerHTML = '';
+    _tree(groupCache).forEach(node => body.appendChild(_branch(node)));
+
+    // "Everything", so there is always a way back to the whole list without
+    // hunting for which group is currently selected.
+    const all = document.createElement('button');
+    all.type = 'button';
+    all.className = 'tree-all' + (activeGroup ? '' : ' tree-active');
+    all.textContent = `All connections (${profileCache.length})`;
+    all.addEventListener('click', () => { activeGroup = ''; _refresh(); });
+    body.insertBefore(all, body.firstChild);
+  }
+
+  /** One branch: the group chip, its children, and its connections. */
+  function _branch(node) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tree-branch';
+    wrap.style.setProperty('--depth', String(node.depth));
+
+    const row = document.createElement('div');
+    row.className = 'tree-row';
+
+    const hasChildren = node.children.length > 0;
+    const open = expanded.has(node.key);
+
+    const twist = document.createElement('button');
+    twist.type = 'button';
+    twist.className = 'tree-twist' + (hasChildren || node.group ? '' : ' tree-twist-empty');
+    twist.innerHTML = '<span class="material-symbols-outlined">'
+                    + (open ? 'keyboard_arrow_down' : 'keyboard_arrow_up')
+                    + '</span>';
+    twist.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (open) expanded.delete(node.key); else expanded.add(node.key);
+      _refresh();
+    });
+
+    // The chip, kept from the tiles — that part was right.
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    const colour = node.group ? node.group.colour : 'slate';
+    chip.className = `tree-chip group-${colour}`
+                   + (activeGroup === node.key ? ' tree-active' : '')
+                   + (node.group && node.group.favourite ? ' group-favourite' : '');
+    chip.dataset.key = node.key;
+
+    const name = document.createElement('span');
+    name.className = 'tree-chip-name';
+    name.textContent = node.group ? node.group.name.split(SEPARATOR).pop() : node.label;
 
     const count = document.createElement('span');
-    count.className = 'group-tile-count';
-    count.textContent = group.count;
+    count.className = 'tree-chip-count';
+    count.textContent = _countUnder(node);
 
-    name.append(label, count);
-
-    const star = document.createElement('button');
-    star.type = 'button';
-    star.className = 'group-tile-star';
-    star.title = group.favourite ? 'Remove from favourites' : 'Favourite';
-    // One icon, two states. The difference is the font's FILL axis, applied
-    // in CSS — a ternary between two identical names, which is what this was,
-    // renders both states the same and reads as though it distinguishes them.
-    star.innerHTML = '<span class="material-symbols-outlined">bookmark_add</span>';
-    star.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await _update(group.key, { favourite: !group.favourite });
+    chip.append(name, count);
+    chip.addEventListener('click', () => {
+      // Selecting filters the grid; it no longer replaces the view, so the
+      // rest of the tree stays visible beside what it filtered to.
+      activeGroup = (activeGroup === node.key) ? '' : node.key;
+      expanded.add(node.key);
+      _refresh();
     });
+
+    // A group tile could be dropped onto; so can a branch.
+    _bindTreeDrop(chip, node);
 
     const more = document.createElement('button');
     more.type = 'button';
-    more.className = 'group-tile-more';
+    more.className = 'tree-more';
     more.title = 'Rename, recolour or delete';
     more.innerHTML = '<span class="material-symbols-outlined">tune</span>';
     more.addEventListener('click', (e) => {
       e.stopPropagation();
-      _tileMenu(e, group);
+      if (node.group) _tileMenu(e, node.group);
     });
 
-    tile.append(name, star, more);
-    _bindDrag(tile, group);
-    return tile;
+    row.append(twist, chip);
+    if (node.group) row.appendChild(more);
+    wrap.appendChild(row);
+
+    if (!open) return wrap;
+
+    node.children.forEach(child => wrap.appendChild(_branch(child)));
+
+    // The connections themselves, which is the half a tile could never show.
+    if (node.group) {
+      profileCache
+        .filter(p => (p.tags || []).includes(node.key))
+        .forEach(profile => wrap.appendChild(_leaf(profile, node)));
+    }
+    return wrap;
   }
 
-  /** The header shown while a group is open. */
-  function _insideGroup(profiles) {
-    const bar = document.createElement('div');
-    bar.className = 'group-open-bar';
+  /** A connection under a group. Clicking it connects. */
+  function _leaf(profile, node) {
+    const leaf = document.createElement('button');
+    leaf.type = 'button';
+    leaf.className = 'tree-leaf';
+    leaf.style.setProperty('--depth', String(node.depth + 1));
+    leaf.title = profile.hostname || '';
 
-    const group = groupCache.find(g => g.key === activeGroup) || {};
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined';
+    icon.textContent = 'terminal';
 
-    const back = document.createElement('button');
-    back.type = 'button';
-    back.className = 'group-back';
-    back.innerHTML = '<span class="material-symbols-outlined">keyboard_arrow_up</span>'
-                   + 'All groups';
-    back.addEventListener('click', () => open(activeGroup));
+    const label = document.createElement('span');
+    label.className = 'tree-leaf-name';
+    label.textContent = profile.name || profile.hostname || '';
 
-    const title = document.createElement('span');
-    title.className = `group-open-name group-${group.colour || 'slate'}`;
-    title.textContent = group.name || activeGroup;
+    leaf.append(icon, label);
+    leaf.addEventListener('click', () => {
+      if (typeof window.connectProfile === 'function') window.connectProfile(profile);
+      else if (typeof window.showConnectionDialog === 'function') {
+        window.showConnectionDialog(profile);
+      }
+    });
+    return leaf;
+  }
 
-    const inGroup = profiles.filter(
-      p => (p.tags || []).includes(activeGroup)).length;
+  function _bindTreeDrop(chip, node) {
+    chip.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      chip.classList.add('group-drop');
+    });
+    chip.addEventListener('dragleave', () => chip.classList.remove('group-drop'));
+    chip.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      chip.classList.remove('group-drop');
+      const profileId = e.dataTransfer.getData('application/x-shellmate-profile');
+      if (profileId && node.group) await _addMember(node.group, profileId);
+    });
+  }
 
-    const count = document.createElement('span');
-    count.className = 'group-open-count';
-    count.textContent = `${inGroup} connection${inGroup === 1 ? '' : 's'}`;
+  // -------------------------------------------------------------------------
+  // Docking and collapsing
+  // -------------------------------------------------------------------------
 
-    bar.append(back, title, count);
+  function _bindPanelControls() {
+    const dock = document.getElementById('group-tree-dock');
+    if (dock) dock.addEventListener('click', () => {
+      const side = _prefs().group_tree_side === 'right' ? 'left' : 'right';
+      if (window.shellmatePrefs) window.shellmatePrefs.set('group_tree_side', side);
+      renderTree(profileCache);
+    });
 
-    // Opening a whole group is the point of having one. Offered only from
-    // inside it — "connect all" over an unfiltered two hundred is not
-    // something to put one click away.
-    if (inGroup) {
-      const openAll = document.createElement('button');
-      openAll.type = 'button';
-      openAll.className = 'btn-secondary btn-tiny';
-      openAll.textContent = `Open all ${inGroup}`;
-      openAll.addEventListener('click', () => {
-        if (typeof window.connectTag === 'function') {
-          window.connectTag(activeGroup, inGroup);
-        }
-      });
-      bar.appendChild(openAll);
-    }
-
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'group-tile-more';
-    edit.title = 'Rename, recolour or delete';
-    edit.innerHTML = '<span class="material-symbols-outlined">tune</span>';
-    edit.addEventListener('click', (e) => _tileMenu(e, group));
-    bar.appendChild(edit);
-
-    return bar;
+    const collapse = document.getElementById('group-tree-collapse');
+    if (collapse) collapse.addEventListener('click', () => {
+      const now = !(_prefs().group_tree_collapsed === true);
+      if (window.shellmatePrefs) window.shellmatePrefs.set('group_tree_collapsed', now);
+      renderTree(profileCache);
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -230,9 +349,11 @@
       });
       if (!res.ok) throw new Error((await res.json()).detail || 'Could not create it.');
       const group = await res.json();
-      // Straight into it, because the next thing anybody does after making a
-      // group is put something in it.
+      // Selected and expanded, because the next thing anybody does after
+      // making a group is put something in it — and unlike the tiles this
+      // does not replace the view to do it.
       activeGroup = group.key;
+      expanded.add(group.key);
       _refresh();
     } catch (e) {
       _warn('Could not create the group', e.message);

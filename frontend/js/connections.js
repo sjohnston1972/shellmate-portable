@@ -303,6 +303,10 @@
    * a bastion is not buried by them.
    */
   window.connectTag = connectTag;
+  // The tree's leaves connect the same way a dashboard tile does. A second
+  // connect path would be one more thing to keep in step — openProfile
+  // already switches to an existing tab rather than opening a duplicate.
+  window.connectProfile = (profile) => openProfile(profile, null);
 
   async function connectTag(tag, count) {
     const ok = await (window.shellmateDialog

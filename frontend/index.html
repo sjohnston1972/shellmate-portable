@@ -136,16 +136,32 @@
       <main id="terminal-pane">
         <!-- Welcome screen shown when no tabs are open -->
         <div id="welcome-screen">
+          <!-- The group tree (#147). A sibling of the content rather than a
+               row inside it, so it can dock to either side and collapse
+               without the dashboard reflowing around it.
+
+               This replaced a wrapped row of group tiles. Tiles grew
+               sideways into a wall at a dozen groups, their counts were too
+               small to scan, and diving into one replaced the whole view —
+               so seeing two groups meant visiting them one at a time. A tree
+               grows downwards, holds its shape, and shows a group's contents
+               without hiding everything else. -->
+          <aside id="group-tree" class="hidden">
+            <div id="group-tree-head">
+              <span id="group-tree-title">Groups</span>
+              <button id="group-tree-dock" class="icon-btn" title="Move to the other side">
+                <span class="material-symbols-outlined">swap_horiz</span>
+              </button>
+              <button id="group-tree-collapse" class="icon-btn" title="Collapse">
+                <span class="material-symbols-outlined">keyboard_arrow_down</span>
+              </button>
+            </div>
+            <div id="group-tree-body"></div>
+          </aside>
+
           <div id="welcome-content">
             <h1><img src="/static/Untitled-removebg-preview.png" alt="" id="welcome-logo" />ShellMate Portable</h1>
 
-            <!-- Groups. Tags rather than folders, because the useful ones
-                 overlap: a device is both "glasgow" and "production" and
-                 "access". A group is one of those tags given a name, a
-                 colour and a place — see groups.js. This replaced the tag
-                 chip row, which filtered the grid by tag and was therefore
-                 the same feature without the colour. -->
-            <div id="welcome-groups"></div>
 
             <!-- Saved session quick-launch grid -->
             <div id="welcome-profiles-grid"></div>

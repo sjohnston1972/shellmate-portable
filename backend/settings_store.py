@@ -165,6 +165,10 @@ DEFAULT_SETTINGS: dict = {
         # because it costs nothing when no groups exist — a tab with no
         # group is drawn exactly as before.
         "tab_groups": True,
+        # The group tree on the dashboard (#147): which side it docks to and
+        # whether it is collapsed. "left" | "right".
+        "group_tree_side": "left",
+        "group_tree_collapsed": False,
         # Interface font scale, the same shape as --icon-scale (#136). The
         # terminal has been settable for a long time; the chrome around it
         # was fixed at whatever looked right on one display.
