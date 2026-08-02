@@ -204,11 +204,11 @@
 
     const prefs = _prefs();
     const right = prefs.group_tree_side === 'right';
+    // One mechanism only: `order` on the panel itself. There used to be a
+    // second — row-reverse on the container — and the pair cancelled out, so
+    // the dock button changed the setting and moved nothing (reported as
+    // "clicking the icon with the arrows does nothing").
     panel.classList.toggle('group-tree-right', right);
-    // The container reverses too, or the panel would order itself after the
-    // content while still sitting on the left.
-    const screen = document.getElementById('welcome-screen');
-    if (screen) screen.classList.toggle('tree-docked-right', right);
     panel.classList.toggle('group-tree-collapsed', prefs.group_tree_collapsed === true);
 
     body.innerHTML = '';

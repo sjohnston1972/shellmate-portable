@@ -7038,7 +7038,11 @@ body {
   gap: 0;
 }
 
-#welcome-screen.tree-docked-right { flex-direction: row-reverse; }
+/* Dock side is `order` on the tree alone. This used to ALSO set
+   flex-direction: row-reverse on the container, and the two cancelled out:
+   with row-reverse the order-0 content takes the right edge and the order-2
+   tree lands back on the left — pixel-identical to not clicking. The setting
+   changed, the screen did not, and the button read as dead. One mechanism. */
 
 #group-tree {
   flex: 0 0 auto;
