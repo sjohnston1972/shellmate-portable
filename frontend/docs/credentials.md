@@ -40,8 +40,17 @@ that session.
 Tick **Remember these credentials in the encrypted vault** when connecting.
 The password goes into the vault, filed against that saved connection.
 
-Next time, leave the password field blank — the dialog shows a **saved in
-vault** badge so you know one is stored, and offers to forget it.
+Once the connection succeeds — not before — ShellMate asks one more question:
+whether to **give the credentials a name**. The same login usually covers more
+than one device, and a named credential is one other connections can point at,
+so naming it now is cheaper than discovering later that the same password is
+saved forty times over. Leave the name blank and it stays with this connection
+alone, which is the right answer for a one-off. The *Shared credentials*
+section below explains what a name buys you.
+
+Next time, leave the password field blank — the dialog shows a badge saying
+where one is stored, **saved in vault** or **saved in plain text**, and offers
+to forget it.
 
 ### Or in plain text
 
@@ -178,7 +187,9 @@ they were ever the same password.
 **Settings → Credentials Vault → Shared credentials** lets you name one. Give
 it a name you will recognise later — *Lab admin*, *Core switches* — a username,
 and a password. Connections then **point at it** rather than copying it, so
-changing it here fixes every device using it at once.
+changing it here fixes every device using it at once. The naming prompt after
+a successful connect creates exactly the same thing, from the credentials you
+have just proved work.
 
 Each one shows how many connections rely on it, which is what you want to know
 before deleting it. Deleting a shared credential detaches everything using it,

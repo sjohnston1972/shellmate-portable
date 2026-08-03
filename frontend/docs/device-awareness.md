@@ -21,10 +21,15 @@ never as the first resort.
 
 ## The confidence gate
 
-Every result carries a **confidence**, and everything else on this page
-depends on it. Acting on a weak guess is how a tool ends up sending
-`terminal length 0` to a firewall, so below a threshold ShellMate identifies
-the device and then deliberately does nothing with the answer.
+Every result carries a **confidence**, and it gates the one thing ShellMate
+sends to a device unasked: the paging-off command. Acting on a weak guess is
+how a tool ends up sending `terminal length 0` to a firewall, so below a
+threshold ShellMate identifies the device and then deliberately withholds the
+command.
+
+The gate covers exactly that — what gets *sent*. Aliases switch on with the
+identification itself, confident or not, because an expansion is shown to you
+as it happens rather than sent behind your back.
 
 This matters more than it sounds, because the gate is met less often than you
 would expect. A banner naming the software is conclusive. A prompt on its own
@@ -57,20 +62,22 @@ not send:
 > identified Cisco IOS / IOS-XE from its prompt alone — not confident enough
 > to send "terminal length 0", so paging is still on
 
-The status bar says `(unconfirmed)` rather than showing the device as known.
-Hovering it gives the confidence, where the identification came from, and what
-that means.
+It carries a **Set platform** button, and then fades — the offer's permanent
+home is the **Device** chip in the status bar, which reads `(unconfirmed)`
+rather than showing the device as known. Hovering the chip gives the
+confidence, where the identification came from, and what that means.
 
 ### Telling it yourself
 
-Click the device entry in the status bar and choose the platform. That is the
-one source that is not a guess, so it carries full confidence: aliases switch
-over immediately and the paging command is sent, if that setting is on. What
-was sent is announced exactly as it would have been automatically.
+Click the **Device** chip in the status bar and choose the platform — it
+works even from the dashboard, where the chip still describes the last
+session shown. That is the one source that is not a guess, so it carries full
+confidence: aliases switch over immediately and the paging command is sent,
+if that setting is on. What was sent is announced exactly as it would have
+been automatically.
 
-The choice applies to that session only. To make it stick for a device, give
-its platform a signature that matches something in its banner — see
-**Editing what ShellMate knows** below.
+The choice applies to that session — and is remembered against the saved
+connection, see below.
 
 ## What it does with that
 
@@ -96,6 +103,7 @@ interchangeable.
 Retrieving a running configuration is `show running-config` on IOS,
 `show configuration | display set` on Junos, and `show config running` on
 PAN-OS. Configuration snapshots and drift detection use whichever applies.
+The destructive-command list is per-platform for the same reason.
 
 ### Enables aliases
 
@@ -127,10 +135,16 @@ Two rules keep this safe:
 - **The terminal shows what was actually sent.** You see your `ints`, then
   you see the real command replace it, and a note says so.
 
-Nothing is expanded until the device has been identified, and nothing at all
-is expanded on an unidentified one.
+Nothing is expanded until the device has been identified — an unidentified
+device has no alias table, so nothing at all is expanded on one. An
+identification below the confidence bar is still an identification: aliases
+work there, with every expansion shown as it happens.
 
-Turn expansion off under **Settings → Device Awareness**.
+Turn expansion off under **Settings → Device Awareness**. The same section
+also holds **Keep sessions alive** — a nudge typed at an idle prompt so
+`exec-timeout` never closes the tab you left over lunch — which sits there
+because, like everything on this page, it types into your session and is
+never done silently.
 
 ## Editing what ShellMate knows
 
@@ -178,8 +192,8 @@ definitions. Deleting `platforms.json` does the same.
 
 Identifying a device by hand used to last as long as the tab. Close it,
 reconnect, and you were back to a device identified from its prompt alone —
-below the confidence threshold, so no aliases, no paging command, and the
-guardrail falling back to the generic list.
+below the confidence threshold, so no paging command, and the guardrail
+falling back to the generic list.
 
 That landed hardest on exactly the devices the override exists for. A switch
 whose banner is a legal warning, and anything behind a terminal server, are

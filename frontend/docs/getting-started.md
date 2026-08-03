@@ -29,6 +29,24 @@ The interface is also a local web page, so you can point a browser at
 `http://localhost:8765` whenever you want a second view or the browser's
 developer tools.
 
+## The home screen
+
+What you see before any tab is open — and can always get back to by clicking
+**ShellMate Portable** in the tab bar, or the logo in the sidebar. Either one
+is Home: it clears whatever group was selected and brings the hero view
+forward, even over a running terminal.
+
+Down the side of the terminal area sits the **group tree** — your saved
+connections arranged into named groups, once you have made some. Click a
+group and its dashboard of connection tiles comes forward; click Home and you
+are back to the unfiltered view. See [Connecting](#connecting) for what groups
+can do.
+
+The home view itself shows your most recent connections as tiles, doors into
+the rest of the application — the manual, session history, SSH keys,
+support — and a row of shortcut pills so the keyboard shortcuts are learnable
+without opening a page like this one.
+
 ## Your first connection
 
 Click **New Connection**, or press `Ctrl+T`.
@@ -42,7 +60,7 @@ Click **New Connection**, or press `Ctrl+T`.
 | Password | Optional if you are using a key, or have one saved |
 
 The connection is saved automatically once it succeeds, so it appears on the
-welcome screen next time. Passwords are only saved if you ask.
+dashboard next time. Passwords are only saved if you ask.
 
 ## What happens when you connect
 
@@ -56,8 +74,8 @@ Several things, in the first second or two:
   the device was identified *confidently* — see
   [Device awareness](#device-awareness) for why that gate exists and what to do
   when it stops you.
-- The **running configuration is captured** on a second channel and compared
-  with your last visit, so you are told if anything has changed since.
+- The **running configuration is captured** and compared with your last
+  visit, so you are told if anything has changed since.
 - The session starts **recording**, so you can search it later.
 
 A note appears briefly in the bottom-right corner saying what was done and, if
@@ -65,18 +83,33 @@ nothing was, why not. None of this needs configuring, and all of it can be
 switched off.
 
 The AI panel is **not** shown until you ask for it — the robot icon in the
-sidebar turns it on.
+tab bar, beside the layout button, turns it on.
 
-## How long a session has been up
+## Picking up where you left off
 
-The status bar shows the active session's age — *connected 02:14:32* — counted
-from the moment the device answered. Hovering any tab gives the same for that
-session, which is how you find the one that has been up longest without
-crowding the tab strip.
+**Settings → ShellMate Interface → Reopen tabs when ShellMate starts**
+reconnects the tabs you had open last time. It only restores sessions saved
+as a connection with a stored password — nothing else can be reconnected
+without asking you — and anything it could not restore is named rather than
+silently missing, so "Restored 9 of 12" always comes with the list of three.
+
+## The status bar
+
+The line across the bottom describes the **active** session:
+`SSH: core-sw-01 | Connected 01:05:12` — the state and, beside it, how long
+the session has been up, counted from the moment the device answered.
+Hovering any tab gives the same for that session, which is how you find the
+one that has been up longest without crowding the tab strip.
 
 A session that drops stops counting and says what it reached — *disconnected
 after 02:11:04*. A clock still running on a dead session would be telling you
 something untrue. Reconnecting starts a fresh one rather than resuming.
+
+Next along is the **Device** chip — what ShellMate identified the device as,
+and whether it was sure. Click it to say what the device is yourself; that
+works even from the dashboard, where it still describes the last session
+shown. It clears when no sessions remain, rather than describing a device
+that is no longer connected to anything.
 
 ## Keyboard shortcuts
 
@@ -85,6 +118,7 @@ something untrue. Reconnecting starts a fresh one rather than resuming.
 | `Ctrl+T` | New connection |
 | `Ctrl+W` | Close the current tab |
 | `Ctrl+1` … `Ctrl+9` | Switch to that tab |
+| `Ctrl+F` | Find in the terminal |
 | `Ctrl+Alt+1` … `Ctrl+Alt+8` | Choose a split layout |
 | `Ctrl+Shift+B` | Broadcast a command to several devices |
 | `Ctrl+Shift+C` | Copy the selection |
@@ -136,11 +170,17 @@ Everything lives in `ShellMate-Data` beside the executable.
 |---|---|
 | `settings.json` | Your preferences |
 | `profiles.json` | Saved connections. Never contains a secret |
+| `groups.json` | The groups and subgroups the dashboard tree shows |
 | `vault.json` | API keys and saved passwords, encrypted |
+| `credential-sets.json` | Named shared logins — the names and usernames only; passwords go to the vault |
+| `credentials-plaintext.json` | Passwords you explicitly chose to keep readable |
 | `shellmate.db` | Session history and configuration snapshots |
 | `platforms.json` | What ShellMate knows about each device type |
+| `schemes.json` | Terminal colour schemes, including any you add |
 | `snippets.json` | The saved command library used by Broadcast |
 | `prompts.json` | The assistant's system prompts, editable |
+| `models.json` | The AI model lists discovered from each provider, cached |
+| `shellmate.lock` | Stops a second copy starting against the same data folder |
 | `logs/` | Session logs, if you turn them on |
 | `configs/` | Captured device configurations, if you ask for them as files |
 | `support/` | Diagnostic bundles you have built for a support request |
@@ -148,9 +188,9 @@ Everything lives in `ShellMate-Data` beside the executable.
 | `window-storage/` | The desktop window's own state — scroll positions and the like |
 | `shellmate.log` | What the application itself did, for troubleshooting |
 
-`platforms.json` and `snippets.json` are both plain, commented JSON meant to
-be edited, kept in version control, or handed to a colleague. Delete either
-and the shipped defaults come back.
+`platforms.json`, `schemes.json` and `snippets.json` are plain, commented
+JSON meant to be edited, kept in version control, or handed to a colleague.
+Delete any of them and the shipped defaults come back.
 
 `configs/` can be pointed anywhere, including a network share — see
 [History and drift](#history-and-drift).

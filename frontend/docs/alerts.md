@@ -18,6 +18,9 @@ The patterns come from the platform definitions, so a device ShellMate has not
 been taught about produces no alerts. See
 [Device awareness](#device-awareness) for how to add one.
 
+A `commit confirmed` with no number is assumed to mean ten minutes, which is
+the Junos default — settable, if your estate differs.
+
 ## Where the countdown appears
 
 **On the tab** — a countdown beside the device name, so it is visible whichever
@@ -52,7 +55,8 @@ ABORTED`, a plain `commit`. The alert clears.
 ## The channels
 
 Three ways of being told, each switchable under **Settings → Alerts**. They
-escalate at ten minutes, five minutes, one minute and ten seconds.
+escalate as the deadline approaches — at ten minutes, five minutes, one minute
+and ten seconds, unless you change the thresholds.
 
 **Flash the tab.** The tab pulses over the last five minutes only. A tab that
 pulses for ten minutes is one people stop seeing.
@@ -69,12 +73,37 @@ The final warning stays until dismissed; the earlier ones fade.
 **Reduce motion** replaces the flashing with a steady outline. Your system's
 own reduced-motion setting is honoured as well; this forces it on regardless.
 
+## Tuning it
+
+Those switches decide *whether* each channel speaks. The numbers behind them —
+when, how often, how loudly — are settable too, in the **Alert timing and
+thresholds** subsection at the bottom of Settings → Alerts. They apply as soon
+as you change them.
+
+| Setting | Default |
+|---|---|
+| Escalation thresholds | 600, 300, 60 and 10 seconds remaining |
+| Flash the tab within | The last 300 seconds |
+| Toasts on screen at once | 3 |
+| How long a toast stays | 12 seconds — the final warning stays until dismissed |
+| Tone volume | 0.2 |
+| Junos commit-confirm default | 10 minutes |
+| Forget a pending action after | 6 hours |
+
+Somebody who wants a nudge half an hour out adds 1800 to the thresholds. A
+malformed list falls back to the default rather than leaving a pending reload
+unannounced.
+
+Which corner the toasts appear in is a layout question rather than an alert
+one, so it lives with the layout settings: **Settings → ShellMate Interface →
+Notifications appear**.
+
 ## Stale alerts
 
-A pending action older than six hours is dropped. Something was missed — the
-device rebooted and the socket survived, or the cancellation scrolled past —
-and a countdown stuck at zero for the rest of the afternoon is worse than no
-countdown at all.
+A pending action nothing has been heard about for six hours — settable, above —
+is dropped. Something was missed: the device rebooted and the socket survived,
+or the cancellation scrolled past. A countdown stuck at zero for the rest of
+the afternoon is worse than no countdown at all.
 
 ## Closing a tab with something pending
 

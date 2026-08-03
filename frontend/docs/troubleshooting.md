@@ -5,14 +5,18 @@
 `ShellMate-Data/shellmate.log` records what the application did on this run.
 It is rewritten each launch, so what is in it is current.
 
-`GET http://127.0.0.1:8765/api/system/info` reports where data is being
-stored and which port is in use.
+**Settings → Diagnostics** shows the essentials without leaving the
+interface: which build this is, where the data folder and log are, and what
+the history database holds. `GET http://127.0.0.1:8765/api/system/info`
+reports the same from outside it.
 
 ## It will not start
 
 **A message box appears about the server.** Something else holds the port, or
 a security product blocked the listen. ShellMate tries port 8765 and walks
-upward, so this usually means all twenty were unavailable — check the log.
+upward — twenty ports by default; the count is **Ports to try if 8765 is
+busy**, under Settings → Diagnostics — so this usually means all of them were
+unavailable. Check the log.
 
 **Nothing happens at all.** Corporate antivirus quarantines unsigned
 single-file executables more often than any other kind. Check its logs. A
@@ -28,7 +32,8 @@ the same database. Quit from the tray icon first.
 Look at the first line of the log. If it reports a folder inside your user
 profile rather than one next to the executable, the location it was run from
 was not writable — Program Files, or a write-protected stick — and it fell
-back so it could still start.
+back so it could still start. Settings → Diagnostics says so too, on the
+data-folder row.
 
 Move the executable somewhere writable if you want the data to travel with it.
 
@@ -89,21 +94,29 @@ If the status bar shows the platform with no qualifier and paging is still on,
 check the setting itself is on under **Settings → Device Awareness** — the
 note in the corner says so explicitly when that is the reason.
 
-## The configuration snapshot is skipped
+## The configuration snapshot did not happen
 
-The drift check needs a second SSH channel. Three reasons it may not be
-available:
+The drift check prefers a **second SSH channel** — it cannot disturb what you
+are typing, and it gets its own wide terminal so paging never engages. Not
+every device offers one: many switches cap concurrent sessions at one, and
+serial and telnet cannot multiplex at all.
 
-- The device caps concurrent sessions at one. Common on older switches.
-- The session is serial or telnet, which cannot multiplex.
-- The retrieval command for that platform is wrong or the account lacks
-  privilege.
+Those devices are not skipped. The capture runs **through the session you are
+already in** — hidden from your screen while it happens, never started
+mid-command, and stated plainly once it is done, because nothing ShellMate
+sends is sent silently. That behaviour is a setting, on by default: **Capture
+over your session if a second channel is refused**, among the advanced rows
+under **Settings → Configuration Capture**.
 
-It is skipped rather than falling back to typing into your live session,
-which would scroll a page of configuration under your cursor.
+If no capture is happening at all, the likely reasons:
 
-A fourth possibility: capture is switched off under **Settings →
-Configuration Capture**, which also stops the drift check.
+- Capture is switched off under **Settings → Configuration Capture**, which
+  also stops the drift check.
+- The live fallback above is switched off, and the device refuses a second
+  channel.
+- The retrieval command for that platform is wrong, or the account lacks
+  privilege — the device returns nothing, and ShellMate says so rather than
+  storing an empty snapshot.
 
 If captures are being taken but no files appear, **Also save each capture as a
 file** is the separate switch for that — and only a configuration that has
@@ -122,7 +135,8 @@ Three things must all hold:
 ## The AI panel is not there
 
 It is off until you ask for it — the terminal takes the full width on a fresh
-install. The robot icon in the sidebar turns it on.
+install. The robot icon in the tab bar turns it on; **ShellMate Interface →
+Show the AI panel** is the same switch.
 
 ## The AI panel is not working
 
@@ -133,21 +147,30 @@ Providers**. It reports exactly what went wrong per provider.
 proxied or blocked, not that the key is wrong. Ollama running locally avoids
 the problem entirely.
 
-## Something I changed in Stockton broke it
+## The model list is stale
+
+Cloud providers retire models. If a chat fails because the selected model no
+longer exists, the picker refreshes itself from the providers so you can pick
+a current one — the failure is self-healing rather than permanent. **Test
+connections & refresh models** under Settings → AI Providers, and the refresh
+button beside the model picker itself, do the same on demand.
+
+## An advanced setting broke it
 
 Run ShellMate once with `--reset-advanced` and every advanced setting goes back
 to its default. Deleting the `advanced` section from `settings.json` does the
 same thing.
 
-Nothing in that panel can stop ShellMate starting — every value is held to a
-range on the server — but a connect timeout of three seconds or a restrictive
-cipher list will certainly stop it reaching a device.
+Nothing among the advanced rows can stop ShellMate starting — every value is
+held to a range on the server — but a connect timeout of three seconds or a
+restrictive cipher list will certainly stop it reaching a device.
 
 ## Reporting a problem
 
 Click the **?** in the sidebar. It opens a panel that gathers what the first
 reply would otherwise have to ask for, writes it as a single zip in your data
-folder, and opens an email naming the file so you can attach it.
+folder, and opens an email naming the file so you can attach it. The same
+panel opens from **Build a support bundle** under Settings → Diagnostics.
 
 Everything is a choice, and everything can be read first. **Preview** beside
 each row shows exactly what would be written.

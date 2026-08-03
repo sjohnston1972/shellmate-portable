@@ -7,14 +7,12 @@ full width: the assistant is optional, on a locked-down network there may be
 no provider to reach at all, and a third of the window given to a pane that
 cannot answer anything is a poor introduction to it.
 
-The robot icon in the sidebar turns it on and off. It is the same setting as
-**Settings → ShellMate Interface → Show the AI panel** — not a second one that can
-disagree with it — and it is remembered between launches.
-
-It lives under ShellMate Interface rather than with the AI settings because it is a
-question about the shape of the window rather than about the assistant: it is
-the control you want when the terminal needs the full width, which is not a
-moment you would think to look under AI.
+The robot icon in the **tab bar**, beside the layout button, turns it on and
+off. It sits there rather than in the sidebar because the assistant is half of
+the split screen, not a panel that opens on top — it belongs with the control
+that decides what the window is showing. It is the same setting as
+**Settings → ShellMate Interface → Show the AI panel** — not a second one that
+can disagree with it — and it is remembered between launches.
 
 If you have been using ShellMate already, nothing changes — an existing setup
 keeps the panel it has always had.
@@ -24,16 +22,32 @@ keeps the panel it has always had.
 Anthropic, OpenAI, xAI, DeepSeek, or Ollama running locally.
 
 Add a key under **Settings → AI Providers**, then press **Test connections &
-refresh models**. The model you pick is remembered between
-launches. That does two things: confirms the key works, and rebuilds
-the model list from what the provider actually offers — so a model you have
-just been granted, or one you have just pulled into Ollama, appears without
-anyone editing a list.
+refresh models**. That does two things: confirms the key works, and rebuilds
+the model list from what each provider actually offers — every provider is
+asked for its own list, so a model you have just been granted, or one you have
+just pulled into Ollama, appears without anyone editing anything.
 
 Failures are explained rather than reported as a status code. "Rejected the
 API key" tells you what to do; `401` does not. A connection failure suggests
 the proxy rather than the key, because on a corporate build that is usually
 the cause.
+
+### Picking a model
+
+The dropdown in the chat header holds every model discovered, cloud providers
+and local Ollama grouped separately, with a refresh button beside it — the
+same discovery as the Settings button, reachable from where a stale list gets
+noticed.
+
+What discovery finds is kept — `models.json` in your data folder — and fills
+the picker on every page load, so the list survives a restart without touching
+the network. Discovery also re-runs on its own when you save a provider key,
+because a new key changes what is on offer, and when a provider rejects a
+retired model id — so a model withdrawn from under you drops out of the picker
+instead of lingering as an option that only ever errors.
+
+The model you pick is saved to `settings.json`, travels with the data folder,
+and is back on the next launch.
 
 ### Ollama
 
@@ -48,20 +62,63 @@ configuration should not go to a third party.
 By default, the tab you are looking at: the recent output, the commands you
 have run, and which device it is.
 
-The **session picker** in the chat header changes that. Tick several sessions
-and the assistant sees all of them — which is what you want for *"why can A
-reach C but B cannot"*, where the answer is in the difference between two
-devices.
+The **session picker** in the chat header changes that. **Follow the active
+tab** is the default; **Choose sessions** lets you tick several, and the
+assistant sees all of them — which is what you want for *"why can A reach C
+but B cannot"*, where the answer is in the difference between two devices.
 
-The context indicator in the status bar shows roughly how much of the model's
-context window is in use.
+The choice travels with **every** request, including the automatic analysis
+after an approved command, until you change it or the tabs close. And it is
+visible: the indicator in the chat header reads *N sessions* while a choice is
+in force, and the context meter in the status bar counts the added buffers —
+what the assistant will see is on screen, not remembered.
+
+That meter estimates how much of the model's context window the next question
+will use — green under a quarter, red when it is worth trimming.
+
+## Modes
+
+The **Tshoot / Learn** toggle in the chat header switches the assistant's
+manner:
+
+- **Troubleshoot** — terse, fix-it-now. Assumes you know what you are doing
+  and are in the middle of something.
+- **Learn** — explains the why, not just the what.
+
+Whichever you last chose is remembered, so somebody who always wants Learn
+says so once.
+
+## Suggested commands
+
+The assistant can suggest commands, which appear as clickable blocks. Nothing
+is sent until you press **Send**, and **Edit** lets you reword one first. Each
+block names the tab it will go to — so a command suggested while looking at
+one switch cannot quietly land on another after you have changed tabs; sending
+it switches you to that tab so you see it arrive.
+
+Commands the platform lists as dangerous — `reload`, `write erase` and their
+relatives — are held for confirmation before they reach the device, by the
+same guardrail that catches a `write erase` you type yourself. Which commands
+count is per-platform, under Platform Definitions.
+
+Two switches under **Settings → AI Assistant** govern this: whether the
+assistant may suggest commands at all — some people want an explainer and
+nothing clickable near a live device — and whether dangerous ones ask first.
+
+### After you approve one
+
+When a suggested command runs, the device's reply is gathered and sent back to
+the assistant, which comments on it unprompted — approve `show ip bgp summary`
+and the next message is about your neighbours. Sending device output to your
+provider is a different decision from running the command, so it has its own
+switch — **Comment on output after an approved command**, in Settings → AI
+Assistant — and its own cap on how many lines are shipped. Off, commands still
+run and are still suggested; you just ask about the result yourself.
 
 ## The prompts
 
 What the assistant is told before it sees anything of yours lives under
-**Stockton → AI assistant**, in full, and is yours to change. It sits there
-rather than in ordinary Settings because rewriting the assistant's instructions
-is tinkering by any definition. Tell it to stop
+**Settings → AI Assistant**, in full, and is yours to change. Tell it to stop
 explaining things you already know, to always quote a change reference, or to
 answer in your team's house style.
 
@@ -85,57 +142,58 @@ so while you are typing rather than after you have saved.
 A prompt file that has been broken by hand falls back to the shipped text
 rather than leaving the assistant unable to answer.
 
-## Modes
-
-The **Tshoot / Learn** toggle in the chat header switches the assistant's
-manner:
-
-- **Troubleshoot** — terse, fix-it-now. Assumes you know what you are doing
-  and are in the middle of something.
-- **Learn** — explains the why, not just the what.
-
-Whichever you last chose is remembered, so somebody who always wants Learn
-says so once.
-
-## Suggested commands
-
-Two switches under **Stockton → AI assistant** govern this: whether the
-assistant may suggest commands at all — some people want an explainer and
-nothing clickable near a live device — and whether dangerous ones ask first.
-
-The assistant can suggest commands, which appear as clickable blocks. Nothing
-is sent until you click, and the block names the device it will go to — so a
-command suggested while looking at one switch cannot quietly land on another
-after you have changed tabs.
-
-Commands it considers dangerous get a confirmation step.
-
 ## Knowledge base
 
 If you run a Chroma vector database of your own design guidelines, point
-ShellMate at it under **Settings → Knowledge Base**. Matching snippets are
-retrieved and added to the assistant's context, so its answers reflect your
-standards rather than generic advice.
+ShellMate at it under **Settings → AI Providers**, in the **Knowledge Base
+(Chroma DB)** subsection — there is a Test connection button next to the
+fields. Matching snippets are retrieved on every chat and added to the
+assistant's context, so its answers reflect your standards rather than generic
+advice.
 
 Left unconfigured, this is skipped entirely with no penalty.
+
+## Around the conversation
+
+**Quick buttons** under the messages ask a stock question in one press. They
+are yours to change: right-click one to reword it, **+** to add one, **×** to
+remove it. The set is kept in `settings.json`, so a curated row travels with
+the data folder.
+
+**Pop out** floats the chat over the terminal — drag the header to move it,
+the corner to resize — for when the terminal has the whole width but a
+question comes up anyway.
+
+**Enter** sends by default, with Shift+Enter for a new line. If you write
+paragraphs rather than sentences, **Settings → ShellMate Interface → Enter in
+the chat box** swaps that round: Enter starts a new line and Ctrl+Enter sends.
+
+**Clear** empties the conversation. **Conclude** does the opposite of
+forgetting: it summarises the sessions and the chat, and logs the result to
+Jira — the write-up your work order was going to need anyway.
 
 ## What is sent
 
 When you ask a question: your message, recent output from the sessions in
-context, the commands run in them, and the device types.
+context, the commands run in them, the device types, and any knowledge-base
+snippets that matched.
 
 Terminal output is **cleaned and redacted** first. Cleaning removes escape
 sequences and paging artefacts. Redaction masks passwords, hashes, keys and
 community strings — the same **Obscure passwords and secrets** setting that
 covers session logs, because devices echo and `show run` puts credentials
-straight into the buffer. It applies to the Jira export too.
+straight into the buffer. It applies to the Jira export too, and to the
+automatic analysis after an approved command, whose prompt is composed on the
+server precisely so the masking sees the output before any provider does.
 
 Turn it off and the assistant sees the unmasked truth, which is a reasonable
 choice when the model is Ollama running on your own machine and nothing is
 leaving it. It is not a reasonable choice with a cloud provider.
 
-Nothing is sent unless you ask a question. The assistant does not watch your
-session in the background.
+Nothing is sent unless you ask a question — or approve a suggested command
+while the after-approval analysis is on, which is the one case where the
+assistant speaks without being spoken to, and has its own switch for exactly
+that reason. The assistant does not watch your sessions in the background.
 
 If that is more than you want leaving the machine, use Ollama, or turn the
 panel off.

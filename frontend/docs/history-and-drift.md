@@ -31,9 +31,28 @@ get what you expect.
 Click any result to replay that whole session — every command in order, with
 its output and timing.
 
+## Clearing history
+
+**Clear history**, in the History panel's header, deletes records — scoped
+by whatever the
+panel is already filtered to, because choosing a device and then being
+offered only all-or-nothing is how the wrong thing gets deleted. Filter to
+one device and it clears that device; set a date range and everything *older*
+goes, so what is on screen survives. No filters means all of it.
+
+It offers to take the device's configuration snapshots too, ticked by
+default — a snapshot is a full running config, secrets included, and clearing
+a device's history while quietly keeping its configs would be misleading.
+What was removed is counted rather than reported as "done".
+
+For an automatic version, **Discard history after** (under **Settings →
+Session Logging**) prunes anything older than a number of days. The default
+is zero — keep everything — because history you did not know was being
+discarded is worse than a large database.
+
 ## Configuration capture and drift
 
-Every SSH connection captures the device's running configuration and compares
+Every connection captures the device's running configuration and compares
 it with the last time you were there. If anything changed, a prompt appears
 over the terminal:
 
@@ -51,17 +70,33 @@ diff, and a window you have to close first is a tax on every login. It waits
 until dismissed. Nothing changed since last time gets a quieter note that
 fades on its own.
 
-### How it avoids disturbing you
+### How it captures without disturbing you
 
 The capture runs on a **second SSH channel**, multiplexed onto the connection
-your tab already has. No second login, and nothing is typed into the session
-you are working in.
+your tab already has. No second login, nothing typed into the session you are
+working in, and its own wide terminal so paging never engages. That is always
+tried first.
 
-Not every device cooperates. Some switches allow only one session at a time;
-serial and telnet cannot multiplex at all. When that happens the check is
-skipped silently rather than interfering with your session — and it never
-falls back to typing into your terminal, which would scroll a page of
-configuration under your cursor.
+Not every device cooperates. Some switches allow only one session at a time
+and refuse the second channel; serial and telnet cannot multiplex at all. On
+those, the capture runs **through your own session** instead — and because
+that is a different thing to do, it follows strict rules:
+
+- It waits until the device is idle at a prompt, and gives up the moment you
+  type.
+- The command and its output are withheld from your screen, the session
+  buffer, the transcript and the log — so it is neither scrolled under your
+  cursor nor recorded as something you did.
+- A pager is answered rather than reconfigured: it will not send
+  `terminal length 0` to change your session's state.
+- **It is announced afterwards.** Hidden while it happens, stated when it is
+  done — the capture notice says the command ran in this session. Genuinely
+  invisible would break the rule that nothing is sent silently.
+
+The fallback is governed by **Capture over your session if a second channel
+is refused**, on by default. Turn it off and nothing is ever typed into a
+session on your behalf — at the cost of no capture at all on serial, telnet
+and single-session switches.
 
 Identical configurations are not stored twice, so the snapshot history shows
 actual changes rather than one entry per login.
@@ -89,7 +124,11 @@ Under **Settings → Configuration Capture**:
 |---|---|---|
 | Capture the configuration on connect | On | Off, nothing is fetched and the drift check stops |
 | Offer a diff when it has changed | On | Off, captures still happen silently |
+| Capture over your session if a second channel is refused | On | Off, devices that refuse one get no capture at all |
 | Also save each capture as a file | Off | Writes each one out as a `.cfg` |
+
+The timings behind it — capture timeout, quiet period, diff context — render
+in the same section as advanced rows.
 
 ### Keeping the captures as files
 
@@ -116,10 +155,6 @@ of each device is the one the diff compares against.
 setting that covers session logs. A running configuration carries password
 hashes, pre-shared keys and community strings, and this writes it somewhere
 you chose, which may well be backed up. One switch, one promise.
-
-A capture that has been written is confirmed with a small pop-up naming the
-file. Everything else about the process is invisible by design, so that
-confirmation is the only sign it happened.
 
 ## Session logs
 
@@ -169,8 +204,8 @@ chose. Drift then reports both numbers:
 > *(2 lines differ from the baseline set on 3 March.)*
 
 They answer different questions, so you get both rather than one replacing the
-other. **Stockton → Configuration capture → Compare a config against** switches
-to one or the other if you would rather.
+other. **Settings → Configuration Capture → Compare a config against**
+switches to one or the other if you would rather.
 
 A pinned baseline is exempt from retention. Pruning is oldest-first, so
 without that the baseline would be the first thing discarded — which is

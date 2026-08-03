@@ -57,15 +57,10 @@ converters attached.
 
 Defaults are 9600 8-N-1 with no flow control, which is what Cisco console
 ports expect. Change the defaults for every future connection under
-**Settings → Serial Defaults**.
+**Settings → SSH & Serial**.
 
 Opening a COM port needs no administrator rights, as long as the adapter's
 driver is installed.
-
-### Break signal
-
-Sending a break is how you interrupt a Cisco device during boot to reach
-ROMMON. It is available from the tab context menu on a serial session.
 
 ### If the port will not open
 
@@ -98,11 +93,11 @@ Leave the username blank to log in by hand.
 
 ## Saved connections
 
-Every successful connection is saved so it appears on the welcome screen.
+Every successful connection is saved so it appears on the dashboard.
 Saved connections never contain a password.
 
 If you connect by IP, the saved connection is renamed after the device once
-it identifies itself, so the welcome screen shows `core-sw-01` rather than
+it identifies itself, so the dashboard shows `core-sw-01` rather than
 `10.20.30.40`. The address it dials is deliberately left alone: a saved
 connection named after the device but still dialling the IP works everywhere,
 whereas one dialling the name only works where that name resolves — which on
@@ -126,11 +121,59 @@ encryption works and when plain text is a reasonable choice.
 Saved passwords are never sent to the browser. The interface passes a
 connection id and the server fills the credential in on its own side.
 
-## Reconnecting
+## The tab menu
+
+Right-click any tab for everything you can do to that session:
+
+| Entry | What it does |
+|---|---|
+| **Reconnect** | Bring a dropped session back — shown only when it is down |
+| **Clear console** | Empty the visible buffer |
+| **Copy history** | The session's output, onto the clipboard |
+| **Copy address** | The address you dialled — for a ticket or a firewall rule, exactly when the tab has started showing the device's name instead |
+| **Save this connection** | Keep an ad-hoc connection without retyping it |
+| **Duplicate session** | A second tab to the same device |
+| **Colour scheme** | Per-tab colours — production red, lab grey |
+| **Keep this tab alive** / **all tabs** | Nudge the session so `exec-timeout` never fires |
+| **Disconnect session** / **all sessions** | Hang up but keep the tab and its buffer |
+| **Close tab** / **Close all tabs** | Tear it down |
+
+Closing a connected tab asks first, and then hangs up properly: an explicit
+disconnect goes to the device before the teardown, so the far side is logged
+out even if the teardown request is lost.
+
+**Disconnect** is not **Close**. Disconnecting keeps the buffer on screen and
+puts **Reconnect** one click away — the same state a session that dropped on
+its own leaves behind.
+
+## Coming back after a drop
 
 A dropped session keeps its tab so you can still read the buffer. Right-click
 the tab and choose **Reconnect** to bring it back — using the saved password
 if there is one, and asking only if there is not.
+
+**Settings → SSH & Serial → Reconnect a dropped session by itself** is off by
+default, because silently re-authenticating to a device is not something to do
+without being asked.
+
+Turned on, it retries only a drop ShellMate did not cause — never after you
+close a tab, never for serial, since the COM port did not go anywhere. It
+backs off, doubling from five seconds to a minute, because a device coming
+back from a reload takes minutes and hammering it for the first two is
+pointless.
+
+**It waits longer after a reload.** ShellMate saw the `reload` go in, so it
+knows why the session dropped and roughly how long the device will be away.
+
+**It only works where credentials can be resolved without being held.** The
+password is cleared from memory the moment authentication succeeds, and that
+does not change here — so this needs a saved connection whose password the
+server can fetch for itself. Where it cannot, the tab says which is missing
+rather than quietly doing nothing.
+
+When it succeeds, the terminal says so. A session that silently reappears
+leaves you unsure whether the scrollback above the line is from the same boot
+of the device, which matters when you are about to reason about what changed.
 
 ## File transfer
 
@@ -161,7 +204,7 @@ collapsed section that dwarfed the dialog when opened.
 
 Switching between them keeps the address and username, so picking the wrong
 one costs nothing. A saved connection opens on whichever form it uses, and
-key-based ones carry a key icon on the welcome screen — worth knowing before
+key-based ones carry a key icon on the dashboard — worth knowing before
 you click, because when a key connection fails the cause is usually the key
 rather than a password.
 
@@ -185,7 +228,7 @@ and certificate name are shown too; a title of "Cisco Integrated Management
 Controller" identifies a box more usefully than its address does.
 
 Tick the ones worth keeping and **Save as connections**. They arrive on the
-welcome screen knowing what platform they are. Scanning the same subnet again
+dashboard knowing what platform they are. Scanning the same subnet again
 updates those entries rather than adding a second copy of everything.
 
 ### Before you scan something
@@ -210,7 +253,7 @@ scanning. A TCP connection to port 22 needs no privileges and tells you more.
 
 How many addresses are probed at once, how long each waits, which ports are
 tried, whether web pages are fetched at all, and the limits on size and
-duration are all in **Stockton → Network discovery**. The defaults are
+duration are all under **Settings → Network Discovery**. The defaults are
 deliberately unhurried: a burst of hundreds of simultaneous connections
 exhausts a firewall's session table and looks exactly like an attack to
 anything watching.
@@ -227,8 +270,8 @@ The device is named first on purpose. The mistake this exists to catch is not
 "did I mean to type reload" — it is "which tab am I in".
 
 Which commands count is per-platform, under **Settings → Platform
-Definitions**, and the switch is **Stockton → Terminal → Confirm destructive
-commands you type**.
+Definitions**, and the switch is **Settings → Terminal Behaviour → Confirm
+destructive commands you type**.
 
 **It catches common mistakes rather than everything, and it is worth knowing
 where the edges are.** ShellMate matches on the line it can see you assemble,
@@ -237,55 +280,40 @@ the up arrow arrives with nothing to match against — the cursor moved
 invisibly and the assembled line is empty. A guardrail believed to be total is
 worse than one whose limits are known.
 
-On a device ShellMate could not identify confidently there is no platform
-list, so the generic one is used — the commands that are destructive on
-anything. **Stockton → Terminal → On devices ShellMate could not identify**
+On a device ShellMate could not identify at all there is no platform list, so
+the generic one is used — the commands that are destructive on anything.
+**Settings → Terminal Behaviour → On devices ShellMate could not identify**
 turns that off if you would rather.
 
-## Coming back after a drop
+## Groups
 
-**Stockton → SSH → Reconnect a dropped session by itself** is off by default,
-because silently re-authenticating to a device is not something to do without
-being asked.
+Saved connections live on the dashboard, and the **group tree** beside the
+terminal area organises them: named groups with a colour and an icon of their
+own, and groups inside groups — `Glasgow` holding `Glasgow/access` and
+`Glasgow/core` — so a site reads as a branch with its subgroups under it.
+Favourite a group and it is pinned to the top of the tree.
 
-Turned on, it retries only a drop ShellMate did not cause — never after you
-close a tab, never for serial, since the COM port did not go anywhere. It
-backs off, doubling from five seconds to a minute, because a device coming
-back from a reload takes minutes and hammering it for the first two is
-pointless.
+A connection joins a group through the **Groups** field in the connection
+dialog — comma-separated, and it can be in as many as apply, because the
+useful groupings overlap: a device is both in Glasgow and in production and an
+access switch, and forcing a single folder means picking one. Or skip the
+dialog entirely and drag a tile onto a group in the tree.
 
-**It waits longer after a reload.** ShellMate saw the `reload` go in, so it
-knows why the session dropped and roughly how long the device will be away.
+Click a group and its dashboard comes forward — even when a terminal is on
+screen, because selecting a group is a statement about what you want to look
+at. The tree has its own search, covering group names and the devices inside
+them, and collapses to a slim rail when you want the width back. Past twenty
+tiles this is the difference between finding a device and scanning for it.
 
-**It only works where credentials can be resolved without being held.** The
-password is cleared from memory the moment authentication succeeds, and that
-does not change here — so this needs a saved connection whose password the
-server can fetch for itself. Where it cannot, the tab says which is missing
-rather than quietly doing nothing.
+Right-click a group for **Connect all** and **Disconnect all**. Connect all
+opens a tab for every device in the group, subgroups included; the handshakes
+are paced rather than fired at once — forty simultaneous SSH connections
+through one bastion buries it — and anything that fails to connect is
+reported by name rather than silently skipped. It is deliberately not offered
+for the whole unfiltered dashboard: opening two hundred tabs should not be
+one click away.
 
-When it succeeds, the terminal says so. A session that silently reappears
-leaves you unsure whether the scrollback above the line is from the same boot
-of the device, which matters when you are about to reason about what changed.
-
-## Grouping connections with tags
-
-A saved connection can carry tags — `glasgow`, `production`, `access` — typed
-comma-separated in the connection dialog. **Tags rather than folders**, because
-the useful groupings overlap: a device is both in Glasgow and in production and
-an access switch, and any tree forces you to pick one.
-
-The welcome screen shows a chip per tag with a count. Click one to filter,
-click it again to go back. Past twenty tiles this is the difference between
-finding a device and scanning for it.
-
-**Open all** appears once a group is selected, and opens a tab for every device
-in it. The handshakes are paced rather than fired at once — forty simultaneous
-SSH connections through one bastion buries it — and anything that fails to
-connect is reported by name rather than silently skipped. It is deliberately
-not offered for the unfiltered list: opening two hundred tabs should not be one
-click away.
-
-**Broadcast still works on open sessions only.** "Send this to everything
-tagged `access`, connecting to whatever is not open" is a genuinely different
+**Broadcast still works on open sessions only.** "Send this to everything in
+`Glasgow/access`, connecting to whatever is not open" is a genuinely different
 and more dangerous operation, so opening the group is the step you take first —
 the devices are visibly in front of you before anything is sent to them.

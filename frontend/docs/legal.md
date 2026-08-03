@@ -56,7 +56,8 @@ What this means in practice:
   is pattern matching. A secret in a form it does not recognise goes through.
 - Running **Ollama locally** sends nothing anywhere. It is the option to
   choose where the content cannot leave the building.
-- The assistant can be switched off entirely under **Settings → AI**.
+- The assistant can be switched off entirely — **ShellMate Interface →
+  Show the AI panel** in Settings, or the robot icon in the tab bar.
 
 ## Third-party components
 
