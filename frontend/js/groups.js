@@ -309,6 +309,32 @@
     return _matches(node) || node.children.some(_branchMatches);
   }
 
+  /**
+   * Every connection in a group, including its subgroups (#207).
+   *
+   * A site holds nothing directly — a device carries its subgroup's tag only
+   * — so the exact-key lookup both these actions used found nothing, and the
+   * menu said a site was empty while the count beside it said twelve. The
+   * counts were right; the menu was asking the wrong question.
+   *
+   * The separator is required so `site-1` does not swallow `site-10`.
+   */
+  function _membersUnder(key) {
+    const prefix = `${key}${SEPARATOR}`;
+    const out = [];
+    const seen = new Set();
+    _byTag.forEach((profiles, tag) => {
+      if (tag !== key && !tag.startsWith(prefix)) return;
+      profiles.forEach(p => {
+        // A device in two subgroups of one site is one device.
+        if (seen.has(p.id)) return;
+        seen.add(p.id);
+        out.push(p);
+      });
+    });
+    return out;
+  }
+
   /** The tree node for a key, so a menu can ask about its children. */
   function _findNode(key) {
     let found = null;
@@ -924,7 +950,7 @@
    * fifty.
    */
   function _connectAll(group) {
-    const count = (_byTag.get(group.key) || []).length;
+    const count = _membersUnder(group.key).length;
     if (!count) {
       _warn('Nothing to connect', `"${group.name}" has no connections in it.`);
       return;
@@ -944,7 +970,7 @@
   async function _disconnectAll(group) {
     // The same address:port match the live badges use, so what gets closed
     // and what was counted agree about what "this device" means.
-    const members = _byTag.get(group.key) || [];
+    const members = _membersUnder(group.key);
     const ids = new Set(members.map(p => p.id));
     const keys = new Set(members.map(
       p => `${(p.hostname || '').toLowerCase()}:${p.port || 0}`));

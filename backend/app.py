@@ -1545,7 +1545,12 @@ async def connect_tag(tag: str) -> dict:
     rather than assumed — the same reasoning broadcast already records, and it
     matters more here because the whole point is not watching each one.
     """
-    targets = await asyncio.to_thread(profiles_module.profiles_tagged, tag)
+    # Everything beneath it too (#207). A site holds no devices directly —
+    # they carry their subgroup's tag only — so an exact match found nothing
+    # and "Connect all" on a site reported it was empty, while the tree
+    # beside it showed a count of fifty.
+    targets = await asyncio.to_thread(
+        profiles_module.profiles_tagged, tag, True)
     if not targets:
         raise HTTPException(status_code=404,
                             detail=f"Nothing is tagged '{tag}'.")
@@ -1807,6 +1812,32 @@ def _require_session(session_id: str) -> dict:
 async def list_sessions() -> list[dict]:
     """Return metadata for all active sessions."""
     return session_manager.get_all_sessions()
+
+
+@app.post("/api/sessions/{session_id}/disconnect")
+async def disconnect_session(session_id: str) -> dict:
+    """
+    End the connection but keep the session.
+
+    Deliberately not `DELETE`, which destroys the session and takes the buffer
+    with it. Ending the connection while keeping what is on screen is a
+    different thing and the one people ask for: the transcript stays
+    readable, and Reconnect is right there — the same state a session that
+    dropped on its own leaves behind (#208).
+
+    Idempotent: disconnecting something already disconnected is not an error,
+    because "make sure this is closed" is exactly the intent.
+    """
+    session = session_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    handler = session.get("handler")
+    if handler is not None:
+        await asyncio.to_thread(handler.disconnect)
+    session["is_connected"] = False
+
+    return {"status": "ok", "session_id": session_id}
 
 
 @app.delete("/api/sessions/{session_id}")

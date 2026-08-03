@@ -264,6 +264,7 @@
 
     activeTabIndex = index;
     _paintStatusGroup();
+    _revealTab(tabs[index]);
 
     // Which terminals are on screen is the layout's business, not this
     // module's — under a tiled layout several are visible at once and the tab
@@ -1074,6 +1075,40 @@
     document.title = site ? `ShellMate Portable — ${site}` : 'ShellMate Portable';
   }
 
+  /**
+   * Scroll a tab into view, and mark whether the strip overflows (#206).
+   *
+   * The strip is `overflow-x: auto` with the scrollbar hidden, so a tab past
+   * the right edge was simply invisible — and selecting one did not bring it
+   * back, because nothing ever set scrollLeft. With fourteen tabs the last
+   * sat 378px beyond the container while the strip gave no sign there was
+   * anything there.
+   *
+   * `nearest` rather than `center`: shifting the whole strip every time the
+   * tab beside the current one is picked is its own kind of disorienting.
+   */
+  function _revealTab(tab) {
+    const list = document.getElementById('tab-list');
+    if (!list) return;
+    if (tab && tab.tabEl) {
+      try {
+        tab.tabEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      } catch (_) {
+        // Older engines take no options; the default is still better than
+        // leaving the selected tab off screen.
+        try { tab.tabEl.scrollIntoView(); } catch (_) {}
+      }
+    }
+    _markOverflow();
+  }
+
+  function _markOverflow() {
+    const list = document.getElementById('tab-list');
+    if (!list) return;
+    list.classList.toggle('tabs-overflowing',
+                          list.scrollWidth > list.clientWidth + 1);
+  }
+
   /** Whether to show grouping at all. */
   function _groupStripe() {
     const prefs = (window.shellmateSettings || {}).interface || {};
@@ -1181,6 +1216,7 @@
     });
 
     _paintStatusGroup();
+    _markOverflow();
   }
 
   // -------------------------------------------------------------------------
@@ -1313,8 +1349,24 @@
       { action: 'keepalive', icon: 'refresh',
         label: 'Keep this tab alive', setting: 'keep_alive',
         value: (tab) => _keepAliveLabel(tab) },
+      // Its own setting, not a second row writing into 'keep_alive' (#209).
+      // Two entries sharing a key rendered two checkboxes over one value, and
+      // _collectTabMenu() takes them in DOM order — so the first was
+      // overwritten by the second and could not be turned off on its own.
       { action: 'keepalive-all', icon: 'refresh',
-        label: 'Keep all tabs alive', setting: 'keep_alive' },
+        label: 'Keep all tabs alive', setting: 'keep_alive_all' },
+    ],
+    [
+      // Ending the session without closing the tab (#208). Closing already
+      // tears the session down; what this adds is keeping the buffer and the
+      // Reconnect entry — the same state a session that dropped on its own
+      // leaves behind.
+      { action: 'disconnect', icon: 'stop_circle',
+        label: 'Disconnect session', setting: 'disconnect',
+        when: (tab) => tab && tab.isConnected },
+      { action: 'disconnect-all', icon: 'stop_circle',
+        label: 'Disconnect all sessions', setting: 'disconnect_all',
+        when: () => tabs.some(t => t.isConnected) },
     ],
   ];
 
@@ -1460,6 +1512,9 @@
           case 'scheme':    _chooseScheme(tab);       break;
           case 'keepalive':     _toggleKeepAlive([tab]);          break;
           case 'keepalive-all': _toggleKeepAlive(tabs.slice());   break;
+          case 'disconnect':     _disconnectSessions([tab]);        break;
+          case 'disconnect-all': _disconnectSessions(
+                                   tabs.filter(t => t.isConnected)); break;
           case 'pane':
             window.shellmateLayout.place(Number(btn.dataset.pane), tab.sessionId);
             break;
@@ -1475,6 +1530,46 @@
         if (ev.key === 'Escape') _hideTabContextMenu();
       }, { once: true });
     }, 0);
+  }
+
+  /**
+   * End sessions without closing their tabs (#208).
+   *
+   * Confirmed, and the count named. This drops live connections, which is the
+   * thing the interface is otherwise careful never to do by accident —
+   * closing the window only hides it for exactly that reason.
+   *
+   * POST .../disconnect rather than DELETE: the tab, its buffer and its
+   * transcript stay, and Reconnect is one click away.
+   */
+  async function _disconnectSessions(targets) {
+    const live = (targets || []).filter(t => t && t.isConnected);
+    if (!live.length) return;
+
+    const many = live.length > 1;
+    const ok = await window.shellmateDialog.confirm({
+      title: many
+        ? `Disconnect ${live.length} sessions?`
+        : `Disconnect ${live[0].label}?`,
+      body: 'The connection closes on the device as well as here, and '
+            + 'anything running in it stops. The tab stays, so you keep what '
+            + 'is on screen and can reconnect.',
+      confirmLabel: many ? 'Disconnect them' : 'Disconnect it',
+      danger: true,
+    });
+    if (!ok) return;
+
+    for (const tab of live) {
+      // Deliberate, so the drop is not treated as one to retry — the same
+      // flag closeTab sets before it confirms.
+      tab.closingDeliberately = true;
+      _stopRetrying(tab, '');
+      try {
+        await fetch(`/api/sessions/${tab.sessionId}/disconnect`,
+                    { method: 'POST' });
+      } catch (_) { /* the tab going red is the report */ }
+      updateTabStatus(tab.sessionId, false);
+    }
   }
 
   function _hideTabContextMenu() {

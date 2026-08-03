@@ -146,10 +146,12 @@
 [data-theme="light"] .sidebar-link               { color: rgba(28,27,34,0.35); }
 [data-theme="light"] .sidebar-link:hover         { color: var(--primary); }
 [data-theme="light"] .sidebar-link.active        { color: var(--primary-container); }
-[data-theme="light"] .tab                        { color: rgba(28,27,34,0.4); }
-[data-theme="light"] .tab:hover,
-[data-theme="light"] .tab.active                 { color: var(--on-surface); }
-[data-theme="light"] .tab-close                  { color: rgba(28,27,34,0.4); }
+/* The tab overrides that used to be here made the label *fainter* than the
+   token — 0.4 against --on-surface-dim's 0.65 — which measured 2.44:1
+   against the bar and failed AA outright (#204). They were also literals in
+   a theme block, which is the one thing the theme rule forbids. Both themes
+   now take --on-surface from .tab itself. */
+[data-theme="light"] .tab-close                  { color: var(--on-surface-dim); }
 [data-theme="light"] #status-bar                 { color: rgba(28,27,34,0.45); }
 [data-theme="light"] #status-connection          { color: rgba(28,27,34,0.7); }
 [data-theme="light"] .chat-welcome               { color: rgba(28,27,34,0.75); }
@@ -367,6 +369,23 @@ a {
 }
 #tab-list::-webkit-scrollbar { display: none; }
 
+/* The scrollbar is hidden, so nothing said the strip continued past the edge
+   and the rightmost tab simply looked cut off (#206). A fade says it without
+   bringing the scrollbar back. */
+#tab-list {
+  -webkit-mask-image: linear-gradient(to right,
+    #000 0, #000 calc(100% - 24px), transparent 100%);
+          mask-image: linear-gradient(to right,
+    #000 0, #000 calc(100% - 24px), transparent 100%);
+}
+
+/* Only while it actually overflows — otherwise the last tab of three fades
+   for no reason. tabs.js sets this. */
+#tab-list:not(.tabs-overflowing) {
+  -webkit-mask-image: none;
+          mask-image: none;
+}
+
 /* Individual tab */
 .tab {
   display: flex;
@@ -382,9 +401,21 @@ a {
   white-space: nowrap;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 12px;
-  color: var(--on-surface-dim);
-  transition: background 0.12s, color 0.12s, border-color 0.12s, box-shadow 0.12s;
+  /* Full contrast, not --on-surface-dim (#204). A tab is a label on a
+     control, not secondary prose: at 12px, 60% of the surface colour
+     measured 5.79:1 in the dark theme and 2.44:1 in the light one. The
+     distinction between tabs is carried by weight and by the accent below,
+     both of which survive being legible. */
+  color: var(--on-surface);
+  font-weight: 500;
+  transition: background 0.12s, color 0.12s, border-color 0.12s,
+              box-shadow 0.12s, font-weight 0.12s;
   min-width: 80px;
+  /* Never squeezed below the width of a hostname (#206). These were
+     flex-shrink: 1, so a filling strip ground every tab down to its
+     min-width and ellipsised the labels. The strip scrolls instead, and the
+     active tab is scrolled into view. */
+  flex-shrink: 0;
   max-width: 200px;
   position: relative;
 }
@@ -403,9 +434,11 @@ a {
   transition: opacity 0.15s, background 0.15s, left 0.15s, right 0.15s;
 }
 
-.tab:hover {
+/* Hover is a hint, not a state. It used to set the same background and the
+   same colour as .active, so running the mouse along the strip made every
+   tab look selected in turn (#205). */
+.tab:hover:not(.active) {
   background: var(--surface-high);
-  color: var(--on-surface);
   border-color: rgba(183,200,225,0.45);   /* secondary, brighter */
 }
 
@@ -413,19 +446,25 @@ a {
   opacity: 0.7;
 }
 
+/* The selected tab. Weight as well as colour, and a solid accent rather
+   than a 45%-alpha hairline (#205).
+
+   `border-bottom-color` used to be set here and did nothing at all: .tab
+   declares `border-bottom: none`, so there was no edge to recolour and the
+   "merges into the pane below" effect it was reaching for never happened. */
 .tab.active {
-  background: var(--surface-high);
+  background: var(--surface-highest);
   color: var(--on-surface);
+  font-weight: 700;
   border-color: var(--primary-container);
-  border-bottom-color: var(--surface-high);
-  box-shadow: 0 0 0 1px rgba(79,70,229,0.45) inset;
+  box-shadow: 0 0 0 1px var(--primary-container) inset;
 }
 
 /* Bright primary ribbon spans the full tab width when active */
 .tab.active::before {
   left: 0;
   right: 0;
-  height: 2px;
+  height: 3px;
   background: var(--primary-container);
   opacity: 1;
 }
@@ -433,9 +472,13 @@ a {
 /* On screen in a pane, but not the tab holding the keyboard. Quieter than
    .active on purpose: it says "you can see this one", not "you are typing
    into it". */
-.tab.tiled {
+/* On screen in a pane, but not the tab holding the keyboard. Distinct from
+   both hover and active on purpose — it says "you can see this one", not
+   "you are typing into it", and #202 is what happens when two of these three
+   look alike. */
+.tab.tiled:not(.active) {
   background: var(--surface-high);
-  color: var(--on-surface);
+  border-color: rgba(183,200,225,0.30);
 }
 
 .tab.tiled::before {

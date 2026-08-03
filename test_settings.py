@@ -229,6 +229,70 @@ def test_creating_a_missing_folder() -> None:
         shutil.rmtree(made, ignore_errors=True)
 
 
+def test_every_tab_menu_entry_has_its_own_setting() -> None:
+    """
+    One row in Settings per tab-menu entry, and no two writing to one key.
+
+    The Settings rows are generated from `tabMenuItems()`, which is the right
+    shape — a new menu entry appears there without anything being added by
+    hand. What that pattern cannot guarantee on its own is that the keys are
+    unique, and two entries once shared `keep_alive`. That renders two
+    checkboxes carrying the same `data-menu-setting`, and `_collectTabMenu()`
+    walks them in DOM order writing into one key — so the first was silently
+    overwritten by the second and could not be turned off on its own (#209).
+
+    Read out of the source, for the same reason test_icons.py reads the font:
+    the failure is invisible at runtime, and the list is the only place the
+    truth lives.
+    """
+    print("\n-- Tab menu entries reach Settings --")
+    import re
+
+    source = (Path(__file__).parent / "frontend" / "js" / "tabs.js") \
+        .read_text(encoding="utf-8")
+
+    block = re.search(r"const TAB_MENU_GROUPS = \[(.*?)\n  \];", source, re.S)
+    check("the menu definition is findable", block is not None,
+          "TAB_MENU_GROUPS moved or was renamed — this test is now blind")
+    if not block:
+        return
+
+    sections = re.search(r"const TAB_MENU_SECTIONS = \[(.*?)\n  \];", source, re.S)
+    section_text = sections.group(1) if sections else ""
+
+    # The two lists are counted separately on purpose: a SECTIONS entry is a
+    # whole block of the menu — "Move to pane" — and carries a setting without
+    # an action, because there is no single thing to invoke.
+    row_settings = re.findall(r"setting:\s*'([a-z0-9_]+)'", block.group(1))
+    section_settings = re.findall(r"setting:\s*'([a-z0-9_]+)'", section_text)
+    settings = row_settings + section_settings
+
+    check("entries were found to check", len(settings) > 8,
+          f"only {len(settings)} — the pattern is probably not matching")
+
+    duplicates = sorted({s for s in settings if settings.count(s) > 1})
+    check("no two entries share a setting", not duplicates,
+          f"{', '.join(duplicates)} appears twice — the later checkbox "
+          f"overwrites the earlier one and the first row does nothing")
+
+    # Every row has a setting, or it renders in the menu with no way to turn
+    # it off.
+    actions = re.findall(r"action:\s*'([a-z0-9-]+)'", block.group(1))
+    check("every menu row carries a setting",
+          len(actions) == len(row_settings),
+          f"{len(actions)} actions but {len(row_settings)} settings — one has "
+          f"no Settings row and cannot be switched off")
+
+    check("every section carries a setting too", section_settings,
+          "a section with no setting cannot be hidden from Settings")
+
+    # And the handler exists, or the row is a button that does nothing.
+    handled = set(re.findall(r"case '([a-z0-9-]+)':", source))
+    unhandled = sorted(a for a in actions if a not in handled and a != 'pane')
+    check("every entry has a handler", not unhandled,
+          f"no case for: {', '.join(unhandled)}")
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Settings")
@@ -243,6 +307,7 @@ def main() -> int:
         test_a_relative_path_means_the_data_folder,
         test_browsing_names_the_folder_that_is_missing,
         test_creating_a_missing_folder,
+        test_every_tab_menu_entry_has_its_own_setting,
     ):
         try:
             test()

@@ -828,13 +828,34 @@ def set_tags(profile_id: str, tags) -> list[str]:
     return []
 
 
-def profiles_tagged(tag: str) -> list[dict]:
-    """Every connection carrying a tag."""
+def profiles_tagged(tag: str, include_nested: bool = False) -> list[dict]:
+    """
+    Every connection carrying a tag.
+
+    Args:
+        tag: The tag to match.
+        include_nested: Also match tags *beneath* this one — `site-1` finds
+            `site-1/access` (#207). Off by default, because most callers mean
+            the exact tag and silently widening what "tagged" means would
+            change every one of them.
+
+    The nested test requires the separator, so `site-1` does not swallow
+    `site-10`. That is the same rule the tree and the tab strip use, and it
+    is the one thing that makes a prefix match safe here.
+    """
     wanted = (tag or "").strip().lower()
     if not wanted:
         return []
+
+    prefix = f"{wanted}/"
+
+    def matches(tags: list[str]) -> bool:
+        if wanted in tags:
+            return True
+        return include_nested and any(t.startswith(prefix) for t in tags)
+
     return [p for p in get_profiles()
-            if wanted in normalise_tags(p.get("tags"))]
+            if matches(normalise_tags(p.get("tags")))]
 
 
 def get_profiles() -> list[dict]:
