@@ -696,6 +696,11 @@ a {
   height: 100%;
   /* Anchors the absolutely positioned drift banner. */
   position: relative;
+  /* Nothing inside may out-stack a sibling. The tiled focus ring sits at
+     z-index 20 to beat the panes; without a stacking context here that 20
+     escapes to the root and paints over the dashboard (z-index 1) whenever
+     the dashboard is shown without hiding the terminals (#212). */
+  isolation: isolate;
 }
 
 /* Ensure terminals-container inside terminal-pane fills properly */
@@ -1434,6 +1439,40 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 /* Keyboard shortcut pills */
+/* Doors to the rest of the application, on the home view (#233). */
+#welcome-links {
+  margin-top: 18px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.welcome-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--outline);
+  border-radius: 999px;
+  background: none;
+  color: var(--on-surface-dim);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.welcome-link .material-symbols-outlined { font-size: 15px; }
+
+.welcome-link:hover {
+  color: var(--on-surface);
+  background: var(--surface-high);
+  border-color: var(--primary-container);
+}
+
+/* The logo is a home button now (#232), and buttons look pressable. */
+#sidebar-logo { cursor: pointer; }
+
 .shortcuts-hint {
   margin-top: 16px;
   display: flex;
@@ -2785,12 +2824,14 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   background: var(--surface-high);
 }
 
-/* How long the active session has been up. Monospace so the digits do not
-   shuffle sideways every second as their widths change. */
-#status-uptime {
+/* How long the active session has been up, beside the connection state
+   (#227). Monospace so the digits do not shuffle sideways every second as
+   their widths change. */
+#status-connection-clock {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--on-surface-muted);
+  margin-left: 6px;
 }
 
 /* Device identity shown in the status bar once the device is fingerprinted. */
@@ -4754,6 +4795,15 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   box-shadow: inset 0 0 0 2px var(--primary);
 }
 
+/* No focus ring under a full-screen overlay (#228). The overlay scrims are
+   deliberately translucent, so the terminals show through dimmed — that is
+   content. The ring is chrome, and chrome glowing through a scrim reads as
+   a stray outline painted over whichever view is open. */
+body:has(.panel-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::after,
+body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::after {
+  display: none;
+}
+
 #terminals-container.tiled .pane-empty { position: relative; }
 
 .pane-empty {
@@ -4766,43 +4816,12 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   overflow: hidden;
 }
 
-.pane-empty-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-  padding: 12px;
-  max-width: 240px;
-  width: 100%;
-}
-
 .pane-empty-hint {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 11px;
   color: var(--on-surface-muted);
   text-align: center;
-  margin-bottom: 4px;
-}
-
-.pane-empty-tab {
-  background: var(--surface-high);
-  border: 1px solid var(--outline);
-  border-radius: var(--radius-sm);
-  color: var(--on-surface-dim);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 12px;
-  padding: 6px 10px;
-  cursor: pointer;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pane-empty-tab:hover {
-  background: var(--surface);
-  color: var(--on-surface);
-  border-color: var(--primary-container);
+  padding: 12px;
 }
 
 /* --- The layout button and its picker ------------------------------------ */
@@ -5939,6 +5958,33 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   font-size: 13px;
   font-weight: 600;
   color: var(--on-surface);
+}
+
+/* Inside Settings, subsection headings take the section-title treatment at a
+   smaller scale (#223). They carried plain body styling, so every heading
+   after a section's first looked unstyled — one styled header per view and
+   the rest reading as an accident. Scoped to .settings-section so the diff
+   panel's reuse of the class keeps its quieter look. */
+.settings-section .settings-subsection-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: calc(var(--ui-font-size, 14px) - 4px);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--primary);
+  opacity: 0.85;
+}
+
+/* The per-row restart offer (#221), beside the "needs a restart" tag. */
+.stockton-restart-btn {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
+.stockton-restart-btn[disabled] {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .credentials-list {
@@ -7237,16 +7283,6 @@ body {
 .tree-leaf-name {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The active session's group, in the status bar (#149). */
-.status-group {
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--group-colour, var(--outline));
-  color: var(--group-colour, var(--on-surface-muted));
-  font-size: 10.5px;
   white-space: nowrap;
 }
 

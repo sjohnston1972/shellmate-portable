@@ -19,22 +19,35 @@
 (function () {
   'use strict';
 
-  /** Icon per section title, matched on a lowercase substring. */
+  /**
+   * Icon per section title, matched on a lowercase substring.
+   *
+   * Every section gets its own icon (#218) — six of them once shared the
+   * generic cog, which made the rail a list of labels with decoration rather
+   * than something scannable. First match wins, so the more specific
+   * spellings sit above the words they contain. Icon names must exist in the
+   * vendored subset (see tools/vendor_assets.py) or they render as text.
+   */
   const ICONS = [
+    ['terminal behaviour',  'tune'],
+    ['behaviour',           'tune'],
+    ['behavior',            'tune'],
     ['terminal appearance', 'terminal'],
-    ['device awareness',    'smart_toy'],
+    ['device awareness',    'lan'],
     ['output colours',      'light_mode'],
     ['platform',            'list_alt'],
     ['serial',              'cable'],
-    ['credentials vault',   'bookmark_add'],
-    ['ai providers',        'smart_toy'],
+    ['credentials vault',   'key'],
+    ['ai providers',        'cloud'],
+    ['ai assistant',        'smart_toy'],
     ['knowledge base',      'description'],
     ['alerts',              'warning'],
     ['configuration capture', 'save'],
-    ['interface',           'settings'],
-    ['behavior',            'settings'],
-    ['behaviour',           'settings'],
+    ['interface',           'dark_mode'],
     ['logging',             'description'],
+    ['broadcast',           'send'],
+    ['discovery',           'radar'],
+    ['diagnostics',         'info'],
   ];
 
 
@@ -72,6 +85,13 @@
         if (top.length !== sections.length) build();
       }).observe(body, { childList: true });
     }
+
+    // stockton.js builds its standalone sections *inside* slot divs, which
+    // the childList observer above never sees — so Broadcast, Network
+    // Discovery and friends rendered with no nav entry and were never hidden,
+    // stacking underneath whichever category was selected. The event has
+    // always been dispatched; this is its first listener.
+    window.addEventListener('shellmate:sections-changed', build);
   });
 
   function iconFor(title) {

@@ -88,6 +88,20 @@
     document.getElementById('settings-save')
       .addEventListener('click', saveSettings);
 
+    // Diagnostics shortcuts (#222). Settings closes first — both open their
+    // own overlay at the same level, and stacking them leaves the one behind
+    // unreachable.
+    const diagLogs = document.getElementById('diag-open-logs');
+    if (diagLogs) diagLogs.addEventListener('click', () => {
+      closeSettings();
+      if (typeof window.openLogs === 'function') window.openLogs();
+    });
+    const diagSupport = document.getElementById('diag-open-support');
+    if (diagSupport) diagSupport.addEventListener('click', () => {
+      closeSettings();
+      if (typeof window.openSupport === 'function') window.openSupport();
+    });
+
     // The prompt editor is in this panel now (#135), further down. It was
     // reported as deleted once when it moved, so the signpost stays and
     // simply scrolls rather than opening a second panel.
@@ -192,11 +206,48 @@
 
   function openSettings() {
     populateForm(currentSettings);
+    _populateDiagnostics();
     overlay.classList.remove('hidden');
   }
 
   function closeSettings() {
     overlay.classList.add('hidden');
+  }
+
+  /**
+   * Fill the Diagnostics section's read-only rows (#222).
+   *
+   * Asked on every open rather than once: the history counts move, and the
+   * fallback-folder state can change between launches. A failed fetch leaves
+   * the em-dash — Diagnostics failing must never break Settings.
+   */
+  async function _populateDiagnostics() {
+    const set = (id, text) => {
+      const el = document.getElementById(id);
+      if (el && text) el.textContent = text;
+    };
+    try {
+      const info = await (await fetch('/api/system/info')).json();
+      set('diag-version', [
+        info.app || 'ShellMate',
+        info.built ? `built ${info.built}` : '',
+        info.portable ? '(portable)' : '',
+      ].filter(Boolean).join(' — ').replace(' — (', ' ('));
+      set('diag-data-dir', (info.data_dir || '') +
+        (info.using_fallback
+          ? ' — fallback: the folder beside the executable was not writable'
+          : ''));
+      set('diag-log-dir', info.log_dir ? `${info.log_dir}` : '');
+    } catch (_) { /* rows keep their placeholder */ }
+    try {
+      const stats = await (await fetch('/api/history/stats')).json();
+      const search = (stats.search || '').toUpperCase();
+      set('diag-history-stats',
+        `${(stats.sessions ?? 0).toLocaleString()} sessions · ` +
+        `${(stats.commands ?? 0).toLocaleString()} commands · ` +
+        `${(stats.snapshots ?? 0).toLocaleString()} snapshots` +
+        (search ? ` · search: ${search}` : ''));
+    } catch (_) { /* likewise */ }
   }
 
   function populateForm(s) {
@@ -460,6 +511,13 @@
       window.dispatchEvent(new CustomEvent('shellmate:settings-changed', { detail: currentSettings }));
       // Refresh masked-original markers so subsequent edits are detected correctly
       populateForm(currentSettings);
+      // A changed key or host changes what the providers can offer, so
+      // re-discover straight away rather than waiting for someone to press
+      // the test button and wonder why the new key made no difference.
+      if (Object.keys(s.providers || {}).length &&
+          typeof window.refreshProviderModels === 'function') {
+        window.refreshProviderModels();
+      }
       if (!opts.keepOpen) closeSettings();
     } catch (e) {
       console.error('Failed to save settings:', e);

@@ -181,7 +181,10 @@ CATEGORIES = {
     "ai":        "AI Assistant",
     "files":     "Files and panels",
     "discovery": "Network Discovery",
-    "diag":      "Diagnostics",
+    # Not "Diagnostics": the slot renders inside the hand-written Diagnostics
+    # section (#222), and a subsection repeating its section's name reads as
+    # a rendering fault.
+    "diag":      "Logging and startup",
 }
 
 

@@ -25,6 +25,17 @@
   let registry = { settings: [], categories: {}, not_exposed: [] };
 
   /**
+   * Whether a restart-only setting has been changed this session.
+   *
+   * Referenced by save() since the restart offer was written, but never
+   * declared — so under 'use strict' the first restart-flagged save threw
+   * ReferenceError inside the try and surfaced as a save-failure toast
+   * (#221). It gates the per-row Restart button: greyed until a change
+   * actually needs it.
+   */
+  let pendingRestart = false;
+
+  /**
    * No panel of its own any more (#135) — the sections live in Settings.
    *
    * `openStockton(category)` is kept as a signpost. Several places still send
@@ -42,8 +53,16 @@
     if (typeof window.openSettings === 'function') window.openSettings();
     await load();
     if (category && typeof window.openSettingsSection === 'function') {
-      const heading = (registry.categories || {})[category];
-      if (heading) window.openSettingsSection(heading);
+      // A category rendered inside a hand-written section navigates to that
+      // section — its own heading is only an h4 there and matches no nav
+      // entry. Only a standalone category answers to its registry heading.
+      const slot = document.querySelector(
+        `.settings-slot[data-category="${category}"]`);
+      const section = slot && slot.closest('.settings-section');
+      const title = section
+        ? ((section.querySelector('.settings-section-title') || {}).textContent || '')
+        : (registry.categories || {})[category];
+      if (title) window.openSettingsSection(title.trim());
     }
   }
 
@@ -201,8 +220,8 @@
     meta.className = 'stockton-meta';
     meta.textContent = describeDefault(setting, showCategory);
 
-    // How a change lands. Nothing for "live", which is 54 of the 57 — a tag
-    // on every row would say nothing.
+    // How a change lands. Nothing for "live", which is nearly all of them —
+    // a tag on every row would say nothing.
     if (setting.applies && setting.applies !== 'live') {
       const tag = document.createElement('span');
       tag.className = 'stockton-restart';
@@ -210,6 +229,23 @@
         ? 'applies to new tabs'
         : 'needs a restart';
       meta.appendChild(tag);
+
+      // The way out, next to the sentence that creates the need (#221).
+      // Greyed until a restart-only setting has actually been changed —
+      // a live restart button beside an untouched setting is an invitation
+      // to drop every session for nothing.
+      if (setting.applies === 'restart') {
+        const go = document.createElement('button');
+        go.type = 'button';
+        go.className = 'btn-tertiary stockton-restart-btn';
+        go.textContent = 'Restart now';
+        go.disabled = !pendingRestart;
+        go.title = pendingRestart
+          ? 'Restart ShellMate to apply the change'
+          : 'Enabled once a setting that needs a restart is changed';
+        go.addEventListener('click', offerRestart);
+        meta.appendChild(go);
+      }
     }
 
     text.append(label, summary, meta);
@@ -432,7 +468,6 @@
       // field still showing a rejected value would be a quiet lie.
       const stored = registry.settings.find(s => s.key === setting.key);
       if (setting.restart) pendingRestart = true;
-      updateRestartOffer();
 
       report(stored && String(stored.value) !== String(value)
         ? `${setting.label} was adjusted to ${format(stored.value)} — its range is ` +
@@ -472,21 +507,15 @@
 
 
   /**
-   * Offer a restart, once something that needs one has been changed.
+   * The per-row Restart button's click (#221).
    *
-   * Two of fifty-seven settings genuinely cannot be reapplied — the rest are
-   * read at the point of use. Telling somebody a restart is needed and then
-   * leaving them to work out how is half a feature; the obvious move, closing
-   * the window, is specifically not a shutdown here.
+   * Availability is asked at click time rather than held from an earlier
+   * check — whether a restart can work depends on how the process was
+   * started, and a button acting on a stale answer would either fail or lie.
+   * The old footer-based offer targeted the removed Stockton panel and could
+   * never render; this replaces it where the "needs a restart" text lives.
    */
-  async function updateRestartOffer() {
-    const footer = document.querySelector('#stockton-panel .settings-footer');
-    if (!footer) return;
-
-    const existing = document.getElementById('stockton-restart');
-    if (!pendingRestart) { if (existing) existing.remove(); return; }
-    if (existing) return;
-
+  async function offerRestart() {
     let info = { available: false, sessions: [] };
     try {
       info = await (await fetch('/api/restart')).json();
@@ -494,22 +523,11 @@
 
     if (!info.available) {
       // A button that cannot work is worse than a sentence that explains.
-      const note = document.createElement('span');
-      note.id = 'stockton-restart';
-      note.className = 'settings-footer-note field-warn';
-      note.textContent = 'Quit from the tray and start ShellMate again for '
-        + 'that to take effect.';
-      footer.insertBefore(note, footer.firstChild);
+      report('Quit from the tray and start ShellMate again for that to take '
+             + 'effect — this build cannot restart itself.', true);
       return;
     }
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.id = 'stockton-restart';
-    button.className = 'btn-primary';
-    button.textContent = 'Restart now';
-    button.addEventListener('click', () => doRestart(info.sessions));
-    footer.appendChild(button);
+    doRestart(info.sessions || []);
   }
 
   async function doRestart(sessions) {

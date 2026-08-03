@@ -204,16 +204,42 @@
                 New Group
               </button>
             </div>
+            <!-- Doors to the rest of the application (#233) — the home view
+                 used to offer two buttons and a sentence. -->
+            <div id="welcome-links">
+              <button type="button" class="welcome-link" id="welcome-link-docs">
+                <span class="material-symbols-outlined">description</span>
+                Manual
+              </button>
+              <button type="button" class="welcome-link" id="welcome-link-history">
+                <span class="material-symbols-outlined">search</span>
+                Session history
+              </button>
+              <button type="button" class="welcome-link" id="welcome-link-keys">
+                <span class="material-symbols-outlined">key</span>
+                SSH keys
+              </button>
+              <button type="button" class="welcome-link" id="welcome-link-support">
+                <span class="material-symbols-outlined">help</span>
+                Support
+              </button>
+            </div>
             <div class="shortcuts-hint">
               <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>T</kbd> New tab</span>
               <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>W</kbd> Close tab</span>
               <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>1–9</kbd> Switch tab</span>
+              <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>F</kbd> Find in terminal</span>
+              <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>1–8</kbd> Layout</span>
+              <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> Broadcast</span>
             </div>
           </div>
         </div>
 
         <!-- Terminal containers are injected here by terminal.js -->
-        <div id="terminals-container"></div>
+        <!-- Starts behind the dashboard, matching the welcome screen starting
+             in front (#228) — the two ship as one state, not two defaults
+             that happen to line up. -->
+        <div id="terminals-container" class="behind-dashboard"></div>
         </div><!-- #pane-stage -->
       </main>
 
@@ -255,6 +281,13 @@
                 <option value="_loading" disabled>Loading…</option>
               </optgroup>
             </select>
+
+            <!-- Same discovery as Settings → "Test connections & refresh
+                 models", reachable from where the stale list is noticed. -->
+            <button id="btn-refresh-models" class="icon-btn"
+                    title="Refresh the model list from the providers">
+              <span class="material-symbols-outlined">refresh</span>
+            </button>
 
             <!-- Which sessions the assistant can see. Replaces the
                  undiscoverable /context commands. -->
@@ -321,21 +354,15 @@
          STATUS BAR
     ================================================================ -->
     <footer id="status-bar">
-      <span id="status-connection">No active session</span>
+      <!-- The clock sits beside the state (#227): "SSH: name | Connected
+           01:05:12". Two spans, because the text is rewritten on every output
+           message while the clock ticks once a second — separate elements
+           mean neither write clobbers the other. -->
+      <span id="status-connection"><span id="status-connection-text">No active session</span><span id="status-connection-clock" class="hidden" title="How long this session has been connected"></span></span>
       <span class="status-sep">|</span>
       <span id="status-device" title="Detected device platform">Device: —</span>
-      <!-- Which group this session belongs to (#149). The tab strip carries
-           it as a spine and a label on the first tab of a run, so the tab you
-           are actually *in* may show nothing — and this is where "what am I
-           connected to" already lives. -->
-      <span id="status-group" class="hidden"></span>
       <span class="status-sep">|</span>
       <span id="status-buffer">Buffer: 0L</span>
-      <span class="status-sep hidden" id="status-uptime-sep">|</span>
-      <!-- How long this session has been up. Counted in the browser from the
-           connected_at the backend sent once — nothing ticks over the socket.
-           Hidden until there is a session, so the separator never sits alone. -->
-      <span id="status-uptime" class="hidden" title="How long this session has been connected"></span>
       <span class="status-sep">|</span>
       <span id="status-tabs">Tabs: 0</span>
       <span class="status-sep">|</span>
@@ -817,22 +844,204 @@ GigEth0/2     unassigned    YES unset  down     down
               <span class="setting-unit">cols</span>
             </div>
           </div>
+        </section>
+        <!-- ===== Interface ===== -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">ShellMate Interface</h3>
+          <p class="settings-section-hint">These are kept in <code>settings.json</code> in your data folder, so they travel with it — and are the same whether you use the window or open ShellMate in a browser.</p>
+
           <div class="setting-row">
-            <label class="setting-label" for="setting-screen-reader">Screen Reader Mode
-              <span class="setting-hint">Maintains a live region a screen reader can follow. Costs enough that it is off unless wanted.</span>
+            <label class="setting-label" for="setting-theme">Theme</label>
+            <select id="setting-theme" class="setting-input">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="system">Follow the system</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-ui-font-size">UI Text Size</label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-ui-font-size" class="setting-input setting-input-sm" min="11" max="20" step="1" />
+              <span class="setting-unit">px</span>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-density">Density</label>
+            <select id="setting-density" class="setting-input">
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </select>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-panel-transition">Panels open with</label>
+            <select id="setting-panel-transition" class="setting-input">
+              <option value="slide">Slide — in from the edge</option>
+              <option value="fade">Fade</option>
+              <option value="scale">Scale</option>
+              <option value="none">Nothing — appear instantly</option>
+            </select>
+            <p class="settings-section-hint">Applies to Settings, Stockton, History and the other side panels. Duration and pacing are in Stockton. If your system is set to reduce motion, that wins over this.</p>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-tab-label-width">Maximum tab width</label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-tab-label-width" class="setting-input setting-input-sm" min="60" max="400" step="10" />
+              <span class="setting-unit">px</span>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-connection-dot">Connection dot on tabs</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-connection-dot" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-restore-tabs">Reopen tabs when ShellMate starts
+              <span class="setting-hint">Only sessions saved as a connection with its password — nothing else can be reconnected without asking you. Any it cannot restore are named.</span>
             </label>
             <label class="toggle">
-              <input type="checkbox" id="setting-screen-reader" />
+              <input type="checkbox" id="setting-restore-tabs" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-new-tab-opens">New tab opens
+              <span class="setting-hint">The connection dialog appears either way — this decides whether it arrives filled in.</span>
+            </label>
+            <select id="setting-new-tab-opens" class="setting-input">
+              <option value="welcome">An empty connection dialog</option>
+              <option value="last">The last device you connected to</option>
+              <option value="profile">A saved connection…</option>
+            </select>
+          </div>
+
+          <div class="setting-row" id="new-tab-profile-row">
+            <label class="setting-label" for="setting-new-tab-profile">Which saved connection</label>
+            <select id="setting-new-tab-profile" class="setting-input"></select>
+          </div>
+
+          <div class="setting-row setting-row-block">
+            <label class="setting-label">Tab right-click menu
+              <span class="setting-hint">Which entries the menu offers. Turning one off never removes what it does — every one is reachable elsewhere.</span>
+            </label>
+            <div id="tab-menu-toggles"></div>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-font-scale">Interface text size
+              <span class="setting-hint">The chrome around the terminal. The terminal's own font is under Terminal Appearance.</span>
+            </label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-font-scale" class="setting-input setting-input-sm" min="0.8" max="1.6" step="0.05" />
+              <span class="setting-unit">x</span>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-toast-position">Notifications appear</label>
+            <select id="setting-toast-position" class="setting-input">
+              <option value="bottom-right">Bottom right</option>
+              <option value="bottom-left">Bottom left</option>
+              <option value="top-right">Top right</option>
+              <option value="top-left">Top left</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-chat-enter">Enter in the chat box
+              <span class="setting-hint">With "new line", Ctrl+Enter sends instead.</span>
+            </label>
+            <select id="setting-chat-enter" class="setting-input">
+              <option value="send">Sends the message</option>
+              <option value="newline">Starts a new line</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-sidebar-labels">Labels in the sidebar
+              <span class="setting-hint">Names beside the icons, in a wider rail. Icons alone are quick once learned and unguessable until then.</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-sidebar-labels" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-tab-order">Tab order
+              <span class="setting-hint">Anything but Manual sorts the strip and turns off dragging, since the next sort would undo it. Tag uses the first tag on the matching saved connection.</span>
+            </label>
+            <select id="setting-tab-order" class="setting-input">
+              <option value="manual">Manual — where you put them</option>
+              <option value="name">By tab name</option>
+              <option value="device">By device</option>
+              <option value="opened">By when it was opened</option>
+              <option value="tag">Grouped by tag</option>
+            </select>
+          </div>
+
+          <!-- Whether the assistant pane is on screen is a question about the
+               shape of the window, not about the assistant. It lived under its
+               own "AI Assistant" heading, which put the one control that
+               governs a third of the layout in a section nobody opens unless
+               they are already looking for AI. -->
+          <div class="setting-row">
+            <label class="setting-label" for="setting-ai-enabled"
+                   data-tip="Gives the assistant the right-hand third of the window. Off, the terminal has all of it.||Off by default: on a locked-down network there may be no provider to reach, and a pane that cannot answer anything is worse than no pane.||The robot icon in the sidebar is the same switch, so you can move it out of the way without opening Settings.">Show the AI panel</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-ai-enabled" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-confirm-close-tab">Confirm before closing a live tab</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-confirm-close-tab" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <p class="settings-section-hint">Closing a tab disconnects the session. A tab that is already disconnected closes without asking.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-confirm-quit">Confirm before quitting</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-confirm-quit" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <p class="settings-section-hint">Quit from the tray drops every connection. Closing the window does not — it keeps everything running behind the tray icon.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-start-minimised">Start minimised to the tray</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-start-minimised" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-remember-window">Remember window size and position</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-remember-window" />
               <span class="toggle-track"></span>
             </label>
           </div>
         
           <!-- Advanced values for this area render here as a
                subsection (#152) — the same rows, one heading fewer. -->
-          <div class="settings-slot" data-category="terminal"></div>
+          <div class="settings-slot" data-category="files"></div>
         </section>
         <section class="settings-section">
-          <h3 class="settings-section-title">Behavior</h3>
+          <h3 class="settings-section-title">Terminal Behaviour</h3>
           <div class="setting-row">
             <label class="setting-label" for="setting-scrollback"
                    data-tip="How many lines of output each tab keeps before the oldest are dropped. This is what you can scroll back through and select — it is not the session log, which is written to disk and keeps everything.||Held in memory, per tab. A large value across a dozen open sessions is the one setting here that can make ShellMate feel slow, so raise it when you need to read back through a big `show run`, not as a matter of course.">Scrollback Lines</label>
@@ -857,6 +1066,24 @@ GigEth0/2     unassigned    YES unset  down     down
               <span class="toggle-track"></span>
             </label>
           </div>
+          <!-- Moved from Terminal Appearance (#219): what the terminal does,
+               not how it looks. -->
+          <div class="setting-row">
+            <label class="setting-label" for="setting-screen-reader">Screen Reader Mode
+              <span class="setting-hint">Maintains a live region a screen reader can follow. Costs enough that it is off unless wanted.</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-screen-reader" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <!-- Advanced values for this area render here as a
+               subsection (#152) — the same rows, one heading fewer. The slot
+               moved here with the behaviour rows (#219): word separators,
+               paste protection and destructive-command confirmation are
+               behaviour, whatever the category key says. -->
+          <div class="settings-slot" data-category="terminal"></div>
         </section>
         <section class="settings-section">
           <h3 class="settings-section-title">Output Colours</h3>
@@ -1127,7 +1354,7 @@ GigEth0/2     unassigned    YES unset  down     down
         <section class="settings-section">
           <h3 class="settings-section-title">Configuration Capture</h3>
           <p class="settings-section-hint">On connect, ShellMate fetches the device's running configuration on a <strong>second channel</strong> — invisibly, never in the session you are typing in — and keeps it. Every login becomes a change check, with nothing to remember.</p>
-          <p class="settings-section-hint">Skipped, quietly, where it cannot be done without disturbing you: serial and telnet cannot open a second channel, and some switches allow only one session at a time. It never falls back to typing into your terminal.</p>
+          <p class="settings-section-hint">Where a second channel is refused — serial and telnet cannot open one, and some switches allow only one session at a time — it can fall back to running the command through your own session: only while it sits idle at a prompt, hidden from the screen and the transcript, and announced afterwards. The fallback has its own switch below, for anyone who wants captures on a second channel or not at all.</p>
 
           <div class="setting-row">
             <label class="setting-label" for="setting-capture-configs"
@@ -1303,201 +1530,6 @@ GigEth0/2     unassigned    YES unset  down     down
         </section>
         <div class="settings-slot" data-category="ai"></div>
 
-        <!-- ===== Interface ===== -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">ShellMate Interface</h3>
-          <p class="settings-section-hint">These are kept in <code>settings.json</code> in your data folder, so they travel with it — and are the same whether you use the window or open ShellMate in a browser.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-theme">Theme</label>
-            <select id="setting-theme" class="setting-input">
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-              <option value="system">Follow the system</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-ui-font-size">UI Text Size</label>
-            <div class="setting-input-group">
-              <input type="number" id="setting-ui-font-size" class="setting-input setting-input-sm" min="11" max="20" step="1" />
-              <span class="setting-unit">px</span>
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-density">Density</label>
-            <select id="setting-density" class="setting-input">
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
-            </select>
-          </div>
-
-          <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-panel-transition">Panels open with</label>
-            <select id="setting-panel-transition" class="setting-input">
-              <option value="slide">Slide — in from the edge</option>
-              <option value="fade">Fade</option>
-              <option value="scale">Scale</option>
-              <option value="none">Nothing — appear instantly</option>
-            </select>
-            <p class="settings-section-hint">Applies to Settings, Stockton, History and the other side panels. Duration and pacing are in Stockton. If your system is set to reduce motion, that wins over this.</p>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-tab-label-width">Maximum tab width</label>
-            <div class="setting-input-group">
-              <input type="number" id="setting-tab-label-width" class="setting-input setting-input-sm" min="60" max="400" step="10" />
-              <span class="setting-unit">px</span>
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-connection-dot">Connection dot on tabs</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-connection-dot" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-restore-tabs">Reopen tabs when ShellMate starts
-              <span class="setting-hint">Only sessions saved as a connection with its password — nothing else can be reconnected without asking you. Any it cannot restore are named.</span>
-            </label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-restore-tabs" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-new-tab-opens">New tab opens
-              <span class="setting-hint">The connection dialog appears either way — this decides whether it arrives filled in.</span>
-            </label>
-            <select id="setting-new-tab-opens" class="setting-input">
-              <option value="welcome">An empty connection dialog</option>
-              <option value="last">The last device you connected to</option>
-              <option value="profile">A saved connection…</option>
-            </select>
-          </div>
-
-          <div class="setting-row" id="new-tab-profile-row">
-            <label class="setting-label" for="setting-new-tab-profile">Which saved connection</label>
-            <select id="setting-new-tab-profile" class="setting-input"></select>
-          </div>
-
-          <div class="setting-row setting-row-block">
-            <label class="setting-label">Tab right-click menu
-              <span class="setting-hint">Which entries the menu offers. Turning one off never removes what it does — every one is reachable elsewhere.</span>
-            </label>
-            <div id="tab-menu-toggles"></div>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-font-scale">Interface text size
-              <span class="setting-hint">The chrome around the terminal. The terminal's own font is under Terminal Appearance.</span>
-            </label>
-            <div class="setting-input-group">
-              <input type="number" id="setting-font-scale" class="setting-input setting-input-sm" min="0.8" max="1.6" step="0.05" />
-              <span class="setting-unit">x</span>
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-toast-position">Notifications appear</label>
-            <select id="setting-toast-position" class="setting-input">
-              <option value="bottom-right">Bottom right</option>
-              <option value="bottom-left">Bottom left</option>
-              <option value="top-right">Top right</option>
-              <option value="top-left">Top left</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-chat-enter">Enter in the chat box
-              <span class="setting-hint">With "new line", Ctrl+Enter sends instead.</span>
-            </label>
-            <select id="setting-chat-enter" class="setting-input">
-              <option value="send">Sends the message</option>
-              <option value="newline">Starts a new line</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-sidebar-labels">Labels in the sidebar
-              <span class="setting-hint">Names beside the icons, in a wider rail. Icons alone are quick once learned and unguessable until then.</span>
-            </label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-sidebar-labels" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-tab-order">Tab order
-              <span class="setting-hint">Anything but Manual sorts the strip and turns off dragging, since the next sort would undo it. Tag uses the first tag on the matching saved connection.</span>
-            </label>
-            <select id="setting-tab-order" class="setting-input">
-              <option value="manual">Manual — where you put them</option>
-              <option value="name">By tab name</option>
-              <option value="device">By device</option>
-              <option value="opened">By when it was opened</option>
-              <option value="tag">Grouped by tag</option>
-            </select>
-          </div>
-
-          <!-- Whether the assistant pane is on screen is a question about the
-               shape of the window, not about the assistant. It lived under its
-               own "AI Assistant" heading, which put the one control that
-               governs a third of the layout in a section nobody opens unless
-               they are already looking for AI. -->
-          <div class="setting-row">
-            <label class="setting-label" for="setting-ai-enabled"
-                   data-tip="Gives the assistant the right-hand third of the window. Off, the terminal has all of it.||Off by default: on a locked-down network there may be no provider to reach, and a pane that cannot answer anything is worse than no pane.||The robot icon in the sidebar is the same switch, so you can move it out of the way without opening Settings.">Show the AI panel</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-ai-enabled" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-confirm-close-tab">Confirm before closing a live tab</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-confirm-close-tab" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-          <p class="settings-section-hint">Closing a tab disconnects the session. A tab that is already disconnected closes without asking.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-confirm-quit">Confirm before quitting</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-confirm-quit" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-          <p class="settings-section-hint">Quit from the tray drops every connection. Closing the window does not — it keeps everything running behind the tray icon.</p>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-start-minimised">Start minimised to the tray</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-start-minimised" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <label class="setting-label" for="setting-remember-window">Remember window size and position</label>
-            <label class="toggle">
-              <input type="checkbox" id="setting-remember-window" />
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-        
-          <!-- Advanced values for this area render here as a
-               subsection (#152) — the same rows, one heading fewer. -->
-          <div class="settings-slot" data-category="files"></div>
-        </section>
         <section class="settings-section">
           <h3 class="settings-section-title">Alerts</h3>
           <p class="settings-section-hint">ShellMate watches for things that will happen to a device unless someone intervenes — <code>reload in 10</code>, or a Junos <code>commit confirmed</code> waiting to be confirmed. The countdown on the tab and in the status bar is always shown; these control how loudly it interrupts you.</p>
@@ -1549,7 +1581,60 @@ GigEth0/2     unassigned    YES unset  down     down
         <div class="settings-slot" data-category="discovery"></div>
 
         <!-- ===== Diagnostics ===== -->
-        <div class="settings-slot" data-category="diag"></div>
+        <section class="settings-section">
+          <h3 class="settings-section-title">Diagnostics</h3>
+          <p class="settings-section-hint">Where this installation lives, what
+            it has recorded, and the tools for when something goes wrong. The
+            rows below are filled in when Settings opens.</p>
+
+          <!-- About this installation — filled by settings.js from
+               /api/system/info and /api/history/stats (#222). -->
+          <div class="setting-row">
+            <label class="setting-label">Version
+              <span class="setting-hint">The build you are running.</span>
+            </label>
+            <span class="setting-value" id="diag-version">—</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">Data folder
+              <span class="setting-hint">Settings, history, keys and logs all live here. It travels with the executable.</span>
+            </label>
+            <span class="setting-value" id="diag-data-dir">—</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">Application log
+              <span class="setting-hint">The first place to look when something fails — truncated on each launch.</span>
+            </label>
+            <span class="setting-value" id="diag-log-dir">—</span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">Recorded history
+              <span class="setting-hint">Sessions, commands and config snapshots in the history database, and which search engine it is using.</span>
+            </label>
+            <span class="setting-value" id="diag-history-stats">—</span>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label">Session logs
+              <span class="setting-hint">Per-session terminal logs, when file logging is on.</span>
+            </label>
+            <button type="button" id="diag-open-logs" class="btn-secondary">
+              <span class="material-symbols-outlined">description</span>
+              Open session logs
+            </button>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">Support bundle
+              <span class="setting-hint">Collect the log, versions and settings into a zip you can review before sending.</span>
+            </label>
+            <button type="button" id="diag-open-support" class="btn-secondary">
+              <span class="material-symbols-outlined">archive</span>
+              Build a support bundle
+            </button>
+          </div>
+
+          <div class="settings-slot" data-category="diag"></div>
+        </section>
 
         <!-- Any advanced category without a slot above lands here, so a new
              one added to CATEGORIES is never invisible — only unsorted. -->
