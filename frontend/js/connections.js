@@ -75,6 +75,20 @@
     document.getElementById('btn-welcome-connect')
       .addEventListener('click', () => showConnectionDialog());
 
+    // Home-view doors (#233). Each guards its opener: a missing module must
+    // cost a dead button, not the whole dashboard.
+    [['welcome-link-docs',    () => window.openDocs],
+     ['welcome-link-history', () => window.openHistory],
+     ['welcome-link-keys',    () => window.openKeys],
+     ['welcome-link-support', () => window.openSupport],
+    ].forEach(([id, opener]) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('click', () => {
+        const fn = opener();
+        if (typeof fn === 'function') fn();
+      });
+    });
+
     document.getElementById('modal-close')
       .addEventListener('click', hideConnectionDialog);
 
@@ -384,11 +398,20 @@
       // not a view of anything. The tree is how a connection is found now.
       const leaf = window.shellmateGroups
         ? window.shellmateGroups.showsTiles() : Boolean(openGroup);
-      const shown = leaf
+      let shown = leaf
         ? profiles.filter(p => (p.tags || []).includes(openGroup))
         : [];
 
-      _paintEmptyState(leaf, openGroup, profiles.length);
+      // Home shows the recent set (#233) — a handful of tiles for the
+      // connections last worked with, not the five-thousand-tile wall the
+      // no-selection fallback used to be.
+      let recent = 0;
+      if (!leaf && !openGroup) {
+        shown = _recentProfiles(profiles);
+        recent = shown.length;
+      }
+
+      _paintEmptyState(leaf, openGroup, profiles.length, recent);
 
       shown.forEach(p => {
         const wrap = document.createElement('div');
@@ -511,7 +534,7 @@
    * An empty panel reads as broken, and "select a group" is the one thing
    * somebody landing on an empty dashboard needs told.
    */
-  function _paintEmptyState(leaf, openGroup, total) {
+  function _paintEmptyState(leaf, openGroup, total, recent) {
     const box = document.getElementById('welcome-empty');
     if (!box) return;
 
@@ -522,10 +545,42 @@
     }
 
     box.classList.remove('hidden');
+    if (!openGroup && recent) {
+      // The home view has recent tiles above this line (#233), so the
+      // sentence names what they are rather than claiming emptiness.
+      box.textContent = `Recent connections. ${total} saved in all — `
+        + 'pick a group on the left to see everything.';
+      return;
+    }
     box.textContent = openGroup
       ? 'Pick a subgroup on the left to see the connections in it.'
       : `${total} saved connection${total === 1 ? '' : 's'}. `
         + 'Pick a group on the left to see them.';
+  }
+
+  /**
+   * The profiles behind the last remembered set of open tabs (#233).
+   *
+   * interface.open_tabs is already persisted for tab restore, so "recent"
+   * costs no new bookkeeping. Matched conservatively — type, address and
+   * port — and capped, because the home view is a doorway, not a list.
+   */
+  function _recentProfiles(profiles) {
+    const remembered =
+      ((window.shellmateSettings || {}).interface || {}).open_tabs || [];
+    const out = [];
+    const seen = new Set();
+    remembered.forEach(t => {
+      const match = profiles.find(p =>
+        (p.connection_type || 'ssh') === (t.connection_type || 'ssh')
+        && (p.hostname || '') === (t.hostname || '')
+        && Number(p.port || 0) === Number(t.port || 0));
+      if (match && !seen.has(match.id)) {
+        seen.add(match.id);
+        out.push(match);
+      }
+    });
+    return out.slice(0, 8);
   }
 
   /**

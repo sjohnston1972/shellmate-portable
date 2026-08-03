@@ -116,6 +116,18 @@
   }
 
   /**
+   * Back to no selection — the plain ShellMate hero (#232).
+   *
+   * Its own export rather than open(''): open() toggles, so calling it to
+   * clear would *select* the empty key if something ever passed '' while
+   * nothing was chosen. "Go home" must not depend on where you already are.
+   */
+  function clear() {
+    activeGroup = '';
+    _select();
+  }
+
+  /**
    * Redraw for a new selection, without reloading anything (#188).
    *
    * Everything a selection changes is already in memory: which chip is
@@ -462,7 +474,12 @@
     all.type = 'button';
     all.className = 'tree-all' + (activeGroup ? '' : ' tree-active');
     all.textContent = `All connections (${profileCache.length})`;
-    all.addEventListener('click', () => { activeGroup = ''; _select(); });
+    all.addEventListener('click', () => {
+      activeGroup = '';
+      _select();
+      // Same as selecting a branch: the result must be visible (#232).
+      if (typeof window.showDashboard === 'function') window.showDashboard();
+    });
     body.insertBefore(all, body.firstChild);
   }
 
@@ -585,6 +602,10 @@
       else expanded.add(node.key);
       activeGroup = node.key;
       _select();
+      // The dashboard has to come forward to show what was just selected —
+      // with a terminal on screen, the tiles were painted into a hidden
+      // layer and the click read as doing nothing (#232).
+      if (typeof window.showDashboard === 'function') window.showDashboard();
     });
 
     // Right-click gets the same menu the tune button opens (#170). Members
@@ -1375,6 +1396,6 @@
 
   window.shellmateGroups = {
     render, active, activeName, activePath, activeIcon, showsTiles,
-    open, newGroup, editGroup, deleteGroup,
+    open, clear, newGroup, editGroup, deleteGroup,
   };
 })();

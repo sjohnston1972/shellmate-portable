@@ -194,9 +194,11 @@
    * An empty pane.
    *
    * Only ever seen when the layout has more panes than there are sessions —
-   * every other case is filled automatically — so the one thing worth
-   * offering here is a new connection. Choosing *which* session goes where is
-   * a different question, answered by "Move to pane" on the tab.
+   * every other case is filled automatically. It offers nothing clickable
+   * (#229): the "New connection" button it used to carry could never fire —
+   * the pane's own mousedown re-rendered the placeholders, so the pressed
+   * button was detached before the click event existed. The hint names the
+   * shortcut instead, which is the working route.
    */
   function placeholder(paneIndex) {
     const el = document.createElement('div');
@@ -204,27 +206,16 @@
     el.style.gridArea = PANE_LETTERS[paneIndex];
     el.dataset.pane = String(paneIndex);
 
-    const inner = document.createElement('div');
-    inner.className = 'pane-empty-inner';
-
     const hint = document.createElement('div');
     hint.className = 'pane-empty-hint';
-    hint.textContent = 'Empty pane';
-    inner.appendChild(hint);
+    hint.textContent = 'Empty pane — Ctrl+T for a new connection';
+    el.appendChild(hint);
 
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'pane-empty-tab';
-    btn.textContent = 'New connection';
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      focusedPane = paneIndex;
-      if (typeof window.showConnectionDialog === 'function') window.showConnectionDialog();
+    el.addEventListener('mousedown', () => {
+      // Only when the focus actually moves. Re-rendering on every press is
+      // what used to tear the placeholder out from under its own button.
+      if (focusedPane !== paneIndex) { focusedPane = paneIndex; render(); }
     });
-    inner.appendChild(btn);
-
-    el.appendChild(inner);
-    el.addEventListener('mousedown', () => { focusedPane = paneIndex; render(); });
     return el;
   }
 

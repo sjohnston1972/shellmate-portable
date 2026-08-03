@@ -114,17 +114,16 @@
   }
 
   function render() {
-    const el = document.getElementById('status-uptime');
+    // Beside the connection state, so the line reads "SSH: name | Connected
+    // 01:05:12" (#227). Digits only here — the state word belongs to
+    // #status-connection-text, and repeating it made the line stutter.
+    const el = document.getElementById('status-connection-clock');
     const active = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
 
     if (el) {
-      const text = active ? label(active.sessionId) : '';
+      const text = active ? format(secondsFor(active.sessionId)) : '';
       el.textContent = text;
-      // Hidden rather than blank, so the separator beside it does not sit on
-      // its own in an empty status bar.
       el.classList.toggle('hidden', !text);
-      const sep = document.getElementById('status-uptime-sep');
-      if (sep) sep.classList.toggle('hidden', !text);
     }
 
     // The tab tooltips are deliberately *not* touched here any more.

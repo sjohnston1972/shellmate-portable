@@ -55,8 +55,14 @@
     welcomeScreen      = document.getElementById('welcome-screen');
     terminalsContainer = document.getElementById('terminals-container');
 
-    // Brand click → show welcome/home screen
-    document.getElementById('tab-bar-brand').addEventListener('click', () => {
+    // Brand click → the default home view (#232)
+    document.getElementById('tab-bar-brand').addEventListener('click', goHome);
+
+    // The logo is the first thing people try as "home", and it did nothing.
+    const sidebarLogo = document.getElementById('sidebar-logo');
+    if (sidebarLogo) sidebarLogo.addEventListener('click', goHome);
+
+    function goHome() {
       // Hide all terminal containers so the welcome screen shows through
       tabs.forEach(tab => {
         const c = document.getElementById(tab.containerId);
@@ -65,9 +71,20 @@
       tabs.forEach(tab => tab.tabEl.classList.remove('active'));
       activeTabIndex = -1;
       if (window.shellmateLayout) window.shellmateLayout.clear();
-      welcomeScreen.classList.remove('hidden');
-      if (typeof window.renderWelcomeProfiles === 'function') window.renderWelcomeProfiles();
-    });
+      // Home means the ShellMate hero, not the last group's dashboard — the
+      // tooltip said "Home" while the click preserved the selection (#232).
+      if (window.shellmateGroups && window.shellmateGroups.clear) {
+        window.shellmateGroups.clear();
+      }
+      // Through showDashboard(), not a bare un-hide: it also puts the
+      // terminals behind the dashboard — without that, a tiled layout's
+      // focus ring paints straight through the welcome screen (#212) — and
+      // tells the alert stack to hide (#168).
+      showDashboard();
+      // With no active tab the bar must say so — left alone it went on
+      // claiming "Connected" with a ticking clock from the dashboard.
+      updateStatusBar();
+    }
 
     // Right-click the brand for a quicker route than the welcome screen.
     document.getElementById('tab-bar-brand')
@@ -263,7 +280,7 @@
     window.dispatchEvent(new CustomEvent('shellmate:dashboard-changed'));
 
     activeTabIndex = index;
-    _paintStatusGroup();
+    _paintBrand();
     _revealTab(tabs[index]);
 
     // Which terminals are on screen is the layout's business, not this
@@ -447,6 +464,7 @@
     }
 
     const { sessionId, websocket, terminalInstance, containerId, tabEl } = tab;
+    const wasConnected = tab.isConnected;
 
     // The terminal, its addons, its socket and its resize listener go too.
     // Without this every terminal ever opened stayed reachable, and — worse —
@@ -457,10 +475,23 @@
     // The clock goes with the tab, so a closed session stops costing a tick.
     if (window.shellmateUptime) window.shellmateUptime.forget(sessionId);
 
-    // Tell the backend to tear down the session
-    fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' }).catch(() => {
-      // Best-effort — don't block UI on network error
-    });
+    // Hang up first, then tear down — two requests, in order (#214). DELETE
+    // does disconnect as part of destroying the session, but it also flushes
+    // history and clears the buffer, and it is sent best-effort: when it
+    // fails, the device side stayed logged in with no tab left pointing at
+    // it. The explicit disconnect makes the hang-up its own request, so the
+    // connection is closed on the device even if the teardown after it is
+    // lost. Both are idempotent, so the overlap costs nothing.
+    (async () => {
+      if (wasConnected) {
+        try {
+          await fetch(`/api/sessions/${sessionId}/disconnect`, { method: 'POST' });
+        } catch (_) { /* the DELETE below disconnects too */ }
+      }
+      try {
+        await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+      } catch (_) { /* best-effort — don't block UI on network error */ }
+    })();
 
     // Close WebSocket
     try { websocket.close(); } catch (_) {}
@@ -487,7 +518,10 @@
     // Decide what to show next
     if (tabs.length === 0) {
       activeTabIndex = -1;
-      welcomeScreen.classList.remove('hidden');
+      // The full dashboard path, for the same reason as the brand click:
+      // un-hiding the welcome screen without putting the terminals behind it
+      // is how a leftover focus ring ends up painted over it (#212).
+      showDashboard();
     } else {
       // Switch to the tab to the left, or the first one
       const nextIndex = Math.min(index, tabs.length - 1);
@@ -560,7 +594,9 @@
    * Refresh the status bar with information about the active session.
    */
   function updateStatusBar() {
-    const connEl   = document.getElementById('status-connection');
+    // The nested text span, not #status-connection itself: the clock beside
+    // it (#227) is uptime.js's, and writing the parent would erase it.
+    const connEl   = document.getElementById('status-connection-text');
     const bufferEl = document.getElementById('status-buffer');
     const tabsEl   = document.getElementById('status-tabs');
 
@@ -570,6 +606,7 @@
     if (!active) {
       connEl.textContent  = 'No active session';
       bufferEl.textContent = 'Buffer: 0L';
+      if (window.shellmateUptime) window.shellmateUptime.render();
       return;
     }
 
@@ -580,6 +617,7 @@
     bufferEl.textContent = `Buffer: ${lines.toLocaleString()}L`;
 
     if (typeof window.updateContextStatus === 'function') window.updateContextStatus();
+    if (window.shellmateUptime) window.shellmateUptime.render();
   }
 
   // -------------------------------------------------------------------------
@@ -762,7 +800,7 @@
     } else if (mode === 'last') {
       const last = (prefs.open_tabs || [])[prefs.open_tabs.length - 1];
       if (last) {
-        profile = await _profileFor({
+        profile = await _profileForQuiet({
           label:          last.label,
           hostname:       last.hostname,
           port:           last.port,
@@ -910,6 +948,37 @@
   /** Tag lookup by session, filled lazily — a profile match costs a fetch. */
   const _tagCache = new Map();
 
+  /** Failed lookups per session, so a retry is bounded rather than forever. */
+  const _tagRetries = new Map();
+
+  /**
+   * The profile list, one fetch shared by everyone who asks (#215).
+   *
+   * Five tabs opening together used to fire five fetches of the whole list —
+   * heaviest exactly when the backend is busiest establishing sessions, which
+   * is when one of them is most likely to lose. Cached for a few seconds:
+   * long enough to cover a burst of openings, short enough that an edit to a
+   * profile still shows up. A failure is never cached.
+   */
+  let _profilesShared = null;   // { at, promise }
+  function _allProfiles() {
+    const now = Date.now();
+    if (_profilesShared && now - _profilesShared.at < 5000) {
+      return _profilesShared.promise;
+    }
+    const promise = fetch('/api/profiles').then(res => {
+      if (!res.ok) throw new Error(`profiles returned ${res.status}`);
+      return res.json();
+    });
+    promise.catch(() => {
+      if (_profilesShared && _profilesShared.promise === promise) {
+        _profilesShared = null;
+      }
+    });
+    _profilesShared = { at: now, promise };
+    return promise;
+  }
+
   /**
    * Reorder the tab strip.
    *
@@ -970,13 +1039,24 @@
     // group to show.
     const wanted = _order === 'tag' || _groupStripe();
     if (!wanted || _tagCache.has(tab.sessionId)) return;
+    // The tab may have closed between a failure and its retry.
+    if (!tabs.some(t => t.sessionId === tab.sessionId)) return;
     try {
       const profile = await _profileFor(tab);
       const tag = ((profile || {}).tags || [])[0] || '';
       _tagCache.set(tab.sessionId, tag.toLowerCase());
     } catch (_) {
-      _tagCache.set(tab.sessionId, '');
+      // Left unlearned rather than cached as "no group". Writing '' here
+      // turned a lost fetch into the answer for the life of the session —
+      // one tab kept its group colour while its four siblings, opened in the
+      // same burst, silently lost theirs (#215). Retry a few times, backing
+      // off, then stay quiet until something asks again.
+      const tries = (_tagRetries.get(tab.sessionId) || 0) + 1;
+      _tagRetries.set(tab.sessionId, tries);
+      if (tries <= 3) setTimeout(() => _learnTag(tab), 2000 * tries);
+      return;
     }
+    _tagRetries.delete(tab.sessionId);
     sortTabs();
     _paintGroups();
   }
@@ -1015,37 +1095,10 @@
   // header is not a tab and must never become index 0.
   // -------------------------------------------------------------------------
 
-  /**
-   * Name the active tab's group in the status bar (#149).
-   *
-   * Reuses the group already resolved for the strip rather than resolving it
-   * again — a device can be in several groups, and two places picking
-   * differently would be worse than neither showing it.
-   */
-  async function _paintStatusGroup() {
-    // First, and outside the early return below — the brand has to go back to
-    // plain "ShellMate Portable" when the selection is cleared, which is
-    // exactly the case that returns early.
-    _paintBrand();
-
-    const el = document.getElementById('status-group');
-    if (!el) return;
-
-    const tab = getActiveTab();
-    const key = tab ? (_tagCache.get(tab.sessionId) || '') : '';
-    if (!key) {
-      el.classList.add('hidden');
-      el.textContent = '';
-      return;
-    }
-
-    const colours = await _loadGroupColours();
-    el.className = `status-group group-${colours[key] || 'slate'}`;
-    // The leaf of a nested name: "site-3/access" reads as "access" here,
-    // where the space is tight and the parent is on the tab strip anyway.
-    el.textContent = key.split('/').pop();
-    el.title = `In the "${key}" group`;
-  }
+  // The status-bar group chip that lived here (#149) was removed (#224) —
+  // the group is on the tree and the tab strip already. The brand and window
+  // title still follow the active tab's site via _paintBrand(), which the old
+  // repaint carried along and its call sites now invoke directly.
 
   /**
    * The site on the brand, and on the window title (#190).
@@ -1067,11 +1120,14 @@
     const site = key ? key.split('/')[0] : '';
 
     if (brand) {
-      brand.textContent = site ? `ShellMate Portable — ${site}` : 'ShellMate Portable';
+      // The brand is the brand (#216). The suffix made it read as a
+      // navigation element and change width with every selection — the
+      // selected group is already on the tree and the dashboard heading.
+      brand.textContent = 'ShellMate Portable';
       brand.title = site ? `Home — showing ${site}` : 'Home / Quick connect';
     }
-    // The native window's own title bar, which is the only place the site
-    // shows when the window is not focused.
+    // The native window's own title bar keeps the site: it is the only place
+    // it shows when the window is not focused.
     document.title = site ? `ShellMate Portable — ${site}` : 'ShellMate Portable';
   }
 
@@ -1215,7 +1271,7 @@
       el.classList.add('tab-group-start');
     });
 
-    _paintStatusGroup();
+    _paintBrand();
     _markOverflow();
   }
 
@@ -1368,6 +1424,14 @@
         label: 'Disconnect all sessions', setting: 'disconnect_all',
         when: () => tabs.some(t => t.isConnected) },
     ],
+    [
+      // The × on the tab does the same thing, but the menu is where people
+      // look when they are already in it — and "all" has no other home (#214).
+      { action: 'close', icon: 'close', label: 'Close tab',
+        setting: 'close' },
+      { action: 'close-all', icon: 'delete_sweep', label: 'Close all tabs',
+        setting: 'close_all', when: () => tabs.length > 1 },
+    ],
   ];
 
   /** "on" / "off", so a toggle shows its state rather than only setting it. */
@@ -1515,6 +1579,9 @@
           case 'disconnect':     _disconnectSessions([tab]);        break;
           case 'disconnect-all': _disconnectSessions(
                                    tabs.filter(t => t.isConnected)); break;
+          // By session id, not index (#181): the menu can outlive a reorder.
+          case 'close':     window.closeTabBySessionId(tab.sessionId); break;
+          case 'close-all': _closeAllTabs();                        break;
           case 'pane':
             window.shellmateLayout.place(Number(btn.dataset.pane), tab.sessionId);
             break;
@@ -1569,6 +1636,37 @@
                     { method: 'POST' });
       } catch (_) { /* the tab going red is the report */ }
       updateTabStatus(tab.sessionId, false);
+    }
+  }
+
+  /**
+   * Close every tab, asking once for the lot rather than once per tab (#214).
+   *
+   * Each close still goes through closeTab — disconnect first, then teardown
+   * — with `force` so the one confirmation here is the only question.
+   */
+  async function _closeAllTabs() {
+    if (!tabs.length) return;
+
+    const settings = (window.shellmateSettings || {}).interface || {};
+    const connected = tabs.filter(t => t.isConnected).length;
+    if (settings.confirm_close_tab !== false && connected) {
+      const ok = await window.shellmateDialog.confirm({
+        title: `Close all ${tabs.length} tabs?`,
+        body: (connected === 1
+                ? 'One session is still connected'
+                : `${connected} sessions are still connected`)
+              + ' and will be disconnected. Anything already scheduled on a '
+              + 'device — a pending reload — carries on regardless.',
+        confirmLabel: 'Close all',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+
+    // By session id, not index (#181): every close shifts the indices.
+    for (const sid of tabs.map(t => t.sessionId)) {
+      await window.closeTabBySessionId(sid, { force: true });
     }
   }
 
@@ -1868,7 +1966,7 @@
 
     // Whether it *can* work is a question about credentials, and the honest
     // answer is available before the first attempt rather than after it.
-    const profile = await _profileFor(tab);
+    const profile = await _profileForQuiet(tab);
     if (!profile || !profile.has_saved_credentials) {
       _sayWhyNot(tab, profile);
       return;
@@ -1939,13 +2037,12 @@
    * can supply credentials beats one that cannot when everything else ties.
    */
   async function _profileFor(tab) {
-    let profiles = [];
-    try {
-      const res = await fetch('/api/profiles');
-      profiles = res.ok ? await res.json() : [];
-    } catch (_) {
-      return null;
-    }
+    // Throws when the list cannot be fetched, deliberately. Returning null
+    // here made "the request failed" indistinguishable from "no profile
+    // matches", and callers cached the failure as the answer — five tabs
+    // opening at once is exactly when a fetch is most likely to lose, and
+    // four of them wore the wrong group for the life of the session (#215).
+    const profiles = await _allProfiles();
 
     // Asked and answered, when the session recorded where it came from
     // (#187). The scoring below is a good guess and a guess is all it is:
@@ -1977,6 +2074,17 @@
       if (points > bestScore) { best = p; bestScore = points; }
     });
     return best;
+  }
+
+  /**
+   * _profileFor with a fetch failure read as "no profile".
+   *
+   * For the reconnect and new-tab paths, where the conservative guess is the
+   * right behaviour and a throw would break the flow. The group-tag path must
+   * NOT use this — there, failure and "no group" mean different things (#215).
+   */
+  async function _profileForQuiet(tab) {
+    try { return await _profileFor(tab); } catch (_) { return null; }
   }
 
   /**
@@ -2013,7 +2121,7 @@
 
     let profile = options.profile || null;
     if (!profile) {
-      profile = await _profileFor(tab);
+      profile = await _profileForQuiet(tab);
     }
 
     if (profile && profile.has_saved_credentials) {
@@ -2408,7 +2516,7 @@
     // `address` is what was dialled and is never rewritten; `hostname` is
     // what the device calls itself.
     const address = session.address || session.hostname || '';
-    const profile = await _profileFor({
+    const profile = await _profileForQuiet({
       connectionType: session.connection_type || 'ssh',
       hostname:       address,
       port:           session.port,
@@ -2478,6 +2586,18 @@
 
   /** Return the tab object at 1-based tab number, or null. */
   window.getTabByNumber = (n) => tabs[n - 1] || null;
+
+  /**
+   * Recent-buffer size for one session, for the context meter.
+   *
+   * By session id rather than handing out the tab object — those carry live
+   * xterm and WebSocket handles that nothing outside this module should be
+   * reaching into.
+   */
+  window.getContextCharsBySessionId = (sessionId, lines) => {
+    const t = tabs.find(x => x.sessionId === sessionId);
+    return (t && t.getContextChars) ? t.getContextChars(lines) : 0;
+  };
 
   window.createTab        = createTab;
   window.switchToTab      = switchToTab;

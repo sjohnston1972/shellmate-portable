@@ -30,6 +30,15 @@
   /** sessionId -> fingerprint, so switching tabs shows the right device. */
   const identified = new Map();
 
+  /**
+   * The session the chip currently describes.
+   *
+   * The chip outlives the active tab — it still reads correctly from the
+   * dashboard, where getActiveTab() is null — and the click has to know which
+   * session that text belongs to, or it silently does nothing (#225).
+   */
+  let shownSessionId = null;
+
   /** Platform list for the override menu, fetched once and reused. */
   let platformsPromise = null;
 
@@ -62,6 +71,23 @@
       updateStatus(tab ? tab.sessionId : null);
     });
 
+    // Closing the last tab dispatches no tab-switch, so without this the chip
+    // kept describing a device that was no longer connected to anything, for
+    // as long as the window stayed open (#226). The map is pruned here too —
+    // entries for closed sessions otherwise outlive them.
+    window.addEventListener('shellmate:sessions-changed', () => {
+      const open = new Set(
+        (typeof window.getOpenTabs === 'function' ? window.getOpenTabs() : [])
+          .map(t => t.sessionId));
+      [...identified.keys()].forEach(id => {
+        if (!open.has(id)) identified.delete(id);
+      });
+      const active = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+      if (!active || !open.has(shownSessionId)) {
+        updateStatus(active ? active.sessionId : null);
+      }
+    });
+
     const status = document.getElementById('status-device');
     if (status) status.addEventListener('click', () => openChooser());
   });
@@ -74,9 +100,18 @@
     const el = document.getElementById('status-device');
     if (!el) return;
 
-    const info = sessionId ? identified.get(sessionId) : null;
+    shownSessionId = sessionId || null;
     el.classList.remove('status-device-known', 'status-device-unsure');
 
+    // No session at all is different from a session nothing could identify:
+    // the first shows the resting state, the second is an offer to help.
+    if (!sessionId) {
+      el.textContent = 'Device: —';
+      el.title = 'Detected device platform';
+      return;
+    }
+
+    const info = identified.get(sessionId);
     if (!info || info.platform === 'generic') {
       el.textContent = 'Device: unidentified';
       el.title = info
@@ -277,15 +312,26 @@
   function loadPlatforms() {
     if (!platformsPromise) {
       platformsPromise = fetch('/api/platforms')
-        .then(r => r.ok ? r.json() : [])
-        .catch(() => []);
+        .then(r => {
+          if (!r.ok) throw new Error(`platforms returned ${r.status}`);
+          return r.json();
+        })
+        .catch(() => {
+          // Not cached: one lost fetch used to leave the chooser permanently
+          // empty — a click that did nothing, forever (#225).
+          platformsPromise = null;
+          return {};
+        });
     }
     return platformsPromise;
   }
 
   async function openChooser() {
+    // The chip is clickable from the dashboard too, where no tab is active
+    // but the chip still describes the session it last showed (#225).
     const tab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
-    if (!tab || !tab.sessionId) return;
+    const sessionId = (tab && tab.sessionId) || shownSessionId;
+    if (!sessionId) return;
 
     document.querySelectorAll('.device-chooser').forEach(m => m.remove());
 
@@ -295,7 +341,12 @@
     const list = Object.values(platforms.platforms || {})
       .filter(p => p && p.id && p.id !== 'generic')
       .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-    if (!list.length) return;
+    if (!list.length) {
+      // Silence here read as a dead click (#225). Say why nothing opened.
+      note('Could not load the platform list — check the connection and try again.',
+           'device');
+      return;
+    }
 
     const menu = document.createElement('div');
     menu.className = 'device-chooser';
@@ -326,7 +377,7 @@
       }
       row.addEventListener('click', () => {
         menu.remove();
-        choose(tab.sessionId, profile.id);
+        choose(sessionId, profile.id);
       });
       menu.appendChild(row);
     });
