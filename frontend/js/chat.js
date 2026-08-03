@@ -90,26 +90,40 @@
     window.addEventListener('shellmate:models-refreshed', applySavedModel);
 
     // Dynamically populate local Ollama models
-    fetch('/api/ollama/models').then(r => r.json()).then(models => {
-      const group = document.getElementById('local-models-group');
-      if (!group) return;
-      group.innerHTML = '';
-      if (!models.length) {
-        const opt = document.createElement('option');
-        opt.value = '_none'; opt.disabled = true; opt.textContent = 'None found';
-        group.appendChild(opt);
-        return;
-      }
-      models.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = `ollama:${m.name}`;
-        opt.textContent = `${m.name}${m.size ? '  (' + m.size + ')' : ''}`;
-        group.appendChild(opt);
+    function loadLocalModels() {
+      fetch('/api/ollama/models').then(r => r.json()).then(models => {
+        const group = document.getElementById('local-models-group');
+        if (!group) return;
+        const previous = backendSelect.value;
+        group.innerHTML = '';
+        if (!models.length) {
+          const opt = document.createElement('option');
+          opt.value = '_none'; opt.disabled = true; opt.textContent = 'None found';
+          group.appendChild(opt);
+          return;
+        }
+        models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = `ollama:${m.name}`;
+          opt.textContent = `${m.name}${m.size ? '  (' + m.size + ')' : ''}`;
+          group.appendChild(opt);
+        });
+        // Rewriting the group's options can silently move the selection; put
+        // it back when the selected model still exists.
+        if ([...backendSelect.options].some(o => o.value === previous)) {
+          backendSelect.value = previous;
+        }
+      }).catch(() => {
+        const group = document.getElementById('local-models-group');
+        if (group) { group.innerHTML = '<option value="_err" disabled>Ollama unavailable</option>'; }
       });
-    }).catch(() => {
-      const group = document.getElementById('local-models-group');
-      if (group) { group.innerHTML = '<option value="_err" disabled>Ollama unavailable</option>'; }
-    });
+    }
+    loadLocalModels();
+    // The picker is rebuilt from the model cache on load and from live
+    // discovery after a test — both replace the local group's contents, and
+    // the cache's idea of Ollama may be older than Ollama itself. Asking
+    // Ollama again after every rebuild keeps the local list live.
+    window.addEventListener('shellmate:models-refreshed', loadLocalModels);
 
     // Wire up events
     sendBtn.addEventListener('click', sendMessage);
@@ -185,6 +199,17 @@
     } else if (msg.type === 'error') {
       finishStreaming();
       appendErrorBubble(msg.message || 'Unknown error');
+      // A retired model id is self-healing: refresh the picker from the
+      // providers so the dead option disappears and the saved default is
+      // re-pointed at something that exists (#230). Guarded so a run of
+      // failures does not hammer every provider's models endpoint.
+      if (/does not recognise the model/i.test(msg.message || '')
+          && typeof window.refreshProviderModels === 'function'
+          && !handleWsMessage._refreshedForModel) {
+        handleWsMessage._refreshedForModel = true;
+        setTimeout(() => { handleWsMessage._refreshedForModel = false; }, 30000);
+        window.refreshProviderModels();
+      }
     }
   }
 
@@ -250,7 +275,11 @@
       chatWs.send(JSON.stringify({
         message,
         session_id:        sessionId,
-        open_session_ids:  picked || openIds,
+        // Always the real tab order. The selection used to be sent *as* this
+        // list, which renumbered the AI's session summary over the subset —
+        // so its tab numbers stopped matching the tab bar (#213).
+        open_session_ids:  openIds,
+        context_session_ids: picked,
         backend:           currentBackend,
         model:             currentModel,
         context_mode:      picked ? 'selected' : mode,
@@ -340,6 +369,13 @@
     sendBtn.disabled = true;
 
     const aiMode = typeof window.getShellmateMode === 'function' ? window.getShellmateMode() : 'tshoot';
+    // The same context the user chose for typed messages. This path used to
+    // send none of it, so in a flow of approved commands — where most AI
+    // turns arrive through here — the picker's selection silently "wore off"
+    // after the first reply (#213).
+    const openIds = typeof window.getOpenSessionIds === 'function' ? window.getOpenSessionIds() : [];
+    const picked = typeof window.getChatContextSelection === 'function'
+      ? window.getChatContextSelection() : null;
     chatWs.send(JSON.stringify({
       message:       message || '',
       // The command and the device's reply as data. The server composes the
@@ -348,9 +384,11 @@
       // already inside it.
       auto_analysis: autoAnalysis || null,
       session_id:    sid,
+      open_session_ids: openIds,
+      context_session_ids: picked,
       backend:       currentBackend,
       model:         currentModel,
-      context_mode:  contextMode,
+      context_mode:  picked ? 'selected' : contextMode,
       mode:          aiMode,
     }));
   }
@@ -885,7 +923,19 @@
 
     // Active terminal buffer — read the last 200 lines (matches backend's get_text(200))
     const activeTab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
-    const bufChars  = (activeTab && activeTab.getContextChars) ? activeTab.getContextChars(200) : 0;
+    let bufChars  = (activeTab && activeTab.getContextChars) ? activeTab.getContextChars(200) : 0;
+
+    // Sessions added through the tab picker. The meter used to count only the
+    // active tab, so adding sessions moved nothing on screen and read as the
+    // assistant not seeing them (#213). 100 lines each, matching the backend.
+    const picked = typeof window.getChatContextSelection === 'function'
+      ? window.getChatContextSelection() : null;
+    if (picked && typeof window.getContextCharsBySessionId === 'function') {
+      const activeId = activeTab ? activeTab.sessionId : null;
+      picked.forEach(id => {
+        if (id !== activeId) bufChars += window.getContextCharsBySessionId(id, 100);
+      });
+    }
 
     // Fixed overhead: system prompt + per-request framing (~900 tokens)
     return 900 + Math.round((chatChars + bufChars) / 4);
@@ -914,10 +964,23 @@
   }
 
   function updateContextIndicator(tab) {
-    // Update the chat-header label (shows active tab name)
+    // Update the chat-header label: the active tab's name, or — when sessions
+    // are chosen in the picker — how many the assistant will see. Showing the
+    // active tab regardless was half of #213: the choice worked, but nothing
+    // on screen acknowledged it.
     if (contextIndicator) {
       const activeTab = tab || (typeof window.getActiveTab === 'function' ? window.getActiveTab() : null);
-      contextIndicator.textContent = activeTab ? (activeTab.label || 'active session') : 'no session';
+      const picked = typeof window.getChatContextSelection === 'function'
+        ? window.getChatContextSelection() : null;
+      if (picked) {
+        const seen = new Set(picked);
+        if (activeTab) seen.add(activeTab.sessionId);
+        contextIndicator.textContent = `${seen.size} session${seen.size === 1 ? '' : 's'}`;
+        contextIndicator.title = 'The assistant sees the active tab plus the sessions chosen in the picker';
+      } else {
+        contextIndicator.textContent = activeTab ? (activeTab.label || 'active session') : 'no session';
+        contextIndicator.title = '';
+      }
     }
 
     // Update the status-bar context meter

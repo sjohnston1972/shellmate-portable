@@ -16,11 +16,14 @@ engineer nothing; "the key was rejected" tells them what to do.
 """
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 
+from backend.paths import data_dir
 from backend.settings_store import get_effective
 
 logger = logging.getLogger(__name__)
@@ -245,4 +248,59 @@ async def check_all() -> dict[str, dict]:
             out[name] = ProviderResult(False, str(result), []).as_dict()
         else:
             out[name] = result.as_dict()
+
+    await asyncio.to_thread(_remember, out)
     return out
+
+
+# ---------------------------------------------------------------------------
+# The cache — what the picker shows before anyone presses "test"
+# ---------------------------------------------------------------------------
+#
+# Discovery answers "what can these providers run right now", but only when
+# someone asks. Without a cache, every page load falls back to the model list
+# hardcoded in index.html, which goes stale the day after it is written — the
+# original complaint behind discovery existing at all. So the last successful
+# answer is kept on disk and served to the picker on load; the hardcoded list
+# is only ever seen on a first run that has never tested anything.
+
+
+def _cache_path() -> Path:
+    return data_dir() / "models.json"
+
+
+def load_cached() -> dict[str, dict]:
+    """The model list as it stood after the last discovery, or {} if none."""
+    try:
+        with open(_cache_path(), encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:
+        logger.warning("Could not read the cached model list: %s", exc)
+        return {}
+
+
+def _remember(results: dict[str, dict]) -> None:
+    """
+    Fold a discovery run into the cache.
+
+    A provider that failed this time keeps its previous entry — Ollama being
+    stopped for an afternoon should not erase what it can run. A provider that
+    is no longer configured at all (its key removed) drops out, so the picker
+    cannot go on offering models nothing can answer with.
+    """
+    previous = load_cached()
+    kept: dict[str, dict] = {}
+    for name, result in results.items():
+        if result.get("ok") and result.get("models"):
+            kept[name] = result
+        elif name in previous:
+            kept[name] = previous[name]
+    try:
+        _cache_path().write_text(
+            json.dumps(kept, indent=2), encoding="utf-8"
+        )
+    except Exception as exc:
+        logger.warning("Could not save the model list cache: %s", exc)

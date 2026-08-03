@@ -34,6 +34,15 @@
     const test = document.getElementById('btn-test-providers');
     if (test) test.addEventListener('click', testProviders);
 
+    const refresh = document.getElementById('btn-refresh-models');
+    if (refresh) refresh.addEventListener('click', testProviders);
+
+    // The picker starts as whatever index.html was written with, which goes
+    // stale the day after it is written. The last successful discovery is
+    // served back on load, so the hardcoded list is only ever a first-run
+    // fallback.
+    restoreCachedModels();
+
     const toggle = document.getElementById('btn-ai-toggle');
     if (toggle) {
       toggle.addEventListener('click', (e) => { e.preventDefault(); togglePanel(); });
@@ -117,12 +126,19 @@
   async function testProviders() {
     const status  = document.getElementById('provider-test-status');
     const results = document.getElementById('provider-results');
-    const button  = document.getElementById('btn-test-providers');
+    // Two ways in — the Settings button and the refresh beside the picker —
+    // and both go quiet while a test runs, whichever one was pressed.
+    const buttons = [
+      document.getElementById('btn-test-providers'),
+      document.getElementById('btn-refresh-models'),
+    ].filter(Boolean);
     if (!results) return;
 
-    button.disabled = true;
+    buttons.forEach(b => { b.disabled = true; });
     status.textContent = 'Testing…';
     results.innerHTML = '';
+
+    const done = () => buttons.forEach(b => { b.disabled = false; });
 
     let data;
     try {
@@ -132,7 +148,7 @@
     } catch (e) {
       status.textContent = '';
       renderRow(results, 'error', 'Could not reach ShellMate’s own API.', String(e.message || e));
-      button.disabled = false;
+      done();
       return;
     }
 
@@ -141,7 +157,7 @@
       status.textContent = '';
       renderRow(results, 'muted', 'No providers configured.',
                 'Add an API key above, or start Ollama locally.');
-      button.disabled = false;
+      done();
       return;
     }
 
@@ -155,7 +171,28 @@
 
     status.textContent = `${working} of ${names.length} working.`;
     populateModelPicker(data);
-    button.disabled = false;
+    done();
+  }
+
+  /**
+   * Fill the picker from the last successful discovery, on page load.
+   *
+   * No network beyond our own API: this must not slow the page down or fail
+   * when offline. If nothing has ever been discovered, the hardcoded HTML
+   * list stays — a first run has nothing better to offer.
+   */
+  async function restoreCachedModels() {
+    let data;
+    try {
+      const res = await fetch('/api/providers/cached');
+      if (!res.ok) return;
+      data = await res.json();
+    } catch (e) {
+      return;
+    }
+    const usable = Object.values(data || {})
+      .some(r => r && r.ok && r.models && r.models.length);
+    if (usable) populateModelPicker(data);
   }
 
   function renderRow(host, kind, title, detail) {
@@ -199,6 +236,9 @@
     cloud.label = '☁ Cloud';
     const local = document.createElement('optgroup');
     local.label = '⚡ Local';
+    // chat.js refreshes the local list live from Ollama and finds the group
+    // by this id — a rebuild must not take the anchor away.
+    local.id = 'local-models-group';
 
     Object.keys(data).forEach(name => {
       const result = data[name];
@@ -212,10 +252,7 @@
       });
     });
 
-    if (cloud.children.length) select.appendChild(cloud);
-    if (local.children.length) select.appendChild(local);
-
-    if (!select.children.length) {
+    if (!cloud.children.length && !local.children.length) {
       const opt = document.createElement('option');
       opt.value = '';
       opt.textContent = 'No models available';
@@ -223,6 +260,18 @@
       select.appendChild(opt);
       return;
     }
+
+    if (cloud.children.length) select.appendChild(cloud);
+    // The local group is kept even when empty: chat.js fills it live from
+    // Ollama, and dropping it here would leave that refresh nowhere to land.
+    if (!local.children.length) {
+      const opt = document.createElement('option');
+      opt.value = '_none';
+      opt.disabled = true;
+      opt.textContent = 'None found';
+      local.appendChild(opt);
+    }
+    select.appendChild(local);
 
     if ([...select.options].some(o => o.value === previous)) {
       select.value = previous;

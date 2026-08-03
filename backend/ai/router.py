@@ -54,6 +54,7 @@ async def stream_chat(
     context_mode: str,                    # "active" | "all" | "1" | "2" etc
     session_manager: SessionManager,
     open_session_ids: list[str] | None = None,  # only sessions the browser has open
+    context_session_ids: list[str] | None = None,  # the tab picker's selection
     model: str | None = None,             # optional model override
     mode: str | None = None,              # "learn" | "tshoot"
 ) -> AsyncIterator[str]:
@@ -103,9 +104,14 @@ async def stream_chat(
     extra_contexts: list[dict] = []
 
     if context_mode == "selected":
-        # The tab picker sends exactly the sessions it wants included, so
-        # open_session_ids is the selection rather than "everything open".
-        for sid in (open_session_ids or []):
+        # The tab picker's choice arrives in its own field. It used to arrive
+        # *as* open_session_ids, which renumbered the OPEN SESSIONS summary
+        # over the subset — so tab numbers no longer matched the tab bar and
+        # a [SUGGEST_CMD:N] resolved against the wrong tab (#213). The old
+        # spelling is still honoured for a page that has not been reloaded.
+        chosen = (context_session_ids if context_session_ids is not None
+                  else (open_session_ids or []))
+        for sid in chosen:
             if sid == active_session_id:
                 continue
             sess = session_manager.get_session(sid)

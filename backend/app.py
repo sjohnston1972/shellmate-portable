@@ -2742,14 +2742,27 @@ async def provider_models() -> dict:
     return await providers.check_all()
 
 
+@app.get("/api/providers/cached")
+async def provider_models_cached() -> dict:
+    """
+    The model list as discovered last time, without touching the network.
+
+    Backs the picker on page load. The list hardcoded in index.html is only a
+    first-run fallback; once a discovery has succeeded, a fresh page shows the
+    providers as they were last seen rather than as the HTML remembers them.
+    """
+    return await asyncio.to_thread(providers.load_cached)
+
+
 @app.get("/api/ollama/models")
 async def ollama_models() -> list[dict]:
     """Return the list of models installed in the local Ollama instance."""
-    from backend.config import OLLAMA_HOST
     import httpx
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{OLLAMA_HOST.rstrip('/')}/api/tags")
+            # Through the same host resolution as discovery, so a host set in
+            # Settings is honoured here too instead of only in .env.
+            resp = await client.get(providers._ollama_url())
             resp.raise_for_status()
             data = resp.json()
             return [
@@ -3504,6 +3517,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
             model            = msg.get("model") or None
             context_mode     = msg.get("context_mode", "active")
             open_session_ids = msg.get("open_session_ids") or None
+            context_session_ids = msg.get("context_session_ids") or None
             mode             = msg.get("mode") or None  # "learn" | "tshoot"
 
             # Approving a suggested command used to also ship whatever the
@@ -3536,6 +3550,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     context_mode=context_mode,
                     session_manager=session_manager,
                     open_session_ids=open_session_ids,
+                    context_session_ids=context_session_ids,
                     model=model,
                     mode=mode,
                 ):

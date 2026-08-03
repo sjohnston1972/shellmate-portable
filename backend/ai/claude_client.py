@@ -17,10 +17,29 @@ from backend.ai.prompts import SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
-#: The fallback whenever no explicit model is passed — anything not coming
-#: from the chat picker. A model id the API no longer serves comes back as a
-#: 404, so this being current matters more than it looks.
+#: The last-resort fallback when no explicit model is passed and nothing has
+#: ever been discovered. A model id the API no longer serves comes back as a
+#: 404, so a hardcoded id going stale is a matter of when — which is why
+#: _fallback_model() prefers what the provider actually offered last time.
 MODEL = "claude-sonnet-5"
+
+
+def _fallback_model() -> str:
+    """
+    The model to use when the caller did not name one.
+
+    Resolved from the last successful discovery rather than the constant,
+    because the constant is written once and retired on Anthropic's schedule,
+    not ours (#230). Only with no discovery at all does the constant apply.
+    """
+    try:
+        from backend.ai.providers import load_cached
+        cached = (load_cached().get("anthropic") or {}).get("models") or []
+        if cached:
+            return cached[0]["id"]
+    except Exception:
+        pass
+    return MODEL
 
 
 
@@ -84,7 +103,7 @@ async def stream_response(
     }
 
     payload = {
-        "model": model or MODEL,
+        "model": model or _fallback_model(),
         "max_tokens": advanced("ai.max_tokens"),
         "temperature": advanced("ai.temperature"),
         "system": system_prompt or SYSTEM_PROMPT,

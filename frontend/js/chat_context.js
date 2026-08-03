@@ -155,6 +155,9 @@
       label.textContent = selected.size === 1 ? '1 session' : `${selected.size} sessions`;
       button.classList.add('chat-pill-active');
     }
+    // The context indicator and token meter count the selection; a tick that
+    // moved neither looked like the assistant never received it (#213).
+    if (typeof window.updateContextStatus === 'function') window.updateContextStatus();
   }
 
   /**
