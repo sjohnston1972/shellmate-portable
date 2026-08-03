@@ -589,6 +589,73 @@ def test_a_session_records_which_connection_opened_it() -> None:
         adhoc_server.close()
 
 
+def test_a_dropped_session_stops_reporting_itself_as_open() -> None:
+    """
+    `is_connected` asks the transport, not only the flag.
+
+    The flag is written by the WebSocket read loop when `recv()` returns b"" —
+    which only happens once something tries to read. A transport that went
+    away between reads left the flag saying True, and everything polling
+    /api/sessions believed it: the device's light in the group tree, and its
+    group's, stayed green after the session had died (#203).
+
+    Both are consulted, and conjoined. The flag can say False for a session
+    deliberately closed; the handler can say False for one that dropped.
+    Either is enough to be disconnected.
+    """
+    print("\n-- A dropped session says so --")
+    from fastapi.testclient import TestClient
+
+    from backend.app import app, session_manager
+
+    server = FakeTelnetServer(b"\r\nswitch01> ")
+    session_id = None
+    try:
+        with TestClient(app) as client:
+            made = client.post("/api/sessions", json={
+                "connection_type": "telnet", "hostname": "127.0.0.1",
+                "port": server.port, "display_label": "lab-switch",
+                "profile_id": "prof-1",
+            })
+            if made.status_code != 200:
+                check("a session could be opened to check", False, made.text)
+                return
+            session_id = made.json()["session_id"]
+
+            listed = client.get("/api/sessions").json()
+            check("it starts out reported as open",
+                  listed and listed[0]["is_connected"] is True,
+                  f"got {listed}")
+
+            # The transport goes away without anything having read from it —
+            # exactly the window the flag could not see.
+            internal = session_manager.get_session(session_id)
+            check("the internal session is reachable for the test",
+                  internal is not None and internal.get("handler") is not None)
+            if internal and internal.get("handler"):
+                internal["handler"].disconnect()
+
+            # The flag is untouched — that is the point.
+            check("the stored flag still says connected",
+                  internal.get("is_connected") is True,
+                  "if this changed, the test is no longer exercising the gap")
+
+            after = client.get("/api/sessions").json()
+            check("but the API reports it closed",
+                  after and after[0]["is_connected"] is False,
+                  f"got {after} — a session whose transport has gone must not "
+                  f"go on showing a green light")
+
+            # And nothing about the identity was lost on the way.
+            check("the profile it came from survives the drop",
+                  after and after[0].get("profile_id") == "prof-1",
+                  f"got {after[0].get('profile_id')!r}")
+    finally:
+        if session_id:
+            session_manager.destroy_session(session_id)
+        server.close()
+
+
 def test_unknown_connection_type_rejected() -> None:
     """An unsupported transport should fail cleanly, not with a 500."""
     print("\n-- Unknown transport --")
@@ -804,6 +871,7 @@ def main() -> int:
         test_secrets_are_scrubbed,
         test_end_to_end_session,
         test_a_session_records_which_connection_opened_it,
+        test_a_dropped_session_stops_reporting_itself_as_open,
         test_unknown_connection_type_rejected,
         test_a_password_stops_paramiko_offering_keys,
         test_a_failure_says_what_actually_happened,

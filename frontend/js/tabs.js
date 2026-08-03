@@ -529,6 +529,13 @@
     if (!tab) return;
     tab.isConnected = isConnected;
     tab.tabEl.classList.toggle('disconnected', !isConnected);
+
+    // The tree reads live state from this event, and it was dispatched only
+    // when a tab opened or closed — never when one dropped. So a dead session
+    // left its device, and its group, showing green until something else
+    // happened to force a reload. This is the one place that hears about
+    // every drop, however it happened (#203).
+    window.dispatchEvent(new CustomEvent('shellmate:sessions-changed'));
     if (!isConnected) {
       tab.labelEl.textContent = tab.label + ' (disconnected)';
       // Decide whether to start retrying. Everything about *whether* lives in
@@ -1118,7 +1125,7 @@
     tabs.forEach((tab, index) => {
       const el = tab.tabEl;
       el.classList.remove('tab-group-start', 'tab-group-member',
-                          'tab-in-group', 'tab-outside-group');
+                          'tab-outside-group');
       el.removeAttribute('data-group');
       [...el.classList].filter(c => c.startsWith('group-'))
         .forEach(c => el.classList.remove(c));
@@ -1148,7 +1155,9 @@
       const selected = window.shellmateGroups
         ? window.shellmateGroups.active() : '';
       const inside = Boolean(selected) && _within(group, selected);
-      el.classList.toggle('tab-in-group', inside);
+      // Only the outside class carries styling (#202) — see the note in the
+      // stylesheet. Emphasis is the others receding, not this one lighting up
+      // in a way indistinguishable from being active.
       el.classList.toggle('tab-outside-group', Boolean(selected) && !inside);
 
       if (!group) return;

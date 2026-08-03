@@ -43,7 +43,8 @@
   --ok:         #A6E3A1;
   --ok-tint:    rgba(166,227,161,0.12);
   --ok-edge:    rgba(166,227,161,0.40);
-  --ok-glow:    rgba(166,227,161,0.55);
+  --live:       #C7F9C0;
+  --live-glow:  rgba(199,249,192,0.60);
   --primary-tint: rgba(195,192,255,0.12);
   --primary-edge: rgba(195,192,255,0.40);
 
@@ -128,9 +129,11 @@
   --ok:         #0F5C26;
   --ok-tint:    rgba(20,108,46,0.10);
   --ok-edge:    rgba(20,108,46,0.30);
-  /* Stronger than the dark theme's, not weaker: a glow is light spilling
-     onto its surround, and on a pale surround it has less to work with. */
-  --ok-glow:    rgba(20,108,46,0.45);
+  /* Lighter than --ok here too, but only so far: on a near-white surface a
+     pale green stops being visible at all, so "lighter" means a brighter mid
+     green rather than the near-white the dark theme can afford. */
+  --live:       #1FA24E;
+  --live-glow:  rgba(31,162,78,0.45);
   --primary-tint: rgba(79,70,229,0.10);
   --primary-edge: rgba(79,70,229,0.30);
   --overlay:       rgba(236,236,240,0.97);
@@ -460,19 +463,12 @@ a {
   opacity: 1;
 }
 
-/* Connection status dot */
-.tab-dot {
+/* Connection status dot */.tab-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--secondary);  /* slate-blue, per design system rules */
   flex-shrink: 0;
 }
-
-.tab.disconnected .tab-dot {
-  background: var(--error);
-}
-
 .tab.disconnected .tab-label {
   color: var(--on-surface-muted);
   font-style: italic;
@@ -7422,7 +7418,27 @@ body {
 }
 
 .tree-chip.tree-chip-has-live .tree-chip-icon {
-  color: var(--ok);
+  color: var(--live);
+}
+
+/* Connected, in the same terms the tree uses (#201).
+   The tab dot was slate-blue while the tree's was green, so one fact had two
+   visual languages — which #166 set out to avoid and then drifted from. Both
+   now read from --ok and share the glow, so a change to one is a change to
+   both. */
+.tree-leaf-dot.tree-leaf-live,
+.tab:not(.disconnected) .tab-dot {
+  background: var(--live);
+  border-color: var(--live);
+  box-shadow: 0 0 0 2px var(--live-glow), 0 0 7px 1px var(--live-glow);
+}
+
+/* Dropped. The tree has no equivalent — a device that is not open simply is
+   not lit — but a tab persists after its session dies, and telling at a
+   glance which of twelve has gone is the whole reason the dot is there. */
+.tab.disconnected .tab-dot {
+  background: var(--error);
+  box-shadow: none;
 }
 
 /* A tab's relationship to the selected group (#195, #197).
@@ -7431,17 +7447,21 @@ body {
    screen should do, so the selection now emphasises instead: the tabs inside
    it lift, the rest recede, and every one of them stays reachable.
    The tabs array was never filtered even then — Ctrl+1..9 and the drag
-   handler index into it — which is what made this a clean removal. */
+   handler index into it — which is what made this a clean removal.
+
+   Only the dimming, and deliberately (#202). The emphasised half used to set
+   `background: var(--surface-high)` — which is exactly what .tab.active,
+   .tab:hover and .tab.tiled already use, so a tab in the selected group was
+   pixel-identical to the active tab, a hovered tab and a tiled tab. Four
+   meanings, one appearance, and selecting a group made unrelated tabs look
+   active. Receding the others carries the emphasis on its own, and costs no
+   new appearance to be confused with. */
 .tab.tab-outside-group {
   opacity: 0.45;
 }
 
 .tab.tab-outside-group:hover {
   opacity: 1;
-}
-
-.tab.tab-in-group {
-  background: var(--surface-high);
 }
 
 /* A stored credential (#171). Marks which connections will just open and

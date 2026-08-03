@@ -268,5 +268,34 @@ class SessionManager:
             "display_label":   session["display_label"],
             "target":          session["target"],
             "connected_at":    session["connected_at"],
-            "is_connected":    session["is_connected"],
+            "is_connected":    SessionManager._still_connected(session),
         }
+
+    @staticmethod
+    def _still_connected(session: dict[str, Any]) -> bool:
+        """
+        Whether this session is open, asking the transport as well as the flag.
+
+        `session["is_connected"]` is written by the WebSocket read loop when
+        `recv()` returns b"" — which only happens once something tries to
+        read. A transport that has gone away between reads leaves the flag
+        saying True, and anything polling /api/sessions believes it: the
+        device and its group went on showing a green light after the session
+        had died (#203).
+
+        Both, and conjoined: the flag can say False for a session deliberately
+        closed, and the handler can say False for one that dropped. Either is
+        enough to be disconnected; it takes both agreeing to be connected.
+        """
+        if not session.get("is_connected"):
+            return False
+        handler = session.get("handler")
+        if handler is None:
+            return False
+        try:
+            return bool(handler.is_connected)
+        except Exception:
+            # Asking cost us an exception, which is itself an answer — but not
+            # one worth taking a session down over. The read loop will settle
+            # it definitively the moment anything arrives.
+            return True

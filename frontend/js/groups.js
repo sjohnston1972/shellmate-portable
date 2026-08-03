@@ -59,10 +59,20 @@
   // State
   // -------------------------------------------------------------------------
 
-  // Recount the live badges when a session opens or closes.
+  // Recount the live badges when a session opens, closes or drops.
+  //
+  // One listener, because there were two and they ran in the wrong order:
+  // this redraw was registered first and the `liveStale = true` below it
+  // second, so the redraw used the state it was meant to invalidate and only
+  // the *next* render was right. Both halves are here now, in the order they
+  // have to happen (#203).
   window.addEventListener('shellmate:sessions-changed', () => {
-    if (typeof window.renderWelcomeProfiles === 'function') {
-      window.renderWelcomeProfiles();
+    liveStale = true;
+    // The tiles, not a re-fetch: which sessions are open cannot change which
+    // connections are saved, and re-reading 5,000 profiles on every drop
+    // would undo #188.
+    if (typeof window.renderWelcomeTiles === 'function') {
+      window.renderWelcomeTiles();
     }
   });
 
@@ -144,7 +154,6 @@
   let liveStale = true;
 
   window.addEventListener('shellmate:groups-changed', () => { groupsStale = true; });
-  window.addEventListener('shellmate:sessions-changed', () => { liveStale = true; });
 
   async function render(profiles) {
     if (groupsStale) {
