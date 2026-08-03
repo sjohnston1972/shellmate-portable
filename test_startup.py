@@ -228,6 +228,100 @@ def test_restart_machinery() -> None:
           f"call order is {order}")
 
 
+def test_tray_menu_actions_do_not_block_the_tray() -> None:
+    """
+    Nothing that can block runs inline in a tray callback.
+
+    pystray invokes menu callbacks from inside its own window-message
+    handling, while the popup menu still holds mouse capture — so a modal
+    dialog opened from one is drawn but never receives a click. Restart and
+    Quit both did that and hung on their own confirmation, with no clue
+    anywhere: the log showed neither "Restarting from the tray" nor "Quit
+    cancelled", because the call never returned (#210).
+
+    It bit only when something was connected, since `_confirm_quit()` returns
+    immediately with no live sessions — so it read as "Restart is broken"
+    rather than "the dialog is".
+
+    Checked through the AST rather than by reading the text, because the
+    docstrings discuss both threading and the callbacks and a substring
+    search finds the prose first.
+    """
+    print("\n-- Tray callbacks hand off --")
+    import ast
+
+    source = (Path(__file__).parent / "backend" / "desktop.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    tray = next((n for n in ast.walk(tree)
+                 if isinstance(n, ast.ClassDef) and n.name == "Tray"), None)
+    check("the tray class is findable", tray is not None,
+          "Tray was renamed — this test is now blind")
+    if tray is None:
+        return
+
+    methods = {n.name: n for n in tray.body if isinstance(n, ast.FunctionDef)}
+
+    detach = methods.get("_detach")
+    check("there is a way to hand work off the callback thread",
+          detach is not None, "no _detach on Tray")
+    if detach is not None:
+        starts_thread = any(
+            isinstance(node, ast.Call)
+            and getattr(node.func, "attr", None) == "Thread"
+            for node in ast.walk(detach))
+        check("and it starts a thread", starts_thread,
+              "_detach does not create a Thread, so it is not detaching "
+              "anything")
+
+    # The two that confirm. Each must reach _detach and must not call the
+    # blocking callback itself.
+    for name in ("_restart", "_quit"):
+        fn = methods.get(name)
+        check(f"{name} exists", fn is not None)
+        if fn is None:
+            continue
+        called = {getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+                  for node in ast.walk(fn) if isinstance(node, ast.Call)}
+        check(f"{name} hands off rather than blocking", "_detach" in called,
+              f"{name} calls {sorted(c for c in called if c)} — a confirmation "
+              f"opened inline from a tray callback is drawn but never "
+              f"clickable")
+
+    # And the same thing measured rather than read: a callback that blocks
+    # must not block the caller. This is what actually failed — the AST check
+    # above only describes how it was fixed.
+    import threading as _threading
+    import time as _time
+
+    from backend.desktop import Tray
+
+    entered = _threading.Event()
+    release = _threading.Event()
+
+    def slow_quit(confirm=False):
+        """Stands in for a modal dialog: it does not return until answered."""
+        entered.set()
+        release.wait(timeout=5)
+        return False
+
+    tray = Tray(port=0, on_show=lambda: None, on_quit=slow_quit,
+                on_restart=lambda: slow_quit())
+
+    started = _time.monotonic()
+    tray._quit()
+    elapsed = _time.monotonic() - started
+
+    check("the callback returns while the dialog is still open",
+          elapsed < 0.5,
+          f"took {elapsed:.2f}s — it waited for the dialog, which is the "
+          f"hang: pystray cannot service the menu while this is blocked")
+    check("and the dialog really was open at the time",
+          entered.wait(timeout=2),
+          "the action never ran at all, which is a different fault")
+    release.set()
+
+
 def test_restart_survives_a_failed_handover() -> None:
     """
     Drive the restart far enough to evaluate every argument it builds.
@@ -376,6 +470,7 @@ def main() -> int:
     print("=" * 52)
 
     for test in (test_reset_advanced_flag, test_restart_machinery,
+                 test_tray_menu_actions_do_not_block_the_tray,
                  test_restart_survives_a_failed_handover,
                  test_the_replacement_does_not_inherit_the_unpack_directory,
                  test_only_what_cannot_be_reapplied_needs_a_restart,

@@ -253,17 +253,47 @@ class Tray:
         """
         if self._on_restart is None:
             return
-        try:
-            self._on_restart()
-        except Exception as exc:
-            logger.warning("Restart failed: %s", exc)
+        self._detach("Restart", self._on_restart)
 
     def _quit(self, icon=None, item=None):
-        # The confirmation has to happen before the icon is destroyed, or a
-        # user who says "no" is left with a running application and no tray.
-        if not self._on_quit(confirm=True):
-            return
-        self.stop()
+        def go():
+            # The confirmation has to happen before the icon is destroyed, or
+            # a user who says "no" is left with a running application and no
+            # tray.
+            if not self._on_quit(confirm=True):
+                return
+            self.stop()
+
+        self._detach("Quit", go)
+
+    def _detach(self, what: str, action) -> None:
+        """
+        Run a menu action off the tray's callback thread.
+
+        **Nothing that can block may run inline here.** pystray invokes menu
+        callbacks from inside its own window-message handling, while the popup
+        menu still holds mouse capture — so a modal dialog opened from one is
+        drawn but never receives a click. Both Restart and Quit did exactly
+        that, and hung on their own confirmation with no clue anywhere: the
+        log showed neither "Restarting from the tray" nor "Quit cancelled",
+        because the call never came back (#210).
+
+        It only ever bit when something was connected. `_confirm_quit()`
+        returns True immediately with no live sessions, so with nothing open
+        both worked — which is why this read as "Restart is broken" rather
+        than "the dialog is".
+
+        Daemon, and nothing joins it: `quit()` ends in `os._exit(0)`, so this
+        thread is the one that ends the process.
+        """
+        def go():
+            try:
+                action()
+            except Exception as exc:
+                logger.warning("%s failed: %s", what, exc)
+
+        threading.Thread(target=go, daemon=True,
+                         name=f"shellmate-tray-{what.lower()}").start()
 
     def stop(self):
         if self._icon is not None:
@@ -476,9 +506,20 @@ class Desktop:
         if sys.platform == "win32":
             try:
                 import ctypes
-                # MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND; IDYES == 6.
+                # MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND | MB_TOPMOST.
+                # IDYES == 6.
+                #
+                # TOPMOST as well as SETFOREGROUND: this is asked from the
+                # tray, which is reachable with the window hidden, so there is
+                # nothing to own the dialog and nothing guaranteeing it lands
+                # in front of whatever the user is actually looking at. A
+                # confirmation behind another window is a hang as far as
+                # anybody can tell.
+                flags = 0x04 | 0x30 | 0x10000 | 0x40000
                 answer = ctypes.windll.user32.MessageBoxW(
-                    None, message, f"{WINDOW_TITLE} — {'restart' if restarting else 'quit'}?", 0x04 | 0x30 | 0x10000,
+                    None, message,
+                    f"{WINDOW_TITLE} — {'restart' if restarting else 'quit'}?",
+                    flags,
                 )
                 return answer == 6
             except Exception as exc:
