@@ -519,6 +519,14 @@
     // group would be noise on a dashboard opened before connecting to
     // anything.
     const live = _liveUnder(node);
+    // The chip itself, not only its badge (#198). A count is a number to
+    // read; the group looking live is something to notice. It aggregates,
+    // so one open device marks its subgroup and its site — which is right
+    // here, and was the bug when it happened by accident across unrelated
+    // sites (#187).
+    // Not `tree-chip-live` — that is already the badge's class, and putting it
+    // on the chip too would style the chip as a badge.
+    chip.classList.toggle('tree-chip-has-live', Boolean(live));
     if (live) {
       const badge = document.createElement('span');
       badge.className = 'tree-chip-live';
@@ -529,10 +537,18 @@
 
     chip.append(glyph, name, count);
     chip.addEventListener('click', () => {
-      // Selecting filters the grid; it no longer replaces the view, so the
-      // rest of the tree stays visible beside what it filtered to.
-      activeGroup = (activeGroup === node.key) ? '' : node.key;
-      expanded.add(node.key);
+      // Clicking opens and closes it (#200), and selects it.
+      //
+      // It used to toggle the *selection* and only ever expand, so a second
+      // click on the same group deselected it while leaving it open — which
+      // read as the click doing nothing. Selection cannot simply move to the
+      // twist arrow: it decides which tiles are painted (#177) and what the
+      // hero names (#179), so a click does both and "All connections" stays
+      // the way to clear it. Collapsing and emptying the dashboard on one
+      // click would be two answers to one gesture.
+      if (expanded.has(node.key)) expanded.delete(node.key);
+      else expanded.add(node.key);
+      activeGroup = node.key;
       _select();
     });
 
@@ -759,6 +775,37 @@
    * panel is docked left or right by preference, so the drag direction flips
    * with the side.
    */
+  /**
+   * Re-measure every terminal after the tree changes width (#196).
+   *
+   * The tree is a column of the terminal pane now, so collapsing it, docking
+   * it or dragging it makes the terminals wider or narrower. xterm sizes
+   * itself in whole character cells against its container and does not watch
+   * for that, so without this a terminal keeps the geometry it had and wraps
+   * at the wrong column — and the far end goes on being told the old size,
+   * which is the same class of failure as #143.
+   *
+   * After a frame, because the width transition has to have run for the
+   * container to have its new size to measure against.
+   */
+  function _refitTerminals() {
+    setTimeout(() => {
+      if (typeof window.refitTerminals !== 'function') return;
+      // Only what is on screen. Fitting a display:none container measures
+      // zero and would set the terminal to a nonsense size, which is worse
+      // than leaving it to be fitted when it is next shown.
+      const visible = (window.shellmateLayout && window.shellmateLayout.visible)
+        ? window.shellmateLayout.visible()
+        : [];
+      const active = (typeof window.getActiveTab === 'function')
+        ? window.getActiveTab() : null;
+      const ids = visible.length
+        ? visible
+        : (active ? [active.sessionId] : []);
+      if (ids.length) window.refitTerminals(ids);
+    }, 220);   // after the panel's own width transition
+  }
+
   function _bindResize() {
     const handle = document.getElementById('group-tree-handle');
     const panel = document.getElementById('group-tree');
@@ -788,6 +835,10 @@
       if (dragged && window.shellmatePrefs) {
         window.shellmatePrefs.set('group_tree_width', dragged);
       }
+      // On release, not per mousemove: a refit reflows the buffer and tells
+      // the device, and doing that sixty times a second during a drag would
+      // send the far end a resize per frame.
+      _refitTerminals();
     };
 
     handle.addEventListener('mousedown', (e) => {
@@ -808,6 +859,7 @@
       e.stopPropagation();
       panel.style.width = '';
       if (window.shellmatePrefs) window.shellmatePrefs.set('group_tree_width', 0);
+      _refitTerminals();
     });
   }
 
@@ -820,6 +872,7 @@
       if (_prefs().group_tree_collapsed === true) {
         if (window.shellmatePrefs) window.shellmatePrefs.set('group_tree_collapsed', false);
         renderTree(profileCache);
+        _refitTerminals();
       }
     });
 
@@ -831,6 +884,7 @@
       const side = _prefs().group_tree_side === 'right' ? 'left' : 'right';
       if (window.shellmatePrefs) window.shellmatePrefs.set('group_tree_side', side);
       renderTree(profileCache);
+      _refitTerminals();
     });
 
     const collapse = document.getElementById('group-tree-collapse');
@@ -839,6 +893,7 @@
       const now = !(_prefs().group_tree_collapsed === true);
       if (window.shellmatePrefs) window.shellmatePrefs.set('group_tree_collapsed', now);
       renderTree(profileCache);
+      _refitTerminals();
     });
   }
 

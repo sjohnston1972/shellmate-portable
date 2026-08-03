@@ -1117,7 +1117,8 @@
 
     tabs.forEach((tab, index) => {
       const el = tab.tabEl;
-      el.classList.remove('tab-group-start', 'tab-group-member');
+      el.classList.remove('tab-group-start', 'tab-group-member',
+                          'tab-in-group', 'tab-outside-group');
       el.removeAttribute('data-group');
       [...el.classList].filter(c => c.startsWith('group-'))
         .forEach(c => el.classList.remove(c));
@@ -1136,10 +1137,19 @@
       // must not silently change meaning because of a selection made on
       // another screen, and a device must not become unreachable by the route
       // somebody's fingers already know.
+      // Selecting a group emphasises its tabs; it never hides one (#195,
+      // #197).
+      //
+      // #165 hid everything outside the selection, and #191 widened that to
+      // parent groups. Both were wrong in the same way: a live session that
+      // cannot be seen is one somebody forgets is running, on a device that
+      // may be mid-reload. The problem hiding solved — forty tabs is
+      // unreadable — is real, and the answer to it is emphasis.
       const selected = window.shellmateGroups
         ? window.shellmateGroups.active() : '';
-      el.classList.toggle('tab-filtered-out',
-                          Boolean(selected) && !_within(group, selected));
+      const inside = Boolean(selected) && _within(group, selected);
+      el.classList.toggle('tab-in-group', inside);
+      el.classList.toggle('tab-outside-group', Boolean(selected) && !inside);
 
       if (!group) return;
 
@@ -1151,17 +1161,14 @@
         && (_tagCache.get(previous.sessionId) || '') === group;
       if (sameAsPrevious) return;
 
-      // First of a run: it carries the name — the subgroup's, not the whole
-      // path (#190). "site-001/core switches" is wider than the tab it sits
-      // on, so the path was truncated to the site and every group in a site
-      // read identically. The tree renders only the last segment on its chips
-      // for the same reason; the site is on the window title instead.
+      // The run is marked, but not named (#199).
+      //
+      // #190 put the group's name on the first tab of each run, because
+      // nothing else said which group a tab belonged to. That reason is gone:
+      // the tree is permanently on screen now (#196) and says it far better
+      // than a word squeezed onto a tab. What is left is the colour and the
+      // run boundary, which cost no width at all.
       el.classList.add('tab-group-start');
-      const name = document.createElement('span');
-      name.className = 'tab-group-label';
-      name.textContent = group.split('/').pop();
-      name.title = group;
-      el.insertBefore(name, el.firstChild);
     });
 
     _paintStatusGroup();

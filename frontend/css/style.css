@@ -43,6 +43,7 @@
   --ok:         #A6E3A1;
   --ok-tint:    rgba(166,227,161,0.12);
   --ok-edge:    rgba(166,227,161,0.40);
+  --ok-glow:    rgba(166,227,161,0.55);
   --primary-tint: rgba(195,192,255,0.12);
   --primary-edge: rgba(195,192,255,0.40);
 
@@ -127,6 +128,9 @@
   --ok:         #0F5C26;
   --ok-tint:    rgba(20,108,46,0.10);
   --ok-edge:    rgba(20,108,46,0.30);
+  /* Stronger than the dark theme's, not weaker: a glow is light spilling
+     onto its surround, and on a pale surround it has less to work with. */
+  --ok-glow:    rgba(20,108,46,0.45);
   --primary-tint: rgba(79,70,229,0.10);
   --primary-edge: rgba(79,70,229,0.30);
   --overlay:       rgba(236,236,240,0.97);
@@ -603,6 +607,11 @@ a {
 }
 
 /* Terminal pane (left side of the split) */
+/* A row now, not a column (#196): the group tree is a permanent column of
+   this pane, and #pane-stage holds everything that swaps in and out beside
+   it. The tree used to be inside #welcome-screen — an absolute layer over
+   the terminals — so opening a session hid the navigation you opened it
+   from. */
 #terminal-pane {
   position: relative;
   flex: 1;
@@ -610,7 +619,20 @@ a {
   background: var(--bedrock);
   overflow: hidden;
   display: flex;
+  flex-direction: row;
+}
+
+/* The dashboard and the terminals, stacked in whatever the tree leaves.
+   min-width:0 matters: without it a flex child refuses to shrink below its
+   content, and the terminal would push the tree off the edge instead of
+   narrowing. */
+#pane-stage {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 /* Drag divider between terminal and chat panes */
@@ -6984,24 +7006,19 @@ body {
    groups and replaced the whole view when one was opened. A tree grows
    downwards and holds its shape. The chip styling is kept — that part worked.
 --------------------------------------------------------------------------- */
+/* The tree is no longer inside this (#196), so the dashboard goes back to
+   simply centring its content. The flex-start rule that lived here was for
+   the tree owning the left edge; with the tree a sibling, centring is correct
+   again and the tree cannot be dragged around by it. */
 #welcome-screen {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  justify-content: center;
   gap: 0;
-  /* The tree owns the edge, the content centres in what is left.
-     #welcome-screen was `justify-content: center` from when it held only the
-     welcome content — which centred the tree and the content *as a pair*, so
-     the tree floated 170px from the edge and collapsing it moved the whole
-     group rightwards instead of shrinking to the side. Reported as "the
-     groups are pinned to the resizing bar" and "it does not collapse onto
-     the left edge": one cause, two symptoms. */
-  justify-content: flex-start;
 }
 
 #welcome-content {
-  /* Takes the space the tree does not, and centres within it — the centring
-     the parent used to do for it. */
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   justify-content: center;
 }
@@ -7369,25 +7386,62 @@ body {
 /* Whether a group member is open (#166). Same vocabulary as the tab dot —
    one fact should not have two visual languages. */
 .tree-leaf-dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
   background: var(--outline);
   border: 1px solid var(--on-surface-muted);
 }
 
+/* Connected (#194).
+   The glow is derived from --ok rather than typed as an rgba literal: a
+   colour that changes with the theme must come from a token, and a shadow
+   tuned against the dark theme is that rule broken in a different property.
+   Static rather than pulsing — five thousand rows of animation is a lot to
+   ask of a page, and it would need prefers-reduced-motion honoured. */
 .tree-leaf-dot.tree-leaf-live {
   background: var(--ok);
   border-color: var(--ok);
+  box-shadow: 0 0 0 2px var(--ok-glow), 0 0 7px 1px var(--ok-glow);
 }
 
-/* A tab outside the selected group (#165). Hidden from the strip, never
-   removed from the tabs array — Ctrl+1..9 and the drag handler index into
-   that array, and a keystroke must not change meaning because of a
-   selection made on another screen. */
-.tab.tab-filtered-out {
-  display: none;
+/* A group with something open in it (#198). The same vocabulary as the dot,
+   one step quieter — a group is live *because* of what is under it, and
+   should not shout louder than the device that actually is.
+
+   The left border is deliberately left alone. That edge is the group's
+   colour and is the only thing telling one group from another at a glance;
+   painting it green made every live group look identical and cost the
+   identity to say something the rest of the chip was already saying. */
+.tree-chip.tree-chip-has-live {
+  border-top-color: var(--ok-edge);
+  border-right-color: var(--ok-edge);
+  border-bottom-color: var(--ok-edge);
+  background: var(--ok-tint);
+}
+
+.tree-chip.tree-chip-has-live .tree-chip-icon {
+  color: var(--ok);
+}
+
+/* A tab's relationship to the selected group (#195, #197).
+   #165 hid everything outside the selection and #191 widened that to parent
+   groups. Hiding a live session is not something a selection made on another
+   screen should do, so the selection now emphasises instead: the tabs inside
+   it lift, the rest recede, and every one of them stays reachable.
+   The tabs array was never filtered even then — Ctrl+1..9 and the drag
+   handler index into it — which is what made this a clean removal. */
+.tab.tab-outside-group {
+  opacity: 0.45;
+}
+
+.tab.tab-outside-group:hover {
+  opacity: 1;
+}
+
+.tab.tab-in-group {
+  background: var(--surface-high);
 }
 
 /* A stored credential (#171). Marks which connections will just open and

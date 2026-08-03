@@ -134,40 +134,49 @@
 
       <!-- Terminal pane -->
       <main id="terminal-pane">
+        <!-- The group tree (#147). A column of the pane, and a sibling of
+             everything that gets swapped in and out of it (#196).
+
+             It used to live *inside* #welcome-screen, which is an absolute
+             layer over the terminals — so hiding the dashboard to show a
+             session hid the navigation with it, and opening a device meant
+             losing the tree you opened it from. Being a sibling is what
+             makes it permanent; nothing else changed about it.
+
+             This replaced a wrapped row of group tiles. Tiles grew sideways
+             into a wall at a dozen groups, their counts were too small to
+             scan, and diving into one replaced the whole view — so seeing
+             two groups meant visiting them one at a time. A tree grows
+             downwards, holds its shape, and shows a group's contents without
+             hiding everything else. -->
+        <aside id="group-tree" class="hidden">
+          <div id="group-tree-head">
+            <span id="group-tree-title">Groups</span>
+            <button id="group-tree-dock" class="icon-btn" title="Move to the other side">
+              <span class="material-symbols-outlined">swap_horiz</span>
+            </button>
+            <button id="group-tree-collapse" class="icon-btn" title="Collapse">
+              <span class="material-symbols-outlined">keyboard_arrow_down</span>
+            </button>
+          </div>
+          <div id="group-tree-body"></div>
+          <!-- What the collapsed rail says (#153). A 44px strip with two
+               tiny buttons read as a decorative sliver and a missing
+               feature — this names it and carries the count, and the whole
+               rail expands on click. -->
+          <button id="group-tree-rail" class="hidden" type="button"
+                  title="Show the groups"></button>
+          <!-- Drag to resize. Same pattern as the side panels: clamp,
+               persist on mouse-up, double-click to reset. -->
+          <div id="group-tree-handle" title="Drag to resize"></div>
+        </aside>
+
+        <!-- What the tree points at: the dashboard and the terminals, one in
+             front of the other, both inside the space the tree leaves. -->
+        <div id="pane-stage">
+
         <!-- Welcome screen shown when no tabs are open -->
         <div id="welcome-screen">
-          <!-- The group tree (#147). A sibling of the content rather than a
-               row inside it, so it can dock to either side and collapse
-               without the dashboard reflowing around it.
-
-               This replaced a wrapped row of group tiles. Tiles grew
-               sideways into a wall at a dozen groups, their counts were too
-               small to scan, and diving into one replaced the whole view —
-               so seeing two groups meant visiting them one at a time. A tree
-               grows downwards, holds its shape, and shows a group's contents
-               without hiding everything else. -->
-          <aside id="group-tree" class="hidden">
-            <div id="group-tree-head">
-              <span id="group-tree-title">Groups</span>
-              <button id="group-tree-dock" class="icon-btn" title="Move to the other side">
-                <span class="material-symbols-outlined">swap_horiz</span>
-              </button>
-              <button id="group-tree-collapse" class="icon-btn" title="Collapse">
-                <span class="material-symbols-outlined">keyboard_arrow_down</span>
-              </button>
-            </div>
-            <div id="group-tree-body"></div>
-            <!-- What the collapsed rail says (#153). A 44px strip with two
-                 tiny buttons read as a decorative sliver and a missing
-                 feature — this names it and carries the count, and the whole
-                 rail expands on click. -->
-            <button id="group-tree-rail" class="hidden" type="button"
-                    title="Show the groups"></button>
-            <!-- Drag to resize. Same pattern as the side panels: clamp,
-                 persist on mouse-up, double-click to reset. -->
-            <div id="group-tree-handle" title="Drag to resize"></div>
-          </aside>
-
           <div id="welcome-content">
             <!-- The heading names whatever is selected (#179). The parent
                  path sits above it, so a subgroup reads as its position in
@@ -205,6 +214,7 @@
 
         <!-- Terminal containers are injected here by terminal.js -->
         <div id="terminals-container"></div>
+        </div><!-- #pane-stage -->
       </main>
 
       <!-- Drag divider -->
