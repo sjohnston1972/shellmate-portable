@@ -213,10 +213,29 @@ def test_payload() -> None:
     t.observe_command("reload in 10")
     payload = t.payload()["pending"]
     check("the kind is reported", payload["kind"] == RELOAD, str(payload))
-    check("as an absolute deadline in milliseconds",
-          payload["deadline_ms"] > time.time() * 1000, str(payload))
+    # IOS announces its reloads, so the typed command alone is tracked but
+    # not counted down from (#248): the command can still be aborted at the
+    # device's own [confirm] prompt.
+    check("a typed reload awaits the device's confirmation",
+          payload["awaiting_confirmation"] is True, str(payload))
+    check("and shows no deadline until it comes",
+          payload["deadline_ms"] is None, str(payload))
     check("the command that caused it is included",
           "reload in 10" in payload["source"], str(payload))
+
+    t.observe_output("Reload scheduled in 10 minutes by admin")
+    confirmed = t.payload()["pending"]
+    check("the announcement arms the countdown",
+          confirmed["awaiting_confirmation"] is False, str(confirmed))
+    check("as an absolute deadline in milliseconds",
+          confirmed["deadline_ms"] is not None
+          and confirmed["deadline_ms"] > time.time() * 1000, str(confirmed))
+
+    # Declining the guardrail retracts a pending the device never confirmed.
+    t2 = AlertTracker(platform="ios")
+    t2.observe_command("reload in 10")
+    check("a declined command's pending retracts", t2.retract() is True)
+    check("and nothing is left behind", t2.payload()["pending"] is None)
 
 
 def main() -> int:

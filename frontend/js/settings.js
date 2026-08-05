@@ -101,6 +101,119 @@
       closeSettings();
       if (typeof window.openSupport === 'function') window.openSupport();
     });
+    // The Broadcast section's door to the panel the library lives in (#239).
+    const broadcastOpen = document.getElementById('broadcast-open-panel');
+    if (broadcastOpen) broadcastOpen.addEventListener('click', () => {
+      closeSettings();
+      if (typeof window.openBroadcast === 'function') window.openBroadcast();
+    });
+
+    // The global destructive-command switch (#252). It writes the two
+    // advanced keys that gate typing and AI suggestions — one intent, two
+    // gates, and a switch that only closed one would be a false promise.
+    const destructive = document.getElementById('setting-confirm-destructive');
+    if (destructive) destructive.addEventListener('change', async () => {
+      const on = destructive.checked;
+      try {
+        await fetch('/api/advanced', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ values: {
+            'terminal.confirm_dangerous': on,
+            'ai.confirm_dangerous':       on,
+          } }),
+        });
+        window.dispatchEvent(new CustomEvent('shellmate:advanced-changed'));
+      } catch (e) {
+        console.warn('Could not save the destructive-command switch:', e);
+      }
+    });
+
+    // The door to the per-platform command lists (#251).
+    const editDangerous = document.getElementById('behaviour-edit-dangerous');
+    if (editDangerous) editDangerous.addEventListener('click', () => {
+      if (typeof window.openSettingsSection === 'function') {
+        window.openSettingsSection('Platform Definitions');
+      }
+    });
+
+    // Toast appearance (#254). Picking a colour marks it custom; Reset hands
+    // the severity back to the theme token.
+    TOAST_ACCENTS.forEach(([id]) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => { el.dataset.custom = '1'; });
+    });
+    document.querySelectorAll('.toast-accent-reset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const entry = TOAST_ACCENTS.find(([id]) => id === btn.dataset.accent);
+        const el = entry && document.getElementById(entry[0]);
+        if (!el) return;
+        el.dataset.custom = '0';
+        el.value = _themeColour(entry[2]);
+      });
+    });
+
+    // Toast duration mirrors the advanced alerts.toast_seconds row — one
+    // value, two doors, saved immediately like every advanced row.
+    const toastSeconds = document.getElementById('setting-toast-seconds');
+    if (toastSeconds) toastSeconds.addEventListener('change', async () => {
+      const value = Math.max(3, Math.min(120, parseInt(toastSeconds.value, 10) || 12));
+      toastSeconds.value = value;
+      try {
+        await fetch('/api/advanced', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ values: { 'alerts.toast_seconds': value } }),
+        });
+        window.dispatchEvent(new CustomEvent('shellmate:advanced-changed'));
+      } catch (e) {
+        console.warn('Could not save the toast duration:', e);
+      }
+    });
+
+    // Where notifications appear applies live (#256). The setting always
+    // worked — but only on Save, with nothing on screen to show it, which
+    // reads as broken. The change now lands immediately and fires a sample
+    // toast in the new corner; closing without saving puts it back.
+    const toastPosition = document.getElementById('setting-toast-position');
+    if (toastPosition) toastPosition.addEventListener('change', () => {
+      const choice = toastPosition.value;
+      if (!['bottom-right', 'bottom-left', 'top-right', 'top-left'].includes(choice)) return;
+      document.documentElement.setAttribute('data-toast-position', choice);
+      if (window.shellmateAlerts && window.shellmateAlerts.notify) {
+        window.shellmateAlerts.notify({
+          icon:  'check_circle',
+          title: 'Notifications will appear here',
+          body:  'Save Settings to keep this.',
+          deadline_ms: Date.now() + 600000,
+        });
+      }
+    });
+
+    // One sample of each kind, with whatever is configured above (#254).
+    const toastPreview = document.getElementById('toast-preview');
+    if (toastPreview) toastPreview.addEventListener('click', () => {
+      if (!window.shellmateAlerts || !window.shellmateAlerts.notify) return;
+      // Unsaved colour picks are applied for the preview, so what fires is
+      // what would be saved — Save Settings still makes it permanent.
+      _applyToastAccents({
+        accent_info:     _accentValue('setting-toast-accent-info'),
+        accent_warning:  _accentValue('setting-toast-accent-warning'),
+        accent_critical: _accentValue('setting-toast-accent-critical'),
+      });
+      [['info',     'check_circle', 'An ordinary confirmation.'],
+       ['warning',  'warning',      'Something worth a look.'],
+       ['critical', 'error',        'Something about to happen.'],
+      ].forEach(([severity, icon, body], i) => {
+        setTimeout(() => window.shellmateAlerts.notify({
+          severity, icon, body,
+          title: `Preview — ${severity}`,
+          // Marks the toast urgent, so the open Settings overlay does not
+          // swallow the non-critical ones.
+          deadline_ms: Date.now() + 600000,
+        }), i * 300);
+      });
+    });
 
     // The prompt editor is in this panel now (#135), further down. It was
     // reported as deleted once when it moved, so the signpost stays and
@@ -195,6 +308,7 @@
       window.shellmateSettings = currentSettings;
       _applyHighlightRules(currentSettings);
       _applyUiFontSize((currentSettings.appearance || {}).ui_font_size || 14);
+      _applyToastAccents(currentSettings.alerts);
       // Interface preferences — theme, layout, density — are applied by
       // prefs.js, which may have loaded before this resolved.
       window.dispatchEvent(new CustomEvent('shellmate:settings-loaded',
@@ -207,11 +321,134 @@
   function openSettings() {
     populateForm(currentSettings);
     _populateDiagnostics();
+    _populateDestructiveSwitch();
+    _populateDangerousLists();
     overlay.classList.remove('hidden');
+  }
+
+  /**
+   * Show every platform's destructive-command list in place (#258).
+   *
+   * Read-only here — the editor is Platform Definitions — but "which
+   * commands are guarded" must be answerable by looking, not by knowing
+   * which other section to open.
+   */
+  async function _populateDangerousLists() {
+    const host = document.getElementById('dangerous-lists');
+    if (!host) return;
+    try {
+      const data = await (await fetch('/api/platforms')).json();
+      const profiles = Object.values(data.platforms || {})
+        .filter(p => p && (p.dangerous_commands || []).length)
+        .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+
+      host.innerHTML = '';
+      profiles.forEach(p => {
+        const row = document.createElement('div');
+        row.className = 'dangerous-list-row';
+        const name = document.createElement('span');
+        name.className = 'dangerous-list-name';
+        name.textContent = p.name || p.id;
+        const commands = document.createElement('code');
+        commands.className = 'dangerous-list-commands';
+        commands.textContent = (p.dangerous_commands || []).join(' · ');
+        row.append(name, commands);
+        host.appendChild(row);
+      });
+    } catch (_) { /* the edit button still works; the preview is a bonus */ }
+  }
+
+  // -------------------------------------------------------------------------
+  // Toast appearance (#254)
+  // -------------------------------------------------------------------------
+
+  /** Colour input id → [settings key, theme token it falls back to]. */
+  const TOAST_ACCENTS = [
+    ['setting-toast-accent-info',     'accent_info',     '--primary'],
+    ['setting-toast-accent-warning',  'accent_warning',  '--warn'],
+    ['setting-toast-accent-critical', 'accent_critical', '--error'],
+  ];
+
+  function _themeColour(token) {
+    const raw = getComputedStyle(document.documentElement)
+      .getPropertyValue(token).trim();
+    return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : '#888888';
+  }
+
+  /**
+   * A colour input cannot be empty, so "no custom colour" is carried in
+   * dataset.custom rather than in the value — the input shows the theme's
+   * own colour until the user actually picks one.
+   */
+  function _populateToastAccents(al) {
+    TOAST_ACCENTS.forEach(([id, key, token]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const saved = (al || {})[key] || '';
+      el.value = /^#[0-9a-fA-F]{6}$/.test(saved) ? saved : _themeColour(token);
+      el.dataset.custom = saved ? '1' : '0';
+    });
+  }
+
+  function _accentValue(id) {
+    const el = document.getElementById(id);
+    return (el && el.dataset.custom === '1') ? el.value : '';
+  }
+
+  /**
+   * Custom accents become CSS variables on :root; blank hands the toast back
+   * to the theme token (#254). The stylesheet only ever reads
+   * var(--alert-accent-*, <theme token>), so the theme rule holds either way.
+   */
+  function _applyToastAccents(al) {
+    const root = document.documentElement.style;
+    [['accent_info', '--alert-accent-info'],
+     ['accent_warning', '--alert-accent-warning'],
+     ['accent_critical', '--alert-accent-critical'],
+    ].forEach(([key, cssVar]) => {
+      const value = (al || {})[key] || '';
+      if (/^#[0-9a-fA-F]{6}$/.test(value)) root.setProperty(cssVar, value);
+      else root.removeProperty(cssVar);
+    });
+  }
+
+  /**
+   * Fill the ordinary rows that mirror advanced values, in one fetch.
+   *
+   * The destructive-command switch (#252): "any guard active" reads as on —
+   * the switch sets both gates together, and a mixed state means someone
+   * tuned the halves individually, which on represents more honestly.
+   * The toast duration (#254) mirrors alerts.toast_seconds.
+   */
+  async function _populateDestructiveSwitch() {
+    try {
+      const registry = await (await fetch('/api/advanced')).json();
+      const lookup = (key) => {
+        const setting = (registry.settings || []).find(s => s.key === key);
+        return setting ? setting.value : undefined;
+      };
+
+      const destructive = document.getElementById('setting-confirm-destructive');
+      if (destructive) {
+        destructive.checked =
+          Boolean(lookup('terminal.confirm_dangerous') ?? true)
+          || Boolean(lookup('ai.confirm_dangerous') ?? true);
+      }
+
+      const toastSeconds = document.getElementById('setting-toast-seconds');
+      if (toastSeconds) {
+        toastSeconds.value = Number(lookup('alerts.toast_seconds')) || 12;
+      }
+    } catch (_) { /* leave whatever state the rows had */ }
   }
 
   function closeSettings() {
     overlay.classList.add('hidden');
+    // Un-saved live previews — the toast position (#256) — go back to what
+    // is actually saved.
+    if (window.shellmatePrefs && typeof window.shellmatePrefs.apply === 'function') {
+      window.shellmatePrefs.apply();
+    }
   }
 
   /**
@@ -317,6 +554,7 @@
     _checked('setting-alert-sound',  al.sound         !== false);
     _checked('setting-alert-popup',  al.popup         !== false);
     _checked('setting-reduce-motion', !!al.reduce_motion);
+    _populateToastAccents(al);
 
     const ui = s.interface || {};
     _val('setting-theme',             ui.theme || 'dark');
@@ -453,6 +691,9 @@
         sound:         _gchecked('setting-alert-sound'),
         popup:         _gchecked('setting-alert-popup'),
         reduce_motion: _gchecked('setting-reduce-motion'),
+        accent_info:     _accentValue('setting-toast-accent-info'),
+        accent_warning:  _accentValue('setting-toast-accent-warning'),
+        accent_critical: _accentValue('setting-toast-accent-critical'),
       },
       interface: {
         theme:               _gval('setting-theme') || 'dark',
@@ -507,6 +748,7 @@
       window.shellmateSettings = currentSettings;
       _applyHighlightRules(currentSettings);
       _applyUiFontSize((currentSettings.appearance || {}).ui_font_size || 14);
+      _applyToastAccents(currentSettings.alerts);
       // Notify terminal.js to apply new settings
       window.dispatchEvent(new CustomEvent('shellmate:settings-changed', { detail: currentSettings }));
       // Refresh masked-original markers so subsequent edits are detected correctly

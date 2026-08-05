@@ -756,4 +756,18 @@
   window.initTerminal = initTerminal;
   window.forgetTerminal = forgetTerminal;
 
+  /**
+   * Stop tracking a session's pending action (#265).
+   *
+   * Over the session's own terminal socket, because that is where the
+   * tracker lives; the server clears it and answers with the empty pending.
+   */
+  window.dismissPendingAction = (sessionId) => {
+    const instance = _instances[sessionId];
+    if (instance && instance.websocket
+        && instance.websocket.readyState === WebSocket.OPEN) {
+      instance.websocket.send(JSON.stringify({ type: 'dismiss_pending' }));
+    }
+  };
+
 })();

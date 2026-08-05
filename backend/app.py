@@ -2782,32 +2782,76 @@ async def ollama_models() -> list[dict]:
 
 @app.get("/api/logs")
 async def list_logs() -> list[dict]:
-    """Return a list of available session log files."""
+    """
+    Return a list of available session log files.
+
+    Zero-byte files are swept rather than listed (#235): a log with nothing
+    in it says nothing, and the writer no longer creates one on purpose — any
+    that exist are leftovers from failures or older builds.
+    """
     from datetime import datetime
     logs_dir = log_directory()
     if not logs_dir.exists():
         return []
     files = []
-    for f in sorted(logs_dir.glob("*.log"), key=lambda x: x.stat().st_mtime, reverse=True):
-        stat = f.stat()
+    for f in logs_dir.glob("*.log"):
+        try:
+            stat = f.stat()
+            if stat.st_size == 0:
+                f.unlink()
+                continue
+        except OSError:
+            # Deleted or unreadable between glob and stat — not worth a 500.
+            continue
         files.append({
             "filename": f.name,
             "size_bytes": stat.st_size,
             "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
         })
+    files.sort(key=lambda entry: entry["modified"], reverse=True)
     return files
 
 
 @app.get("/api/logs/{filename}")
 async def download_log(filename: str) -> FileResponse:
-    """Download a specific log file."""
-    # Sanitize filename — only allow safe characters to prevent path traversal
-    if not re.match(r'^[\w\-\.]+\.log$', filename):
+    """
+    Download a specific log file.
+
+    Traversal is blocked by refusing separators and then checking the
+    resolved path is still inside the log directory — not by a character
+    allowlist. The old `[\\w\\-\\.]+` regex quietly rejected names the writer
+    happily produces: a detected hostname with a space, an IPv6 address with
+    colons (#234). The writer and the reader must accept the same names.
+    """
+    if ("/" in filename or "\\" in filename or filename in (".", "..")
+            or not filename.endswith(".log")):
         raise HTTPException(status_code=400, detail="Invalid filename")
-    log_path = log_directory() / filename
+    directory = log_directory().resolve()
+    log_path = (directory / filename).resolve()
+    if log_path.parent != directory:
+        raise HTTPException(status_code=400, detail="Invalid filename")
     if not log_path.exists():
         raise HTTPException(status_code=404, detail="Log file not found")
     return FileResponse(str(log_path), filename=filename)
+
+
+@app.post("/api/logs/reveal")
+async def logs_reveal() -> dict:
+    """
+    Open the session-log folder, where the platform allows it (#245).
+
+    The downloaded copy lands wherever the browser keeps downloads, which
+    the server cannot see — but the originals live here, and "show me the
+    files" is the intent behind clicking a download toast.
+    """
+    folder = log_directory()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        opened = await asyncio.to_thread(desktop.reveal, folder)
+    except Exception as exc:
+        logger.info("Could not open the log folder: %s", exc)
+        opened = False
+    return {"opened": opened, "folder": str(folder)}
 
 
 # ---------------------------------------------------------------------------
@@ -2868,42 +2912,138 @@ CANCELLED_NOTE = "\r\n\x1b[33m[not sent: {command}]\x1b[0m\r\n"
 
 def _open_session_log(session: dict, session_id: str) -> None:
     """
-    Open this session's log file once, rather than once per chunk.
+    Decide where this session's log goes — without touching the disk.
 
-    Failures are recorded and not raised: a log that cannot be written is a
-    lost log, never a dropped session.
+    The file itself is created by the first successful write, not here.
+    Opening in "a" mode creates the file the moment the handle exists, and
+    every path between that moment and the first write — a settings save
+    closing the handle, the socket dropping, the first write itself failing —
+    left a zero-byte file behind (#235). Deciding the path is free; only a
+    line actually written should cost a file.
     """
     settings = get_settings()
     if not settings.get("logging", {}).get("enabled"):
+        session["_log_path"] = None
         return
 
     session["_log_redact"] = bool(settings["logging"].get("redact_secrets", True))
+    session["_log_path"] = (
+        log_directory() / f"{session_id[:8]}-{session.get('hostname', 'session')}.log"
+    )
+
+
+def _discard_if_empty(path) -> None:
+    """A zero-byte log says nothing; it is tidier gone than listed."""
     try:
-        directory = log_directory()
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{session_id[:8]}-{session.get('hostname', 'session')}.log"
-        session["_log_handle"] = open(path, "a", encoding="utf-8")
-        logger.info("Logging session %s to %s", session_id[:8], path)
-    except OSError as exc:
-        logger.warning("Could not open a session log for %s: %s", session_id[:8], exc)
-        session["_log_handle"] = None
+        if path is not None and path.exists() and path.stat().st_size == 0:
+            path.unlink()
+    except OSError:
+        pass
 
 
-def _append_to_log(session: dict, line: str) -> None:
-    """Write one line, flushing so a crash does not lose the tail."""
-    handle = session.get("_log_handle")
-    if handle is None:
+def _redact_for_log(session: dict, line: str) -> str | None:
+    """
+    One line, masked — or None when masking itself failed.
+
+    Withheld rather than written raw on failure: a log written without
+    redaction is the worse outcome, and one bad line must not cost the
+    session (#235).
+    """
+    try:
+        return redact(line) if session.get("_log_redact", True) else line
+    except Exception as exc:
+        logger.warning("Log redaction failed; line withheld: %s", exc)
+        return None
+
+
+def _append_to_log(session: dict, text: str) -> None:
+    """
+    Buffer device output and write whole stamped lines.
+
+    Stamping every chunk as it arrived put a timestamp between every echoed
+    keystroke — a typed command read back as one character per stamp (#246).
+    Output now coalesces until a newline, and each complete line gets one
+    stamp. Redaction runs on the assembled line too, which is the first
+    moment it can see a credential whole rather than split across chunks.
+
+    Open-and-write stay in one call, on one thread, so nothing can land
+    between them and orphan an empty file (#235). Flushed per batch so a
+    crash does not lose the tail.
+    """
+    path = session.get("_log_path")
+    if path is None:
         return
+
+    buffer = session.get("_log_buffer", "") + text
+    if "\n" not in buffer:
+        if len(buffer) < 4096:
+            session["_log_buffer"] = buffer
+            return
+        # A screen redrawn in place can go pages without a newline; flush it
+        # as one line rather than holding it forever.
+        lines = [buffer]
+        session["_log_buffer"] = ""
+    else:
+        lines = buffer.split("\n")
+        session["_log_buffer"] = lines.pop()
+
+    handle = session.get("_log_handle")
     try:
-        handle.write(line)
+        if handle is None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(path, "a", encoding="utf-8")
+            session["_log_handle"] = handle
+            logger.info("Logging session to %s", path)
+        stamp = datetime.datetime.now().isoformat()
+        for line in lines:
+            masked = _redact_for_log(session, line.rstrip("\r"))
+            if masked is not None:
+                handle.write(f"[{stamp}] {masked}\n")
         handle.flush()
     except (OSError, ValueError) as exc:
         logger.warning("Session log write failed, giving up on it: %s", exc)
         try:
-            handle.close()
+            if handle is not None:
+                handle.close()
         except Exception:
             pass
         session["_log_handle"] = None
+        session["_log_path"] = None
+        session.pop("_log_buffer", None)
+        _discard_if_empty(path)
+
+
+def _close_session_log(session: dict) -> None:
+    """
+    Flush the partial line, close the handle, and drop an empty file.
+
+    The tail matters: a session usually ends mid-line, and the last thing
+    typed is often the interesting thing.
+    """
+    handle = session.pop("_log_handle", None)
+    path = session.pop("_log_path", None)
+    tail = (session.pop("_log_buffer", "") or "").rstrip("\r")
+    try:
+        if tail.strip():
+            if handle is None and path is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                handle = open(path, "a", encoding="utf-8")
+                session["_log_handle"] = handle
+            if handle is not None:
+                masked = _redact_for_log(session, tail)
+                if masked is not None:
+                    handle.write(
+                        f"[{datetime.datetime.now().isoformat()}] {masked}\n")
+    except (OSError, ValueError):
+        pass
+    finally:
+        session.pop("_log_handle", None)
+        if handle is not None:
+            try:
+                handle.close()
+            except Exception:
+                pass
+    _discard_if_empty(path)
 
 
 @app.websocket("/ws/terminal/{session_id}")
@@ -3025,17 +3165,20 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     session["_last_activity"] = time.monotonic()
                     session["_keep_alive_told"] = False
 
+                elif msg_type == "dismiss_pending":
+                    # The user's explicit "stop tracking this" (#265). The
+                    # tracker cannot always see a cancel scroll past, and a
+                    # pending with no readable time otherwise sits in the
+                    # status bar for the six-hour stale limit. Nothing is
+                    # sent to the device — only the tracking ends.
+                    await note_pending([session["alerts"].clear()])
+
                 elif msg_type == "logging_changed":
                     # Sent by the browser when session logging is saved. One
                     # round trip on a deliberate action, rather than reading
                     # settings.json for every chunk of device output — which
                     # is what this replaced.
-                    handle = session.pop("_log_handle", None)
-                    if handle is not None:
-                        try:
-                            handle.close()
-                        except Exception:
-                            pass
+                    await asyncio.to_thread(_close_session_log, session)
                     session["_log_recheck"] = True
 
                 elif msg_type == "guardrail_answer":
@@ -3060,6 +3203,11 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         dropped = pipeline.drop()
                         if dropped:
                             logger.info("Cancelled at the guardrail: %r", dropped)
+                            # The tracker armed at Enter, before this question
+                            # was answered — declining must take the pending
+                            # with it, or the bar counts down to a reload the
+                            # device never received (#248).
+                            await note_pending([session["alerts"].retract()])
                             await websocket.send_text(json.dumps({
                                 "type": "output",
                                 "data": CANCELLED_NOTE.format(command=dropped),
@@ -3336,14 +3484,12 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     session["_log_checked"] = True
                     await asyncio.to_thread(_open_session_log, session, session_id)
 
-                handle = session.get("_log_handle")
-                if handle is not None:
-                    logged = (redact(text) if session.get("_log_redact", True)
-                              else text)
-                    stamp = datetime.datetime.now().isoformat()
-                    # Still off the loop: a log directory on a network share
-                    # can block for as long as the share feels like it.
-                    await asyncio.to_thread(_append_to_log, session, f"[{stamp}] {logged}")
+                if session.get("_log_path") is not None:
+                    # Raw text in — buffering, per-line stamping and redaction
+                    # all happen inside (#246), and still off the loop: a log
+                    # directory on a network share can block for as long as
+                    # the share feels like it.
+                    await asyncio.to_thread(_append_to_log, session, text)
 
                 # Send output to browser
                 await websocket.send_text(json.dumps({"type": "output", "data": text}))
@@ -3429,14 +3575,9 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
     session["is_connected"] = False
 
     # The log handle is per-session now rather than per-chunk, so it has an
-    # end as well as a beginning.
-    handle = session.pop("_log_handle", None)
+    # end as well as a beginning — including the partial last line.
+    await asyncio.to_thread(_close_session_log, session)
     session.pop("_log_checked", None)
-    if handle is not None:
-        try:
-            handle.close()
-        except Exception:
-            pass
 
     logger.info("WebSocket closed for session %s", session_id)
 

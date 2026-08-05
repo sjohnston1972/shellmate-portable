@@ -65,6 +65,13 @@ class PlatformProfile:
     # true even if the reply scrolls past. The device's own answer carries the
     # authoritative time, which is the only one worth counting down from.
     reload_patterns: list[str] = field(default_factory=list)
+    # The device's own scheduling banner — "Reload scheduled in 5 minutes by
+    # admin" (#248). Where a platform has these, a typed reload is tracked but
+    # the countdown arms only when one of them lands: the command can still be
+    # aborted at the device's own [confirm] prompt, and a countdown for a
+    # reload that never started is a false alarm with a deadline. A platform
+    # with none of these keeps the typed-command countdown.
+    reload_announce_patterns: list[str] = field(default_factory=list)
     reload_cancel_patterns: list[str] = field(default_factory=list)
     # Junos-style "commit confirmed": rolls itself back unless confirmed. Not
     # a reboot, so it is tracked separately and worded differently.
@@ -143,11 +150,18 @@ BUILTIN: dict[str, PlatformProfile] = {
             r"^\s*reload\s+in\s+(?P<h>\d+):(?P<m>\d{1,2})\b",
             r"^\s*reload\s+in\s+(?P<m>\d+)\b",
             r"^\s*reload\s+at\s+(?P<at>\d{1,2}:\d{2})\b",
-            # The device's own banner, repeated as the time approaches. This is
-            # the authoritative one and refines whatever was inferred above.
+        ],
+        reload_announce_patterns=[
+            # The device's own banner, repeated as the time approaches. This
+            # is the authoritative one; a typed reload only becomes a
+            # countdown when one of these arrives (#248).
             r"SHUTDOWN\s+in\s+(?P<h>\d+):(?P<m>\d{2}):(?P<s>\d{2})",
             r"Reload\s+scheduled\s+.*?\(in\s+(?:(?P<h>\d+)\s+hours?)?"
             r"(?:\s*and\s*)?(?:(?P<m>\d+)\s+minutes?)?\)",
+            # The parenthesis-free form: "Reload scheduled in 5 minutes by
+            # admin". Both shapes occur across IOS trains.
+            r"Reload\s+scheduled\s+in\s+(?:(?P<h>\d+)\s+hours?\s*(?:and\s*)?)?"
+            r"(?P<m>\d+)\s+minutes?",
         ],
         reload_cancel_patterns=[
             r"^\s*reload\s+cancel\b",
@@ -308,6 +322,10 @@ BUILTIN: dict[str, PlatformProfile] = {
         reload_patterns=[
             r"^\s*request\s+system\s+reboot\s+in\s+(?P<m>\d+)\b",
             r"^\s*request\s+system\s+reboot\s+at\s+(?P<at>\d{1,2}:\d{2})\b",
+        ],
+        reload_announce_patterns=[
+            # The device's own word (#248) — the typed request becomes a
+            # countdown when this arrives.
             r"Shutdown\s+NOW|System\s+going\s+down\s+in\s+(?P<m>\d+)\s+minute",
         ],
         reload_cancel_patterns=[

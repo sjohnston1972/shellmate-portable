@@ -49,9 +49,20 @@
    */
   let icons = ['folder'];
 
+  /** Whether the root node's children are shown (#260). Session-local — a
+   *  folded tree on every launch would cost more than it saves. */
+  let rootOpen = true;
+
   document.addEventListener('DOMContentLoaded', () => {
     const button = document.getElementById('btn-new-group');
-    if (button) button.addEventListener('click', () => newGroup());
+    // Routed by selection (#261): at root a new top-level group, inside a
+    // group a child of it — matching the label renderTree paints on it.
+    if (button) button.addEventListener('click', () => {
+      const parent = activeGroup
+        ? groupCache.find(g => g.key === activeGroup) : null;
+      if (parent) newSubgroup(parent);
+      else newGroup();
+    });
     _bindPanelControls();
   });
 
@@ -460,27 +471,57 @@
     const pinned = roots.filter(n => n.group && n.group.favourite);
     const rest = roots.filter(n => !(n.group && n.group.favourite));
 
-    pinned.forEach(node => body.appendChild(_branch(node)));
-    if (pinned.length && rest.length) {
-      const rule = document.createElement('div');
-      rule.className = 'tree-pin-divider';
-      body.appendChild(rule);
-    }
-    rest.forEach(node => body.appendChild(_branch(node)));
-
-    // "Everything", so there is always a way back to the whole list without
-    // hunting for which group is currently selected.
+    // The root (#260): every group is a child of "All connections", so the
+    // hierarchy has a visible top rather than a flat button floating over a
+    // separate list. Selecting it clears the selection; the chevron folds
+    // the whole tree.
     const all = document.createElement('button');
     all.type = 'button';
-    all.className = 'tree-all' + (activeGroup ? '' : ' tree-active');
-    all.textContent = `All connections (${profileCache.length})`;
+    all.className = 'tree-all tree-root' + (activeGroup ? '' : ' tree-active');
+
+    const chevron = document.createElement('span');
+    chevron.className = 'material-symbols-outlined tree-root-chevron';
+    chevron.textContent = rootOpen ? 'keyboard_arrow_down' : 'keyboard_arrow_right';
+
+    const rootLabel = document.createElement('span');
+    rootLabel.textContent = `All connections (${profileCache.length})`;
+    all.append(chevron, rootLabel);
+
+    const children = document.createElement('div');
+    children.className = 'tree-root-children';
+    children.classList.toggle('hidden', !rootOpen);
+
+    chevron.addEventListener('click', (e) => {
+      e.stopPropagation();
+      rootOpen = !rootOpen;
+      chevron.textContent = rootOpen ? 'keyboard_arrow_down' : 'keyboard_arrow_right';
+      children.classList.toggle('hidden', !rootOpen);
+    });
     all.addEventListener('click', () => {
       activeGroup = '';
       _select();
       // Same as selecting a branch: the result must be visible (#232).
       if (typeof window.showDashboard === 'function') window.showDashboard();
     });
-    body.insertBefore(all, body.firstChild);
+
+    pinned.forEach(node => children.appendChild(_branch(node)));
+    if (pinned.length && rest.length) {
+      const rule = document.createElement('div');
+      rule.className = 'tree-pin-divider';
+      children.appendChild(rule);
+    }
+    rest.forEach(node => children.appendChild(_branch(node)));
+
+    body.append(all, children);
+
+    // The dashboard's group button follows the selection (#261): at root it
+    // makes a top-level group; inside one it makes a child of it. One
+    // button, because the two actions are never both sensible at once.
+    const newBtn = document.getElementById('btn-new-group');
+    if (newBtn) {
+      newBtn.innerHTML = '<span class="material-symbols-outlined">folder</span>'
+        + (activeGroup ? 'New Sub-Group' : 'New Group');
+    }
   }
 
   /** The tree's own search (#183). */
@@ -735,8 +776,12 @@
                           () => _deleteMember(profile), true));
 
     document.body.appendChild(menu);
-    menu.style.left = event.clientX + 'px';
-    menu.style.top = event.clientY + 'px';
+    // Clamped like the group menu (#264) — a member at the bottom of the
+    // tree deserves a reachable menu too.
+    menu.style.left = `${Math.max(8, Math.min(event.clientX,
+      window.innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(event.clientY,
+      window.innerHeight - menu.offsetHeight - 8))}px`;
     setTimeout(() => {
       document.addEventListener('click', () => menu.remove(), { once: true });
     }, 0);
@@ -1029,12 +1074,50 @@
   // Creating and editing
   // -------------------------------------------------------------------------
 
+  /**
+   * The icon grid, shared by creation and the later edit (#259).
+   *
+   * Returns the element and a reader for the choice, so each dialog can
+   * embed it wherever it belongs.
+   */
+  function _iconGrid(initial) {
+    const grid = document.createElement('div');
+    grid.className = 'icon-picker';
+    let chosen = initial;
+
+    icons.forEach(name => {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'icon-picker-cell' + (name === initial ? ' chosen' : '');
+      cell.title = name.replace(/_/g, ' ');
+      cell.innerHTML = '<span class="material-symbols-outlined">' + name + '</span>';
+      cell.addEventListener('click', () => {
+        chosen = name;
+        grid.querySelectorAll('.icon-picker-cell')
+            .forEach(c => c.classList.remove('chosen'));
+        cell.classList.add('chosen');
+      });
+      grid.appendChild(cell);
+    });
+
+    return { el: grid, chosen: () => chosen };
+  }
+
+  /** The default for a new group (#259): a site, because that is what most
+   *  top-level groups are. Falls back when the fetched list lacks it. */
+  function _defaultIcon() {
+    return icons.includes('apartment') ? 'apartment' : 'folder';
+  }
+
   async function newGroup() {
+    const picker = _iconGrid(_defaultIcon());
     const answer = await window.shellmateDialog.form({
       title: 'New group',
       body:  'Groups arrange the dashboard. A connection can be in as many as '
              + 'you like — adding it to one never takes it out of another.',
       confirmLabel: 'Create',
+      // The icon up front (#259), not a second trip through the menu.
+      content: picker.el,
       fields: [
         { name: 'name', label: 'Name', required: true, placeholder: 'Glasgow',
           hint: 'If you already tag connections with this name, they join it.' },
@@ -1048,10 +1131,18 @@
       const res = await fetch('/api/groups', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(answer),
+        body:    JSON.stringify({ ...answer, icon: picker.chosen() }),
       });
       if (!res.ok) throw new Error((await res.json()).detail || 'Could not create it.');
       const group = await res.json();
+      // Belt and braces: if creation ignored the icon, set it explicitly.
+      if (picker.chosen() && (group.icon || 'folder') !== picker.chosen()) {
+        await fetch('/api/groups/' + encodeURIComponent(group.key), {
+          method:  'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ icon: picker.chosen() }),
+        }).catch(() => { /* the group exists; the icon is cosmetic */ });
+      }
       // Selected and expanded, because the next thing anybody does after
       // making a group is put something in it — and unlike the tiles this
       // does not replace the view to do it.
@@ -1070,11 +1161,15 @@
    * know the convention in order to use it.
    */
   async function newSubgroup(parent) {
+    // The parent's icon by default (#259): subgroups usually read as parts
+    // of the same thing, and a different icon is one click away.
+    const picker = _iconGrid(parent.icon || _defaultIcon());
     const answer = await window.shellmateDialog.form({
       title: 'New group inside "' + parent.name + '"',
       body:  'It appears as a branch under the parent, and the parent counts '
              + 'everything beneath it.',
       confirmLabel: 'Create',
+      content: picker.el,
       fields: [
         { name: 'name', label: 'Name', required: true, placeholder: 'access',
           hint: 'Stored as "' + parent.name + '/...", which is what makes it nest.' },
@@ -1089,10 +1184,18 @@
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ name: parent.name + '/' + answer.name,
-                                  colour: answer.colour }),
+                                  colour: answer.colour,
+                                  icon: picker.chosen() }),
       });
       if (!res.ok) throw new Error((await res.json()).detail || 'Could not create it.');
       const group = await res.json();
+      if (picker.chosen() && (group.icon || 'folder') !== picker.chosen()) {
+        await fetch('/api/groups/' + encodeURIComponent(group.key), {
+          method:  'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ icon: picker.chosen() }),
+        }).catch(() => { /* the group exists; the icon is cosmetic */ });
+      }
       expanded.add(parent.key);
       activeGroup = group.key;
       _refresh();
@@ -1109,32 +1212,15 @@
    * icon and the word itself printed on the dashboard.
    */
   async function pickIcon(group) {
-    const current = group.icon || 'folder';
-
-    const grid = document.createElement('div');
-    grid.className = 'icon-picker';
-    let chosen = current;
-
-    icons.forEach(name => {
-      const cell = document.createElement('button');
-      cell.type = 'button';
-      cell.className = 'icon-picker-cell' + (name === current ? ' chosen' : '');
-      cell.title = name.replace(/_/g, ' ');
-      cell.innerHTML = '<span class="material-symbols-outlined">' + name + '</span>';
-      cell.addEventListener('click', () => {
-        chosen = name;
-        grid.querySelectorAll('.icon-picker-cell')
-            .forEach(c => c.classList.remove('chosen'));
-        cell.classList.add('chosen');
-      });
-      grid.appendChild(cell);
-    });
+    // The same grid the creation dialogs embed (#259) — one picker, not two
+    // that could drift.
+    const picker = _iconGrid(group.icon || 'folder');
 
     const ok = await window.shellmateDialog.confirm({
       title: 'Icon for "' + group.name + '"',
       body:  'It appears beside the name in the tree and on the tab strip.',
       confirmLabel: 'Use it',
-      content: grid,
+      content: picker.el,
     });
     if (!ok) return;
 
@@ -1142,7 +1228,7 @@
       const res = await fetch('/api/groups/' + encodeURIComponent(group.key), {
         method:  'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ icon: chosen }),
+        body:    JSON.stringify({ icon: picker.chosen() }),
       });
       if (!res.ok) throw new Error((await res.json()).detail || 'Could not save it.');
       _refresh();
@@ -1231,13 +1317,20 @@
     const menu = document.createElement('div');
     menu.className = 'tab-context-menu group-menu';
 
-    const item = (icon, text, onClick, danger) => {
+    const item = (icon, text, onClick, danger, disabled) => {
       const button = document.createElement('button');
       button.type = 'button';
       if (danger) button.className = 'ctx-danger';
       button.innerHTML = `<span class="material-symbols-outlined">${icon}</span>`;
       button.appendChild(document.createTextNode(text));
-      button.addEventListener('click', () => { menu.remove(); onClick(); });
+      if (disabled) {
+        // Present but grey (#262): an entry that vanishes leaves someone
+        // wondering where it went; one that explains itself does not.
+        button.disabled = true;
+        button.title = 'The group has no connections in it.';
+      } else {
+        button.addEventListener('click', () => { menu.remove(); onClick(); });
+      }
       return button;
     };
 
@@ -1247,6 +1340,13 @@
     // a branch under "site-3" - but the only way to make one was typing the
     // separator by hand into the name field, which nothing explained (#163).
     menu.appendChild(item('add', 'New subgroup...', () => newSubgroup(group)));
+    // Straight into this group (#263): the dialog opens with the Groups
+    // field prefilled, so the new profile lands where the click was.
+    menu.appendChild(item('add_circle', 'New connection...', () => {
+      if (typeof window.showConnectionDialog === 'function') {
+        window.showConnectionDialog({ connection_type: 'ssh', tags: [group.key] });
+      }
+    }));
 
     // At 100 sites of 10 subgroups, opening a tree by hand is not a thing
     // anybody is going to do (#182).
@@ -1261,10 +1361,13 @@
     const sweep = document.createElement('div');
     sweep.className = 'ctx-sep';
     menu.appendChild(sweep);
+    // Grey for an empty group (#262) — the actions could only ever say
+    // "nothing to connect", and a menu entry that always fails is a trap.
+    const empty = _membersUnder(group.key).length === 0;
     menu.appendChild(item('add_circle', 'Connect all',
-                          () => _connectAll(group)));
+                          () => _connectAll(group), false, empty));
     menu.appendChild(item('stop_circle', 'Disconnect all',
-                          () => _disconnectAll(group), true));
+                          () => _disconnectAll(group), true, empty));
     menu.appendChild(item(
       'bookmark_add',
       group.favourite ? 'Unpin from the top' : 'Pin to the top',
@@ -1278,8 +1381,12 @@
                           () => deleteGroup(group), true));
 
     document.body.appendChild(menu);
-    menu.style.left = `${event.clientX}px`;
-    menu.style.top = `${event.clientY}px`;
+    // Clamped on both axes (#264): a group near the bottom of a full tree
+    // used to open its menu half off screen.
+    menu.style.left = `${Math.max(8, Math.min(event.clientX,
+      window.innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(event.clientY,
+      window.innerHeight - menu.offsetHeight - 8))}px`;
 
     setTimeout(() => {
       document.addEventListener('click', () => menu.remove(), { once: true });

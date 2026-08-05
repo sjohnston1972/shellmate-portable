@@ -237,6 +237,12 @@ DEFAULT_SETTINGS: dict = {
         "popup": True,
         # Honours prefers-reduced-motion as well; this forces it on.
         "reduce_motion": False,
+        # Custom toast accent colours (#254). Blank means the theme's own,
+        # which follows dark and light automatically; a hex here is used as
+        # given, in both themes.
+        "accent_info": "",
+        "accent_warning": "",
+        "accent_critical": "",
     },
     # Defaults for a serial console, so the same values are not re-entered on
     # every connection. Cisco console is 9600 8-N-1 with no flow control.

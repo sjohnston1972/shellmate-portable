@@ -45,6 +45,12 @@
   --ok-edge:    rgba(166,227,161,0.40);
   --live:       #C7F9C0;
   --live-glow:  rgba(199,249,192,0.60);
+  --error-tint: rgba(242,184,181,0.12);
+  /* The quick-broadcast bolt when armed (#237). Electric blue on purpose —
+     nothing else in the palette is, so an armed bolt cannot be mistaken for
+     a warning, a live dot or the accent. */
+  --zap:        #55B8FF;
+  --zap-glow:   rgba(85,184,255,0.55);
   --primary-tint: rgba(195,192,255,0.12);
   --primary-edge: rgba(195,192,255,0.40);
 
@@ -134,6 +140,11 @@
      green rather than the near-white the dark theme can afford. */
   --live:       #1FA24E;
   --live-glow:  rgba(31,162,78,0.45);
+  --error-tint: rgba(179,38,30,0.10);
+  /* Darker than the dark theme's — electric on near-white means saturated,
+     not pale, or it disappears exactly where it is meant to shout. */
+  --zap:        #0B63CE;
+  --zap-glow:   rgba(11,99,206,0.35);
   --primary-tint: rgba(79,70,229,0.10);
   --primary-edge: rgba(79,70,229,0.30);
   --overlay:       rgba(236,236,240,0.97);
@@ -2977,14 +2988,17 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   color: var(--on-surface-dim);
 }
 
+/* Tokens, not the pale literals that were chosen against a near-black
+   background and washed out to ~2:1 on the light theme (#247). --ok and
+   --error each carry a per-theme value that clears AA on these tints. */
 .diff-add {
-  background: rgba(64,192,120,0.12);
-  color: #7ee2a8;
+  background: var(--ok-tint);
+  color: var(--ok);
 }
 
 .diff-remove {
-  background: rgba(240,90,90,0.12);
-  color: #f08a8a;
+  background: var(--error-tint);
+  color: var(--error);
 }
 
 .diff-hunk {
@@ -3360,6 +3374,53 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   text-align: center;
 }
 
+/* The destructive-command lists, readable in Terminal Behaviour (#258). */
+#dangerous-lists {
+  margin: 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dangerous-list-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 11.5px;
+}
+
+.dangerous-list-name {
+  flex: 0 0 150px;
+  color: var(--on-surface-dim);
+}
+
+.dangerous-list-commands {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  word-break: break-word;
+}
+
+/* Toast accent pickers (#254). */
+.toast-accent {
+  width: 46px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
+/* The folder's combined weight, at the top of the list (#243). */
+.logs-total {
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  padding: 2px 4px 8px;
+  border-bottom: 1px solid var(--outline);
+  margin-bottom: 6px;
+}
+
 .logs-empty {
   padding: 32px 24px;
   font-size: 13px;
@@ -3384,6 +3445,143 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 /* --------------------------------------------------------------------------
    Paste confirmation modal
    -------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+   The last-chance reload warning (#249)
+   Twenty seconds out a corner toast is not proportionate. Centre-screen,
+   above the panels and toasts, below nothing that matters more.
+--------------------------------------------------------------------------- */
+
+#reload-warning {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(4px);
+  z-index: 650;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#reload-warning-dialog {
+  background: var(--overlay);
+  backdrop-filter: blur(20px);
+  border: 2px solid var(--error);
+  border-radius: var(--radius-lg);
+  padding: 28px 36px;
+  max-width: min(520px, 92vw);
+  text-align: center;
+  box-shadow: 0 24px 48px -12px rgba(0,0,0,0.6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.reload-warning-icon {
+  color: var(--error);
+  font-size: 40px;
+}
+
+.reload-warning-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--on-surface);
+}
+
+.reload-warning-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 44px;
+  font-weight: 700;
+  color: var(--error);
+}
+
+.reload-warning-body {
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  word-break: break-word;
+}
+
+.reload-warning-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Session log viewer (#236)
+   The vault dialog's shape, widened for text: above the Logs side panel it
+   opens from, with the log itself in a scrolling monospace block.
+--------------------------------------------------------------------------- */
+
+#logview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.72);
+  backdrop-filter: blur(4px);
+  z-index: 610;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#logview-dialog {
+  background: var(--overlay);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  width: min(940px, 94vw);
+  max-height: 86vh;
+  box-shadow: 0 24px 48px -12px rgba(15,0,105,0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#logview-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+#logview-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--on-surface);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+#logview-meta {
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  white-space: nowrap;
+}
+
+.logview-spacer { flex: 1; }
+
+#logview-content {
+  flex: 1;
+  min-height: 200px;
+  overflow: auto;
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--on-surface);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
 /* ---------------------------------------------------------------------------
    Vault unlock modal
    Same shape as the paste confirmation, one z-index above everything else so
@@ -4824,6 +5022,22 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
   padding: 12px;
 }
 
+/* Quick terminal text size in dense layouts (#240). */
+#font-quick {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+#font-quick .icon-btn {
+  padding: 2px;
+}
+
+#font-quick .material-symbols-outlined {
+  font-size: 18px;
+}
+
 /* --- The layout button and its picker ------------------------------------ */
 #btn-layout {
   display: flex;
@@ -4867,6 +5081,10 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
   box-shadow: 0 12px 32px -8px rgba(0,0,0,0.55);
   padding: 4px;
   min-width: 236px;
+  /* Fifteen layouts now (#238) — the list scrolls rather than running off
+     the bottom of a short window. */
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
 }
 
 .layout-menu-item {
@@ -4900,7 +5118,11 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
   display: flex;
   gap: 4px;
   padding: 2px 10px 6px;
+  /* Sixteen panes (#238) would stretch the menu absurdly on one line. */
+  flex-wrap: wrap;
 }
+
+.ctx-pane-row .ctx-pane { min-width: 34px; }
 
 .ctx-pane {
   flex: 1;
@@ -5278,10 +5500,10 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
 #status-alert:empty { display: none; }
 
 .status-alert-info     { color: var(--on-surface-dim); }
-.status-alert-warning  { color: #f0a94a; }
-.status-alert-critical { color: var(--error); }
-
-[data-theme="light"] .status-alert-warning { color: #a45c00; }
+/* --warn carries its own light-theme value, which is what the removed
+   #f0a94a literal (and its bolted-on light override) never did. */
+.status-alert-warning  { color: var(--alert-accent-warning, var(--warn)); }
+.status-alert-critical { color: var(--alert-accent-critical, var(--error)); }
 
 /* --- The clock on the tab ------------------------------------------------ */
 .tab-countdown {
@@ -5336,7 +5558,10 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
    * now, so the offset was reserving space against itself — leaving the
    * column floating well clear of the bottom with nothing underneath it. */
   bottom: 16px;
-  z-index: 60;
+  /* Above the panel overlays (200) and below the modals (500+): a download
+     finishing while the Logs panel is open must be readable without closing
+     the panel (#244), but a toast must never sit over a dialog's buttons. */
+  z-index: 300;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -5390,7 +5615,11 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
   font-size: 11.5px;
   font-weight: 500;
   white-space: nowrap;
-  color: var(--on-surface);
+  /* --on-primary, not --on-surface: the fill is indigo in both themes, and
+     --on-surface flips to near-black in the light one — which put dark text
+     on dark blue and made "Show me" unreadable (#253). Every other
+     indigo-filled control already pairs these two tokens. */
+  color: var(--on-primary);
   background: var(--primary-container);
   border: none;
   border-radius: var(--radius-sm);
@@ -5401,13 +5630,17 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
   filter: brightness(1.08);
 }
 
-.alert-info     { border-left-color: var(--primary); }
-.alert-warning  { border-left-color: #f0a94a; }
-.alert-critical { border-left-color: var(--error); }
+/* Per-severity accents, overridable from Settings (#254): settings.js sets
+   --alert-accent-* on :root when a custom colour is chosen, and the theme
+   token takes over when it is not. The warning fallback is --warn, not the
+   old #f0a94a literal, which had no light-theme value at all. */
+.alert-info     { border-left-color: var(--alert-accent-info, var(--primary)); }
+.alert-warning  { border-left-color: var(--alert-accent-warning, var(--warn)); }
+.alert-critical { border-left-color: var(--alert-accent-critical, var(--error)); }
 
-.alert-info .material-symbols-outlined     { color: var(--primary); }
-.alert-warning .material-symbols-outlined  { color: #f0a94a; }
-.alert-critical .material-symbols-outlined { color: var(--error); }
+.alert-info .material-symbols-outlined     { color: var(--alert-accent-info, var(--primary)); }
+.alert-warning .material-symbols-outlined  { color: var(--alert-accent-warning, var(--warn)); }
+.alert-critical .material-symbols-outlined { color: var(--alert-accent-critical, var(--error)); }
 
 .alert-toast-text { flex: 1; min-width: 0; }
 
@@ -6401,7 +6634,14 @@ body.resizing-panel * { cursor: ew-resize !important; }
 }
 
 .snippet-quick:hover { color: var(--on-surface); }
-.snippet-quick.on    { color: var(--warn); }
+
+/* Armed. Electric blue with a glow (#237) — drop-shadow rather than
+   box-shadow so the light follows the bolt's shape, not the button's box. */
+.snippet-quick.on {
+  color: var(--zap);
+  filter: drop-shadow(0 0 4px var(--zap-glow));
+}
+
 .snippet-quick .material-symbols-outlined { font-size: var(--icon-md); }
 
 .ctx-quick-row {
@@ -7183,6 +7423,34 @@ body {
 
 .tree-all:hover { background: var(--surface-high); color: var(--on-surface); }
 .tree-all.tree-active { background: var(--surface-high); color: var(--on-surface); }
+
+/* The root node (#260): every group is its child, and the chevron folds
+   the lot. */
+.tree-all.tree-root {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.tree-root-chevron {
+  font-size: 16px;
+  color: var(--on-surface-muted);
+}
+
+.tree-root-chevron:hover { color: var(--on-surface); }
+
+.tree-root-children {
+  margin-left: 9px;
+  border-left: 1px solid var(--outline);
+  padding-left: 5px;
+}
+
+/* Greyed group actions for an empty group (#262). */
+.group-menu button[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
 
 .tree-row {
   display: flex;

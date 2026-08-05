@@ -65,6 +65,12 @@ class PendingAction:
     # questions: whether to show a countdown, and whether a fresh estimate of
     # our own is allowed to overwrite it.
     authoritative: bool = False
+    # True while the typed command has not yet been answered by the device's
+    # own scheduling banner (#248). Tracked — so a cancel still clears it —
+    # but not counted down from: `reload in 10` can still be aborted at the
+    # device's [confirm] prompt, and a countdown for a reload that never
+    # started is a false alarm with a deadline.
+    awaiting_confirmation: bool = False
 
     def seconds_left(self) -> float | None:
         if self.deadline is None:
@@ -72,14 +78,19 @@ class PendingAction:
         return self.deadline - time.time()
 
     def as_dict(self) -> dict:
+        # While awaiting confirmation the deadline is only our reading of the
+        # typed command — good enough to hold, not good enough to show (#248).
+        masked = self.awaiting_confirmation
         return {
             "kind": self.kind,
             "source": self.source,
             "requested_at": self.requested_at,
             # Milliseconds, because the browser's clock works in them.
-            "deadline_ms": None if self.deadline is None else int(self.deadline * 1000),
-            "confident": self.confident,
+            "deadline_ms": (None if (self.deadline is None or masked)
+                            else int(self.deadline * 1000)),
+            "confident": self.confident and not masked,
             "authoritative": self.authoritative,
+            "awaiting_confirmation": masked,
         }
 
 
@@ -234,12 +245,27 @@ class AlertTracker:
         return changed
 
     def _match_reload(self, profile, text: str, from_device: bool) -> bool:
-        match = _search(profile.reload_patterns, text)
+        announce = getattr(profile, "reload_announce_patterns", None) or []
+
+        if from_device:
+            # Where the platform has announcement patterns, only those count
+            # as the device's word (#248) — the echoed command text also
+            # arrives as output, and an echo is not a confirmation. A
+            # platform with no announcement patterns keeps the old behaviour.
+            match = (_search(announce, text) if announce
+                     else _search(profile.reload_patterns, text))
+        else:
+            match = _search(profile.reload_patterns, text)
         if not match:
             return False
 
         seconds = _seconds_from(match)
-        return self._record(RELOAD, match.group(0).strip(), seconds, from_device)
+        # A platform that announces its reloads gets no countdown from the
+        # typed command alone (#248): the pending is tracked, badged, and
+        # armed only when the announcement lands.
+        awaiting = (not from_device) and bool(announce)
+        return self._record(RELOAD, match.group(0).strip(), seconds,
+                            from_device, awaiting=awaiting)
 
     def _match_commit_confirm(self, profile, text: str, from_device: bool) -> bool:
         match = _search(profile.commit_confirm_patterns, text)
@@ -253,7 +279,7 @@ class AlertTracker:
         return self._record(COMMIT_CONFIRM, match.group(0).strip(), seconds, from_device)
 
     def _record(self, kind: str, source: str, seconds: float | None,
-                from_device: bool) -> bool:
+                from_device: bool, awaiting: bool = False) -> bool:
         now = time.time()
         deadline = None if seconds is None else now + seconds
 
@@ -269,14 +295,19 @@ class AlertTracker:
             if not from_device and existing.authoritative:
                 return False
             # IOS repeats its banner every minute. Only report a change worth
-            # reporting, or the interface is redrawn for nothing.
+            # reporting, or the interface is redrawn for nothing. A device
+            # answer that *confirms* an awaited command is always worth it,
+            # whatever the deadline delta — it is the arming moment (#248).
             if (abs((existing.deadline or 0) - deadline) < 2
-                    and existing.authoritative == from_device):
+                    and existing.authoritative == from_device
+                    and not (from_device and existing.awaiting_confirmation)):
                 return False
 
             existing.deadline = deadline
             existing.confident = True
             existing.authoritative = existing.authoritative or from_device
+            if from_device:
+                existing.awaiting_confirmation = False
             existing.source = source or existing.source
             return True
 
@@ -287,10 +318,12 @@ class AlertTracker:
             deadline=deadline,
             confident=deadline is not None,
             authoritative=from_device and deadline is not None,
+            awaiting_confirmation=awaiting,
         )
         logger.info(
-            "Pending %s on this session: %s",
+            "Pending %s on this session: %s%s",
             kind, "in %.0fs" % seconds if seconds is not None else "time unknown",
+            " (awaiting the device's confirmation)" if awaiting else "",
         )
         return True
 
@@ -328,6 +361,25 @@ class AlertTracker:
             return False
         self.pending = None
         return True
+
+    def retract(self, max_age_seconds: float = 30.0) -> bool:
+        """
+        Drop a pending that only ever came from a freshly typed command.
+
+        The tracker arms at Enter, before the guardrail question is answered —
+        so declining "send `reload in 10`?" used to leave a live countdown for
+        a command the device never received (#248). Bounded by age and by
+        authority: anything the device itself has confirmed is not ours to
+        retract, and neither is something typed minutes ago.
+        """
+        pending = self.pending
+        if (pending is not None and not pending.authoritative
+                and time.time() - pending.requested_at <= max_age_seconds):
+            logger.info("Pending %s retracted — the command was not sent",
+                        pending.kind)
+            self.pending = None
+            return True
+        return False
 
     def payload(self) -> dict:
         """What to send to the interface."""

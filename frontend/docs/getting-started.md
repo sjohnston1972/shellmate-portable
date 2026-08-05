@@ -119,7 +119,7 @@ that is no longer connected to anything.
 | `Ctrl+W` | Close the current tab |
 | `Ctrl+1` … `Ctrl+9` | Switch to that tab |
 | `Ctrl+F` | Find in the terminal |
-| `Ctrl+Alt+1` … `Ctrl+Alt+8` | Choose a split layout |
+| `Ctrl+Alt+1` … `Ctrl+Alt+9` | Choose a split layout (the rest are in the picker) |
 | `Ctrl+Shift+B` | Broadcast a command to several devices |
 | `Ctrl+Shift+C` | Copy the selection |
 | `Ctrl+Shift+V` | Paste |
@@ -143,6 +143,17 @@ a glance.
 | Two over one | 3 — two above, one wide below |
 | One over two | 3 — one wide above, two below |
 | Quad | 4 |
+| Three rows | 3, full-width rows |
+| Two and main | 3 — two smaller, one large beside them |
+| Six (3×2) | 6 |
+| Eight (4×2) | 8 |
+| Nine (3×3) | 9 |
+| Twelve (4×3) | 12 |
+| Sixteen (4×4) | 16 |
+
+The first nine have `Ctrl+Alt` shortcuts; the grids are picked from the menu.
+The big grids are for watching a wall of devices rather than working in them —
+every pane is live, but sixteen tiny terminals is a dashboard, not a desk.
 
 Open tabs fill the panes automatically. Everything still lives in the tab
 strip; the panes decide which of those tabs are on screen together, and the

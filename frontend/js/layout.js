@@ -58,9 +58,36 @@
       cols: '1fr 1fr',     rows: '1fr 1fr', areas: ['a a', 'b c'] },
     { id: 'quad',   name: 'Quad',          panes: 4,
       cols: '1fr 1fr',     rows: '1fr 1fr', areas: ['a b', 'c d'] },
+    // Everything below is picker-only (#238): Ctrl+Alt goes up to 9, and
+    // Three rows takes that last slot. The grids exist for wall-of-devices
+    // monitoring — sixteen panes is not a place to *work*, it is a place to
+    // watch, and the picker is where you go once, not per keystroke.
+    { id: 'rows3',  name: 'Three rows',    panes: 3,
+      cols: '1fr',         rows: '1fr 1fr 1fr', areas: ['a', 'b', 'c'] },
+    // The mirror of Main and two: the pair of smaller panes on the left,
+    // the device being worked on holding the right.
+    { id: 'twoMain', name: 'Two and main', panes: 3,
+      cols: '1fr 2fr',     rows: '1fr 1fr', areas: ['a b', 'c b'] },
+    { id: 'grid6',  name: 'Six (3×2)',     panes: 6,
+      cols: '1fr 1fr 1fr', rows: '1fr 1fr', areas: ['a b c', 'd e f'] },
+    { id: 'grid8',  name: 'Eight (4×2)',   panes: 8,
+      cols: '1fr 1fr 1fr 1fr', rows: '1fr 1fr',
+      areas: ['a b c d', 'e f g h'] },
+    { id: 'grid9',  name: 'Nine (3×3)',    panes: 9,
+      cols: '1fr 1fr 1fr', rows: '1fr 1fr 1fr',
+      areas: ['a b c', 'd e f', 'g h i'] },
+    { id: 'grid12', name: 'Twelve (4×3)',  panes: 12,
+      cols: '1fr 1fr 1fr 1fr', rows: '1fr 1fr 1fr',
+      areas: ['a b c d', 'e f g h', 'i j k l'] },
+    { id: 'grid16', name: 'Sixteen (4×4)', panes: 16,
+      cols: '1fr 1fr 1fr 1fr', rows: '1fr 1fr 1fr 1fr',
+      areas: ['a b c d', 'e f g h', 'i j k l', 'm n o p'] },
   ];
 
-  const PANE_LETTERS = ['a', 'b', 'c', 'd'];
+  const PANE_LETTERS = 'abcdefghijklmnop'.split('');
+
+  /** How many layouts Ctrl+Alt+N can reach — the keys run '1' to '9'. */
+  const SHORTCUT_MAX = 9;
 
   let currentId = 'single';
   /** @type {Array<string|null>} pane index → sessionId */
@@ -86,6 +113,11 @@
     assignment = new Array(byId(currentId).panes).fill(null);
 
     document.addEventListener('keydown', onKeydown);
+
+    const quickUp = document.getElementById('font-quick-up');
+    const quickDown = document.getElementById('font-quick-down');
+    if (quickUp)   quickUp.addEventListener('click', () => adjustFontSize(+1));
+    if (quickDown) quickDown.addEventListener('click', () => adjustFontSize(-1));
 
     // The split divider and the AI panel both resize the terminal area without
     // the window changing size, so a window resize listener alone is not
@@ -177,6 +209,12 @@
 
     updateButton();
 
+    // The quick text-size arrows, for every layout (#257). Born gated to
+    // dense views (#240), but one pane benefits from the same two clicks —
+    // the gate was a rule nobody was served by.
+    const quick = document.getElementById('font-quick');
+    if (quick) quick.classList.remove('hidden');
+
     // The strip marks the one tab with the keyboard. Under a tiled layout
     // several others are also on screen, and without saying which, the strip
     // implies the rest are hidden when they are not.
@@ -245,12 +283,45 @@
     if (typeof window.refitTerminals === 'function') window.refitTerminals(visible());
   }
 
+  /**
+   * Nudge the terminal font size from the tab bar (#240).
+   *
+   * The same setting the Settings panel edits — one value, not a second
+   * per-view size that could disagree with it. Applied optimistically so
+   * every pane changes on the click rather than a round trip later, then
+   * saved so a reload keeps the choice.
+   */
+  async function adjustFontSize(delta) {
+    const terminal = (window.shellmateSettings || {}).terminal || {};
+    const current = Number(terminal.font_size) || 14;
+    const size = Math.max(8, Math.min(24, current + delta));
+    if (size === current) return;
+
+    window.shellmateSettings = window.shellmateSettings || {};
+    window.shellmateSettings.terminal = { ...terminal, font_size: size };
+    window.dispatchEvent(new CustomEvent('shellmate:settings-changed',
+      { detail: window.shellmateSettings }));
+
+    try {
+      await fetch('/api/settings', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ settings: { terminal: { font_size: size } } }),
+      });
+      if (typeof window.reloadSettings === 'function') await window.reloadSettings();
+    } catch (_) {
+      // The visible change already happened; persistence failing quietly
+      // costs a preference, not a view.
+    }
+  }
+
   // -------------------------------------------------------------------------
   // The picker
   // -------------------------------------------------------------------------
 
   function updateButton() {
-    button.title = `Layout: ${layout().name} (Ctrl+Alt+1…${LAYOUTS.length})`;
+    const reach = Math.min(LAYOUTS.length, SHORTCUT_MAX);
+    button.title = `Layout: ${layout().name} (Ctrl+Alt+1…${reach}, more in the picker)`;
     button.innerHTML = '';
     button.appendChild(preview(layout(), true));
   }
@@ -296,7 +367,9 @@
 
       const shortcut = document.createElement('span');
       shortcut.className = 'layout-menu-key';
-      shortcut.textContent = `Ctrl+Alt+${i + 1}`;
+      // Only where a key actually reaches: printing Ctrl+Alt+12 beside a
+      // layout the handler cannot select would be a small lie.
+      shortcut.textContent = i < SHORTCUT_MAX ? `Ctrl+Alt+${i + 1}` : '';
 
       item.append(preview(l), name, shortcut);
       item.addEventListener('click', () => { set(l.id); closeMenu(); });
@@ -305,7 +378,10 @@
 
     document.body.appendChild(menu);
     const rect = button.getBoundingClientRect();
-    menu.style.top  = `${rect.bottom + 4}px`;
+    // Clamped on both axes now the list is long enough to run off the
+    // bottom; the menu itself scrolls past its max-height.
+    menu.style.top  = `${Math.max(8, Math.min(rect.bottom + 4,
+      window.innerHeight - menu.offsetHeight - 8))}px`;
     menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8))}px`;
 
     setTimeout(() => document.addEventListener('click', closeMenu, { once: true }), 0);

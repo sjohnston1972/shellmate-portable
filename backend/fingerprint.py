@@ -122,15 +122,22 @@ def _from_prompt(prompt: str) -> tuple[str, float]:
     Weak evidence, and mostly treated as such: enough to pick sensible
     aliases, rarely enough on its own to start sending commands.
 
-    It is tempting to score these higher — ``hostname(config)#`` really is
-    distinctive, and nothing else prints it.  But distinctive *of what?*  It
-    says the device is Cisco-shaped, and IOS, NX-OS, ASA and EOS all print it
-    identically.  The command we would act on belongs to the platform, not the
-    family: ``terminal length 0`` is right on three of those four and wrong on
-    an ASA, which wants ``terminal pager 0``.  A prompt that narrows the field
-    to four vendorsis not the same as one that picks the platform, so these
-    stay below :data:`ACT_THRESHOLD` and the user gets an explicit override
-    instead (see ``onboard.as_chosen``).
+    Nothing here requires configuration mode (#255). A fresh session lands
+    at ``hostname>`` or ``hostname#``, and both are matched — at the weakest
+    score, because a bare ``#`` is barely evidence. ``hostname(config)#`` is
+    a *stronger* clue when it happens to be on screen, never a prerequisite:
+    someone who later enters config mode sharpens the guess, and someone who
+    never does still gets identified from the exec prompt or the banner.
+
+    It is tempting to score the config shape higher — ``hostname(config)#``
+    really is distinctive, and nothing else prints it.  But distinctive *of
+    what?*  It says the device is Cisco-shaped, and IOS, NX-OS, ASA and EOS
+    all print it identically.  The command we would act on belongs to the
+    platform, not the family: ``terminal length 0`` is right on three of
+    those four and wrong on an ASA, which wants ``terminal pager 0``.  A
+    prompt that narrows the field to four vendors is not the same as one that
+    picks the platform, so these stay below :data:`ACT_THRESHOLD` and the
+    user gets an explicit override instead (see ``onboard.as_chosen``).
 
     ``:~`` is the exception, and only because it fails safely: a shell prompt
     is unmistakable, and the Linux profile has no paging command to get wrong.

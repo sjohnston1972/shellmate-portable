@@ -113,6 +113,17 @@
            a generic icon, so what is on screen is legible at a glance. -->
       <button id="btn-layout" title="Layout"></button>
 
+      <!-- Quick terminal text size (#240, #257) — every layout, because the
+           fix for unreadable text should not cost a trip into Settings. -->
+      <div id="font-quick">
+        <button type="button" id="font-quick-down" class="icon-btn" title="Smaller terminal text" aria-label="Smaller terminal text">
+          <span class="material-symbols-outlined">keyboard_arrow_down</span>
+        </button>
+        <button type="button" id="font-quick-up" class="icon-btn" title="Larger terminal text" aria-label="Larger terminal text">
+          <span class="material-symbols-outlined">keyboard_arrow_up</span>
+        </button>
+      </div>
+
       <!-- The assistant is half of the split screen rather than a panel that
            opens over it, so it belongs with the layout picker — the two
            controls that decide what the window is showing — and not in the
@@ -229,7 +240,7 @@
               <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>W</kbd> Close tab</span>
               <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>1–9</kbd> Switch tab</span>
               <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>F</kbd> Find in terminal</span>
-              <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>1–8</kbd> Layout</span>
+              <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>1–9</kbd> Layout</span>
               <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> Broadcast</span>
             </div>
           </div>
@@ -955,6 +966,51 @@ GigEth0/2     unassigned    YES unset  down     down
             </select>
           </div>
 
+          <!-- Toast appearance (#254). The accent drives the coloured edge,
+               icon and status-bar countdown of every toast of that severity;
+               Reset hands back to the theme's own colour. -->
+          <div class="setting-row">
+            <label class="setting-label" for="setting-toast-accent-info"
+                   data-tip="The coloured edge and icon on ordinary notifications — confirmations, downloads, FYIs.||Reset returns to the theme's accent, which follows dark and light automatically. A custom colour is used as given in both themes.">Toast accent — info</label>
+            <div class="setting-input-group">
+              <input type="color" id="setting-toast-accent-info" class="toast-accent" />
+              <button type="button" class="btn-tertiary toast-accent-reset" data-accent="setting-toast-accent-info">Reset</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-toast-accent-warning"
+                   data-tip="The edge and icon on warnings — pending reloads, drift, things worth a look.||Reset returns to the theme's warning colour.">Toast accent — warning</label>
+            <div class="setting-input-group">
+              <input type="color" id="setting-toast-accent-warning" class="toast-accent" />
+              <button type="button" class="btn-tertiary toast-accent-reset" data-accent="setting-toast-accent-warning">Reset</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-toast-accent-critical"
+                   data-tip="The edge and icon on critical alerts — the final countdown thresholds.||Reset returns to the theme's error colour.">Toast accent — critical</label>
+            <div class="setting-input-group">
+              <input type="color" id="setting-toast-accent-critical" class="toast-accent" />
+              <button type="button" class="btn-tertiary toast-accent-reset" data-accent="setting-toast-accent-critical">Reset</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label" for="setting-toast-seconds"
+                   data-tip="How long an ordinary toast stays on screen. Critical ones stay two minutes, and sticky ones until answered.||Saved immediately — this is the same value as the advanced Alerts row, reachable from here because this is where the rest of the toast's appearance lives.">Toast duration</label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-toast-seconds" class="setting-input setting-input-sm" min="3" max="120" step="1" />
+              <span class="setting-unit">s</span>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">Preview
+              <span class="setting-hint">Fires one sample toast of each kind, with the colours and duration above.</span>
+            </label>
+            <button type="button" id="toast-preview" class="btn-secondary">
+              <span class="material-symbols-outlined">send</span>
+              Preview toasts
+            </button>
+          </div>
+
           <div class="setting-row">
             <label class="setting-label" for="setting-chat-enter">Enter in the chat box
               <span class="setting-hint">With "new line", Ctrl+Enter sends instead.</span>
@@ -1077,6 +1133,31 @@ GigEth0/2     unassigned    YES unset  down     down
               <span class="toggle-track"></span>
             </label>
           </div>
+
+          <!-- Destructive commands, in plain sight (#251, #252). One global
+               switch over every confirmation, and the door to the per-
+               platform lists that say which commands count. -->
+          <div class="setting-row">
+            <label class="setting-label" for="setting-confirm-destructive"
+                   data-tip="One switch over every destructive-command confirmation: commands you type and commands the assistant suggests. Broadcast always confirms regardless — sending to a fleet unasked is not a preference.||Off, listed commands are sent like any other. The per-platform lists below still say which commands count, for when this comes back on.">Confirm destructive commands</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-confirm-destructive" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label">The command lists
+              <span class="setting-hint">Which commands get the "are you sure" — per platform, because reload on IOS is not request system reboot on Junos.</span>
+            </label>
+            <button type="button" id="behaviour-edit-dangerous" class="btn-secondary">
+              <span class="material-symbols-outlined">list_alt</span>
+              Edit the command lists
+            </button>
+          </div>
+          <!-- The lists themselves, readable in place (#258) — filled from
+               /api/platforms when Settings opens. Editing stays in Platform
+               Definitions, where the rest of each platform lives. -->
+          <div id="dangerous-lists"></div>
 
           <!-- Advanced values for this area render here as a
                subsection (#152) — the same rows, one heading fewer. The slot
@@ -1577,7 +1658,28 @@ GigEth0/2     unassigned    YES unset  down     down
                subsection (#152) — the same rows, one heading fewer. -->
           <div class="settings-slot" data-category="alerts"></div>
         </section>
-        <div class="settings-slot" data-category="broadcast"></div>
+        <!-- A real section rather than a bare slot (#239): this used to be
+             four pacing rows and nothing else, and people arriving from the
+             rail expected the command library here. The library lives in the
+             Broadcast panel; this says so and takes them there. -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Broadcast</h3>
+          <p class="settings-section-hint">Send a command, or a sequence, to
+            several devices at once. The command <strong>library</strong> —
+            saved snippets, vendor groups, the quick-broadcast bolt — lives in
+            the Broadcast panel itself, not here; these rows only govern its
+            pacing and safety.</p>
+          <div class="setting-row">
+            <label class="setting-label">Broadcast panel
+              <span class="setting-hint">Targets, the command library, and sending. Also on Ctrl+Shift+B.</span>
+            </label>
+            <button type="button" id="broadcast-open-panel" class="btn-secondary">
+              <span class="material-symbols-outlined">send</span>
+              Open the Broadcast panel
+            </button>
+          </div>
+          <div class="settings-slot" data-category="broadcast"></div>
+        </section>
         <div class="settings-slot" data-category="discovery"></div>
 
         <!-- ===== Diagnostics ===== -->
@@ -2227,6 +2329,33 @@ GigEth0/2     unassigned    YES unset  down     down
           Send
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Session log viewer (#236). Reading a log should not require leaving
+       the application — the download machinery is the fallback, not the
+       route. Same shape as the paste confirmation: a centred dialog over a
+       scrim, with the text in a <pre> and the copy tools in the header. -->
+  <div id="logview-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="logview-title">
+    <div id="logview-dialog">
+      <div id="logview-header">
+        <span class="material-symbols-outlined" style="color:var(--primary)">description</span>
+        <h2 id="logview-title">Session log</h2>
+        <span id="logview-meta"></span>
+        <span class="logview-spacer"></span>
+        <button type="button" id="logview-copy" class="btn-secondary" title="Copy the whole log to the clipboard">
+          <span class="material-symbols-outlined">content_copy</span>
+          Copy all
+        </button>
+        <button type="button" id="logview-download" class="btn-secondary" title="Download the file">
+          <span class="material-symbols-outlined">download</span>
+          Download
+        </button>
+        <button type="button" id="logview-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <pre id="logview-content"></pre>
     </div>
   </div>
 

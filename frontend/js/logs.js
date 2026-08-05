@@ -1,6 +1,6 @@
 /**
  * logs.js — Logs panel for ShellMate.
- * Shows available session log files and allows downloading them.
+ * Shows available session log files, views them in place, downloads them.
  */
 (function () {
   'use strict';
@@ -19,6 +19,8 @@
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) closeLogs();
     });
+
+    _initViewer();
   });
 
   async function openLogs() {
@@ -102,26 +104,204 @@
         return;
       }
       listEl.innerHTML = '';
+
+      // What the folder is costing altogether (#243) — the sizes are already
+      // in the listing, so the total is free.
+      const totalBytes = files.reduce((sum, f) => sum + (f.size_bytes || 0), 0);
+      const totalEl = document.createElement('div');
+      totalEl.className = 'logs-total';
+      totalEl.textContent = `${files.length} log${files.length === 1 ? '' : 's'} · `
+        + (totalBytes >= 1048576
+            ? `${(totalBytes / 1048576).toFixed(1)} MB`
+            : `${(totalBytes / 1024).toFixed(1)} KB`)
+        + ' in total';
+      listEl.appendChild(totalEl);
+
       files.forEach(f => {
+        // createElement throughout — the filename carries a device-supplied
+        // hostname, and interpolating it into markup let a quote in a
+        // hostname break the row.
         const row = document.createElement('div');
         row.className = 'log-row';
-        const sizeKb = (f.size_bytes / 1024).toFixed(1);
-        const date = new Date(f.modified).toLocaleString();
-        row.innerHTML = `
-          <span class="material-symbols-outlined log-icon">description</span>
-          <div class="log-info">
-            <span class="log-name">${f.filename}</span>
-            <span class="log-meta">${date} &middot; ${sizeKb} KB</span>
-          </div>
-          <a class="log-download btn-secondary" href="/api/logs/${encodeURIComponent(f.filename)}" download="${f.filename}" title="Download">
-            <span class="material-symbols-outlined">download</span>
-          </a>
-        `;
+
+        const icon = document.createElement('span');
+        icon.className = 'material-symbols-outlined log-icon';
+        icon.textContent = 'description';
+
+        const info = document.createElement('div');
+        info.className = 'log-info';
+        const name = document.createElement('span');
+        name.className = 'log-name';
+        name.textContent = f.filename;
+        const meta = document.createElement('span');
+        meta.className = 'log-meta';
+        meta.textContent = `${new Date(f.modified).toLocaleString()} · `
+          + `${(f.size_bytes / 1024).toFixed(1)} KB`;
+        info.append(name, meta);
+
+        // The row opens the viewer — reading a log should not require
+        // leaving the application (#236).
+        row.title = 'Click to view';
+        row.addEventListener('click', () => openViewer(f));
+
+        const dl = document.createElement('button');
+        dl.type = 'button';
+        dl.className = 'log-download btn-secondary';
+        dl.title = 'Download';
+        const dlIcon = document.createElement('span');
+        dlIcon.className = 'material-symbols-outlined';
+        dlIcon.textContent = 'download';
+        dl.appendChild(dlIcon);
+        dl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          downloadLog(f.filename);
+        });
+
+        row.append(icon, info, dl);
         listEl.appendChild(row);
       });
     } catch (e) {
       listEl.innerHTML = '<div class="logs-empty logs-error">Failed to load logs.</div>';
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Downloading (#234)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Fetch the file and hand it to the browser as a blob.
+   *
+   * The old form was a bare `<a download>`, which leans entirely on the
+   * browser's download machinery — and in the native window that machinery
+   * quietly did nothing, with no error to see. Fetching first means a failure
+   * has a status code and a toast, and success is announced rather than
+   * assumed.
+   */
+  async function downloadLog(filename) {
+    try {
+      const res = await fetch(`/api/logs/${encodeURIComponent(filename)}`);
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      if (window.shellmateAlerts && window.shellmateAlerts.notify) {
+        window.shellmateAlerts.notify({
+          icon:  'download',
+          title: 'Download complete',
+          body:  `${filename} — check your downloads folder.`,
+          // Somewhere to click (#245). The browser's downloads folder is
+          // not ours to open; the originals' folder is.
+          action: {
+            label: 'Open the log folder',
+            onClick: () => fetch('/api/logs/reveal', { method: 'POST' })
+              .catch(() => { /* the folder not opening is not worth an error */ }),
+          },
+        });
+      }
+    } catch (e) {
+      if (window.shellmateAlerts && window.shellmateAlerts.notify) {
+        window.shellmateAlerts.notify({
+          severity: 'warning',
+          icon:  'error',
+          title: 'Download failed',
+          body:  String(e.message || e),
+        });
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // The viewer (#236)
+  // -------------------------------------------------------------------------
+
+  /** Longest text the viewer will render; beyond it, the tail wins. */
+  const VIEW_LIMIT = 2_000_000;
+
+  let _viewerText = '';
+  let _viewerFile = '';
+
+  function _initViewer() {
+    const overlayEl = document.getElementById('logview-overlay');
+    if (!overlayEl) return;
+
+    document.getElementById('logview-close')
+      .addEventListener('click', closeViewer);
+    overlayEl.addEventListener('click', (e) => {
+      if (e.target === overlayEl) closeViewer();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !overlayEl.classList.contains('hidden')) {
+        closeViewer();
+      }
+    });
+
+    document.getElementById('logview-copy')
+      .addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(_viewerText);
+        } catch (_) {
+          // The fallback route older webviews need.
+          const ta = document.createElement('textarea');
+          ta.value = _viewerText;
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); } catch (_) { /* give up */ }
+          ta.remove();
+        }
+        if (typeof window._showCopyToast === 'function') window._showCopyToast();
+      });
+
+    document.getElementById('logview-download')
+      .addEventListener('click', () => {
+        if (_viewerFile) downloadLog(_viewerFile);
+      });
+  }
+
+  async function openViewer(f) {
+    const overlayEl = document.getElementById('logview-overlay');
+    const content = document.getElementById('logview-content');
+    const metaEl = document.getElementById('logview-meta');
+    if (!overlayEl || !content) return;
+
+    document.getElementById('logview-title').textContent = f.filename;
+    metaEl.textContent = `${new Date(f.modified).toLocaleString()} · `
+      + `${(f.size_bytes / 1024).toFixed(1)} KB`;
+    content.textContent = 'Loading…';
+    overlayEl.classList.remove('hidden');
+
+    try {
+      const res = await fetch(`/api/logs/${encodeURIComponent(f.filename)}`);
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      const text = await res.text();
+      _viewerText = text;
+      _viewerFile = f.filename;
+      // The tail, not the head: on a log too big to show whole, the recent
+      // end is the part someone opens it for. Copy still takes everything.
+      content.textContent = text.length > VIEW_LIMIT
+        ? `[…first ${(text.length - VIEW_LIMIT).toLocaleString()} characters `
+          + `not shown — download or copy for the whole file…]\n`
+          + text.slice(-VIEW_LIMIT)
+        : text;
+      content.scrollTop = content.scrollHeight;
+    } catch (e) {
+      _viewerText = '';
+      _viewerFile = '';
+      content.textContent = `Could not load the log: ${e.message || e}`;
+    }
+  }
+
+  function closeViewer() {
+    const overlayEl = document.getElementById('logview-overlay');
+    if (overlayEl) overlayEl.classList.add('hidden');
+    _viewerText = '';
+    _viewerFile = '';
   }
 
   window.openLogs = openLogs;

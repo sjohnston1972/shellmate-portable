@@ -1374,6 +1374,14 @@
     [
       { action: 'reconnect', icon: 'add_circle', label: 'Reconnect',
         setting: 'reconnect', when: (tab) => tab && !tab.isConnected },
+      // The fleet variant (#241): after an outage drops half the strip,
+      // reconnecting one tab at a time is the chore this menu exists to end.
+      { action: 'reconnect-all', icon: 'add_circle', label: 'Reconnect all tabs',
+        setting: 'reconnect_all', when: () => tabs.some(t => !t.isConnected) },
+      // The menu is where the mouse already is (#242) — same route as
+      // Ctrl+T and the New button.
+      { action: 'new-connection', icon: 'add', label: 'New connection',
+        setting: 'new_connection' },
     ],
     [
       { action: 'clear', icon: 'backspace', label: 'Clear console',
@@ -1568,6 +1576,20 @@
       if (tab) {
         switch (btn.dataset.action) {
           case 'reconnect': _reconnectSession(tab);   break;
+          case 'reconnect-all':
+            // Sequentially, not in a burst — the reconnects share the
+            // backend and the credentials path, and a device that just came
+            // back does not need five simultaneous logins from one client.
+            (async () => {
+              for (const t of tabs.filter(x => !x.isConnected)) {
+                await _reconnectSession(t);
+              }
+            })();
+            break;
+          case 'new-connection':
+            if (typeof window.openNewTabTarget === 'function') window.openNewTabTarget();
+            else if (typeof window.showConnectionDialog === 'function') window.showConnectionDialog();
+            break;
           case 'clear':     _clearConsole(tab);       break;
           case 'copy':      _copyHistory(tab);        break;
           case 'copy-address': _copyAddress(tab);      break;

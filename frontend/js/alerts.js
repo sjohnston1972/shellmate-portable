@@ -92,6 +92,8 @@
     (document.getElementById('terminal-pane') || document.body).appendChild(toastHost);
 
     statusEl = document.getElementById('status-alert');
+    // The countdown text is also the dismiss affordance (#265).
+    if (statusEl) statusEl.addEventListener('click', _dismissFromStatus);
 
     // The two moments the dashboard comes and goes.
     window.addEventListener('shellmate:dashboard-changed', syncVisibility);
@@ -158,7 +160,12 @@
       raise({
         severity: 'warning',
         title:    `${labelFor(sessionId)}: ${KIND_LABEL[pending.kind] || 'action'} pending`,
-        body:     pending.confident
+        body:     pending.awaiting_confirmation
+          // The typed command was seen, but the device has not yet said the
+          // schedule is real — the countdown starts when it does (#248).
+          ? `${labelFor(sessionId)} ${KIND_VERB[pending.kind] || 'will act'} if the ` +
+            `device confirms it. The countdown starts when it does.`
+          : pending.confident
           ? `${labelFor(sessionId)} ${KIND_VERB[pending.kind] || 'will act'} — see the countdown.`
           : `${labelFor(sessionId)} ${KIND_VERB[pending.kind] || 'will act'}, but the ` +
             `time was not readable. No countdown is shown rather than a wrong one.`,
@@ -215,6 +222,7 @@
 
       paintTab(sessionId, entry.pending, left, severity);
       escalate(sessionId, entry, left, severity);
+      updateBigWarning(sessionId, entry, left);
 
       if (!worst || rank(severity) > rank(worst.severity) ||
           (left !== null && worst.left !== null && left < worst.left)) {
@@ -222,7 +230,101 @@
       }
     });
 
+    // The warning must not outlive its pending — a cancel or an expiry
+    // clears the tracked entry without passing through the branch above.
+    if (bigWarning && !tracked.has(bigWarning.sessionId)) removeBigWarning();
+
     paintStatus(worst);
+  }
+
+  // -------------------------------------------------------------------------
+  // The last-chance warning (#249)
+  //
+  // Twenty seconds out, a toast in the corner is no longer proportionate: the
+  // device is about to drop, and someone looking at another tab has exactly
+  // one chance to notice. This is deliberately the loudest thing in the
+  // application — centre-screen, above everything, and it stays until
+  // dismissed, jumped to, or the reload happens.
+  // -------------------------------------------------------------------------
+
+  const BIG_WARNING_AT = 20;
+
+  let bigWarning = null;   // { sessionId, count } while on screen
+
+  function updateBigWarning(sessionId, entry, left) {
+    const due = left !== null && left >= 0 && left <= BIG_WARNING_AT
+      && !entry.bigDismissed;
+
+    if (due) {
+      if (!bigWarning) showBigWarning(sessionId, entry);
+      if (bigWarning && bigWarning.sessionId === sessionId) {
+        bigWarning.count.textContent = formatLeft(left);
+      }
+      return;
+    }
+    if (bigWarning && bigWarning.sessionId === sessionId) removeBigWarning();
+  }
+
+  function showBigWarning(sessionId, entry) {
+    const overlay = document.createElement('div');
+    overlay.id = 'reload-warning';
+
+    const dialog = document.createElement('div');
+    dialog.id = 'reload-warning-dialog';
+
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined reload-warning-icon';
+    icon.textContent = 'warning';
+
+    const title = document.createElement('div');
+    title.className = 'reload-warning-title';
+    title.textContent =
+      `${labelFor(sessionId)} ${KIND_VERB[entry.pending.kind] || 'will act'} in`;
+
+    const count = document.createElement('div');
+    count.className = 'reload-warning-count';
+
+    const body = document.createElement('div');
+    body.className = 'reload-warning-body';
+    body.textContent = entry.pending.source || '';
+
+    const actions = document.createElement('div');
+    actions.className = 'reload-warning-actions';
+
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'btn-secondary';
+    dismiss.textContent = 'Dismiss this warning';
+    dismiss.addEventListener('click', () => {
+      entry.bigDismissed = true;
+      removeBigWarning();
+    });
+
+    const jump = document.createElement('button');
+    jump.type = 'button';
+    jump.className = 'btn-primary';
+    jump.textContent = 'Jump to tab';
+    jump.addEventListener('click', () => {
+      entry.bigDismissed = true;
+      removeBigWarning();
+      if (typeof window.switchToTabBySessionId === 'function') {
+        window.switchToTabBySessionId(sessionId);
+      }
+    });
+
+    actions.append(dismiss, jump);
+    dialog.append(icon, title, count, body, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    bigWarning = { sessionId, count };
+    if (enabled('sound', true)) beep('critical');
+  }
+
+  function removeBigWarning() {
+    const el = document.getElementById('reload-warning');
+    if (el) el.remove();
+    bigWarning = null;
   }
 
   function rank(severity) {
@@ -269,10 +371,13 @@
   }
 
   function paintStatus(worst) {
+    statusWorst = worst || null;
     if (!statusEl) return;
     if (!worst) {
       statusEl.textContent = '';
       statusEl.className = '';
+      statusEl.title = '';
+      statusEl.style.cursor = '';
       return;
     }
     const name = labelFor(worst.sessionId);
@@ -281,6 +386,33 @@
       ? `${what} pending on ${name} (time unknown)`
       : `${what} on ${name} in ${formatLeft(worst.left)}`;
     statusEl.className = `status-alert-${worst.severity}`;
+    statusEl.title = 'Click to dismiss this pending action';
+    statusEl.style.cursor = 'pointer';
+  }
+
+  /** The pending the status bar currently names, for the dismiss click. */
+  let statusWorst = null;
+
+  /**
+   * Offer to stop tracking what the status bar shows (#265).
+   *
+   * A pending with no readable time otherwise sits there for the six-hour
+   * stale limit with nothing anyone can do about it. Dismissing is local:
+   * nothing is sent to the device, and anything genuinely scheduled on it
+   * still happens — the dialog says so.
+   */
+  async function _dismissFromStatus() {
+    if (!statusWorst) return;
+    const what = (KIND_LABEL[statusWorst.pending.kind] || 'action').toLowerCase();
+    const ok = await window.shellmateDialog.confirm({
+      title: `Dismiss the pending ${what}?`,
+      body:  'ShellMate stops tracking it here. Nothing is sent to the '
+             + 'device — anything actually scheduled on it still happens.',
+      confirmLabel: 'Dismiss',
+    });
+    if (ok && typeof window.dismissPendingAction === 'function') {
+      window.dismissPendingAction(statusWorst.sessionId);
+    }
   }
 
   function reduceMotion() {
@@ -307,6 +439,11 @@
         body:     `${KIND_LABEL[entry.pending.kind] || 'Action'}: ${entry.pending.source}`,
         sessionId,
         sound:    true,
+        // A threshold toast is urgent by nature: without this, shouldShow()
+        // dropped the 600/300/60s warnings whenever the dashboard was open
+        // or another tab had focus — exactly when a pop-up is the only
+        // channel left (#250). Only the 10s critical survived.
+        deadline_ms: entry.pending.deadline_ms,
       });
     });
   }

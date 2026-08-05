@@ -177,7 +177,10 @@ CATEGORIES = {
     "history":   "Recording and history",
     "capture":   "Capture timing and limits",
     "alerts":    "Alert timing and thresholds",
-    "broadcast": "Broadcast",
+    # Not "Broadcast": the slot renders inside the hand-written Broadcast
+    # section (#239), and a subsection repeating its section's name reads as
+    # a rendering fault.
+    "broadcast": "Pacing and safety",
     "ai":        "AI Assistant",
     "files":     "Files and panels",
     "discovery": "Network Discovery",

@@ -92,6 +92,9 @@
       const active = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
       if (active) selected.add(active.sessionId);
     }
+    // A search left behind by the last visit filtered the next one down to
+    // "Nothing matches." — which read as the library being hidden (#239).
+    if (searchEl) searchEl.value = '';
     renderTargets();
     results.innerHTML = '';
     overlay.classList.remove('hidden');
@@ -226,12 +229,20 @@
   // The library
   // -------------------------------------------------------------------------
 
+  /** Whether the last library fetch failed — "empty" and "unreachable" are
+   *  different sentences, and showing the first for the second read as the
+   *  library being hidden (#239). */
+  let libraryError = false;
+
   async function loadLibrary() {
     try {
       const res = await fetch('/api/snippets');
-      library = res.ok ? (await res.json()).snippets : [];
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      library = (await res.json()).snippets || [];
+      libraryError = false;
     } catch (_) {
       library = [];
+      libraryError = true;
     }
     renderLibrary();
   }
@@ -297,7 +308,9 @@
     if (!matches.length) {
       const empty = document.createElement('div');
       empty.className = 'broadcast-empty';
-      empty.textContent = query ? 'Nothing matches.' : 'The library is empty.';
+      empty.textContent = libraryError
+        ? 'Could not load the library — check that ShellMate is reachable and reopen the panel.'
+        : (query ? 'Nothing matches.' : 'The library is empty.');
       libraryEl.appendChild(empty);
       return;
     }
@@ -418,8 +431,13 @@
     quick.title = snippet.quick
       ? 'On the tab right-click menu. Click to remove it.'
       : 'Add to the tab right-click menu';
-    quick.innerHTML = '<span class="material-symbols-outlined">'
-      + (snippet.quick ? 'bolt' : 'bolt') + '</span>';
+    // textContent, not a concatenated innerHTML string: the icon scanners in
+    // tools/vendor_assets.py and test_icons.py only see names written plainly,
+    // and 'bolt' survived subsetting by luck rather than declaration.
+    const quickIcon = document.createElement('span');
+    quickIcon.className = 'material-symbols-outlined';
+    quickIcon.textContent = 'bolt';
+    quick.appendChild(quickIcon);
     quick.addEventListener('click', async (e) => {
       e.stopPropagation();
       await fetch('/api/snippets/' + encodeURIComponent(snippet.id), {

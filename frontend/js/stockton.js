@@ -47,6 +47,10 @@
     // Rebuilt on save, because a reset or a changed value alters what the
     // "modified" marks say.
     window.addEventListener('shellmate:settings-changed', load);
+    // And when something else writes an advanced value — the global
+    // destructive-command switch (#252) sets two of these rows' keys, and
+    // the rows must not go on showing the old values.
+    window.addEventListener('shellmate:advanced-changed', load);
   });
 
   async function open(category) {
