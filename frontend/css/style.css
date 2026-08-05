@@ -2835,6 +2835,12 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   background: var(--surface-high);
 }
 
+/* The application's own footprint (#266). */
+#status-usage {
+  color: var(--on-surface-muted);
+  white-space: nowrap;
+}
+
 /* How long the active session has been up, beside the connection state
    (#227). Monospace so the digits do not shuffle sideways every second as
    their widths change. */

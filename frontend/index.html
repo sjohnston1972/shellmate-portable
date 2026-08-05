@@ -378,6 +378,9 @@
       <span id="status-tabs">Tabs: 0</span>
       <span class="status-sep">|</span>
       <span id="status-context" title="Estimated AI context usage">Context: —</span>
+      <!-- ShellMate's own footprint (#266). Wrapped with its separator so an
+           unavailable reading hides both rather than leaving a bare pipe. -->
+      <span id="status-usage-wrap" class="hidden"><span class="status-sep">|</span><span id="status-usage" title="ShellMate's own processor and memory use — the application, not the machine"></span></span>
       <!-- Pushed to the right and only present when something is pending, so
            the countdown is the one thing in the bar that draws the eye. -->
       <span id="status-alert"></span>
@@ -2479,6 +2482,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/filepicker.js"></script>
   <!-- Before tabs.js, which starts a session clock as each tab is created. -->
   <script src="/static/js/uptime.js"></script>
+  <script src="/static/js/usage.js"></script>
   <script src="/static/js/tabs.js"></script>
   <script src="/static/js/layout.js"></script>
   <script src="/static/js/alerts.js"></script>

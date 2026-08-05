@@ -1972,6 +1972,87 @@ async def system_info() -> dict:
     }
 
 
+#: Last CPU sample, for the utilisation delta below. Module state rather than
+#: per-request, because utilisation only means anything *between* two readings.
+_CPU_SAMPLE = {"process": 0.0, "wall": 0.0}
+
+
+def _process_stats() -> dict:
+    """
+    ShellMate's own footprint (#266) — this process, not the machine.
+
+    No psutil: a dependency is a real cost in a portable build, and both
+    numbers are available for free. CPU is the process_time delta over the
+    wall-clock delta since the last call (it can exceed 100% — the server is
+    threaded and the number is per-process, not per-core). Memory is the
+    working set via psapi on Windows, /proc on anything else. Either being
+    unavailable reports None, never an error.
+    """
+    import time as _time
+
+    cpu = None
+    now_process, now_wall = _time.process_time(), _time.monotonic()
+    last_process, last_wall = _CPU_SAMPLE["process"], _CPU_SAMPLE["wall"]
+    _CPU_SAMPLE["process"], _CPU_SAMPLE["wall"] = now_process, now_wall
+    if last_wall and now_wall > last_wall:
+        cpu = max(0.0, min(999.0,
+                           (now_process - last_process)
+                           / (now_wall - last_wall) * 100.0))
+
+    memory_mb = None
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+
+            class _MemoryCounters(ctypes.Structure):
+                _fields_ = [
+                    ("cb", wintypes.DWORD),
+                    ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t),
+                ]
+
+            # Explicit signatures, not windll defaults: the untyped call
+            # truncates the pseudo-handle on 64-bit and fails with no error
+            # to read — it simply reports zero.
+            psapi = ctypes.WinDLL("psapi")
+            kernel32 = ctypes.WinDLL("kernel32")
+            kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+            psapi.GetProcessMemoryInfo.argtypes = [
+                wintypes.HANDLE, ctypes.POINTER(_MemoryCounters), wintypes.DWORD]
+            psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+
+            counters = _MemoryCounters()
+            counters.cb = ctypes.sizeof(counters)
+            if psapi.GetProcessMemoryInfo(
+                    kernel32.GetCurrentProcess(),
+                    ctypes.byref(counters), counters.cb):
+                memory_mb = counters.WorkingSetSize / (1024 * 1024)
+        else:
+            with open("/proc/self/status", encoding="utf-8") as fh:
+                for line in fh:
+                    if line.startswith("VmRSS:"):
+                        memory_mb = float(line.split()[1]) / 1024
+                        break
+    except Exception:
+        pass
+
+    return {"cpu_percent": cpu, "memory_mb": memory_mb}
+
+
+@app.get("/api/system/stats")
+async def system_stats() -> dict:
+    """The process's CPU and memory, for the status bar (#266)."""
+    return await asyncio.to_thread(_process_stats)
+
+
 def _build_time() -> str:
     """
     When the running copy was produced, as a readable local timestamp.
