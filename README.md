@@ -6,35 +6,58 @@ Ships as a **single portable executable** — no Python, no installer, no admini
 
 > A fork of [ShellMate](https://github.com/sjohnston1972/shellmate), reshaped around portability and a much wider feature set.
 
-![ShellMate welcome screen](docs/screenshot-welcome.png)
+![ShellMate home view — group tree, recent connections and shortcuts](docs/screenshot-home.png)
 
 ## What it does
 
+### Terminal and connections
+
 - **SSH, serial console and telnet** — one tabbed terminal for all three. SSH supports password or key authentication (Ed25519/ECDSA/RSA/DSA, encrypted keys included) and jump-host chaining through a bastion. Serial enumerates the COM ports actually present on the machine and sends break for ROMMON access. Telnet negotiates options properly and can answer login prompts for you
+- **Multi-tab terminal** — connect to multiple network devices simultaneously, each in its own tab with an independent session, buffer and WebSocket
+- **Split views** — fifteen tile layouts up to a 4×4 grid (`Ctrl+Alt+1`–`9` for the first nine, the rest in the picker), with tabs assigned to panes from their context menu. Sessions in hidden panes keep running and keep their scrollback. Quick text-size arrows sit beside the layout button, so a wall of panes is two clicks from readable
+- **Tab management** — drag to reorder, `Ctrl+1–9` shortcuts, `Ctrl+T`/`Ctrl+W`, and a right-click menu that earns its place: reconnect (one tab or all), duplicate, new connection, per-tab colour scheme, keep-alive, copy address/history, disconnect, close tab and close all — closing sends an explicit disconnect to the device before teardown
+- **Groups** — organise thousands of saved connections in a collapsible tree with a real root node, colours, icons (picked at creation, site icon first), favourites and nested subgroups. Per-group connect-all/disconnect-all, drag-and-drop membership, and a New Sub-Group button that follows your selection
 - **SFTP file browser** — pull a config off a device or push an image to it over the SSH connection the tab already has open. No second login, no separate tool
-- **Encrypted credentials vault** — API keys and remembered device passwords are encrypted on disk, never in plain text. By default they are tied to your Windows account, so a lost USB stick is useless to anyone else; switch to a master password if you need the vault to work on any machine
-- **Knows what it is talking to** — identifies IOS/IOS-XE, NX-OS, ASA, Junos, PAN-OS, Arista EOS and Linux from the login banner, then adapts: turns paging off with the right command so you stop typing `terminal length 0`, picks the right config command, and shows the platform and version in the status bar. Nothing is sent to a device it cannot confidently identify — and when that happens it says so, names the command it declined to send, and lets you name the platform yourself
+- **Network discovery** — scan a subnet, range or list, fingerprint what answers, and save the results as connections
+- **Smart copy/paste** — `Ctrl+C` (smart — copies selection or passes SIGINT), `Ctrl+Shift+C/V`, right-click paste, and confirmation with chunked pacing for large pastes
+
+### Device awareness and safety
+
+- **Knows what it is talking to** — identifies IOS/IOS-XE, NX-OS, ASA, Junos, PAN-OS, Arista EOS and Linux from the login banner, then adapts: turns paging off with the right command so you stop typing `terminal length 0`, picks the right config command, and shows the platform in the status bar (click it to set the platform yourself). Nothing is sent to a device it cannot confidently identify — and when that happens it says so and names the command it declined to send
 - **Cross-vendor aliases** — type `ints` and get `show ip interface brief` on IOS, `show interfaces terse` on Junos, `show interface all` on PAN-OS. The terminal shows what was actually sent
-- **Configurable output colours** — `down` in red, `up` in green, `error` in orange, driven by your own regex rules with a live preview in Settings
+- **Destructive-command confirmation** — `reload`, `write erase` and friends get an "are you sure" before they reach the device. One global switch covers typing and AI suggestions, and every platform's command list is visible and editable in Settings
+- **Pending-action alerts** — `reload in 10` and Junos `commit confirmed` are tracked per session with a live countdown on the tab and in the status bar. The countdown arms only when the **device itself confirms** the schedule ("Reload scheduled in 5 minutes by admin"), re-synchronises against its announcements, escalates through flash/tone/toast thresholds, throws an unmissable centre-screen warning at 20 seconds with a jump-to-tab button — and can be dismissed from the status bar when you know better
+- **Broadcast** — send a command or sequence to many devices at once, from a vendor-grouped snippet library with per-entry quick-broadcast bolts (electric blue when armed). Every run confirms exactly what goes to exactly which devices first
+
+![Broadcast — the vendor-grouped command library](docs/screenshot-broadcast.png)
+
+### Record, recall, compare
+
 - **Searchable session history** — every session is recorded automatically as structured commands and output. *"What did I change on the Glasgow core last Tuesday"* is a search with a device filter and a date range, not a grep across a folder of log files
 - **Session replay** — open any past session and read it back command by command, with the output and how long each took
-- **Diff on connect** — every SSH login captures the running config on a second channel, invisibly, and compares it against your last visit. If it changed you are *asked* whether you want to see the difference, never interrupted with it; the diff opens as readable blocks with a copy button on each. Captures can also be kept as redacted `.cfg` files wherever you choose, with retention limits
-- **Pending-action alerts** — `reload in 10` and Junos `commit confirmed` are tracked per session with a live countdown on the tab and in the status bar, re-synchronised against the device's own announcements. How loudly it interrupts you — flash, tone, pop-up — is yours to set
-- **Split views** — fifteen tile layouts up to a 4×4 grid (`Ctrl+Alt+1`–`9` for the first nine), with tabs assigned to panes from their context menu. Sessions in hidden panes keep running and keep their scrollback
-- **Multi-tab terminal** — connect to multiple network devices simultaneously, each in its own tab with an independent session, buffer and WebSocket
+- **Diff on connect** — every SSH login captures the running config on a second channel, invisibly (falling back to a hidden, announced capture over your own session where a second channel is refused), and compares it against your last visit. If it changed you are *asked* whether you want to see the difference; the diff opens as readable blocks with a copy button on each, legible in both themes. Captures can also be kept as redacted `.cfg` files with retention limits
+- **Session logging** — optional per-session file logging with one timestamp per line, an in-app viewer with copy tools, working downloads with a completion toast, and a running total of what the folder weighs. Redaction masks credentials on the way to disk
+
+### The AI copilot
+
 - **AI chat copilot** — Claude, OpenAI, xAI Grok, DeepSeek or local Ollama models see your live terminal output and answer questions about what's on screen. Off until you ask for it, so a fresh install opens with the terminal at full width and no provider configured
+- **Live model discovery** — "Test connections & refresh models" asks each provider what it can actually run; the list is cached, restored on every launch, refreshed when a key is saved, and self-heals when a provider retires a model. A refresh button sits beside the picker
+- **Session-aware context** — a picker chooses exactly which tabs the AI can see ("compare the BGP tables on tab 1 and tab 3"), and the choice sticks for every request including automatic post-command analysis. The status bar counts the context cost live
+- **Command suggestions** — the AI suggests CLI commands you can approve with one click; dangerous commands get a confirmation prompt, and the reply can analyse the output of what you approved
 - **Tshoot / Learn mode toggle** — a pill in the chat header flips the AI persona between *Troubleshoot* (terse, fix-it-now) and *Learn* (patient mentor that explains the why)
 - **Knowledge-base augmentation (Chroma DB)** — point ShellMate at a Chroma vector store of your design guidelines and matching snippets are auto-retrieved and injected into every AI prompt; silently disabled when not configured
-- **Configurable provider keys** — set Anthropic / OpenAI / xAI / DeepSeek / Ollama / Chroma credentials in the Settings panel as well as `.env`; the UI shows *"Already preconfigured by env variable"* when an env var is the active source
-- **Command suggestions** — the AI suggests CLI commands you can approve with one click; dangerous commands get a confirmation prompt
-- **Saved connection profiles** — save device details (no passwords stored) for one-click reconnect from the welcome screen
-- **Session-aware context** — use `/context all` or `/context 2` to pull in other tabs; the AI always knows which tab is active
-- **Tab management** — drag to reorder, right-click context menu, `Ctrl+1–9` shortcuts, `Ctrl+T`/`Ctrl+W`
-- **Settings panel** — font, size, colour scheme (Deep Space, Solarized Dark, Nord, One Dark, Gruvbox, Dracula, Monokai), cursor, scrollback, UI text size, AI provider keys, Chroma DB endpoint
 - **Conclude to Jira** — bundle session transcripts + chat into a Jira ticket (or comment on an existing one) with one click
-- **Light / dark theme** — toggle from the sidebar
-- **Smart copy/paste** — `Ctrl+C` (smart — copies selection or passes SIGINT), `Ctrl+Shift+C/V`, right-click paste dialog
-- **Session logging** — optional per-session file logging to a configurable directory
+
+### The chrome
+
+- **One Settings panel** — sixteen sections behind a searchable rail with per-section icons: appearance, terminal behaviour, output colour rules with live preview, seven colour schemes, per-platform definitions, credentials, capture, alerts, AI, broadcast, discovery — plus ~80 advanced values, each bounded, individually marked when off-default, with a Restart button beside the two that need one
+- **Toast notifications, your way** — corner, accent colours per severity and duration are all editable, with a live preview button and position changes that apply as you pick them
+- **Diagnostics in-app** — version, data folder, log location and history-database counts, with one-click doors to the session logs and a redacted support bundle
+- **Encrypted credentials vault** — API keys and remembered device passwords are encrypted on disk, never in plain text. By default they are tied to your Windows account, so a lost USB stick is useless to anyone else; switch to a master password if you need the vault to work on any machine
+- **Light / dark theme** — toggle from the sidebar; every surface is token-driven and contrast-checked in both
+- **A manual that matches the software** — eleven bundled pages, re-verified against the code, readable offline from the sidebar
+
+![Settings — Terminal Behaviour with the destructive-command lists in plain sight](docs/screenshot-settings.png)
 
 ## Tech stack
 
@@ -210,22 +233,28 @@ If you front the container with a TLS reverse proxy, the WebSocket clients pick
 
 ## Usage
 
+![The layout picker — fifteen tilings up to 4×4](docs/screenshot-layouts.png)
+
 | Action | How |
 |---|---|
-| New connection | Click **+ New** in the tab bar, or `Ctrl+T` |
-| Quick connect | Click a saved device tile on the welcome screen |
-| Switch AI mode | Click the **MODE** pill in the tab bar to flip between *Tshoot* and *Learn* |
-| Pick AI model | Use the model dropdown in the chat header (cloud + local groups) |
+| New connection | Click **+ New** in the tab bar, `Ctrl+T`, or right-click a tab or group |
+| Quick connect | Click a recent tile on the home view, or a device tile in its group |
+| Go home | Click the logo or the **ShellMate Portable** brand |
+| Choose a layout | The layout button beside **New**, or `Ctrl+Alt+1`–`9` |
+| Terminal text size | The ▲▼ arrows beside the layout button |
+| Switch AI mode | Click the **Tshoot/Learn** pill in the chat header |
+| Pick AI model | The model dropdown in the chat header — the ↻ beside it re-asks the providers |
+| Choose what the AI sees | The sessions pill in the chat header ("Follow the active tab" / "Choose sessions") |
 | Switch tab | Click the tab, or `Ctrl+1` – `Ctrl+9` |
-| Close tab | Click **×** on the tab, or `Ctrl+W` |
+| Close tab | Click **×** on the tab, `Ctrl+W`, or right-click → Close tab / Close all tabs |
 | Reorder tabs | Drag and drop |
+| Broadcast a command | `Ctrl+Shift+B`, or the send icon in the sidebar |
 | Ask the AI | Type in the chat panel on the right |
-| Include all tabs in AI context | Start message with `/context all` |
-| Include a specific tab | Start message with `/context 2` |
 | Run AI-suggested command | Click **Send** on the command block |
 | Send the session to Jira | Click **Conclude** in the chat header |
 | Copy terminal text | `Ctrl+C` (with selection), or `Ctrl+Shift+C` |
 | Paste into terminal | `Ctrl+V` or right-click |
+| Dismiss a pending reload | Click the countdown in the status bar |
 | Open settings | Gear icon in the left sidebar |
 | Configure provider keys / Chroma | Settings → *AI Providers* and *Knowledge Base (Chroma DB)* |
 | Toggle light/dark theme | Moon icon in the left sidebar |
