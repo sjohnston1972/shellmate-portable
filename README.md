@@ -105,17 +105,56 @@ the folder to another machine and your setup comes with it. If the location it i
 run from happens to be read-only (Program Files, a write-protected stick), it
 falls back to `%LOCALAPPDATA%\ShellMatePortable` and says so clearly in the console.
 
-To build it yourself:
+To build it yourself, see **Building the executable** below.
+
+### Building the executable
+
+Everything needed to compile `ShellMate-Portable.exe` from a fresh clone, in
+order. You need **Windows** (the build targets the WebView2 desktop shell) and
+**Python 3.11+** on the PATH — nothing else.
 
 ```bash
+# 1. Get the source
+git clone https://github.com/sjohnston1972/shellmate-portable.git
+cd shellmate-portable
+
+# 2. Install the runtime and build dependencies
+pip install -r requirements.txt
 pip install -r requirements-dev.txt
+
+# 3. (Optional) run the test suites — each is a standalone script
+python test_vault.py
+python test_alerts.py
+#    ...or the lot:
+#    for %f in (test_*.py) do @python %f
+
+# 4. Build
 pyinstaller build.spec --noconfirm
-# -> dist/ShellMate-Portable.exe
+
+# 5. The result
+#    -> dist/ShellMate-Portable.exe   (a single self-contained file, ~37 MB)
 ```
 
-If corporate antivirus quarantines the single-file build, set `ONEFILE = False`
-in `build.spec` to produce a folder build instead. It starts faster and is far
-less likely to be flagged.
+Double-click the result, or copy it to a USB stick — it needs nothing else.
+On first run it creates `ShellMate-Data/` beside itself for settings and data.
+
+Worth knowing before you build:
+
+- **Frontend assets are already committed** (`frontend/vendor/` — xterm.js and
+  the subsetted icon font), so a build needs no network. Only run
+  `python tools/vendor_assets.py` if you are deliberately upgrading those
+  assets; it downloads them fresh and re-subsets the icon font.
+- **Rebuild after every source change you want in the exe.** The executable is
+  a frozen snapshot — editing `backend/` or `frontend/` does nothing to an
+  already-built binary.
+- **Check the build date if in doubt**: Settings → Diagnostics shows when the
+  running copy was built, so a stale exe cannot masquerade as your fix.
+- **If corporate antivirus quarantines the single-file build**, set
+  `ONEFILE = False` in `build.spec` and rebuild to produce a folder build
+  (`dist/ShellMate-Portable/`) instead. It starts faster and is far less
+  likely to be flagged.
+- The application icon is generated during the build from
+  `backend/branding.py`; a failure there costs the icon, never the build.
 
 ### Source install
 
@@ -232,6 +271,37 @@ If you front the container with a TLS reverse proxy, the WebSocket clients pick
 `wss://` automatically — no extra configuration needed.
 
 ## Usage
+
+### Your first five minutes
+
+1. **Start ShellMate** — double-click `ShellMate-Portable.exe` (or
+   `python run.py` from source). A desktop window opens on the home view.
+2. **Connect to a device** — click **New Connection** (or `Ctrl+T`), pick
+   SSH/serial/telnet, fill in the address and credentials, and connect. Tick
+   *Save this connection* to get a one-click tile for next time; tick
+   *Remember these credentials* to skip the password prompt (encrypted vault).
+3. **Watch it identify the device** — the status bar names the platform once
+   the banner arrives, paging is turned off with the right command (echoed,
+   never silent), and the running config is captured for drift comparison on
+   your next visit.
+4. **Open more tabs and split the screen** — more connections with `Ctrl+T`,
+   a layout from the picker beside **New** (`Ctrl+Alt+1`–`9`), tabs assigned
+   to panes from their right-click menu.
+5. **Organise with groups** — **New Group** on the home view (pick an icon
+   and colour), then drag saved connections onto it in the tree. Right-click
+   a group for connect-all, subgroups and more.
+6. **Turn on the AI when you want it** — click the robot icon in the tab bar,
+   add a provider key under **Settings → AI Providers** (or run Ollama
+   locally), press **Test connections & refresh models**, and ask about
+   whatever is on screen. The sessions pill chooses which tabs it can see.
+7. **Find anything later** — **Session history** on the home view searches
+   everything you have ever typed, by device and date, with full replay.
+
+Closing the window keeps every session alive in the tray; **Quit** from the
+tray icon is the real exit. The full manual lives in the app — the book icon
+in the sidebar — and works offline.
+
+### Controls
 
 ![The layout picker — fifteen tilings up to 4×4](docs/screenshot-layouts.png)
 
