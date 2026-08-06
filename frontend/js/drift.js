@@ -183,6 +183,15 @@
       title: `Configuration captured — ${device}`,
       body: parts.join(' · '),
       sessionId: sessionData.session_id,
+      // Where it went (#275). Only when a file was actually written — the
+      // database copy has no folder to open, and an action that leads
+      // nowhere is worse than none.
+      action: (archive.written && archive.path)
+        ? { label: 'Open the folder',
+            onClick: () => fetch('/api/configs/archive/reveal', { method: 'POST' })
+              .catch(() => { /* the folder not opening is not worth an error */ }) }
+        : { label: 'Past captures',
+            onClick: () => showDiff(report, sessionData) },
     });
   }
 
@@ -213,12 +222,17 @@
 
     if (!report.changed) {
       // Nothing changed is reassurance, not news. It goes in the stack like
-      // everything else and lets itself out.
+      // everything else and lets itself out — but it carries the way in to
+      // the snapshots (#276). The diff panel holds every past capture and
+      // the pinned baseline, and it was reachable only from a *change*: on a
+      // device that never drifts, the history was unreachable entirely.
       window.shellmateAlerts.notify({
         icon:      'check_circle',
         title:     `${device} is unchanged`,
         body:      report.summary || '',
         sessionId,
+        action:    { label: 'Capture history',
+                     onClick: () => showDiff(report, sessionData) },
       });
       return;
     }
@@ -256,13 +270,20 @@
 
     openReport = report;
 
-    document.getElementById('diff-title').textContent =
-      `${report.hostname || sessionData.display_label || 'Device'} — configuration changes`;
+    const name = report.hostname || sessionData.display_label || 'Device';
+    // Opened from an unchanged device too now (#276), where "configuration
+    // changes" and "0 lines added" would be a strange way to describe what
+    // is on screen — which is the capture history.
+    document.getElementById('diff-title').textContent = report.changed
+      ? `${name} — configuration changes`
+      : `${name} — configuration history`;
 
-    document.getElementById('diff-summary').textContent =
-      `${report.added} line${report.added === 1 ? '' : 's'} added, ` +
-      `${report.removed} removed, since ${report.days_since ?? 0} day` +
-      `${report.days_since === 1 ? '' : 's'} ago.`;
+    document.getElementById('diff-summary').textContent = report.changed
+      ? `${report.added} line${report.added === 1 ? '' : 's'} added, `
+        + `${report.removed} removed, since ${report.days_since ?? 0} day`
+        + `${report.days_since === 1 ? '' : 's'} ago.`
+      : 'Nothing has changed since the last capture. Every stored capture is '
+        + 'below — pick any two to compare.';
 
     renderBaselineLine(report);
 

@@ -61,7 +61,12 @@
       select.appendChild(opt);
     });
 
-    select.value = (previous && data.platforms[previous]) ? previous : (Object.keys(data.platforms).sort()[0] || '');
+    // IOS by default (#280) rather than whatever sorts first — which was
+    // "arista", a platform most people opening this editor are not looking
+    // at. Keeps the current choice across a reload.
+    const fallback = data.platforms.ios ? 'ios'
+      : (Object.keys(data.platforms).sort()[0] || '');
+    select.value = (previous && data.platforms[previous]) ? previous : fallback;
     status.textContent = `Stored in ${data.path}`;
     showPlatform(select.value);
   }

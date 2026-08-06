@@ -96,6 +96,14 @@
       closeSettings();
       if (typeof window.openLogs === 'function') window.openLogs();
     });
+    const copyUrl = document.getElementById('diag-copy-url');
+    if (copyUrl) copyUrl.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(window.location.origin);
+      } catch (_) { /* the address is on screen either way */ }
+      if (typeof window._showCopyToast === 'function') window._showCopyToast();
+    });
+
     const diagSupport = document.getElementById('diag-open-support');
     if (diagSupport) diagSupport.addEventListener('click', () => {
       closeSettings();
@@ -105,7 +113,22 @@
     const broadcastOpen = document.getElementById('broadcast-open-panel');
     if (broadcastOpen) broadcastOpen.addEventListener('click', () => {
       closeSettings();
-      if (typeof window.openBroadcast === 'function') window.openBroadcast();
+      if (typeof window.openBroadcast === 'function') {
+        // With a way back (#283): Settings has to close for Broadcast to be
+        // reachable, so Broadcast carries the return trip.
+        window.openBroadcast({
+          returnTo: {
+            label: 'Settings',
+            open: () => {
+              if (typeof window.openSettingsSection === 'function') {
+                window.openSettingsSection('Broadcast');
+              } else if (typeof window.openSettings === 'function') {
+                window.openSettings();
+              }
+            },
+          },
+        });
+      }
     });
 
     // The global destructive-command switch (#252). It writes the two
@@ -319,6 +342,9 @@
   }
 
   function openSettings() {
+    // Before populateForm, so the saved choice still has an option to select
+    // once the list has been rebuilt (#277).
+    _buildFontPicker();
     populateForm(currentSettings);
     _populateDiagnostics();
     _populateDestructiveSwitch();
@@ -356,6 +382,69 @@
         host.appendChild(row);
       });
     } catch (_) { /* the edit button still works; the preview is a bonus */ }
+  }
+
+  // -------------------------------------------------------------------------
+  // The font picker (#277)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Monospace faces worth offering.
+   *
+   * Only JetBrains Mono ships with ShellMate; the rest depend on the machine.
+   * Rather than pretend, the picker draws each option in its own face and
+   * says which are not installed — choosing an absent font silently falls
+   * back to the browser's default monospace, which looks like the setting
+   * being ignored.
+   */
+  const FONT_CHOICES = [
+    ['JetBrains Mono, monospace',   'JetBrains Mono'],
+    ['Cascadia Code, monospace',    'Cascadia Code'],
+    ['Cascadia Mono, monospace',    'Cascadia Mono'],
+    ['Consolas, monospace',         'Consolas'],
+    ['Fira Code, monospace',        'Fira Code'],
+    ['Hack, monospace',             'Hack'],
+    ['IBM Plex Mono, monospace',    'IBM Plex Mono'],
+    ['Inconsolata, monospace',      'Inconsolata'],
+    ['Iosevka, monospace',          'Iosevka'],
+    ['Liberation Mono, monospace',  'Liberation Mono'],
+    ['Lucida Console, monospace',   'Lucida Console'],
+    ['Menlo, monospace',            'Menlo'],
+    ['Monaco, monospace',           'Monaco'],
+    ['DejaVu Sans Mono, monospace', 'DejaVu Sans Mono'],
+    ['Roboto Mono, monospace',      'Roboto Mono'],
+    ['Source Code Pro, monospace',  'Source Code Pro'],
+    ['Ubuntu Mono, monospace',      'Ubuntu Mono'],
+    ['Victor Mono, monospace',      'Victor Mono'],
+    ['Courier New, monospace',      'Courier New'],
+    ['monospace',                   'System default'],
+  ];
+
+  function _buildFontPicker() {
+    const select = document.getElementById('setting-font-family');
+    if (!select) return;
+
+    const chosen = select.value;
+    select.innerHTML = '';
+    FONT_CHOICES.forEach(([value, label]) => {
+      const family = value.split(',')[0].trim();
+      // document.fonts.check needs a size; the family is what it answers on.
+      let available = true;
+      try {
+        available = family === 'monospace'
+          || document.fonts.check(`12px "${family}"`);
+      } catch (_) { /* assume present rather than mislabel it */ }
+
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = available ? label : `${label} — not installed`;
+      opt.disabled = !available && family !== 'JetBrains Mono';
+      // Drawn in its own face, so the choice is visible before applying it.
+      if (available) opt.style.fontFamily = value;
+      select.appendChild(opt);
+    });
+    if (chosen) select.value = chosen;
+    if (!select.value) select.value = 'JetBrains Mono, monospace';
   }
 
   // -------------------------------------------------------------------------
@@ -476,6 +565,17 @@
           : ''));
       set('diag-log-dir', info.log_dir ? `${info.log_dir}` : '');
     } catch (_) { /* rows keep their placeholder */ }
+    // The address this page is already served from (#285) — asking the
+    // window beats asking the server, since the port is chosen at startup
+    // and this is by definition the one that worked.
+    const url = document.getElementById('diag-web-url');
+    if (url) {
+      url.textContent = window.location.origin;
+      url.href = window.location.origin;
+      url.target = '_blank';
+      url.rel = 'noopener noreferrer';
+    }
+
     try {
       const stats = await (await fetch('/api/history/stats')).json();
       const search = (stats.search || '').toUpperCase();

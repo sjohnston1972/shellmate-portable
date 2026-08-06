@@ -258,6 +258,10 @@
 
       head.appendChild(cmd);
       head.appendChild(meta);
+      // Copying the command is the commonest thing anybody wants from a
+      // search result — it is why they went looking (#273). stopPropagation,
+      // or the row's own click would open the replay behind the copy.
+      head.appendChild(_copyButton('Copy the command', hit.command));
       row.appendChild(head);
 
       if (hit.snippet) {
@@ -265,11 +269,42 @@
         snippet.className = 'history-snippet';
         snippet.textContent = hit.snippet;
         row.appendChild(snippet);
+        snippet.appendChild(_copyButton('Copy this output', hit.snippet));
       }
 
       row.addEventListener('click', () => openReplay(hit.session_id));
       resultsEl.appendChild(row);
     });
+  }
+
+  /**
+   * A copy button for one piece of a result (#273).
+   *
+   * The clipboard API first, with the textarea route behind it for the
+   * webview builds that refuse it, and the shared toast so a copy that
+   * worked says so — the same shape drift.js uses for diff hunks.
+   */
+  function _copyButton(title, text) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'history-copy';
+    button.title = title;
+    button.innerHTML = '<span class="material-symbols-outlined">content_copy</span>';
+    button.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        const area = document.createElement('textarea');
+        area.value = text;
+        document.body.appendChild(area);
+        area.select();
+        try { document.execCommand('copy'); } catch (_) { /* give up quietly */ }
+        area.remove();
+      }
+      if (typeof window._showCopyToast === 'function') window._showCopyToast();
+    });
+    return button;
   }
 
   function showMessage(text) {

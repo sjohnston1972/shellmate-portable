@@ -119,9 +119,41 @@
    *   Must include: session_id, display_label, hostname, connection_type,
    *   connected_at, is_connected.
    */
+  /** How many entries the dashboard's recently-used list keeps (#268). */
+  const RECENT_MAX = 8;
+
+  /**
+   * Remember a connection as recently used (#268).
+   *
+   * Here rather than at each call site because this is the single funnel
+   * every session passes through — the dialog, a tile, a duplicate, a
+   * reconnect, a restored tab. Identity is the profile when there is one and
+   * the address otherwise, so an ad-hoc connection is still remembered and a
+   * saved one never appears twice.
+   */
+  function _rememberRecent(sessionData) {
+    if (!window.shellmatePrefs) return;
+    const entry = {
+      profile_id:      sessionData.profile_id || '',
+      label:           sessionData.display_label || sessionData.hostname || '',
+      hostname:        sessionData.address || sessionData.hostname || '',
+      port:            sessionData.port || 0,
+      connection_type: sessionData.connection_type || 'ssh',
+    };
+    const identity = (r) => r.profile_id
+      || `${r.connection_type}|${r.hostname}|${r.port}`;
+    const kept = (window.shellmatePrefs.get('recent_connections', []) || [])
+      .filter(r => r && identity(r) !== identity(entry));
+    kept.unshift(entry);
+    window.shellmatePrefs.set('recent_connections', kept.slice(0, RECENT_MAX));
+    if (typeof window.renderWelcomeTiles === 'function') window.renderWelcomeTiles();
+  }
+
   function createTab(sessionData) {
     const { session_id, display_label, hostname } = sessionData;
     const label = display_label || hostname || session_id.slice(0, 8);
+
+    _rememberRecent(sessionData);
 
     // Build the tab DOM element
     const tabEl = document.createElement('div');

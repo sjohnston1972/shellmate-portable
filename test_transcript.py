@@ -315,6 +315,52 @@ def test_split_across_chunks() -> None:
               "Version 15.2" in records[0].output, f"got {records[0].output!r}")
 
 
+def test_erase_arriving_in_its_own_chunk() -> None:
+    """
+    An erase must delete what came before it, even chunks later (#272).
+
+    ShellMate sends Ctrl-U before an expanded alias, so the expansion
+    replaces the alias the device has already echoed. The device answers
+    with backspaces, spaces and backspaces — and that answer arrives as its
+    own chunk, after the keystroke echoes it is meant to erase.
+
+    Cleaning each chunk in isolation found nothing to delete in front of
+    those backspaces and dropped them, so real sessions recorded
+    "arpshow ip arp": the alias glued to its own expansion. The command was
+    then unfindable by either the alias or the command, which is half of why
+    history search looked broken.
+
+    The bytes below are taken from a session log, not invented.
+    """
+    print("\n-- An erase split from what it erases --")
+
+    def replay(chunks: list[str]) -> list[str]:
+        parser = TranscriptParser()
+        records: list = []
+        for chunk in chunks:
+            records.extend(parser.feed(chunk))
+        return [r.command for r in records]
+
+    # "arp" typed a keystroke at a time, then the erase and the expansion.
+    alias = replay(["S3-R1#", "a", "r", "p",
+                    "\b\b\b   \b\b\bshow ip arp", "\r\n",
+                    "Protocol  Address\r\n", "S3-R1#"])
+    check("an expanded alias is recorded as the command that ran",
+          alias == ["show ip arp"], f"got {alias}")
+
+    # Typed "inmt", corrected to "ints", which expanded.
+    corrected = replay(["S3-R1#", "i", "n", "m", "t", "\b \b\b \b", "t", "s",
+                        "\b\b\b\b    \b\b\b\bshow ip interface brief", "\r\n",
+                        "Interface  IP-Address\r\n", "S3-R1#"])
+    check("a corrected typo leaves no trace in the record",
+          corrected == ["show ip interface brief"], f"got {corrected}")
+
+    # And a command typed straight through is unaffected.
+    plain = replay(["S3-R1#show ", "vrf\r\n", "  Name\r\n", "S3-R1#"])
+    check("an ordinary command still reads as itself",
+          plain == ["show vrf"], f"got {plain}")
+
+
 def test_flush_captures_last_command() -> None:
     print("\n-- Flush at end of session --")
 
@@ -391,6 +437,7 @@ def main() -> int:
         test_segmentation,
         test_multiple_commands,
         test_split_across_chunks,
+        test_erase_arriving_in_its_own_chunk,
         test_flush_captures_last_command,
         test_output_not_split_by_hashes,
         test_junos_edit_banner,

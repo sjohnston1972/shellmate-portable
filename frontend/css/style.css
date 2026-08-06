@@ -1283,15 +1283,17 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 
 /* Welcome screen saved-profile quick-launch grid */
-/* The trail above the heading (#179) — "site-004" over "firewalls". Muted and
-   small: it is context for the heading, not a second heading. */
+/* The trail above the heading (#179) — "site-004" over "firewalls". Context
+   for the heading rather than a second heading, but legible with it: at 12px
+   against a 56px title it read as a caption nobody could place (#274). */
 #welcome-breadcrumb {
   font-family: 'Inter', sans-serif;
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--on-surface-muted);
-  margin-bottom: 2px;
+  color: var(--on-surface-dim);
+  margin-bottom: 6px;
 }
 
 /* What stands where the tiles are not (#177). */
@@ -2309,6 +2311,19 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   color: var(--on-surface);
 }
 
+/* A header with three children — title, an action, close — spreads them
+   under space-between, stranding the action in the middle of the bar (#270).
+   The auto margin collects the actions on the right where they belong. */
+#history-clear,
+#broadcast-back {
+  margin-left: auto;
+}
+
+#history-clear + .icon-btn,
+#broadcast-back + .icon-btn {
+  margin-left: 4px;
+}
+
 .panel-body {
   flex: 1;
   overflow-y: auto;
@@ -2555,7 +2570,11 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .settings-preview-terminal[data-cursor="underline"] .preview-cursor {
   height: 0.12em;
   min-height: 1px;
-  vertical-align: baseline;
+  /* text-bottom, inherited from the base rule rather than overridden to
+     baseline (#278): an empty inline-block takes its own bottom edge as its
+     baseline, so "baseline" here floated the bar up the line box and the
+     underline cursor drew across the top of the text instead of under it. */
+  vertical-align: text-bottom;
 }
 
 .settings-preview-terminal.preview-blink .preview-cursor {
@@ -3379,6 +3398,38 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   color: var(--on-surface-muted);
   text-align: center;
 }
+
+/* Copy buttons on a history result (#273). Quiet until the row is hovered:
+   a search result is a list to read, not a panel of controls. */
+.history-copy {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  padding: 0 2px;
+  background: none;
+  border: none;
+  color: var(--on-surface-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.history-row:hover .history-copy { opacity: 1; }
+.history-copy:hover { color: var(--on-surface); }
+.history-copy .material-symbols-outlined { font-size: 15px; }
+
+.history-snippet { position: relative; }
+.history-snippet .history-copy { float: right; }
+
+/* The web-interface address in Diagnostics (#285). */
+.diag-link {
+  color: var(--primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  margin-right: 8px;
+}
+
+/* Clearing the recently-used list, beside the sentence naming it (#268). */
+.welcome-clear-recents { margin-left: 8px; }
 
 /* The destructive-command lists, readable in Terminal Behaviour (#258). */
 #dangerous-lists {
@@ -7492,7 +7543,13 @@ body {
   margin: 1px 0;
   background: var(--surface);
   border: 1px solid var(--outline);
-  border-left: 3px solid var(--group-colour, var(--outline));
+  /* The provenance spine (#286). Thicker, and lit rather than merely
+     coloured: at a glance down a long tree the colour is the thing doing the
+     work, and a 3px line beside a 1px outline was reading as part of the
+     border rather than as the group's mark. */
+  border-left: 5px solid var(--group-colour, var(--outline));
+  box-shadow: -1px 0 0 0 var(--group-colour, transparent),
+              -3px 0 8px -3px var(--group-colour, transparent);
   border-radius: var(--radius-md);
   color: var(--on-surface);
   font-family: 'Inter', system-ui, sans-serif;

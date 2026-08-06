@@ -708,7 +708,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-color-scheme">Color Scheme</label>
+            <label class="setting-label" for="setting-color-scheme"
+                   data-tip="The terminal's palette — the background, the default text colour and the sixteen ANSI colours devices use for their own highlighting.||Choosing a scheme replaces the two colour overrides below with that scheme's values, so a foreground you had picked by hand is lost. The list is read from schemes.json in your data folder, so a scheme added there appears here without a rebuild.">Color Scheme</label>
             <!-- Filled from /api/schemes, so a scheme added to schemes.json
                  appears here without a rebuild. Hardcoding the list was a
                  third copy of it — after the object in settings.js and the
@@ -717,7 +718,8 @@ GigEth0/2     unassigned    YES unset  down     down
             <select id="setting-color-scheme" class="setting-input"></select>
           </div>
           <div class="setting-row">
-            <label class="setting-label">Font Color</label>
+            <label class="setting-label"
+                   data-tip="Overrides the scheme's foreground for terminal text. Reset hands it back to the scheme.||Only text the device sends with no colour of its own is affected. Anything the device colours itself still arrives in the ANSI colour it asked for, so this will not rescue an unreadable red.">Font Color</label>
             <div class="setting-color-wrap">
               <div class="setting-color-swatch" id="setting-fg-swatch" title="Click to pick colour">
                 <div class="setting-color-swatch-inner" id="setting-fg-swatch-inner"></div>
@@ -727,7 +729,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </div>
           </div>
           <div class="setting-row">
-            <label class="setting-label">Background Color</label>
+            <label class="setting-label"
+                   data-tip="Overrides the scheme's background behind the whole terminal. Reset hands it back to the scheme.||Worth checking against the scheme's ANSI colours before you settle on it. A background moved far from the one the scheme was built around can leave blue or grey almost invisible, and device output uses those colours to mean something.">Background Color</label>
             <div class="setting-color-wrap">
               <div class="setting-color-swatch" id="setting-bg-swatch" title="Click to pick colour">
                 <div class="setting-color-swatch-inner" id="setting-bg-swatch-inner"></div>
@@ -737,7 +740,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </div>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-font-family">Font Family</label>
+            <label class="setting-label" for="setting-font-family"
+                   data-tip="The typeface used in the terminal. Every option is monospaced, which is what keeps `show ip interface brief` in columns.||The bundled faces are drawn from frontend/vendor and need no network. A face that is only named here and not installed falls back silently to the next in the list rather than failing, so check the preview above rather than assuming.">Font Family</label>
             <select id="setting-font-family" class="setting-input">
               <option value="JetBrains Mono, monospace">JetBrains Mono</option>
               <option value="Fira Code, monospace">Fira Code</option>
@@ -751,20 +755,23 @@ GigEth0/2     unassigned    YES unset  down     down
             </select>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-font-size">Font Size</label>
+            <label class="setting-label" for="setting-font-size"
+                   data-tip="The size of terminal text, in pixels, from 10 to 24.||Larger text means fewer columns before output wraps, and a device drawing a table at eighty columns starts to look ragged. If you want the chrome bigger without shrinking the terminal, use Interface text size instead.">Font Size</label>
             <div class="setting-input-group">
               <input type="number" id="setting-font-size" class="setting-input setting-input-sm" min="10" max="24" step="1" />
               <span class="setting-unit">px</span>
             </div>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-line-height">Line Height</label>
+            <label class="setting-label" for="setting-line-height"
+                   data-tip="The height of each row of terminal text, as a multiple of the font size.||Above about 1.4 you see noticeably less at once, which costs most when reading back through a long configuration. Below about 1.1 the descenders start to crowd the line beneath.">Line Height</label>
             <div class="setting-input-group">
               <input type="number" id="setting-line-height" class="setting-input setting-input-sm" min="1.0" max="2.0" step="0.1" />
             </div>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-cursor-style">Cursor Style</label>
+            <label class="setting-label" for="setting-cursor-style"
+                   data-tip="Whether the cursor is drawn as a block, a bar or an underline.||A block is easiest to find on a busy screen and covers the character it sits on, which matters when you are checking a hostname or an address character by character. A bar leaves the character visible and is easier to lose.">Cursor Style</label>
             <select id="setting-cursor-style" class="setting-input">
               <option value="block">Block</option>
               <option value="bar">Bar</option>
@@ -772,14 +779,16 @@ GigEth0/2     unassigned    YES unset  down     down
             </select>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-cursor-blink">Cursor Blink</label>
+            <label class="setting-label" for="setting-cursor-blink"
+                   data-tip="Makes the cursor blink, as a hardware terminal did.||Off is steadier to look at and the kinder choice if movement distracts you. The cost is that a still cursor is harder to spot again after a screenful of output has scrolled past.">Cursor Blink</label>
             <label class="toggle">
               <input type="checkbox" id="setting-cursor-blink" />
               <span class="toggle-track"></span>
             </label>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-cursor-width">Cursor Width
+            <label class="setting-label" for="setting-cursor-width"
+                   data-tip="Applies to the bar cursor only. A block and an underline are always one character cell wide, whatever is set here.||Zero is not the same as one: it hands the decision to xterm.js, which sizes the bar from the font. Set a number only once you have actually lost the cursor against dense output.">Cursor Width
               <span class="setting-hint">A bar cursor at the default width disappears on a busy screen. 0 leaves it to the font.</span>
             </label>
             <div class="setting-input-group">
@@ -788,7 +797,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </div>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-cursor-colour">Cursor Colour
+            <label class="setting-label" for="setting-cursor-colour"
+                   data-tip="A colour for the cursor alone, independent of the text around it.||Use scheme is the safer answer. A colour fixed here is used unchanged whichever scheme you move to and in both the dark and light themes, so it can end up invisible against a background it was never chosen for.">Cursor Colour
               <span class="setting-hint">Blank follows the colour scheme, as foreground and background do.</span>
             </label>
             <div class="setting-input-group">
@@ -797,7 +807,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </div>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-selection-colour">Selection Colour
+            <label class="setting-label" for="setting-selection-colour"
+                   data-tip="The colour drawn behind text you have selected with the mouse.||Choose it dark enough that the selected text is still readable through it. A pale selection over pale text hides exactly what you were trying to copy, and Use scheme keeps it in step with the rest of the palette.">Selection Colour
               <span class="setting-hint">What selected text is highlighted with.</span>
             </label>
             <div class="setting-input-group">
@@ -806,7 +817,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </div>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-letter-spacing">Letter Spacing
+            <label class="setting-label" for="setting-letter-spacing"
+                   data-tip="Extra space between characters, in pixels, on top of whatever the font already provides.||Every pixel costs columns: at eighty columns of output, one pixel is enough to start wrapping lines that used to fit. Half a pixel is usually as far as this helps.">Letter Spacing
               <span class="setting-hint">Opens up a condensed face without changing the font.</span>
             </label>
             <div class="setting-input-group">
@@ -815,7 +827,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </div>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-font-weight">Font Weight
+            <label class="setting-label" for="setting-font-weight"
+                   data-tip="The weight used for ordinary terminal text.||Going heavier fixes a light face on a bright screen, and it also narrows the gap between normal and bold. Device output leans on bold for headings and status, so raise Bold Weight to match or the distinction goes.">Font Weight
               <span class="setting-hint">Some faces are unreadably light at 13px.</span>
             </label>
             <select id="setting-font-weight" class="setting-input">
@@ -828,7 +841,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </select>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-font-weight-bold">Bold Weight
+            <label class="setting-label" for="setting-font-weight-bold"
+                   data-tip="The weight used wherever the device asks for bold.||It only reads as bold if it is clearly heavier than the weight above. Most monospace faces ship two real weights, so asking for 800 or 900 gets a synthesised approximation that can look smeared at small sizes.">Bold Weight
               <span class="setting-hint">Set separately, because device output leans on bold for headings and status.</span>
             </label>
             <select id="setting-font-weight-bold" class="setting-input">
@@ -841,7 +855,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </select>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-bold-bright">Brighten Bold Text
+            <label class="setting-label" for="setting-bold-bright"
+                   data-tip="Bold text is drawn in the palette's bright variant of its colour rather than the normal one.||Off gives you eight more distinguishable colours, since bold and bright stop meaning the same thing. The trade is that most schemes are designed assuming this is on, and their bold output looks flat without it.">Brighten Bold Text
               <span class="setting-hint">The traditional terminal behaviour, and what most colour schemes assume. Off keeps bold and bright separate.</span>
             </label>
             <label class="toggle">
@@ -850,7 +865,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </label>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-tab-stop">Tab Width
+            <label class="setting-label" for="setting-tab-stop"
+                   data-tip="How many columns a tab character advances. Eight is what network devices assume.||This changes only how output is drawn, never what is sent or what is stored in the session history. If an indented configuration looks misaligned here but correct in an editor, this is the setting that differs.">Tab Width
               <span class="setting-hint">Configuration output aligned to 8 wraps differently at 4.</span>
             </label>
             <div class="setting-input-group">
@@ -865,7 +881,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">These are kept in <code>settings.json</code> in your data folder, so they travel with it — and are the same whether you use the window or open ShellMate in a browser.</p>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-theme">Theme</label>
+            <label class="setting-label" for="setting-theme"
+                   data-tip="Light or dark for the application around the terminal — panels, dialogs, the tab strip. Follow the system tracks the operating system's own setting and changes with it.||The terminal keeps its own colour scheme regardless, so choosing the light theme does not lighten the terminal. Set that under Terminal Appearance if you want the two to agree.">Theme</label>
             <select id="setting-theme" class="setting-input">
               <option value="dark">Dark</option>
               <option value="light">Light</option>
@@ -874,7 +891,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-ui-font-size">UI Text Size</label>
+            <label class="setting-label" for="setting-ui-font-size"
+                   data-tip="The base text size for the interface, in pixels.||Interface text size further down is a multiplier applied over this and moves spacing and icons with it, which usually looks better. Reach for this row when you want the words larger and everything else where it was.">UI Text Size</label>
             <div class="setting-input-group">
               <input type="number" id="setting-ui-font-size" class="setting-input setting-input-sm" min="11" max="20" step="1" />
               <span class="setting-unit">px</span>
@@ -882,7 +900,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-density">Density</label>
+            <label class="setting-label" for="setting-density"
+                   data-tip="How much padding the interface uses. Compact tightens rows, the tab strip and panel spacing.||Compact fits more tabs and more of a list on screen, and makes every click target smaller. Worth it on a laptop, less so if you work at a distance from the display or use a touchscreen.">Density</label>
             <select id="setting-density" class="setting-input">
               <option value="comfortable">Comfortable</option>
               <option value="compact">Compact</option>
@@ -890,7 +909,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-panel-transition">Panels open with</label>
+            <label class="setting-label" for="setting-panel-transition"
+                   data-tip="How a side panel arrives when you open it.||Nothing is a real answer rather than a joke one: over Remote Desktop an animation that drops frames is slower to read than no animation. Slide is the default because it says which edge the panel came from, and so where Escape will send it back to.">Panels open with</label>
             <select id="setting-panel-transition" class="setting-input">
               <option value="slide">Slide — in from the edge</option>
               <option value="fade">Fade</option>
@@ -901,7 +921,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-tab-label-width">Maximum tab width</label>
+            <label class="setting-label" for="setting-tab-label-width"
+                   data-tip="The widest a tab is allowed to grow. Longer labels are truncated with an ellipsis.||Narrow tabs fit more sessions on screen and stop telling you which is which — a dozen switches named alike for the first fourteen characters truncate before the part that differs. Hovering a tab shows the full label whatever this is set to.">Maximum tab width</label>
             <div class="setting-input-group">
               <input type="number" id="setting-tab-label-width" class="setting-input setting-input-sm" min="60" max="400" step="10" />
               <span class="setting-unit">px</span>
@@ -909,7 +930,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-connection-dot">Connection dot on tabs</label>
+            <label class="setting-label" for="setting-connection-dot"
+                   data-tip="The small coloured dot on each tab showing whether that session is still connected.||Off, a dropped session is marked only by the label greying and gaining a suffix, which is a quieter signal on a busy strip. Turn it off if you find the strip cluttered, not to make it tidier at a glance.">Connection dot on tabs</label>
             <label class="toggle">
               <input type="checkbox" id="setting-connection-dot" />
               <span class="toggle-track"></span>
@@ -917,7 +939,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-restore-tabs">Reopen tabs when ShellMate starts
+            <label class="setting-label" for="setting-restore-tabs"
+                   data-tip="The list of open tabs is written on every change rather than at quit, so a crash still leaves something to restore.||It reconnects to devices nobody asked it to connect to, which is the whole objection. Off by default, and it stays off on upgrade for that reason — a machine left overnight otherwise comes back logged into everything.">Reopen tabs when ShellMate starts
               <span class="setting-hint">Only sessions saved as a connection with its password — nothing else can be reconnected without asking you. Any it cannot restore are named.</span>
             </label>
             <label class="toggle">
@@ -927,7 +950,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-new-tab-opens">New tab opens
+            <label class="setting-label" for="setting-new-tab-opens"
+                   data-tip="What a new tab is prefilled with: nothing, the last device you connected to, or the saved connection named below.||The last device you connected to suits somebody working on one box all day. It is a nuisance if your next tab is rarely your last, because you clear the fields before you can type.">New tab opens
               <span class="setting-hint">The connection dialog appears either way — this decides whether it arrives filled in.</span>
             </label>
             <select id="setting-new-tab-opens" class="setting-input">
@@ -938,19 +962,22 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row" id="new-tab-profile-row">
-            <label class="setting-label" for="setting-new-tab-profile">Which saved connection</label>
+            <label class="setting-label" for="setting-new-tab-profile"
+                   data-tip="The saved connection a new tab is prefilled from. Read only when New tab opens is set to a saved connection.||It is looked up by profile id at the moment a tab opens. Delete or rename that profile and the lookup finds nothing, so you get the empty dialog again with no explanation of why.">Which saved connection</label>
             <select id="setting-new-tab-profile" class="setting-input"></select>
           </div>
 
           <div class="setting-row setting-row-block">
-            <label class="setting-label">Tab right-click menu
+            <label class="setting-label"
+                   data-tip="Every entry defaults to on, so an upgrade that made this configurable never silently took away something you were using.||Worth trimming when the menu has grown longer than you can scan — an item you read past every time costs more attention than one you go and find twice a year.">Tab right-click menu
               <span class="setting-hint">Which entries the menu offers. Turning one off never removes what it does — every one is reachable elsewhere.</span>
             </label>
             <div id="tab-menu-toggles"></div>
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-font-scale">Interface text size
+            <label class="setting-label" for="setting-font-scale"
+                   data-tip="A multiplier over the whole interface, set as a CSS variable, so spacing and icons move with the text instead of the text outgrowing its rows.||This is the row for a high-resolution display where everything is simply too small. UI Text Size above changes the base size alone and leaves the rest of the chrome where it was.">Interface text size
               <span class="setting-hint">The chrome around the terminal. The terminal's own font is under Terminal Appearance.</span>
             </label>
             <div class="setting-input-group">
@@ -960,7 +987,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-toast-position">Notifications appear</label>
+            <label class="setting-label" for="setting-toast-position"
+                   data-tip="Which corner toasts stack in. Alerts, confirmations and download notices all share the one stack.||Bottom right is the default and is also the end of the status bar, so a toast can briefly cover the countdown it is telling you about. Move them to a top corner if you keep the status bar in view.">Notifications appear</label>
             <select id="setting-toast-position" class="setting-input">
               <option value="bottom-right">Bottom right</option>
               <option value="bottom-left">Bottom left</option>
@@ -1005,7 +1033,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </div>
           </div>
           <div class="setting-row">
-            <label class="setting-label">Preview
+            <label class="setting-label"
+                   data-tip="Nothing is sent anywhere and no real alert is created — these are samples, drawn exactly as the real ones would be.||The quickest way to find out whether a custom accent is legible in both the dark and the light theme, which the swatch alone will not tell you.">Preview
               <span class="setting-hint">Fires one sample toast of each kind, with the colours and duration above.</span>
             </label>
             <button type="button" id="toast-preview" class="btn-secondary">
@@ -1015,7 +1044,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-chat-enter">Enter in the chat box
+            <label class="setting-label" for="setting-chat-enter"
+                   data-tip="What Enter does while the cursor is in the chat box. It never affects the terminal, where Enter always goes to the device.||New line suits pasting an error or writing more than a sentence. The cost is one extra key on every short question, and most questions are short.">Enter in the chat box
               <span class="setting-hint">With "new line", Ctrl+Enter sends instead.</span>
             </label>
             <select id="setting-chat-enter" class="setting-input">
@@ -1025,7 +1055,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-sidebar-labels">Labels in the sidebar
+            <label class="setting-label" for="setting-sidebar-labels"
+                   data-tip="Widens the rail and puts each item's name beside its icon.||Off by default because the rail is deliberately narrow. The prompt editor was once reported as deleted when it moved behind an unfamiliar glyph, so turn this on when you cannot find something rather than hunting for it.">Labels in the sidebar
               <span class="setting-hint">Names beside the icons, in a wider rail. Icons alone are quick once learned and unguessable until then.</span>
             </label>
             <label class="toggle">
@@ -1035,7 +1066,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-tab-order">Tab order
+            <label class="setting-label" for="setting-tab-order"
+                   data-tip="How tabs are arranged in the strip.||Anything but Manual takes dragging away, because the next sort would undo whatever you dragged. Grouped by tag earns its keep across twenty tabs and three estates, and does nothing at all if your saved connections carry no tags.">Tab order
               <span class="setting-hint">Anything but Manual sorts the strip and turns off dragging, since the next sort would undo it. Tag uses the first tag on the matching saved connection.</span>
             </label>
             <select id="setting-tab-order" class="setting-input">
@@ -1062,7 +1094,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-confirm-close-tab">Confirm before closing a live tab</label>
+            <label class="setting-label" for="setting-confirm-close-tab"
+                   data-tip="Asks before closing a tab whose session is still connected.||Closing a tab drops the connection, and reconnecting does not bring back what was on screen. Off, one mis-aimed click on the close cross ends a session on a device you were part way through changing.">Confirm before closing a live tab</label>
             <label class="toggle">
               <input type="checkbox" id="setting-confirm-close-tab" />
               <span class="toggle-track"></span>
@@ -1071,7 +1104,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">Closing a tab disconnects the session. A tab that is already disconnected closes without asking.</p>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-confirm-quit">Confirm before quitting</label>
+            <label class="setting-label" for="setting-confirm-quit"
+                   data-tip="Asks before Quit from the tray, which is the one action that drops every connection at once.||Closing the window deliberately does not: sessions carry on behind the tray icon so a device mid-reload is never cut off. Quit is the exception, which is why it is the thing worth a question.">Confirm before quitting</label>
             <label class="toggle">
               <input type="checkbox" id="setting-confirm-quit" />
               <span class="toggle-track"></span>
@@ -1080,7 +1114,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">Quit from the tray drops every connection. Closing the window does not — it keeps everything running behind the tray icon.</p>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-start-minimised">Start minimised to the tray</label>
+            <label class="setting-label" for="setting-start-minimised"
+                   data-tip="ShellMate starts with no window, as a tray icon only. Click the icon to bring the window up.||Suits launching it at login. The server is running either way, so restored sessions connect and alerts still fire whether the window is on screen or not.">Start minimised to the tray</label>
             <label class="toggle">
               <input type="checkbox" id="setting-start-minimised" />
               <span class="toggle-track"></span>
@@ -1088,7 +1123,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-remember-window">Remember window size and position</label>
+            <label class="setting-label" for="setting-remember-window"
+                   data-tip="Stores the window's size and position and reopens it where you left it.||Off, it opens at a default size in the middle of whichever monitor Windows picks. Worth turning off if you move between docked and undocked and keep finding the window on a display that is no longer attached.">Remember window size and position</label>
             <label class="toggle">
               <input type="checkbox" id="setting-remember-window" />
               <span class="toggle-track"></span>
@@ -1128,7 +1164,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <!-- Moved from Terminal Appearance (#219): what the terminal does,
                not how it looks. -->
           <div class="setting-row">
-            <label class="setting-label" for="setting-screen-reader">Screen Reader Mode
+            <label class="setting-label" for="setting-screen-reader"
+                   data-tip="xterm.js keeps a hidden live region in step with the terminal, which is the only way a screen reader can follow output as it arrives.||Off by default because maintaining that region costs real work on every line, and a session producing a lot of output is where you would feel it. There is no reason to turn it on unless you use a screen reader.">Screen Reader Mode
               <span class="setting-hint">Maintains a live region a screen reader can follow. Costs enough that it is off unless wanted.</span>
             </label>
             <label class="toggle">
@@ -1149,7 +1186,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </label>
           </div>
           <div class="setting-row">
-            <label class="setting-label">The command lists
+            <label class="setting-label"
+                   data-tip="Opens the per-platform lists of commands that raise the confirmation, and shows them here in place. Editing them stays in Platform Definitions, where the rest of each platform lives.||Prefix matched on the line you send, so `reload` catches `reload in 10` and leaves `show reload-reason` alone. Abbreviations are not covered — `relo` is a valid IOS reload and matches nothing.">The command lists
               <span class="setting-hint">Which commands get the "are you sure" — per platform, because reload on IOS is not request system reboot on Junos.</span>
             </label>
             <button type="button" id="behaviour-edit-dangerous" class="btn-secondary">
@@ -1174,7 +1212,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">Colour terminal text by pattern, so the line that matters stands out of a wall of output. Patterns are regular expressions.</p>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-highlight-enabled">Enable highlighting</label>
+            <label class="setting-label" for="setting-highlight-enabled"
+                   data-tip="Runs your patterns over terminal output and colours what matches, so the one line that matters stands out of a screenful.||Applied to plain text only, so colour the device sent itself is never overwritten. Off, the rules below are kept exactly as they are and simply stop being applied.">Enable highlighting</label>
             <input type="checkbox" id="setting-highlight-enabled" class="setting-checkbox" />
           </div>
 
@@ -1200,7 +1239,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">That case is common — a legal banner replacing the version string, or a device reached through a terminal server. When it happens, click the device name in the status bar and say what it is; both settings then apply immediately.</p>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-auto-paging">Turn paging off on connect</label>
+            <label class="setting-label" for="setting-auto-paging"
+                   data-tip="Sends the platform's paging command on connect — `terminal length 0` on IOS, `terminal pager 0` on ASA, `set cli screen-length 0` on Junos — so output arrives whole instead of a screen at a time.||It is typed into your live session and echoed like anything you typed, never sent silently. Nothing is sent when the device was not identified confidently, because the wrong paging command lands as a syntax error in front of you at best.">Turn paging off on connect</label>
             <input type="checkbox" id="setting-auto-paging" class="setting-checkbox" />
           </div>
           <div class="setting-row">
@@ -1209,7 +1249,8 @@ GigEth0/2     unassigned    YES unset  down     down
             <input type="checkbox" id="setting-keep-alive" class="setting-checkbox" />
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-keep-alive-seconds">Nudge after
+            <label class="setting-label" for="setting-keep-alive-seconds"
+                   data-tip="Measured from the last byte in either direction, so an active session never reaches it.||Set it well under the device's own `exec-timeout` or the nudge arrives after the session has already gone. Shorter means more traffic and more to see on whatever is watching the device's vty lines.">Nudge after
               <span class="setting-hint">How long a session must be silent first. Well under a typical <code>exec-timeout 5</code>.</span>
             </label>
             <div class="setting-input-group">
@@ -1220,7 +1261,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">Sends the right command for the platform — <code>terminal length 0</code>, <code>terminal pager 0</code>, <code>set cli screen-length 0</code> — so no more <code>--More--</code>. It is echoed like anything you typed, never sent silently. Off, or unidentified, means paging stays as the device left it.</p>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-expand-aliases">Expand command aliases</label>
+            <label class="setting-label" for="setting-expand-aliases"
+                   data-tip="Rewrites a bare alias into the right command for the connected platform in the outbound pipeline, before the device sees anything.||Off, an alias is sent exactly as typed and the device answers with an invalid input error. The aliases themselves are kept either way — this only decides whether they are applied.">Expand command aliases</label>
             <input type="checkbox" id="setting-expand-aliases" class="setting-checkbox" />
           </div>
           <p class="settings-section-hint">Type <code>ints</code> and get the right interface command for whatever you are connected to. Only a bare alias on its own is expanded, and the terminal shows what was actually sent.</p>
@@ -1236,45 +1278,54 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div id="platform-editor">
             <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-select">Platform</label>
+              <label class="setting-label" for="platform-select"
+                     data-tip="Which platform definition the fields below are editing. Switching to another discards anything unsaved in them.||These are matched against a device on connect, and everything ShellMate then sends to that device comes from the entry selected here — so an edit changes behaviour on every device of this kind, not only the one in front of you.">Platform</label>
               <select id="platform-select" class="setting-input setting-input-full"></select>
             </div>
 
             <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-name">Display name</label>
+              <label class="setting-label" for="platform-name"
+                     data-tip="What this platform is called wherever ShellMate names it: the status bar, the identify dialog, the confirmation lists.||A label and nothing more. It has no part in deciding what a device is or what gets sent to it, both of which come from the fields below.">Display name</label>
               <input type="text" id="platform-name" class="setting-input setting-input-full" />
             </div>
 
             <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-paging">Turn paging off with</label>
+              <label class="setting-label" for="platform-paging"
+                     data-tip="The exact command sent into a session when Turn paging off on connect is on and the device is identified as this platform. It is also what the configuration capture sends first on its own channel.||Sent verbatim, so a wrong command here is a syntax error on every login to every device of this kind. Blank is a legitimate answer — a shell has no pager to disable, and the generic profile deliberately sends nothing.">Turn paging off with</label>
               <input type="text" id="platform-paging" class="setting-input setting-input-full" placeholder="terminal length 0" />
               <p class="settings-section-hint">Leave blank to send nothing on connect.</p>
             </div>
 
             <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-showrun">Show running config with</label>
+              <label class="setting-label" for="platform-showrun"
+                     data-tip="The command used to fetch the running configuration for the capture and the drift check. Run on a second channel where the device allows one, so it never appears in your session.||It has to print the configuration and return to the prompt. If the device answers with nothing, the capture is recorded as failed and names the command it tried, which is usually the fastest way to find this field is wrong.">Show running config with</label>
               <input type="text" id="platform-showrun" class="setting-input setting-input-full" placeholder="show running-config" />
             </div>
 
             <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-version">Show version with</label>
+              <label class="setting-label" for="platform-version"
+                     data-tip="The command used to refine the identification once connected, where a second channel is available. Its output is matched against the signatures below.||This is what lifts a guess into something confident enough to act on. Without it, `hostname(config)#` alone stays below the threshold and nothing is sent to the device at all.">Show version with</label>
               <input type="text" id="platform-version" class="setting-input setting-input-full" placeholder="show version" />
             </div>
 
             <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-signatures">Identify by</label>
+              <label class="setting-label" for="platform-signatures"
+                     data-tip="Text matched against the device's login banner and version output to decide it is this platform. The longest match wins.||Be specific. A fragment such as `cisco` matches IOS, NX-OS and ASA alike, and the paging command belongs to the platform rather than the family, so a loose signature is how the wrong command reaches a live device.">Identify by</label>
               <input type="text" id="platform-signatures" class="setting-input setting-input-full" placeholder="cisco ios software, ios-xe" />
               <p class="settings-section-hint">Comma-separated text found in the device's banner or version output. The longest match wins, so be specific.</p>
             </div>
 
             <div class="setting-row setting-row-stack">
-              <label class="setting-label" for="platform-dangerous">Commands to confirm before sending</label>
+              <label class="setting-label" for="platform-dangerous"
+                     data-tip="Commands on this list raise the are-you-sure prompt on this platform, because `reload` on IOS is not `request system reboot` on Junos.||Prefix matched on the normalised line, so `write erase` catches whatever follows it. It has effect only while Confirm destructive commands is on under Terminal Behaviour, and a command recalled with the up arrow arrives with nothing to match.">Commands to confirm before sending</label>
               <input type="text" id="platform-dangerous" class="setting-input setting-input-full" placeholder="reload, write erase, shutdown" />
             </div>
 
             <div class="setting-row setting-row-stack">
-              <label class="setting-label">Aliases</label>
+              <label class="setting-label"
+                     data-tip="Each row is a short name and the command it becomes on this platform, which is what lets one alias mean the right thing on IOS and on Junos.||The one to avoid is an alias that shadows something the device already understands: the terminal shows you the substitution, but by then you have typed what you meant and sent something else.">Aliases</label>
               <p class="settings-section-hint">Type the short name and get the command. Only a bare alias on its own is expanded, and the terminal shows what was actually sent.</p>
+              <p class="settings-section-hint"><strong>These live in ShellMate, not on the device.</strong> The expansion happens here before anything is sent, so nothing is configured on the device, nothing persists there after you disconnect, and the same alias works across every device of this platform — including ones you have never logged into. Somebody using a different tool on the same switch sees none of this.</p>
               <div id="alias-rows"></div>
               <button type="button" id="btn-alias-add" class="btn-tertiary">
                 <span class="material-symbols-outlined">add</span>
@@ -1296,7 +1347,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">Starting values for a new serial connection, so the same settings are not re-entered every time. Cisco console is 9600 8-N-1 with no flow control.</p>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-serial-baud">Baud rate</label>
+            <label class="setting-label" for="setting-serial-baud"
+                   data-tip="The starting baud rate for a new serial connection. 9600 is the Cisco console default and the first thing to try.||It has to match the device's console port and nothing negotiates it, so getting it wrong produces plausible-looking gibberish rather than an error. Changing it here affects the next connection, not sessions already open.">Baud rate</label>
             <select id="setting-serial-baud" class="setting-input">
               <option>1200</option><option>2400</option><option>4800</option>
               <option>9600</option><option>19200</option><option>38400</option>
@@ -1304,13 +1356,15 @@ GigEth0/2     unassigned    YES unset  down     down
             </select>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-serial-databits">Data bits</label>
+            <label class="setting-label" for="setting-serial-databits"
+                   data-tip="Bits per character for a new serial connection. Eight, on essentially anything you will meet on a console port.||Wrong here fails the same quiet way as the baud rate: characters arrive mangled rather than missing. Change it only when the device's own documentation asks for it.">Data bits</label>
             <select id="setting-serial-databits" class="setting-input">
               <option>5</option><option>6</option><option>7</option><option>8</option>
             </select>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-serial-parity">Parity</label>
+            <label class="setting-label" for="setting-serial-parity"
+                   data-tip="The parity bit for a new serial connection. None is the console standard, and the N in 8-N-1.||Set to something the device is not using and you get corrupted or dropped characters, not a refusal. All four serial values have to agree with the port before anything readable appears.">Parity</label>
             <select id="setting-serial-parity" class="setting-input">
               <option value="N">None</option><option value="E">Even</option>
               <option value="O">Odd</option><option value="M">Mark</option>
@@ -1318,13 +1372,15 @@ GigEth0/2     unassigned    YES unset  down     down
             </select>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-serial-stopbits">Stop bits</label>
+            <label class="setting-label" for="setting-serial-stopbits"
+                   data-tip="Stop bits for a new serial connection. One, on standard console kit, and the 1 in 8-N-1.||Part of the same set as the two rows above, and just as unnegotiated. If output is readable but riddled with framing errors, this is one of the three to check.">Stop bits</label>
             <select id="setting-serial-stopbits" class="setting-input">
               <option>1</option><option>1.5</option><option>2</option>
             </select>
           </div>
           <div class="setting-row">
-            <label class="setting-label" for="setting-serial-flow">Flow control</label>
+            <label class="setting-label" for="setting-serial-flow"
+                   data-tip="Flow control for a new serial connection. None is right for a Cisco console cable.||XON/XOFF takes Ctrl+S and Ctrl+Q out of the session, which is a surprising way to discover a terminal has frozen. RTS/CTS needs those wires present in the cable, and console adapters often do not carry them.">Flow control</label>
             <select id="setting-serial-flow" class="setting-input">
               <option value="none">None</option><option value="xonxoff">XON/XOFF</option>
               <option value="rtscts">RTS/CTS</option><option value="dsrdtr">DSR/DTR</option>
@@ -1345,7 +1401,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="vault-mode-select">Protected by</label>
+            <label class="setting-label" for="vault-mode-select"
+                   data-tip="How the vault's encryption key is derived. This Windows account uses DPAPI, so the operating system holds the key and there is nothing to type. A master password derives the key with scrypt instead.||Switching re-encrypts what is already stored rather than losing it. DPAPI ties the vault to this account on this machine, so the same data folder carried to another machine on a USB stick opens only under a master password.">Protected by</label>
             <select id="vault-mode-select" class="setting-input setting-input-full">
               <option value="dpapi">This Windows account (no password to type)</option>
               <option value="password">A master password (works on any machine)</option>
@@ -1354,9 +1411,11 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
 
           <div class="setting-row setting-row-stack hidden" id="vault-password-row">
-            <label class="setting-label" for="vault-new-password">Master password</label>
+            <label class="setting-label" for="vault-new-password"
+                   data-tip="The passphrase the vault's key is derived from, with scrypt. You type it once each launch.||There is no recovery and no reset, and nobody holds a copy — not ShellMate, not Anthropic, not a support bundle. Forget it and every stored API key and device password has to be entered again from scratch.">Master password</label>
             <input type="password" id="vault-new-password" class="setting-input setting-input-full" autocomplete="new-password" />
-            <label class="setting-label" for="vault-confirm-password">Confirm</label>
+            <label class="setting-label" for="vault-confirm-password"
+                   data-tip="Type the master password a second time. Apply does nothing until the two agree.||The only guard against a typo in a password that cannot be recovered. What is already in the vault is re-encrypted under whatever is entered here, so a mistyped pair would take the lot with it.">Confirm</label>
             <input type="password" id="vault-confirm-password" class="setting-input setting-input-full" autocomplete="new-password" />
           </div>
 
@@ -1403,7 +1462,8 @@ GigEth0/2     unassigned    YES unset  down     down
         <section class="settings-section">
           <h3 class="settings-section-title">Session Logging</h3>
           <div class="setting-row">
-            <label class="setting-label" for="setting-logging-enabled">Enable File Logging</label>
+            <label class="setting-label" for="setting-logging-enabled"
+                   data-tip="Writes each session's terminal output to its own file in the directory below, named from the session id and the device.||Everything the device printed goes in, which is why the redaction row matters — logs get handed on, and devices echo what you type. Off, session history is still recorded in ShellMate's own database; only the plain files stop.">Enable File Logging</label>
             <label class="toggle">
               <input type="checkbox" id="setting-logging-enabled" />
               <span class="toggle-track"></span>
@@ -1419,7 +1479,8 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
           <p class="settings-section-hint">Masks credentials in written logs — devices echo, and a session log is meant to be handed to someone else. The terminal itself always shows the truth.</p>
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-log-dir">Log Directory</label>
+            <label class="setting-label" for="setting-log-dir"
+                   data-tip="A relative name resolves against your data folder, never the working directory — for a double-clicked executable that is wherever Explorer happened to leave it.||An absolute path is honoured as given, so logs can be written straight to a network share. Think about that before you do: a session log holds everything the device printed, for anyone who can read the folder.">Log Directory</label>
             <div class="setting-input-group setting-input-group-full">
               <input type="text" id="setting-log-dir" class="setting-input setting-input-full" placeholder="logs" />
               <button type="button" class="btn-secondary btn-browse" data-target="setting-log-dir" data-pick="folder">
@@ -1437,12 +1498,12 @@ GigEth0/2     unassigned    YES unset  down     down
         </section>
         <section class="settings-section">
           <h3 class="settings-section-title">Configuration Capture</h3>
-          <p class="settings-section-hint">On connect, ShellMate fetches the device's running configuration on a <strong>second channel</strong> — invisibly, never in the session you are typing in — and keeps it. Every login becomes a change check, with nothing to remember.</p>
+          <p class="settings-section-hint">On connect, ShellMate fetches the device's running configuration and keeps it, so every login becomes a change check with nothing to remember. It prefers a <strong>second channel</strong> — invisible, never in the session you are typing in. Where the device refuses one, or the transport cannot carry one at all, it can fall back to your own session; that fallback has its own switch below and always says afterwards what it did.</p>
           <p class="settings-section-hint">Where a second channel is refused — serial and telnet cannot open one, and some switches allow only one session at a time — it can fall back to running the command through your own session: only while it sits idle at a prompt, hidden from the screen and the transcript, and announced afterwards. The fallback has its own switch below, for anyone who wants captures on a second channel or not at all.</p>
 
           <div class="setting-row">
             <label class="setting-label" for="setting-capture-configs"
-                   data-tip="Off, no configuration is fetched at all — which also turns off the drift check and stops the configuration history growing. The captures already stored are kept.">Capture the configuration on connect</label>
+                   data-tip="On connect, ShellMate runs the platform's show-running-config command and stores the result, so every login doubles as a change check with nothing to remember.||Off, no configuration is fetched at all — which also turns off the drift check and stops the configuration history growing. The captures already stored are kept.">Capture the configuration on connect</label>
             <label class="toggle">
               <input type="checkbox" id="setting-capture-configs" />
               <span class="toggle-track"></span>
@@ -1451,7 +1512,7 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div class="setting-row">
             <label class="setting-label" for="setting-diff-on-connect"
-                   data-tip="Compares what was just captured against the previous visit and offers the difference — `this device has changed since you last logged in`. Offered, not forced open: a prompt in the corner with a button, which fades if you ignore it.">Offer a diff when it has changed</label>
+                   data-tip="Compares what was just captured against the previous visit and offers the difference — `this device has changed since you last logged in`.||Offered, not forced open: a prompt in the corner with a button, which fades if you ignore it. There is nothing to compare on a first visit, and nothing at all when the capture above is off.">Offer a diff when it has changed</label>
             <label class="toggle">
               <input type="checkbox" id="setting-diff-on-connect" />
               <span class="toggle-track"></span>
@@ -1469,7 +1530,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">Files are masked by the same “Obscure passwords and secrets” setting above — a running configuration carries hashes, keys and community strings, and this folder may well be a share.</p>
 
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-config-dir">Save them in</label>
+            <label class="setting-label" for="setting-config-dir"
+                   data-tip="Where captured configurations are written as `.cfg` files. Kept apart from session logs on purpose — a capture is a thing as it was, a log is a record of what you did.||A relative name goes in your data folder, an absolute path is used as given, so a share works. A running configuration carries hashes, keys and community strings, so settle the redaction row above before pointing this somewhere shared.">Save them in</label>
             <div class="setting-input-group setting-input-group-full">
               <input type="text" id="setting-config-dir" class="setting-input setting-input-full" placeholder="configs" />
               <button type="button" class="btn-secondary btn-browse" data-target="setting-config-dir" data-pick="folder">
@@ -1483,7 +1545,7 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div class="setting-row">
             <label class="setting-label" for="setting-config-keep"
-                   data-tip="The newest this many captures of each device are kept. Older ones are removed as new ones arrive.">Keep per device</label>
+                   data-tip="The newest this many captures of each device are kept.||Older ones are removed as new ones arrive, so this is also how far back a diff can reach on any one device. Zero switches the per-device limit off entirely and leaves the age and size limits below as the only things holding the folder down.">Keep per device</label>
             <div class="setting-input-group">
               <input type="number" id="setting-config-keep" class="setting-input setting-input-sm" min="0" max="500" step="1" />
               <span class="setting-unit">captures</span>
@@ -1491,7 +1553,7 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
           <div class="setting-row">
             <label class="setting-label" for="setting-config-age"
-                   data-tip="Anything older than this is removed, whichever device it came from. Zero means never remove by age.">Discard after</label>
+                   data-tip="Anything older than this is removed, whichever device it came from.||Zero means never remove by age. A capture per login across a fleet of switches is unbounded otherwise, and the folder may well be a network share somebody else has to live with.">Discard after</label>
             <div class="setting-input-group">
               <input type="number" id="setting-config-age" class="setting-input setting-input-sm" min="0" max="3650" step="1" />
               <span class="setting-unit">days</span>
@@ -1499,7 +1561,7 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
           <div class="setting-row">
             <label class="setting-label" for="setting-config-size"
-                   data-tip="A ceiling on the whole archive. When it is exceeded the oldest captures go first, since the newest of each device is the one the diff compares against. Zero means no limit.">Total size limit</label>
+                   data-tip="A ceiling on the whole archive, applied across every device rather than per device.||When it is exceeded the oldest captures go first, since the newest of each device is the one the diff compares against. Zero means no limit, which is the answer to think hardest about when this folder is a share.">Total size limit</label>
             <div class="setting-input-group">
               <input type="number" id="setting-config-size" class="setting-input setting-input-sm" min="0" max="100000" step="10" />
               <span class="setting-unit">MB</span>
@@ -1538,23 +1600,28 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">API keys and endpoints. Keys are stored in the encrypted vault above; anything saved here overrides the matching <code>.env</code> variable. Leaving a field empty falls back to <code>.env</code>.</p>
 
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-anthropic-key">Anthropic API key</label>
+            <label class="setting-label" for="setting-anthropic-key"
+                   data-tip="Used for the Claude models in the assistant's model picker. Saved into the encrypted vault, never into settings.json.||A key here takes precedence over ANTHROPIC_API_KEY in the environment; leave it empty to fall back to that. The field shows dots once a key is stored and never hands the real value back to the page, so saving without touching it leaves the stored key alone.">Anthropic API key</label>
             <input type="password" id="setting-anthropic-key" class="setting-input setting-input-full" autocomplete="off" />
           </div>
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-openai-key">OpenAI API key</label>
+            <label class="setting-label" for="setting-openai-key"
+                   data-tip="Used for the GPT models in the picker. Saved into the encrypted vault, never into settings.json.||Takes precedence over OPENAI_API_KEY in the environment; empty falls back to it. Clearing the field and saving removes the stored key rather than leaving the old one quietly in place.">OpenAI API key</label>
             <input type="password" id="setting-openai-key" class="setting-input setting-input-full" autocomplete="off" />
           </div>
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-xai-key">xAI (Grok) API key</label>
+            <label class="setting-label" for="setting-xai-key"
+                   data-tip="Used for the Grok models in the picker. Saved into the encrypted vault, never into settings.json.||Takes precedence over XAI_API_KEY in the environment; empty falls back to it. Every provider is optional — the terminal is fully usable with none of them configured, which is the point on a locked-down network.">xAI (Grok) API key</label>
             <input type="password" id="setting-xai-key" class="setting-input setting-input-full" autocomplete="off" />
           </div>
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-deepseek-key">DeepSeek API key</label>
+            <label class="setting-label" for="setting-deepseek-key"
+                   data-tip="Used for the DeepSeek models in the picker. Saved into the encrypted vault, never into settings.json.||Takes precedence over DEEPSEEK_API_KEY in the environment; empty falls back to it. A key added here is available to every part of ShellMate at once, because they all resolve credentials through the same lookup.">DeepSeek API key</label>
             <input type="password" id="setting-deepseek-key" class="setting-input setting-input-full" autocomplete="off" />
           </div>
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-ollama-host">Ollama host URL</label>
+            <label class="setting-label" for="setting-ollama-host"
+                   data-tip="Where the local Ollama server is. Blank falls back to OLLAMA_HOST from the environment, which itself defaults to http://localhost:11434.||Not a secret, so this one is kept in settings.json rather than the vault, and it is readable by anyone who can open your data folder. Ollama is the answer when the estate has no route to the internet or the output must not leave the building.">Ollama host URL</label>
             <input type="text" id="setting-ollama-host" class="setting-input setting-input-full" autocomplete="off" placeholder="http://localhost:11434" />
           </div>
         
@@ -1563,15 +1630,18 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">Optional. When set, ShellMate queries this Chroma collection on every chat for design-guideline snippets and injects matches into the AI prompt. Leave blank to disable.</p>
 
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-chroma-url">Chroma URL</label>
+            <label class="setting-label" for="setting-chroma-url"
+                   data-tip="A Chroma server holding your own guideline documents. Set it and ShellMate queries the collection on every chat, putting matching snippets into the prompt before the model sees your question.||Blank disables the lookup entirely and the assistant still answers, just with nothing of yours behind it. Every message becomes an extra request to this host, so it wants to be somewhere close.">Chroma URL</label>
             <input type="text" id="setting-chroma-url" class="setting-input setting-input-full" autocomplete="off" placeholder="http://localhost:8000" />
           </div>
           <div class="setting-row setting-row-stack">
-            <label class="setting-label" for="setting-chroma-collection">Collection name</label>
+            <label class="setting-label" for="setting-chroma-collection"
+                   data-tip="Which collection inside that Chroma server is queried. Blank uses design_guidelines.||A name that is not there produces no error you will ever see: the lookup returns nothing and the assistant answers without it, exactly as if Chroma were switched off. Test connection does not check this — it only proves the server answered.">Collection name</label>
             <input type="text" id="setting-chroma-collection" class="setting-input setting-input-full" autocomplete="off" placeholder="design_guidelines" />
           </div>
           <div class="setting-row">
-            <label class="setting-label">Status</label>
+            <label class="setting-label"
+                   data-tip="The result of the last connection test: whether the Chroma URL answered its heartbeat.||A snapshot rather than a monitor. It does not update on its own, so a server that went away after a successful test still shows as connected until you press the button again. It says nothing about whether the collection exists.">Status</label>
             <div class="setting-chroma-status">
               <span id="setting-chroma-status-dot" class="chroma-dot chroma-dot-unknown"></span>
               <span id="setting-chroma-status-text">Not tested</span>
@@ -1587,7 +1657,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">Stored as <code>prompts.json</code> in your data folder, so they can be edited by hand, kept in version control or carried to another machine. Delete the file to restore the shipped text.</p>
 
           <div class="setting-row">
-            <label class="setting-label" for="prompt-mode-select">Editing</label>
+            <label class="setting-label" for="prompt-mode-select"
+                   data-tip="Which of the two personas you are editing. Troubleshoot is terse and assumes you know the platform; Learn explains the reasoning behind each step.||Editing one never touches the other. This picker does not change which persona the assistant is currently using either — that is the mode button in the chat header.">Editing</label>
             <select id="prompt-mode-select" class="setting-input">
               <option value="tshoot">Troubleshoot — terse, fix it now</option>
               <option value="learn">Learn — explains the why</option>
@@ -1649,7 +1720,8 @@ GigEth0/2     unassigned    YES unset  down     down
           <p class="settings-section-hint">The one that reaches you when you are looking at a different tab. Click it to jump to the device. The last warning stays until dismissed.</p>
 
           <div class="setting-row">
-            <label class="setting-label" for="setting-reduce-motion">Reduce motion</label>
+            <label class="setting-label" for="setting-reduce-motion"
+                   data-tip="Forces the reduced-motion treatment on whatever the system reports: a steady outline in place of the pulse, and panels that appear rather than slide.||It only ever adds. If your operating system already asks for reduced motion that is honoured regardless, so turning this off will not bring the animation back.">Reduce motion</label>
             <label class="toggle">
               <input type="checkbox" id="setting-reduce-motion" />
               <span class="toggle-track"></span>
@@ -1673,7 +1745,8 @@ GigEth0/2     unassigned    YES unset  down     down
             the Broadcast panel itself, not here; these rows only govern its
             pacing and safety.</p>
           <div class="setting-row">
-            <label class="setting-label">Broadcast panel
+            <label class="setting-label"
+                   data-tip="Opens the panel where broadcasting actually happens — choosing targets, the saved command library, and sending. The rows in this section only govern its pacing and safety.||The library living in that panel rather than here is the thing people come to this section looking for. Broadcast confirms a destructive command whatever the confirmation setting says, because sending to a fleet unasked is not a preference.">Broadcast panel
               <span class="setting-hint">Targets, the command library, and sending. Also on Ctrl+Shift+B.</span>
             </label>
             <button type="button" id="broadcast-open-panel" class="btn-secondary">
@@ -1695,32 +1768,48 @@ GigEth0/2     unassigned    YES unset  down     down
           <!-- About this installation — filled by settings.js from
                /api/system/info and /api/history/stats (#222). -->
           <div class="setting-row">
-            <label class="setting-label">Version
+            <label class="setting-label"
+                   data-tip="Reported by the server rather than the page, and it includes when this copy was built and whether it is running as a portable executable.||The first thing to quote in a bug report, and the way to tell whether the copy you double-clicked is the one you updated. A portable executable can be copied and left behind anywhere, and nothing about it says it is stale.">Version
               <span class="setting-hint">The build you are running.</span>
             </label>
             <span class="setting-value" id="diag-version">—</span>
           </div>
           <div class="setting-row">
-            <label class="setting-label">Data folder
+            <label class="setting-label"
+                   data-tip="The full path to the folder holding settings.json, the history database, the vault, platforms.json and your logs.||This is the whole installation state, so copying the folder moves your setup and protecting the folder protects your credentials. If it says fallback, the folder beside the executable was not writable and everything went to your user profile instead.">Data folder
               <span class="setting-hint">Settings, history, keys and logs all live here. It travels with the executable.</span>
             </label>
             <span class="setting-value" id="diag-data-dir">—</span>
           </div>
           <div class="setting-row">
-            <label class="setting-label">Application log
+            <label class="setting-label"
+                   data-tip="The path to shellmate.log, which records what the server did: connections attempted, errors raised, and what was sent on connect.||Truncated on each launch, so read it after reproducing a fault and before restarting. In a windowed build it is the only diagnostic there is, which is why nothing is allowed to replace the logging handlers.">Application log
               <span class="setting-hint">The first place to look when something fails — truncated on each launch.</span>
             </label>
             <span class="setting-value" id="diag-log-dir">—</span>
           </div>
           <div class="setting-row">
-            <label class="setting-label">Recorded history
+            <label class="setting-label"
+                   data-tip="How much is in the history database — sessions, commands and configuration snapshots — and which search engine is behind it.||Recording is automatic and not switchable, because history you had to remember to enable is missing on the one day it matters. Where FTS5 is unavailable the store falls back to LIKE matching, which still finds things and is slower and less precise about it.">Recorded history
               <span class="setting-hint">Sessions, commands and config snapshots in the history database, and which search engine it is using.</span>
             </label>
             <span class="setting-value" id="diag-history-stats">—</span>
           </div>
 
           <div class="setting-row">
-            <label class="setting-label">Session logs
+            <label class="setting-label"
+                   data-tip="The address the server is listening on. The port is picked at startup rather than fixed, so it can differ between runs.||Bound to loopback, so nothing off this machine reaches it unless you set an access token. Opening it in a browser gives you the same live sessions in another window, which is how you get devtools or a second screen.">Web interface
+              <span class="setting-hint">The same sessions in a browser — useful for devtools, a second screen, or another machine on this desktop. Loopback only unless a token is set.</span>
+            </label>
+            <span class="setting-value">
+              <a href="#" id="diag-web-url" class="diag-link"></a>
+              <button type="button" id="diag-copy-url" class="btn-tertiary">Copy</button>
+            </span>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label"
+                   data-tip="Opens the panel listing the per-session log files, so one can be read or downloaded without leaving ShellMate.||It has something to show only while Enable File Logging is on. With logging off the folder stays empty, though the sessions themselves are still in the history database and searchable from History.">Session logs
               <span class="setting-hint">Per-session terminal logs, when file logging is on.</span>
             </label>
             <button type="button" id="diag-open-logs" class="btn-secondary">
@@ -1729,7 +1818,8 @@ GigEth0/2     unassigned    YES unset  down     down
             </button>
           </div>
           <div class="setting-row">
-            <label class="setting-label">Support bundle
+            <label class="setting-label"
+                   data-tip="Collects the application log, version details and your settings into a single zip, with secrets masked and terminal output redacted.||It is written for you to read before you send it, and nothing leaves the machine on its own. Read it anyway: settings carry paths, hostnames and the shape of your estate, none of which is a secret and all of which is information.">Support bundle
               <span class="setting-hint">Collect the log, versions and settings into a zip you can review before sending.</span>
             </label>
             <button type="button" id="diag-open-support" class="btn-secondary">
@@ -1835,6 +1925,9 @@ GigEth0/2     unassigned    YES unset  down     down
     <div id="broadcast-panel" class="side-panel side-panel-wide">
       <div class="panel-header">
         <h2 class="panel-title">Broadcast a command</h2>
+        <!-- Shown only when something sent you here (#283), so a trip from
+             Settings is not one-way. -->
+        <button id="broadcast-back" class="btn-tertiary hidden"></button>
         <button id="broadcast-close" class="icon-btn" aria-label="Close">
           <span class="material-symbols-outlined">close</span>
         </button>

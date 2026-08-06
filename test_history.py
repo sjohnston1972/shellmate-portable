@@ -193,15 +193,17 @@ def test_date_filtering() -> None:
 
 def test_fts_query_escaping() -> None:
     print("\n-- FTS query building --")
-    check("words are quoted and ANDed",
-          _to_fts_query("show version") == '"show" AND "version"',
+    # The last word is a prefix, because the panel searches as you type and
+    # every word is a partial word until the moment it is finished (#271).
+    check("words are quoted and ANDed, the last one a prefix",
+          _to_fts_query("show version") == '"show" AND "version"*',
           f"got {_to_fts_query('show version')}")
     check("punctuation is safely quoted",
-          _to_fts_query("10.1.1.1") == '"10.1.1.1"', f"got {_to_fts_query('10.1.1.1')}")
+          _to_fts_query("10.1.1.1") == '"10.1.1.1"*', f"got {_to_fts_query('10.1.1.1')}")
     # A quote in the input must not close the quoting we add, or the query
     # becomes a syntax error rather than a search.
     check("embedded quotes cannot break out",
-          _to_fts_query('a"b') == '"a" AND "b"',
+          _to_fts_query('a"b') == '"a" AND "b"*',
           f"got {_to_fts_query(chr(97) + chr(34) + chr(98))}")
     check("empty input yields an empty match", _to_fts_query("   ") == '""')
 

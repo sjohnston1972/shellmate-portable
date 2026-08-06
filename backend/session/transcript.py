@@ -229,8 +229,21 @@ class TranscriptParser:
     running is available from :attr:`pending` until its next prompt arrives.
     """
 
-    # Text received but not yet terminated by a newline.
+    # Text received but not yet terminated by a newline, cleaned — what the
+    # prompt matcher and the rest of this class read.
     _partial: str = field(default="", init=False)
+
+    # The same tail, exactly as it arrived (#272).
+    #
+    # Cleaning has to see the whole unterminated line at once, because an
+    # erase only means anything against what precedes it. A device answers
+    # Ctrl-U with backspaces, spaces and backspaces again — and when that
+    # arrives in its own chunk, cleaning the chunk alone finds nothing to
+    # delete and discards the erase. The alias the user typed then stayed in
+    # front of the expansion ShellMate sent, and the pair were recorded as
+    # one command: "arpshow ip arp". Typo correction and arrow-key redraws
+    # were corrupted the same way, for the same reason.
+    _raw: str = field(default="", init=False)
 
     # The command awaiting its next prompt.
     _current: CommandRecord | None = field(default=None, init=False)
@@ -247,14 +260,27 @@ class TranscriptParser:
             Records completed by this chunk. Usually empty — a record is only
             finished when the device returns to a prompt.
         """
-        text = clean(chunk)
-        if not text:
+        if not chunk:
             return []
 
-        self._partial += text
-        lines = self._partial.split("\n")
-        # The final element has no newline yet; hold it for the next chunk.
-        self._partial = lines.pop()
+        # Accumulate raw, and clean whole lines together with the tail they
+        # belong to — never a chunk in isolation (#272).
+        self._raw += chunk
+        head, newline, tail = self._raw.rpartition("\n")
+        self._raw = tail
+
+        lines: list[str] = []
+        if newline:
+            # The trailing empty element after the final newline is not a line.
+            lines = clean(head + newline).split("\n")
+            lines.pop()
+
+        # Re-cleaned in full each time, so an erase arriving later still finds
+        # the characters it is meant to remove.
+        self._partial = clean(tail)
+
+        if not lines and not self._partial:
+            return []
 
         completed: list[CommandRecord] = []
         for line in lines:
@@ -337,7 +363,8 @@ class TranscriptParser:
         """
         if self._partial and self._current is not None:
             self._output_lines.append(self._partial)
-            self._partial = ""
+        self._partial = ""
+        self._raw = ""
         return self._finish_current()
 
     @property

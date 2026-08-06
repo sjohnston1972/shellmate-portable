@@ -165,8 +165,38 @@ def _normalise(provider: str, payload: dict) -> list[dict]:
                                                "transcribe", "tts", "image", "moderation"))
         ]
 
+    models = [m for m in models if not _is_obsolete(m["id"])]
     models.sort(key=lambda m: m["id"])
     return models
+
+
+#: Model generations no longer worth offering (#269).
+#:
+#: A provider keeps serving a model long after it stops being the right
+#: choice, so its list is a history of the product rather than a menu. These
+#: are matched as substrings against the id, so a dated variant
+#: ("claude-3-haiku-20240307") goes with its family.
+#:
+#: Deliberately conservative: only generations superseded across the board.
+#: Anything unrecognised is offered, because a filter that hides a model
+#: somebody is paying for is worse than a list one entry too long.
+OBSOLETE_MODELS: tuple[str, ...] = (
+    # Anthropic: superseded by Claude 4 and 5.
+    "claude-instant", "claude-1", "claude-2",
+    "claude-3-opus", "claude-3-sonnet", "claude-3-haiku",
+    "claude-3-5-sonnet", "claude-3-5-haiku", "claude-3-7-sonnet",
+    # OpenAI: pre-4o generations and their dated variants.
+    "gpt-3.5", "gpt-4-0", "gpt-4-1106", "gpt-4-vision", "gpt-4-32k",
+    "davinci", "babbage", "curie", "ada",
+    # xAI: superseded by Grok 3 and later.
+    "grok-beta", "grok-vision", "grok-2",
+)
+
+
+def _is_obsolete(model_id: str) -> bool:
+    """Whether a model id belongs to a superseded generation."""
+    lowered = (model_id or "").lower()
+    return any(marker in lowered for marker in OBSOLETE_MODELS)
 
 
 async def check(provider: str) -> ProviderResult:

@@ -126,6 +126,10 @@ DEFAULT_SETTINGS: dict = {
     "interface": {
         # "dark" | "light" | "system"
         "theme": "dark",
+        # The dashboard's recently-used list (#268): the last few connections
+        # actually opened, newest first. Written by the tab module, cleared
+        # from the dashboard. Never a secret — label, address, port, type.
+        "recent_connections": [],
         # Which split layout to open with. See frontend/js/layout.js.
         "default_layout": "single",
         # Fraction of the window the chat pane takes. Dragging the divider

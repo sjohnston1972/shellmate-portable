@@ -363,17 +363,6 @@
    */
   let profileCache = [];
 
-  /**
-   * How many tiles the home view will paint (#267).
-   *
-   * Enough that a modest estate is simply all there, bounded so a large one
-   * cannot make the first paint the slowest thing in the application — which
-   * is what the unbounded version did at five thousand. Kept modest as well
-   * as bounded: sixty tiles pushed the hero and the shortcuts off the top,
-   * which is a wall of its own.
-   */
-  const HOME_TILE_CAP = 24;
-
   async function renderWelcomeProfiles() {
     try {
       const res = await fetch('/api/profiles');
@@ -401,36 +390,14 @@
 
       _paintHero();
 
-      // Tiles only for a group with nothing below it (#177).
-      //
-      // The grid used to fall back to every profile when nothing was
-      // selected, which at five thousand made the first paint the slowest
-      // thing in the application — and a wall of tiles nobody could read is
-      // not a view of anything. The tree is how a connection is found now.
-      const leaf = window.shellmateGroups
-        ? window.shellmateGroups.showsTiles() : Boolean(openGroup);
-      let shown = leaf
-        ? profiles.filter(p => (p.tags || []).includes(openGroup))
-        : [];
+      // The dashboard shows what you have actually used, and never a list of
+      // devices (#268) — not at the root, not inside a group. The tree lists
+      // every connection under its group and launches them on click, so a
+      // grid of the same names was the same job done twice, and at five
+      // thousand it was the slowest paint in the application.
+      const shown = _recentTiles(profiles);
 
-      // Home shows the recent set first (#233), then fills up to a cap with
-      // everything else (#267) — a connection in no group appeared nowhere at
-      // all before, while still counting towards the total. Capped rather
-      // than complete: five thousand tiles was the slowest thing in the
-      // application, and the tree and the search are how a specific
-      // connection is found.
-      let recent = 0;
-      let capped = 0;
-      if (!leaf && !openGroup) {
-        const recents = _recentProfiles(profiles);
-        recent = recents.length;
-        const seen = new Set(recents.map(p => p.id));
-        const rest = profiles.filter(p => !seen.has(p.id));
-        shown = recents.concat(rest.slice(0, Math.max(0, HOME_TILE_CAP - recents.length)));
-        capped = profiles.length - shown.length;
-      }
-
-      _paintEmptyState(leaf, openGroup, profiles.length, recent, capped);
+      _paintEmptyState(openGroup, profiles.length, shown.length);
 
       shown.forEach(p => {
         const wrap = document.createElement('div');
@@ -471,7 +438,12 @@
         }
         card.querySelector('.welcome-profile-host').textContent =
           p.connection_type === 'serial' ? (p.serial_port || '') : (p.hostname || '');
-        card.addEventListener('click', () => openProfile(p, card));
+        // A recent connection that was never saved has nothing to connect
+        // with — it opens the dialog prefilled rather than pretending (#268).
+        card.addEventListener('click', () => {
+          if (p._unsaved) showConnectionDialog(p);
+          else openProfile(p, card);
+        });
 
         // Editing a saved connection needs its own route once clicking
         // connects. Right-click is the one people try first.
@@ -485,18 +457,24 @@
           card.title += ' — click to connect, right-click to edit';
         }
 
-        const del = document.createElement('button');
-        del.className = 'welcome-profile-delete';
-        del.title = 'Remove';
-        del.innerHTML = '<span class="material-symbols-outlined">close</span>';
-        del.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          await fetch(`/api/profiles/${p.id}`, { method: 'DELETE' });
-          renderWelcomeProfiles();
-        });
-
         wrap.appendChild(card);
-        wrap.appendChild(del);
+
+        // The × deletes a saved connection, so it has no business on a tile
+        // that only represents something recently opened (#268). Clearing
+        // the list is the whole-list action beneath the grid.
+        if (!p._unsaved && p.id) {
+          const del = document.createElement('button');
+          del.className = 'welcome-profile-delete';
+          del.title = 'Delete this saved connection';
+          del.innerHTML = '<span class="material-symbols-outlined">close</span>';
+          del.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await fetch(`/api/profiles/${p.id}`, { method: 'DELETE' });
+            renderWelcomeProfiles();
+          });
+          wrap.appendChild(del);
+        }
+
         grid.appendChild(wrap);
       });
     } catch (e) { /* silently skip if API unavailable */ }
@@ -553,56 +531,75 @@
    * An empty panel reads as broken, and "select a group" is the one thing
    * somebody landing on an empty dashboard needs told.
    */
-  function _paintEmptyState(leaf, openGroup, total, recent, capped) {
+  function _paintEmptyState(openGroup, total, recentCount) {
     const box = document.getElementById('welcome-empty');
     if (!box) return;
 
-    if (leaf) {
-      box.classList.add('hidden');
-      box.textContent = '';
+    box.classList.remove('hidden');
+    box.textContent = '';
+
+    if (recentCount) {
+      // A heading rather than an apology: the tiles above are what you have
+      // been working on, and the tree beside them is everything else (#268).
+      const line = document.createElement('span');
+      line.textContent = openGroup
+        ? `Recently used. ${total} saved connection${total === 1 ? '' : 's'} — `
+          + 'pick one from the tree on the left.'
+        : `Recently used. ${total} saved connection${total === 1 ? '' : 's'} — `
+          + 'the tree on the left has them all.';
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'btn-tertiary welcome-clear-recents';
+      clear.textContent = 'Clear';
+      clear.title = 'Forget the recently-used list';
+      clear.addEventListener('click', _clearRecents);
+      box.append(line, clear);
       return;
     }
 
-    box.classList.remove('hidden');
-    if (!openGroup && total) {
-      // The home view has tiles above this line, so the sentence names what
-      // they are — and says plainly how many are not shown (#267), rather
-      // than leaving someone to wonder where a connection went.
-      box.textContent = (recent ? 'Recent connections first. ' : '')
-        + (capped > 0
-            ? `Showing ${total - capped} of ${total} — search or pick a group `
-              + 'on the left for the rest.'
-            : `${total} saved connection${total === 1 ? '' : 's'}.`);
-      return;
-    }
-    box.textContent = openGroup
-      ? 'Pick a subgroup on the left to see the connections in it.'
-      : 'No saved connections yet.';
+    box.textContent = total
+      ? `${total} saved connection${total === 1 ? '' : 's'} — pick one from the `
+        + 'tree on the left, or start a new connection.'
+      : 'No saved connections yet. Start one with New Connection.';
   }
 
   /**
-   * The profiles behind the last remembered set of open tabs (#233).
+   * The recently-used list, as things the dashboard can paint (#268).
    *
-   * interface.open_tabs is already persisted for tab restore, so "recent"
-   * costs no new bookkeeping. Matched conservatively — type, address and
-   * port — and capped, because the home view is a doorway, not a list.
+   * Written by tabs.js as connections are opened. Each entry is resolved
+   * back to its saved profile where one exists, so the tile connects and
+   * carries the padlock; an ad-hoc connection with nothing saved is still
+   * shown, and opens the dialog prefilled rather than pretending it can
+   * connect on one click.
    */
-  function _recentProfiles(profiles) {
-    const remembered =
-      ((window.shellmateSettings || {}).interface || {}).open_tabs || [];
-    const out = [];
-    const seen = new Set();
-    remembered.forEach(t => {
-      const match = profiles.find(p =>
-        (p.connection_type || 'ssh') === (t.connection_type || 'ssh')
-        && (p.hostname || '') === (t.hostname || '')
-        && Number(p.port || 0) === Number(t.port || 0));
-      if (match && !seen.has(match.id)) {
-        seen.add(match.id);
-        out.push(match);
+  function _recentTiles(profiles) {
+    const recents =
+      ((window.shellmateSettings || {}).interface || {}).recent_connections || [];
+    return recents.map(entry => {
+      if (entry.profile_id) {
+        const saved = profiles.find(p => p.id === entry.profile_id);
+        if (saved) return saved;
       }
-    });
-    return out.slice(0, 8);
+      const match = profiles.find(p =>
+        (p.connection_type || 'ssh') === (entry.connection_type || 'ssh')
+        && (p.hostname || '') === (entry.hostname || '')
+        && Number(p.port || 0) === Number(entry.port || 0));
+      return match || {
+        id: '',
+        name: entry.label || entry.hostname || '',
+        hostname: entry.hostname || '',
+        port: entry.port || 0,
+        connection_type: entry.connection_type || 'ssh',
+        tags: [],
+        _unsaved: true,
+      };
+    }).filter(Boolean).slice(0, 8);
+  }
+
+  /** Forget the recently-used list (#268). */
+  async function _clearRecents() {
+    if (window.shellmatePrefs) window.shellmatePrefs.set('recent_connections', []);
+    await renderWelcomeTiles();
   }
 
   /**

@@ -52,6 +52,8 @@
     document.getElementById('sidebar-link-broadcast')
       .addEventListener('click', (e) => { e.preventDefault(); open(); });
     document.getElementById('broadcast-close').addEventListener('click', close);
+    const backBtn = document.getElementById('broadcast-back');
+    if (backBtn) backBtn.addEventListener('click', goBack);
     document.getElementById('broadcast-send').addEventListener('click', send);
     // One control for one axis. "None" was a second button doing half of
     // what this one now does, and two controls for one thing is how people
@@ -85,7 +87,23 @@
     return (typeof window.getOpenTabs === 'function') ? window.getOpenTabs() : [];
   }
 
-  async function open() {
+  /**
+   * Where to go back to when this closes (#283).
+   *
+   * Opening Broadcast from Settings had to close Settings — two overlays at
+   * one level leave the one behind unreachable — so the trip was one-way and
+   * whatever you were reading was gone. Set by the caller; consumed once.
+   */
+  let returnTo = null;
+
+  async function open(opts) {
+    returnTo = (opts && opts.returnTo) || null;
+    const back = document.getElementById('broadcast-back');
+    if (back) {
+      back.classList.toggle('hidden', !returnTo);
+      back.textContent = returnTo ? `Back to ${returnTo.label}` : '';
+    }
+
     // Default to the active tab, which is what someone opening this while
     // looking at a device almost always means.
     if (!selected.size) {
@@ -104,7 +122,22 @@
     setTimeout(() => input.focus(), 50);
   }
 
-  function close() { overlay.classList.add('hidden'); }
+  function close() {
+    overlay.classList.add('hidden');
+    // Only when asked for, and only once: closing by Escape or the × from a
+    // Settings visit should not reopen Settings a second time later.
+    const back = returnTo;
+    returnTo = null;
+    const backBtn = document.getElementById('broadcast-back');
+    if (backBtn) backBtn.classList.add('hidden');
+    return back;
+  }
+
+  /** Close and return to whatever opened this (#283). */
+  function goBack() {
+    const back = close();
+    if (back && typeof back.open === 'function') back.open();
+  }
 
   // -------------------------------------------------------------------------
   // Targets
@@ -328,9 +361,10 @@
 
       const group = document.createElement('details');
       group.className = 'snippet-group';
-      // The first two open: cross-vendor, and whatever is selected. The rest
-      // are one click away rather than a wall of a hundred rows.
-      group.open = index < 2;
+      // All closed (#284). Two open by default put a hundred rows above the
+      // vendor you were actually looking for; the list of vendors is the
+      // useful first view, and opening one is a click.
+      group.open = false;
 
       const summary = document.createElement('summary');
       summary.className = 'snippet-group-head';

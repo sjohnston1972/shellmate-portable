@@ -570,6 +570,12 @@
       children.classList.toggle('hidden', !rootOpen);
     });
     all.addEventListener('click', () => {
+      // The row toggles too (#287) — aiming for a 16px chevron to fold the
+      // tree is a precision the rest of the tree does not ask for.
+      rootOpen = !rootOpen;
+      chevron.textContent = rootOpen ? 'keyboard_arrow_down' : 'keyboard_arrow_right';
+      children.classList.toggle('hidden', !rootOpen);
+
       activeGroup = '';
       _select();
       // Same as selecting a branch: the result must be visible (#232).

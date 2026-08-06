@@ -564,6 +564,39 @@ class SessionStore:
                 logger.warning("Search failed: %s", exc)
                 return []
 
+            # Nothing from the index is not the same as nothing to find
+            # (#271). FTS matches whole tokens, so a search for a phrase that
+            # sits inside one — "show ip arp" against a command recorded as
+            # "arpshow ip arp" — misses entirely, as does anything the
+            # tokeniser split differently. A substring pass costs one more
+            # query on the miss path only, and it is the answer people
+            # expect from a search box.
+            if query and self._fts_enabled and not rows:
+                like_sql = """
+                    SELECT c.id, c.session_id, c.command, c.ran_at,
+                           s.hostname, s.label,
+                           substr(c.output, 1, 200) AS snippet
+                    FROM commands c
+                    JOIN sessions s ON s.id = c.session_id
+                    WHERE (c.command LIKE ? OR c.output LIKE ?)
+                """
+                like_params: list[Any] = [f"%{query}%", f"%{query}%"]
+                if hostname:
+                    like_sql += " AND s.hostname = ?"
+                    like_params.append(hostname)
+                if since is not None:
+                    like_sql += " AND c.ran_at >= ?"
+                    like_params.append(since)
+                if until is not None:
+                    like_sql += " AND c.ran_at <= ?"
+                    like_params.append(until)
+                like_sql += " ORDER BY c.ran_at DESC LIMIT ?"
+                like_params.append(min(max(limit, 1), 500))
+                try:
+                    rows = connection.execute(like_sql, like_params).fetchall()
+                except sqlite3.Error as exc:
+                    logger.warning("Substring search failed: %s", exc)
+
             return [
                 SearchHit(
                     command_id=row["id"], session_id=row["session_id"],
@@ -870,11 +903,20 @@ def _to_fts_query(text: str) -> str:
     search for ``10.1.1.1`` or ``Gi0/1`` would otherwise raise rather than
     match. Each word is quoted and the terms ANDed, which is what someone
     typing several words expects.
+
+    The last word is a prefix (#271). The panel searches as you type, so
+    every word is a partial word until the instant it is finished: without
+    this, typing "interface" reported "nothing matches" through i, in, int,
+    inte... and only found anything on the final keystroke — which reads as
+    a search that does not work. Only the last term, because the earlier
+    words in a multi-word query have been finished by the space after them.
     """
     words = [word for word in text.replace('"', " ").split() if word]
     if not words:
         return '""'
-    return " AND ".join(f'"{word}"' for word in words)
+    terms = [f'"{word}"' for word in words[:-1]]
+    terms.append(f'"{words[-1]}"*')
+    return " AND ".join(terms)
 
 
 # Process-wide instance — one database file, one owner.

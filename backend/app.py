@@ -580,6 +580,26 @@ async def config_archive_summary() -> dict:
     return await asyncio.to_thread(config_archive.summary)
 
 
+@app.post("/api/configs/archive/reveal")
+async def config_archive_reveal() -> dict:
+    """
+    Open the folder holding the archived configurations (#275).
+
+    Declared beside the summary and before ``/api/configs/{hostname}`` for
+    the same routing reason.
+    """
+    from backend.settings_store import config_directory
+
+    folder = config_directory()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        opened = await asyncio.to_thread(desktop.reveal, folder)
+    except Exception as exc:
+        logger.info("Could not open the configuration archive: %s", exc)
+        opened = False
+    return {"opened": opened, "folder": str(folder)}
+
+
 @app.get("/api/configs/{hostname}")
 async def config_list(hostname: str, limit: int = 50) -> list[dict]:
     """List stored configuration snapshots for a device, newest first."""
