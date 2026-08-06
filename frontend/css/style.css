@@ -431,17 +431,23 @@ a {
   position: relative;
 }
 
-/* Coloured top-accent ribbon — present but subtle on idle tabs */
+/* Coloured top-accent ribbon — present but subtle on idle tabs.
+ *
+ * A tab in a group wears that group's colour (#288), so the strip answers
+ * "which site is this one" without being read. Outside a group it falls
+ * back to the neutral accent, which is what --group-colour being unset
+ * means. Thicker than the 2px hairline it was: at a glance across a dozen
+ * tabs, two pixels of colour is not a signal. */
 .tab::before {
   content: "";
   position: absolute;
   top: 0;
   left: 8px;
   right: 8px;
-  height: 2px;
+  height: 3px;
   border-radius: 2px 2px 0 0;
-  background: var(--secondary);
-  opacity: 0.25;
+  background: var(--group-colour, var(--secondary));
+  opacity: 0.45;
   transition: opacity 0.15s, background 0.15s, left 0.15s, right 0.15s;
 }
 
@@ -471,12 +477,14 @@ a {
   box-shadow: 0 0 0 1px var(--primary-container) inset;
 }
 
-/* Bright primary ribbon spans the full tab width when active */
+/* The ribbon spans the full tab width when active, in the group's own
+   colour where it has one (#288). Full-width, full-opacity and 4px is the
+   selection signal; the colour says which group it belongs to. */
 .tab.active::before {
   left: 0;
   right: 0;
-  height: 3px;
-  background: var(--primary-container);
+  height: 4px;
+  background: var(--group-colour, var(--primary-container));
   opacity: 1;
 }
 
@@ -495,9 +503,9 @@ a {
 .tab.tiled::before {
   left: 0;
   right: 0;
-  height: 2px;
-  background: var(--primary-container);
-  opacity: 0.45;
+  height: 3px;
+  background: var(--group-colour, var(--primary-container));
+  opacity: 0.7;
 }
 
 /* Disconnected — soft red outline + ribbon */
@@ -7326,11 +7334,11 @@ body.sidebar-labelled .sidebar-label {
  * all index into that array — a header is not a tab and must never become
  * index 0. */
 .tab.tab-group-member {
-  border-bottom: 2px solid var(--group-colour, transparent);
+  border-bottom: 3px solid var(--group-colour, transparent);
 }
 
 .tab.tab-group-start {
-  border-left: 2px solid var(--group-colour, transparent);
+  border-left: 3px solid var(--group-colour, transparent);
   padding-left: 8px;
 }
 
@@ -7866,11 +7874,28 @@ body {
    meanings, one appearance, and selecting a group made unrelated tabs look
    active. Receding the others carries the emphasis on its own, and costs no
    new appearance to be confused with. */
+/* Receded, not hidden (#290). This was 0.45, which on a strip of a dozen
+   tabs made the labels genuinely hard to read — emphasis bought by making
+   most of the interface unreadable is not emphasis, it is a fog. The
+   selected tab has weight, a full-width ribbon and a ring to stand out
+   with; this only has to be quieter than that. */
 .tab.tab-outside-group {
-  opacity: 0.45;
+  opacity: 0.8;
 }
 
 .tab.tab-outside-group:hover {
+  opacity: 1;
+}
+
+/* Nothing recedes the tab you are typing into (#289).
+ *
+ * The dimming above is emphasis for a group selection made on another
+ * screen, and it applied to every tab outside that group — the active one
+ * included. So selecting a group elsewhere faded the session with the
+ * keyboard to 45%, and whether the active tab stood out depended on where
+ * you had last clicked in the tree. Active is a fact about this window and
+ * outranks it. */
+.tab.tab-outside-group.active {
   opacity: 1;
 }
 
