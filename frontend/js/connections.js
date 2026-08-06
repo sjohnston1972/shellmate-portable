@@ -363,6 +363,17 @@
    */
   let profileCache = [];
 
+  /**
+   * How many tiles the home view will paint (#267).
+   *
+   * Enough that a modest estate is simply all there, bounded so a large one
+   * cannot make the first paint the slowest thing in the application — which
+   * is what the unbounded version did at five thousand. Kept modest as well
+   * as bounded: sixty tiles pushed the hero and the shortcuts off the top,
+   * which is a wall of its own.
+   */
+  const HOME_TILE_CAP = 24;
+
   async function renderWelcomeProfiles() {
     try {
       const res = await fetch('/api/profiles');
@@ -402,16 +413,24 @@
         ? profiles.filter(p => (p.tags || []).includes(openGroup))
         : [];
 
-      // Home shows the recent set (#233) — a handful of tiles for the
-      // connections last worked with, not the five-thousand-tile wall the
-      // no-selection fallback used to be.
+      // Home shows the recent set first (#233), then fills up to a cap with
+      // everything else (#267) — a connection in no group appeared nowhere at
+      // all before, while still counting towards the total. Capped rather
+      // than complete: five thousand tiles was the slowest thing in the
+      // application, and the tree and the search are how a specific
+      // connection is found.
       let recent = 0;
+      let capped = 0;
       if (!leaf && !openGroup) {
-        shown = _recentProfiles(profiles);
-        recent = shown.length;
+        const recents = _recentProfiles(profiles);
+        recent = recents.length;
+        const seen = new Set(recents.map(p => p.id));
+        const rest = profiles.filter(p => !seen.has(p.id));
+        shown = recents.concat(rest.slice(0, Math.max(0, HOME_TILE_CAP - recents.length)));
+        capped = profiles.length - shown.length;
       }
 
-      _paintEmptyState(leaf, openGroup, profiles.length, recent);
+      _paintEmptyState(leaf, openGroup, profiles.length, recent, capped);
 
       shown.forEach(p => {
         const wrap = document.createElement('div');
@@ -534,7 +553,7 @@
    * An empty panel reads as broken, and "select a group" is the one thing
    * somebody landing on an empty dashboard needs told.
    */
-  function _paintEmptyState(leaf, openGroup, total, recent) {
+  function _paintEmptyState(leaf, openGroup, total, recent, capped) {
     const box = document.getElementById('welcome-empty');
     if (!box) return;
 
@@ -545,17 +564,20 @@
     }
 
     box.classList.remove('hidden');
-    if (!openGroup && recent) {
-      // The home view has recent tiles above this line (#233), so the
-      // sentence names what they are rather than claiming emptiness.
-      box.textContent = `Recent connections. ${total} saved in all — `
-        + 'pick a group on the left to see everything.';
+    if (!openGroup && total) {
+      // The home view has tiles above this line, so the sentence names what
+      // they are — and says plainly how many are not shown (#267), rather
+      // than leaving someone to wonder where a connection went.
+      box.textContent = (recent ? 'Recent connections first. ' : '')
+        + (capped > 0
+            ? `Showing ${total - capped} of ${total} — search or pick a group `
+              + 'on the left for the rest.'
+            : `${total} saved connection${total === 1 ? '' : 's'}.`);
       return;
     }
     box.textContent = openGroup
       ? 'Pick a subgroup on the left to see the connections in it.'
-      : `${total} saved connection${total === 1 ? '' : 's'}. `
-        + 'Pick a group on the left to see them.';
+      : 'No saved connections yet.';
   }
 
   /**

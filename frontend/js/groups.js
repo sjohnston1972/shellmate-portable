@@ -395,6 +395,78 @@
     });
   }
 
+  /**
+   * Connections that belong to no group the tree can show (#267).
+   *
+   * Two ways to end up here: no tags at all, or tags naming groups that no
+   * longer exist. Both were invisible — the tree is built from groups, and
+   * the home view shows only recent connections, so a newly saved connection
+   * with no group appeared nowhere while still counting towards the total.
+   */
+  function _ungroupedProfiles() {
+    const known = new Set(groupCache.map(g => g.key));
+    return profileCache.filter(p =>
+      !(p.tags || []).some(tag => known.has(tag)));
+  }
+
+  /** The synthetic branch holding them. Absent when there are none. */
+  function _ungroupedBranch(profiles) {
+    const KEY = '__ungrouped__';   // cannot collide with a real group key
+    const wrap = document.createElement('div');
+    wrap.className = 'tree-branch';
+    wrap.style.setProperty('--depth', '0');
+
+    const row = document.createElement('div');
+    row.className = 'tree-row';
+
+    const open = expanded.has(KEY);
+
+    const twist = document.createElement('button');
+    twist.type = 'button';
+    twist.className = 'tree-twist';
+    twist.innerHTML = '<span class="material-symbols-outlined">'
+                    + (open ? 'keyboard_arrow_down' : 'keyboard_arrow_up')
+                    + '</span>';
+    twist.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (open) expanded.delete(KEY); else expanded.add(KEY);
+      _select();
+    });
+
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'tree-chip group-slate tree-chip-ungrouped';
+    chip.title = 'Connections that are not in any group. '
+               + 'Drag one onto a group to file it.';
+
+    const glyph = document.createElement('span');
+    glyph.className = 'material-symbols-outlined tree-chip-icon';
+    glyph.textContent = 'folder_open';
+
+    const name = document.createElement('span');
+    name.className = 'tree-chip-name';
+    name.textContent = 'Ungrouped';
+
+    const count = document.createElement('span');
+    count.className = 'tree-chip-count';
+    count.textContent = String(profiles.length);
+
+    chip.append(glyph, name, count);
+    chip.addEventListener('click', () => {
+      if (open) expanded.delete(KEY); else expanded.add(KEY);
+      _select();
+    });
+
+    row.append(twist, chip);
+    wrap.appendChild(row);
+
+    if (open) {
+      const node = { key: KEY, depth: 0, label: 'Ungrouped', group: null };
+      profiles.forEach(p => wrap.appendChild(_leaf(p, node)));
+    }
+    return wrap;
+  }
+
   function renderTree(profiles) {
     const panel = document.getElementById('group-tree');
     const body = document.getElementById('group-tree-body');
@@ -511,6 +583,12 @@
       children.appendChild(rule);
     }
     rest.forEach(node => children.appendChild(_branch(node)));
+
+    // Last, and only when it has anything in it (#267). A connection in no
+    // group had no home in the tree at all, so it was invisible while still
+    // counting towards the total.
+    const orphans = _ungroupedProfiles().filter(p => !query || _profileMatches(p));
+    if (orphans.length) children.appendChild(_ungroupedBranch(orphans));
 
     body.append(all, children);
 
