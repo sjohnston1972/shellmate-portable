@@ -2355,21 +2355,50 @@
       menu.appendChild(sep);
     }
 
-    const heading = document.createElement('div');
-    heading.className = 'ctx-heading';
-    heading.textContent = 'Send special command';
-    menu.appendChild(heading);
+    // One row, opening a submenu (#306). Listed inline these were nine
+    // entries on a menu that already had a dozen, and a menu long enough to
+    // need reading is a menu nobody reads.
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'ctx-submenu-row';
+
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined';
+    icon.textContent = 'keyboard';
+
+    const chevron = document.createElement('span');
+    chevron.className = 'material-symbols-outlined ctx-submenu-arrow';
+    chevron.textContent = 'keyboard_arrow_right';
+
+    row.append(icon, document.createTextNode('Send special command'), chevron);
+    row.addEventListener('click', (e) => {
+      // Or the document-level dismissal takes the whole menu with it before
+      // the submenu is on screen.
+      e.stopPropagation();
+      _openSpecialSubmenu(row, tab, commands);
+    });
+    menu.appendChild(row);
+  }
+
+  /** The submenu itself, beside the row that opened it (#306). */
+  function _openSpecialSubmenu(row, tab, commands) {
+    document.querySelectorAll('.ctx-submenu').forEach(el => el.remove());
+
+    // Shares the context-menu class, so every existing dismissal path —
+    // outside click, Escape, opening another menu — cleans it up too.
+    const submenu = document.createElement('div');
+    submenu.className = 'tab-context-menu ctx-submenu';
 
     commands.forEach(entry => {
       if (!entry || !entry.name) return;
       const button = document.createElement('button');
       button.type = 'button';
 
-      const icon = document.createElement('span');
-      icon.className = 'material-symbols-outlined';
-      icon.textContent = entry.kind === 'break' ? 'stop_circle' : 'keyboard';
+      const glyph = document.createElement('span');
+      glyph.className = 'material-symbols-outlined';
+      glyph.textContent = entry.kind === 'break' ? 'stop_circle' : 'keyboard';
 
-      button.appendChild(icon);
+      button.appendChild(glyph);
       button.appendChild(document.createTextNode(entry.name));
       if (entry.hint) button.title = entry.hint;
 
@@ -2383,13 +2412,32 @@
           ? 'Break is a serial signal — this session is not a serial console.'
           : 'The session is not connected.';
       } else {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', (e) => {
+          e.stopPropagation();
           _hideTabContextMenu();
           _sendSpecial(tab, entry);
         });
       }
-      menu.appendChild(button);
+      submenu.appendChild(button);
     });
+
+    document.body.appendChild(submenu);
+
+    // Beside the row, flipping to its left when there is no room on the
+    // right, and clamped vertically — the tab menu is often near an edge.
+    const anchor = row.getBoundingClientRect();
+    const width = submenu.offsetWidth;
+    const height = submenu.offsetHeight;
+    const right = anchor.right + width + 8 <= window.innerWidth
+      ? anchor.right + 2
+      : Math.max(8, anchor.left - width - 2);
+    submenu.style.left = `${right}px`;
+    submenu.style.top = `${Math.max(8,
+      Math.min(anchor.top - 4, window.innerHeight - height - 8))}px`;
+
+    setTimeout(() => {
+      document.addEventListener('click', _hideTabContextMenu, { once: true });
+    }, 0);
   }
 
   /** Put one special command on the wire. */

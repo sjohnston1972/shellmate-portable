@@ -3428,6 +3428,15 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .history-snippet { position: relative; }
 .history-snippet .history-copy { float: right; }
 
+/* A context-menu row that opens a submenu (#306). Same shape as any other
+   row, with the arrow pushed to the far edge so it reads as "there is more
+   this way" rather than as a third icon. */
+.ctx-submenu-row .ctx-submenu-arrow {
+  margin-left: auto;
+  font-size: 16px;
+  opacity: 0.7;
+}
+
 /* The certificate inspector (#301). */
 #cert-input {
   width: 100%;
