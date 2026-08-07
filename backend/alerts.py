@@ -385,4 +385,14 @@ class AlertTracker:
         """What to send to the interface."""
         if self.pending is None:
             return {"type": "pending_action", "pending": None}
-        return {"type": "pending_action", "pending": self.pending.as_dict()}
+
+        pending = self.pending.as_dict()
+        # The way out, alongside the warning (#292). Sent with the pending
+        # rather than looked up in the browser, because the platform is
+        # already resolved here and the interface has no business deciding
+        # what to type at a device.
+        if self.pending.kind == RELOAD:
+            profile = self._profile()
+            pending["cancel_command"] = getattr(
+                profile, "reload_cancel_command", "") if profile else ""
+        return {"type": "pending_action", "pending": pending}

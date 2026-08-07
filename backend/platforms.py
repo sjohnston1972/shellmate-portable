@@ -73,6 +73,11 @@ class PlatformProfile:
     # with none of these keeps the typed-command countdown.
     reload_announce_patterns: list[str] = field(default_factory=list)
     reload_cancel_patterns: list[str] = field(default_factory=list)
+    # What to type to call a scheduled reload off (#292). Offered by the
+    # last-chance warning, so the answer to "it is about to reboot" is a
+    # button rather than remembering the command under pressure. Blank where
+    # a platform has no such command, and the button is not offered.
+    reload_cancel_command: str = ""
     # Junos-style "commit confirmed": rolls itself back unless confirmed. Not
     # a reboot, so it is tracked separately and worded differently.
     commit_confirm_patterns: list[str] = field(default_factory=list)
@@ -152,22 +157,25 @@ BUILTIN: dict[str, PlatformProfile] = {
             r"^\s*reload\s+at\s+(?P<at>\d{1,2}:\d{2})\b",
         ],
         reload_announce_patterns=[
-            # The device's own banner, repeated as the time approaches. This
-            # is the authoritative one; a typed reload only becomes a
-            # countdown when one of these arrives (#248).
+            # The SHUTDOWN banner, and only this (#291).
+            #
+            # "Reload scheduled in 1 minute by steven on vty0" was in this
+            # list, and it is printed *before* the [confirm] prompt — so it
+            # announces what the device is being asked to do, not what it is
+            # doing. Answering no, or simply walking away, leaves nothing
+            # scheduled, and a countdown started from that line is counting
+            # down to something that will never happen.
+            #
+            # The banner below is printed once the reload is genuinely armed,
+            # and repeated as the time approaches.
             r"SHUTDOWN\s+in\s+(?P<h>\d+):(?P<m>\d{2}):(?P<s>\d{2})",
-            r"Reload\s+scheduled\s+.*?\(in\s+(?:(?P<h>\d+)\s+hours?)?"
-            r"(?:\s*and\s*)?(?:(?P<m>\d+)\s+minutes?)?\)",
-            # The parenthesis-free form: "Reload scheduled in 5 minutes by
-            # admin". Both shapes occur across IOS trains.
-            r"Reload\s+scheduled\s+in\s+(?:(?P<h>\d+)\s+hours?\s*(?:and\s*)?)?"
-            r"(?P<m>\d+)\s+minutes?",
         ],
         reload_cancel_patterns=[
             r"^\s*reload\s+cancel\b",
             r"SHUTDOWN\s+ABORTED",
             r"Reload\s+cancelled",
         ],
+        reload_cancel_command="reload cancel",
     ),
     "nxos": PlatformProfile(
         id="nxos",
@@ -228,12 +236,17 @@ BUILTIN: dict[str, PlatformProfile] = {
             r"^\s*reload\s+in\s+(?P<h>\d+):(?P<m>\d{1,2})\b",
             r"^\s*reload\s+in\s+(?P<m>\d+)\b",
             r"^\s*reload\s+at\s+(?P<at>\d{1,2}:\d{2})\b",
+        ],
+        reload_announce_patterns=[
+            # Split out for the same reason as IOS (#291): the countdown
+            # arms on the device's banner, not on the command being typed.
             r"SHUTDOWN\s+in\s+(?P<h>\d+):(?P<m>\d{2}):(?P<s>\d{2})",
         ],
         reload_cancel_patterns=[
             r"^\s*reload\s+cancel\b",
             r"SHUTDOWN\s+ABORTED",
         ],
+        reload_cancel_command="reload cancel",
     ),
     "asa": PlatformProfile(
         id="asa",
@@ -332,6 +345,7 @@ BUILTIN: dict[str, PlatformProfile] = {
             r"^\s*clear\s+system\s+reboot\b",
             r"Shutdown\s+cancell?ed",
         ],
+        reload_cancel_command="clear system reboot",
         commit_confirm_patterns=[
             # "commit confirmed" on its own is ten minutes on Junos.
             r"^\s*commit\s+confirmed(?:\s+(?P<m>\d+))?\b",

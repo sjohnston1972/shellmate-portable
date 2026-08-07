@@ -129,6 +129,12 @@
       ['bottom-right', 'bottom-left', 'top-right', 'top-left']
         .includes(s.toast_position) ? s.toast_position : 'bottom-right');
 
+    // Group colours, on or off (#293). An attribute on the root rather than
+    // a class per element: every use resolves --group-colour, so one rule in
+    // the stylesheet neutralises the lot — tabs, tree, tiles and status.
+    document.documentElement.setAttribute(
+      'data-group-colours', s.colourful_groups === false ? 'off' : 'on');
+
     applyTabOrder(s);
     applyPanelTransition(s);
 

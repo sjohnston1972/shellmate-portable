@@ -223,13 +223,30 @@ def test_payload() -> None:
     check("the command that caused it is included",
           "reload in 10" in payload["source"], str(payload))
 
-    t.observe_output("Reload scheduled in 10 minutes by admin")
+    # The scheduling line is printed *before* the [confirm] prompt, so it
+    # says what the device was asked to do, not what it is doing (#291).
+    t.observe_output("Reload scheduled in 10 minutes by steven on vty0")
+    t.observe_output("Proceed with reload? [confirm]")
+    asked = t.payload()["pending"]
+    check("the scheduling line does not arm the countdown",
+          asked["awaiting_confirmation"] is True and asked["deadline_ms"] is None,
+          str(asked))
+
+    # The banner only appears once the reload is genuinely armed.
+    t.observe_output("*** --- SHUTDOWN in 0:10:00 ---")
     confirmed = t.payload()["pending"]
-    check("the announcement arms the countdown",
+    check("the SHUTDOWN banner arms the countdown",
           confirmed["awaiting_confirmation"] is False, str(confirmed))
     check("as an absolute deadline in milliseconds",
           confirmed["deadline_ms"] is not None
           and confirmed["deadline_ms"] > time.time() * 1000, str(confirmed))
+    check("and the way to call it off travels with it",
+          confirmed.get("cancel_command") == "reload cancel", str(confirmed))
+
+    # And the device's own abort clears it.
+    t.observe_output("*** --- SHUTDOWN ABORTED ---")
+    check("SHUTDOWN ABORTED stops the tracking",
+          t.payload()["pending"] is None, str(t.payload()))
 
     # Declining the guardrail retracts a pending the device never confirmed.
     t2 = AlertTracker(platform="ios")

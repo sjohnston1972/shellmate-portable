@@ -130,6 +130,10 @@ DEFAULT_SETTINGS: dict = {
         # actually opened, newest first. Written by the tab module, cleared
         # from the dashboard. Never a secret — label, address, port, type.
         "recent_connections": [],
+        # Whether groups and tabs wear their group's colour (#293). On,
+        # because the colour is what makes a strip of a dozen tabs readable
+        # at a glance; off for anyone who wants the chrome to sit still.
+        "colourful_groups": True,
         # Which split layout to open with. See frontend/js/layout.js.
         "default_layout": "single",
         # Fraction of the window the chat pane takes. Dragging the divider

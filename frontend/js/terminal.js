@@ -762,6 +762,27 @@
    * Over the session's own terminal socket, because that is where the
    * tracker lives; the server clears it and answers with the empty pending.
    */
+  /**
+   * Type a command into a session on the user's behalf (#292).
+   *
+   * Used by the last-chance reload warning for its cancel button. Sent as
+   * ordinary input with a carriage return, so the device sees exactly what
+   * a person typing it would send, and the terminal shows it happening —
+   * a command that goes in silently is the thing this application refuses
+   * to do everywhere else.
+   *
+   * Returns whether it went, so the caller can say if it did not.
+   */
+  window.sendCommandToSession = (sessionId, command) => {
+    const instance = _instances[sessionId];
+    if (!instance || !instance.websocket
+        || instance.websocket.readyState !== WebSocket.OPEN) return false;
+    instance.websocket.send(JSON.stringify({
+      type: 'input', data: String(command).trim() + '\r',
+    }));
+    return true;
+  };
+
   window.dismissPendingAction = (sessionId) => {
     const instance = _instances[sessionId];
     if (instance && instance.websocket

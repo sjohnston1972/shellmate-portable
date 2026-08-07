@@ -312,7 +312,46 @@
       }
     });
 
-    actions.append(dismiss, jump);
+    actions.append(dismiss);
+
+    // Calling it off, from the warning itself (#292). Twenty seconds is not
+    // long enough to jump to the tab and remember the command, and the
+    // command is a property of the platform anyway — the backend sends it
+    // with the pending. Absent where the platform has no such command,
+    // because a button that types nothing useful into a device that is
+    // about to reboot is worse than no button.
+    const cancelCommand = entry.pending.cancel_command;
+    if (cancelCommand) {
+      const stop = document.createElement('button');
+      stop.type = 'button';
+      stop.className = 'btn-primary reload-warning-stop';
+      stop.textContent = `Send "${cancelCommand}"`;
+      stop.title = `Types ${cancelCommand} into ${labelFor(sessionId)} and presses return`;
+      stop.addEventListener('click', () => {
+        const sent = typeof window.sendCommandToSession === 'function'
+          && window.sendCommandToSession(sessionId, cancelCommand);
+        entry.bigDismissed = true;
+        removeBigWarning();
+        // The device's own "SHUTDOWN ABORTED" is what actually clears the
+        // countdown — this only says the command went, which is the honest
+        // claim to make before the device has answered.
+        raise({
+          severity: sent ? 'info' : 'warning',
+          icon:     sent ? 'check_circle' : 'error',
+          title:    sent
+            ? `Sent "${cancelCommand}" to ${labelFor(sessionId)}`
+            : `Could not reach ${labelFor(sessionId)}`,
+          body:     sent
+            ? 'The countdown clears when the device confirms it is aborted.'
+            : 'The session is not connected. Cancel it from the device.',
+          sessionId,
+          deadline_ms: entry.pending.deadline_ms,
+        });
+      });
+      actions.appendChild(stop);
+    }
+
+    actions.appendChild(jump);
     dialog.append(icon, title, count, body, actions);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);

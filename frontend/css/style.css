@@ -3428,6 +3428,11 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .history-snippet { position: relative; }
 .history-snippet .history-copy { float: right; }
 
+/* A dialog field that is present but not editable (#293). */
+.sm-dialog-row-disabled {
+  opacity: 0.55;
+}
+
 /* The web-interface address in Diagnostics (#285). */
 .diag-link {
   color: var(--primary);
@@ -7299,6 +7304,19 @@ body.sidebar-labelled .sidebar-label {
 :root[data-theme="light"] .group-purple { --group-colour: #6742B8; }
 :root[data-theme="light"] .group-teal   { --group-colour: #17706F; }
 :root[data-theme="light"] .group-pink   { --group-colour: #A63B78; }
+
+/* Switched off (#293), everything that reads --group-colour gets a neutral
+   instead — one rule rather than a variant of every component. The spines
+   and accents stay, because they are structure; only the colour goes.
+ *
+ * After the theme overrides above, and matching a theme-qualified selector
+ * of its own: placed before them it tied on specificity with the light
+ * theme's own values and lost on source order, so the switch moved the
+ * attribute and nothing else. */
+:root[data-group-colours="off"] [class*="group-"],
+:root[data-theme="light"][data-group-colours="off"] [class*="group-"] {
+  --group-colour: var(--outline);
+}
 
 /* Tab right-click menu toggles (#141).
  *

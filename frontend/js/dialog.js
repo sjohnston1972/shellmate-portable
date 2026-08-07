@@ -217,6 +217,13 @@
         if (spec.type !== 'checkbox' && spec.value !== undefined) {
           control.value = spec.value;
         }
+        // A field can be present but not editable — the colour picker when
+        // group colours are switched off (#293). Shown rather than removed,
+        // so the setting explains itself where the choice would have been.
+        if (spec.disabled) {
+          control.disabled = true;
+          row.classList.add('sm-dialog-row-disabled');
+        }
         fields[spec.name] = { control, spec };
 
         row.append(label, control);

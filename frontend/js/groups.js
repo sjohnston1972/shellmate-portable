@@ -53,6 +53,12 @@
    *  folded tree on every launch would cost more than it saves. */
   let rootOpen = true;
 
+  /** Whether group colours are switched on (#293). */
+  function _coloursOn() {
+    return ((window.shellmateSettings || {}).interface || {})
+      .colourful_groups !== false;
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const button = document.getElementById('btn-new-group');
     // Routed by selection (#261): at root a new top-level group, inside a
@@ -1206,6 +1212,10 @@
         { name: 'name', label: 'Name', required: true, placeholder: 'Glasgow',
           hint: 'If you already tag connections with this name, they join it.' },
         { name: 'colour', label: 'Colour', type: 'select',
+          // Greyed when group colours are switched off (#293) — the choice
+          // would be saved and never seen.
+          disabled: !_coloursOn(),
+          hint: _coloursOn() ? '' : 'Group colours are switched off in Settings.',
           options: colours.map(c => ({ value: c, label: _colourName(c) })) },
       ],
     });
@@ -1258,6 +1268,10 @@
         { name: 'name', label: 'Name', required: true, placeholder: 'access',
           hint: 'Stored as "' + parent.name + '/...", which is what makes it nest.' },
         { name: 'colour', label: 'Colour', type: 'select',
+          // Greyed when group colours are switched off (#293) — the choice
+          // would be saved and never seen.
+          disabled: !_coloursOn(),
+          hint: _coloursOn() ? '' : 'Group colours are switched off in Settings.',
           options: colours.map(c => ({ value: c, label: _colourName(c) })) },
       ],
     });
