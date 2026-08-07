@@ -2371,14 +2371,43 @@
     chevron.textContent = 'keyboard_arrow_right';
 
     row.append(icon, document.createTextNode('Send special command'), chevron);
+
+    // Opens on hover, the way a submenu is expected to (#307). The delay is
+    // the whole trick: sliding the pointer down the menu crosses this row on
+    // the way to something else, and opening instantly would flash a panel
+    // over whatever was being aimed at.
+    let hoverTimer = null;
+    row.addEventListener('mouseenter', () => {
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => _openSpecialSubmenu(row, tab, commands),
+                              SUBMENU_DELAY_MS);
+    });
+    row.addEventListener('mouseleave', () => clearTimeout(hoverTimer));
+
+    // Click still opens it, immediately — for touch, for keyboards, and for
+    // anyone who does not wait.
     row.addEventListener('click', (e) => {
       // Or the document-level dismissal takes the whole menu with it before
       // the submenu is on screen.
       e.stopPropagation();
+      clearTimeout(hoverTimer);
       _openSpecialSubmenu(row, tab, commands);
     });
+
+    // Leaving the row for anything else in the menu closes it again, so the
+    // submenu does not sit over the rows below while they are being read.
+    menu.addEventListener('mouseover', (e) => {
+      if (row.contains(e.target)) return;
+      if (e.target.closest && e.target.closest('.ctx-submenu')) return;
+      clearTimeout(hoverTimer);
+      document.querySelectorAll('.ctx-submenu').forEach(el => el.remove());
+    });
+
     menu.appendChild(row);
   }
+
+  /** How long the pointer must rest on a submenu row before it opens (#307). */
+  const SUBMENU_DELAY_MS = 150;
 
   /** The submenu itself, beside the row that opened it (#306). */
   function _openSpecialSubmenu(row, tab, commands) {
