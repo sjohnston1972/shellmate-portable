@@ -1211,6 +1211,26 @@
         body:    JSON.stringify(profileFrom(payload)),
       });
       const saved = r.ok ? await r.json() : null;
+
+      // The shared credential travels with it (#302).
+      //
+      // profileFrom() deliberately carries no secret, and the credential
+      // reference went the same way — so saving a connection with a shared
+      // credential chosen produced one that asked for a password anyway.
+      // The reference is not a secret: it names a credential the server
+      // already holds, and attaching it is the same call the connect path
+      // makes.
+      if (saved && saved.id) {
+        const ref = value('field-credential');
+        if (ref) {
+          await fetch(`/api/profiles/${saved.id}/credential-set`, {
+            method:  'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ credential_ref: ref }),
+          }).catch(() => { /* the connection is saved either way */ });
+        }
+      }
+
       renderWelcomeProfiles();
 
       // The backend returns the existing profile rather than appending a

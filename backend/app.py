@@ -2668,6 +2668,31 @@ async def key_delete(request: KeyPathRequest) -> dict:
     return {"removed": removed}
 
 
+class CertificateRequest(BaseModel):
+    """Body for POST /api/keys/certificate."""
+
+    text: str = ""
+
+
+@app.post("/api/keys/certificate")
+async def inspect_certificate(request: CertificateRequest) -> dict:
+    """
+    Read an OpenSSH certificate and report what it permits (#301).
+
+    Nothing is stored and no private key is involved — this reads a public
+    certificate and says what it claims: who it is for, when it stops
+    working, and which CA signed it. `ssh-keygen -L` answers the same
+    questions and is absent from a locked-down Windows machine, which is
+    exactly where somebody is debugging a refused login.
+    """
+    import time as _time
+
+    from backend import certs
+
+    info = await asyncio.to_thread(certs.parse, request.text)
+    return {**info.as_dict(), "verdict": certs.verdict(info, _time.time())}
+
+
 # ---------------------------------------------------------------------------
 # REST — Support bundle
 # ---------------------------------------------------------------------------

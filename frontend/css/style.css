@@ -3428,6 +3428,49 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .history-snippet { position: relative; }
 .history-snippet .history-copy { float: right; }
 
+/* The certificate inspector (#301). */
+#cert-input {
+  width: 100%;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  resize: vertical;
+}
+
+.cert-result { margin-top: 8px; }
+
+.cert-verdict {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--outline);
+  margin-bottom: 10px;
+}
+
+/* The state is the headline: expired and not-yet-valid are refusals, and
+   they look identical to a wrong password from the device's side. */
+.cert-valid       { border-left-color: var(--ok);    color: var(--ok); }
+.cert-expiring    { border-left-color: var(--warn);  color: var(--warn); }
+.cert-expired,
+.cert-not-yet-valid,
+.cert-unreadable  { border-left-color: var(--error); color: var(--error); }
+.cert-bad         { color: var(--error); font-size: 12px; }
+
+.cert-fields {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 3px 12px;
+  font-size: 12px;
+}
+
+.cert-field-name  { color: var(--on-surface-dim); }
+.cert-field-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  color: var(--on-surface);
+  word-break: break-word;
+}
+
 /* Editing the special commands offered on the tab menu (#299). */
 .special-row {
   display: flex;

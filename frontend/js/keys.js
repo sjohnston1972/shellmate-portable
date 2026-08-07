@@ -41,8 +41,97 @@
     document.getElementById('key-import').addEventListener('click', importKey);
     document.getElementById('key-kind').addEventListener('change', showRelevantOptions);
 
+    const inspect = document.getElementById('btn-cert-inspect');
+    if (inspect) inspect.addEventListener('click', inspectCertificate);
+    const clearCert = document.getElementById('btn-cert-clear');
+    if (clearCert) clearCert.addEventListener('click', () => {
+      document.getElementById('cert-input').value = '';
+      document.getElementById('cert-result').innerHTML = '';
+    });
+
     showRelevantOptions();
   });
+
+  // -------------------------------------------------------------------------
+  // Certificate inspector (#301)
+  // -------------------------------------------------------------------------
+
+  /** When a certificate window opens and closes, in local time. */
+  function _when(seconds) {
+    if (!seconds) return '—';
+    // OpenSSH spells "never" as the largest unsigned 64-bit value.
+    if (seconds >= 0xFFFFFFFFFFFF) return 'no expiry';
+    return new Date(seconds * 1000).toLocaleString();
+  }
+
+  async function inspectCertificate() {
+    const input  = document.getElementById('cert-input');
+    const result = document.getElementById('cert-result');
+    if (!input || !result) return;
+
+    result.innerHTML = '';
+    let data;
+    try {
+      const res = await fetch('/api/keys/certificate', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ text: input.value }),
+      });
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      data = await res.json();
+    } catch (e) {
+      result.textContent = `Could not read it: ${e.message || e}`;
+      result.className = 'cert-result cert-bad';
+      return;
+    }
+
+    const verdict = data.verdict || {};
+    if (!data.ok) {
+      result.textContent = data.reason || 'That is not a certificate.';
+      result.className = 'cert-result cert-bad';
+      return;
+    }
+
+    // The verdict first and in colour: expired and not-yet-valid are the two
+    // failures that look exactly like a wrong password from the far end.
+    result.className = 'cert-result';
+    const banner = document.createElement('div');
+    banner.className = 'cert-verdict cert-' + (verdict.state || 'valid');
+    banner.textContent = verdict.detail || '';
+    result.appendChild(banner);
+
+    const rows = [
+      ['Type', `${data.kind} certificate, for a ${data.certifies} key`],
+      ['Key ID', data.key_id || '—'],
+      ['Principals', (data.principals || []).join(', ')
+        || (data.kind === 'user'
+              ? 'none — this certificate is valid for every user the CA allows'
+              : 'none')],
+      ['Valid from', _when(data.valid_after)],
+      ['Valid until', _when(data.valid_before)],
+      ['Serial', String(data.serial ?? 0)],
+      ['Signing CA', `${data.ca_fingerprint || '—'}${data.ca_type ? ' (' + data.ca_type + ')' : ''}`],
+      ['Extensions', (data.extensions || []).join(', ') || 'none'],
+    ];
+    const critical = data.critical_options || {};
+    Object.keys(critical).forEach(name => {
+      rows.push([`Critical: ${name}`, critical[name] || 'set']);
+    });
+
+    const table = document.createElement('div');
+    table.className = 'cert-fields';
+    rows.forEach(([label, value]) => {
+      const key = document.createElement('div');
+      key.className = 'cert-field-name';
+      key.textContent = label;
+      const val = document.createElement('div');
+      val.className = 'cert-field-value';
+      // textContent — a key ID is whatever the CA wrote in it.
+      val.textContent = value;
+      table.append(key, val);
+    });
+    result.appendChild(table);
+  }
 
   async function open() {
     overlay.classList.remove('hidden');

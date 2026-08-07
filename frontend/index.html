@@ -667,7 +667,9 @@
             <span class="material-symbols-outlined">bookmark_add</span>
             Save
           </button>
-          <button type="button" id="btn-cancel" class="btn-secondary">Cancel</button>
+          <!-- "Exit" (#303): it closes the dialog. "Cancel" beside a Save
+               button reads as undoing the save, which it does not do. -->
+          <button type="button" id="btn-cancel" class="btn-secondary">Exit</button>
           <button type="submit" id="btn-connect" class="btn-primary">
             <span id="btn-connect-label">Connect</span>
             <span id="btn-connect-spinner" class="spinner hidden"></span>
@@ -2114,6 +2116,25 @@ GigEth0/2     unassigned    YES unset  down     down
               <button type="button" id="key-import" class="btn-secondary">Import</button>
             </div>
           </div>
+        </section>
+
+        <!-- Certificate inspector (#301). A certificate refuses a login in
+             exactly the same way as a wrong password, so the two questions
+             worth answering — when does it stop working, and who is it for —
+             need somewhere to be asked. -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Inspect a certificate</h3>
+          <p class="settings-section-hint">Paste an OpenSSH certificate — the whole line from a <code>*-cert.pub</code> file. Nothing is stored or sent anywhere; it is read here and reported below.</p>
+          <textarea id="cert-input" class="setting-input" rows="3"
+                    placeholder="ssh-ed25519-cert-v01@openssh.com AAAA…"></textarea>
+          <div class="setting-row">
+            <button type="button" id="btn-cert-inspect" class="btn-secondary">
+              <span class="material-symbols-outlined">search</span>
+              Inspect
+            </button>
+            <button type="button" id="btn-cert-clear" class="btn-tertiary">Clear</button>
+          </div>
+          <div id="cert-result"></div>
         </section>
 
         <section class="settings-section">
