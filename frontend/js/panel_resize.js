@@ -33,13 +33,26 @@
     return ((window.shellmateSettings || {}).interface || {}).panel_widths || {};
   }
 
+  /**
+   * Which stored width a panel uses (#305).
+   *
+   * A panel marked `settings-like` is one that deliberately matches
+   * Settings, so it shares the same remembered width rather than keeping
+   * its own. Otherwise the two agree only until somebody drags one, and a
+   * width remembered from before they were meant to match keeps them apart
+   * for good — which is exactly what happened to Broadcast.
+   */
+  function widthKey(panel) {
+    return panel.classList.contains('settings-like') ? 'settings-panel' : panel.id;
+  }
+
   function applyStoredWidths() {
     const widths = storedWidths();
-    Object.entries(widths).forEach(([id, width]) => {
-      const panel = document.getElementById(id);
-      if (panel && Number(width) >= MIN_WIDTH) {
-        panel.style.width = `${Math.round(Number(width))}px`;
-      }
+    // Driven by the panels rather than by the stored keys, so a panel can
+    // read a width filed under another panel's name.
+    document.querySelectorAll('.side-panel[id]').forEach(panel => {
+      const width = Number(widths[widthKey(panel)]);
+      if (width >= MIN_WIDTH) panel.style.width = `${Math.round(width)}px`;
     });
   }
 
@@ -66,7 +79,7 @@
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       document.body.classList.remove('resizing-panel');
-      remember(panel.id, panel.getBoundingClientRect().width);
+      remember(widthKey(panel), panel.getBoundingClientRect().width);
     };
 
     handle.addEventListener('mousedown', (e) => {
@@ -82,7 +95,11 @@
     // is the way out of having dragged it somewhere useless.
     handle.addEventListener('dblclick', () => {
       panel.style.width = '';
-      remember(panel.id, 0);
+      remember(widthKey(panel), 0);
+      // Anything sharing this width goes back with it (#305).
+      document.querySelectorAll('.side-panel[id]').forEach(other => {
+        if (widthKey(other) === widthKey(panel)) other.style.width = '';
+      });
     });
   }
 
