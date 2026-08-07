@@ -2124,9 +2124,9 @@ GigEth0/2     unassigned    YES unset  down     down
              need somewhere to be asked. -->
         <section class="settings-section">
           <h3 class="settings-section-title">Inspect a certificate</h3>
-          <p class="settings-section-hint">Paste an OpenSSH certificate — the whole line from a <code>*-cert.pub</code> file. Nothing is stored or sent anywhere; it is read here and reported below.</p>
-          <textarea id="cert-input" class="setting-input" rows="3"
-                    placeholder="ssh-ed25519-cert-v01@openssh.com AAAA…"></textarea>
+          <p class="settings-section-hint">Paste an <strong>OpenSSH certificate</strong> — the whole line from a <code>*-cert.pub</code> file — or an <strong>X.509 certificate</strong>, the TLS kind a device serves on its management page, between its <code>BEGIN CERTIFICATE</code> lines. Nothing is stored or sent anywhere; it is read here and reported below.</p>
+          <textarea id="cert-input" class="setting-input" rows="4"
+                    placeholder="ssh-ed25519-cert-v01@openssh.com AAAA…&#10;-----BEGIN CERTIFICATE-----"></textarea>
           <div class="setting-row">
             <button type="button" id="btn-cert-inspect" class="btn-secondary">
               <span class="material-symbols-outlined">search</span>

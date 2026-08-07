@@ -100,19 +100,38 @@
     banner.textContent = verdict.detail || '';
     result.appendChild(banner);
 
-    const rows = [
-      ['Type', `${data.kind} certificate, for a ${data.certifies} key`],
-      ['Key ID', data.key_id || '—'],
-      ['Principals', (data.principals || []).join(', ')
-        || (data.kind === 'user'
-              ? 'none — this certificate is valid for every user the CA allows'
-              : 'none')],
-      ['Valid from', _when(data.valid_after)],
-      ['Valid until', _when(data.valid_before)],
-      ['Serial', String(data.serial ?? 0)],
-      ['Signing CA', `${data.ca_fingerprint || '—'}${data.ca_type ? ' (' + data.ca_type + ')' : ''}`],
-      ['Extensions', (data.extensions || []).join(', ') || 'none'],
-    ];
+    // The two kinds answer the same questions through different fields
+    // (#304), so each gets the rows that mean something for it.
+    const rows = data.family === 'x509'
+      ? [
+          ['Type', `X.509 ${data.is_ca ? 'CA certificate' : 'certificate'}`
+                   + (data.self_signed ? ', self-signed' : '')],
+          ['Subject', data.subject || '—'],
+          // What a browser or a device actually checks the hostname against.
+          ['Valid for', (data.sans || []).join(', ')
+            || (data.key_id ? `${data.key_id} (common name only — no SANs, which modern clients reject)` : '—')],
+          ['Issuer', data.issuer || '—'],
+          ['Valid from', _when(data.valid_after)],
+          ['Valid until', _when(data.valid_before)],
+          ['Public key', data.public_key || '—'],
+          ['Signature', data.signature_algorithm || '—'],
+          ['Key usage', (data.key_usage || []).join(', ') || 'none stated'],
+          ['Serial', String(data.serial ?? 0)],
+          ['Fingerprint', data.fingerprint || '—'],
+        ]
+      : [
+          ['Type', `${data.kind} certificate, for a ${data.certifies} key`],
+          ['Key ID', data.key_id || '—'],
+          ['Principals', (data.principals || []).join(', ')
+            || (data.kind === 'user'
+                  ? 'none — this certificate is valid for every user the CA allows'
+                  : 'none')],
+          ['Valid from', _when(data.valid_after)],
+          ['Valid until', _when(data.valid_before)],
+          ['Serial', String(data.serial ?? 0)],
+          ['Signing CA', `${data.ca_fingerprint || '—'}${data.ca_type ? ' (' + data.ca_type + ')' : ''}`],
+          ['Extensions', (data.extensions || []).join(', ') || 'none'],
+        ];
     const critical = data.critical_options || {};
     Object.keys(critical).forEach(name => {
       rows.push([`Critical: ${name}`, critical[name] || 'set']);

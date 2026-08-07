@@ -116,6 +116,108 @@ def test_the_verdict_follows_the_clock() -> None:
           soon["state"] == "expiring", str(soon))
 
 
+# Sectigo's DV certificate for github.com. A real one, so the expectations
+# below were checked against `openssl x509` on the same bytes.
+X509_CERT = """-----BEGIN CERTIFICATE-----
+MIID7jCCA5SgAwIBAgIQcgEOA/SgZ/5OeWJmQwcY9jAKBggqhkjOPQQDAjBgMQsw
+CQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMTcwNQYDVQQDEy5T
+ZWN0aWdvIFB1YmxpYyBTZXJ2ZXIgQXV0aGVudGljYXRpb24gQ0EgRFYgRTM2MB4X
+DTI2MDcwMzAwMDAwMFoXDTI2MDkzMDIzNTk1OVowFTETMBEGA1UEAxMKZ2l0aHVi
+LmNvbTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABIWWMDSOi/1sMgquP4I/obBM
+735wpzcIZi4fLeiBsToXVVSwjj4OPH+W6azHzxETM0gUP7raehddpJ8uwjqYsTij
+ggJ5MIICdTAfBgNVHSMEGDAWgBQXmagEwW/kLXCoChA9A9PpGrgmYzAdBgNVHQ4E
+FgQUEKU6Ytbv1gZWnty4gvzCe2hdPWkwDgYDVR0PAQH/BAQDAgeAMAwGA1UdEwEB
+/wQCMAAwEwYDVR0lBAwwCgYIKwYBBQUHAwEwSQYDVR0gBEIwQDA0BgsrBgEEAbIx
+AQICBzAlMCMGCCsGAQUFBwIBFhdodHRwczovL3NlY3RpZ28uY29tL0NQUzAIBgZn
+gQwBAgEwgYQGCCsGAQUFBwEBBHgwdjBPBggrBgEFBQcwAoZDaHR0cDovL2NydC5z
+ZWN0aWdvLmNvbS9TZWN0aWdvUHVibGljU2VydmVyQXV0aGVudGljYXRpb25DQURW
+RTM2LmNydDAjBggrBgEFBQcwAYYXaHR0cDovL29jc3Auc2VjdGlnby5jb20wggEF
+BgorBgEEAdZ5AgQCBIH2BIHzAPEAdgDXbX0Q0af1d8LH6V/XAL/5gskzWmXh0LMB
+cxfAyMVpdwAAAZ8lTHVtAAAEAwBHMEUCIQCkpa0ZYNwsPiMRLHz+kk1QS/W9bg/8
+4yNBVGkT289dNQIgMWLgxYp6vGJXJxyD3c1NI1aZsPA7GqyLSXaZLZHgKh0AdwDI
+o8R/x7OtuTVrAT9qehJt4zpOQ6XGRvmXrTl1mR3PmgAAAZ8lTHVhAAAEAwBIMEYC
+IQDsO+TR8EVfCiObBPoDLRKzKLQ/uorsebJ2aZDIejA9RgIhAJ6dp7FqCD93tQXX
+AF24pDIms1fX4dZ+VPzXGuD8u8t1MCUGA1UdEQQeMByCCmdpdGh1Yi5jb22CDnd3
+dy5naXRodWIuY29tMAoGCCqGSM49BAMCA0gAMEUCIB0PC2GRSurxu8gCkSNsYxmw
+kAtCNfCvpXRiif8PhGkmAiEAzBH4AVYAtv1FsMrJabD9FYcAql0EteKafckH2exj
+Uag=
+-----END CERTIFICATE-----"""
+
+
+def test_reads_an_x509_certificate() -> None:
+    """
+    The TLS kind (#304).
+
+    A device's management page, a RADIUS server and a captive portal all
+    serve one of these, and pasting one used to be reported as a corrupt SSH
+    certificate — an error describing the wrong format entirely.
+    """
+    print("\n-- An X.509 certificate --")
+    info = certs.parse(X509_CERT)
+
+    check("it reads", info.ok, info.reason)
+    if not info.ok:
+        return
+
+    check("and is recognised as X.509, not SSH", info.family == "x509", info.family)
+    check("the subject", info.subject == "CN=github.com", info.subject)
+    check("the issuer names the CA",
+          "Sectigo Public Server Authentication CA DV E36" in info.issuer,
+          info.issuer)
+    # The SANs are what a client actually checks the hostname against, so
+    # these are the field that explains a name-mismatch warning.
+    check("the names it is valid for",
+          info.sans == ["github.com", "www.github.com"], str(info.sans))
+    check("the serial, as openssl prints it",
+          f"{info.serial:X}" == "72010E03F4A067FE4E796266430718F6",
+          f"{info.serial:X}")
+    check("the public key is described",
+          info.public_key == "EC secp256r1", info.public_key)
+    check("it is not a CA certificate", info.is_ca is False)
+    check("nor self-signed", info.self_signed is False)
+    check("its use is stated",
+          "digital signature" in info.key_usage and "serverAuth" in info.key_usage,
+          str(info.key_usage))
+    check("the fingerprint matches openssl's",
+          info.fingerprint.lower().endswith(
+              "17:f8:fd:2e:3f:d2:c1:13:fc:b9:77:2d:8a:4b:ab:b8:"
+              "52:2d:d0:6d:d0:79:49:15:a4:ff:98:b1:b6:86:3a:00"),
+          info.fingerprint)
+    check("the validity window is an epoch pair",
+          info.valid_after > 0 and info.valid_before > info.valid_after,
+          f"{info.valid_after} → {info.valid_before}")
+
+    # And the same verdict machinery serves both kinds.
+    expired = certs.verdict(info, info.valid_before + 86400)
+    check("an expired one is called expired", expired["state"] == "expired",
+          str(expired))
+
+
+def test_each_format_reaches_its_own_reader() -> None:
+    """Neither reader is handed the other's input (#304)."""
+    print("\n-- Telling the two apart --")
+
+    check("an SSH certificate goes to the SSH reader",
+          certs.parse(USER_CERT).family == "openssh")
+    check("a PEM certificate goes to the X.509 reader",
+          certs.parse(X509_CERT).family == "x509")
+
+    # A signing request is neither, and saying so beats a parse error.
+    csr = "-----BEGIN CERTIFICATE REQUEST-----\nMIIB\n-----END CERTIFICATE REQUEST-----"
+    result = certs.parse(csr)
+    check("a signing request is named as one",
+          result.ok is False and "signing request" in result.reason.lower(),
+          result.reason)
+
+    # A private key must never be inspected — and must not be mistaken for
+    # something to parse either.
+    key = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3Blb\n-----END OPENSSH PRIVATE KEY-----"
+    result = certs.parse(key)
+    check("a private key is refused",
+          result.ok is False and "private key" in result.reason.lower(),
+          result.reason)
+
+
 def test_bad_input_is_reported_not_raised() -> None:
     """The malformed thing is exactly what somebody is inspecting."""
     print("\n-- Anything else --")
@@ -175,6 +277,8 @@ def main() -> int:
     for test in (
         test_reads_a_real_certificate,
         test_the_verdict_follows_the_clock,
+        test_reads_an_x509_certificate,
+        test_each_format_reaches_its_own_reader,
         test_bad_input_is_reported_not_raised,
         test_the_endpoint_answers,
     ):

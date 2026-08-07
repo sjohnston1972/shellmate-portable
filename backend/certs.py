@@ -45,10 +45,18 @@ FOREVER = 0xFFFFFFFFFFFFFFFF
 
 @dataclass
 class CertInfo:
-    """What a certificate says about itself."""
+    """
+    What a certificate says about itself.
+
+    One shape for both kinds (#304). They answer the same two questions —
+    when does this stop working, and who is it for — through entirely
+    different fields, so the shared ones are shared and the rest are filled
+    in by whichever reader ran. `family` says which.
+    """
 
     ok: bool
     reason: str = ""
+    family: str = "openssh"           # openssh | x509
     type: str = ""                    # the certificate key type
     certifies: str = ""               # the plain key type inside it
     kind: str = ""                    # user | host
@@ -63,10 +71,21 @@ class CertInfo:
     ca_type: str = ""
     fingerprint: str = ""
 
+    # --- X.509 only ---------------------------------------------------------
+    subject: str = ""
+    issuer: str = ""
+    sans: list[str] = field(default_factory=list)
+    public_key: str = ""              # e.g. "EC secp256r1", "RSA 2048"
+    signature_algorithm: str = ""
+    is_ca: bool = False
+    key_usage: list[str] = field(default_factory=list)
+    self_signed: bool = False
+
     def as_dict(self) -> dict:
         return {
             "ok": self.ok,
             "reason": self.reason,
+            "family": self.family,
             "type": self.type,
             "certifies": self.certifies,
             "kind": self.kind,
@@ -80,6 +99,14 @@ class CertInfo:
             "ca_fingerprint": self.ca_fingerprint,
             "ca_type": self.ca_type,
             "fingerprint": self.fingerprint,
+            "subject": self.subject,
+            "issuer": self.issuer,
+            "sans": self.sans,
+            "public_key": self.public_key,
+            "signature_algorithm": self.signature_algorithm,
+            "is_ca": self.is_ca,
+            "key_usage": self.key_usage,
+            "self_signed": self.self_signed,
         }
 
 
@@ -146,6 +173,182 @@ def _fingerprint(blob: bytes) -> str:
 
 
 def parse(text: str) -> CertInfo:
+    """
+    Read a certificate, whichever kind it is (#304).
+
+    Two formats share the word and nothing else: an OpenSSH certificate is
+    one line of SSH wire format with principals and a key id; an X.509
+    certificate is DER, usually PEM-armoured, with a subject and SANs. The
+    form is decided here so that neither reader is ever handed the other's
+    input and left to describe it as corruption.
+    """
+    body = (text or "").strip()
+    if not body:
+        return CertInfo(ok=False, reason="Nothing to read.")
+
+    if "-----BEGIN" in body:
+        if "CERTIFICATE-----" in body and "REQUEST" not in body:
+            return _parse_x509(body.encode("utf-8"), pem=True)
+        if "CERTIFICATE REQUEST" in body:
+            return CertInfo(
+                ok=False, family="x509",
+                reason="That is a certificate signing request, not a "
+                       "certificate — it has not been signed yet.")
+        return CertInfo(
+            ok=False,
+            reason="That is a PEM block, but not a certificate. A private "
+                   "key or a CSR cannot be inspected here.")
+
+    if body.startswith("ssh-") or body.startswith("ecdsa-") \
+            or body.startswith("rsa-sha2-") or "-cert-v01@openssh.com" in body:
+        return _parse_openssh(body)
+
+    # Bare base64: DER for X.509, or somebody who stripped the type off an
+    # SSH certificate. Try the one whose header we can actually recognise.
+    try:
+        raw = base64.b64decode("".join(body.split()), validate=True)
+    except (binascii.Error, ValueError):
+        return CertInfo(
+            ok=False,
+            reason="That is neither an OpenSSH certificate line nor a PEM "
+                   "certificate block.")
+    if raw[:1] == b"\x30":            # ASN.1 SEQUENCE — a DER certificate
+        return _parse_x509(raw, pem=False)
+    return _parse_openssh(body)
+
+
+def _parse_x509(data: bytes, pem: bool) -> CertInfo:
+    """
+    Read an X.509 certificate — the TLS kind a device serves.
+
+    Uses `cryptography`, which paramiko already brings in, so this costs no
+    new dependency. Nothing is verified against a trust store: this reports
+    what the certificate claims, which is what somebody staring at a browser
+    warning or an expired management page needs to see.
+    """
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
+
+        cert = (x509.load_pem_x509_certificate(data) if pem
+                else x509.load_der_x509_certificate(data))
+    except Exception as exc:
+        return CertInfo(ok=False, family="x509",
+                        reason=f"The certificate could not be read: {exc}")
+
+    def _name(name) -> str:
+        try:
+            return name.rfc4514_string()
+        except Exception:
+            return str(name)
+
+    def _common_name(name) -> str:
+        try:
+            from cryptography.x509.oid import NameOID
+            found = name.get_attributes_for_oid(NameOID.COMMON_NAME)
+            return found[0].value if found else ""
+        except Exception:
+            return ""
+
+    sans: list[str] = []
+    try:
+        from cryptography.x509.oid import ExtensionOID
+        ext = cert.extensions.get_extension_for_oid(
+            ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
+        sans = [str(v) for v in ext.value.get_values_for_type(x509.DNSName)]
+        sans += [str(v) for v in ext.value.get_values_for_type(x509.IPAddress)]
+    except Exception:
+        pass
+
+    is_ca = False
+    try:
+        from cryptography.x509.oid import ExtensionOID
+        basic = cert.extensions.get_extension_for_oid(
+            ExtensionOID.BASIC_CONSTRAINTS)
+        is_ca = bool(basic.value.ca)
+    except Exception:
+        pass
+
+    usage: list[str] = []
+    try:
+        from cryptography.x509.oid import ExtensionOID
+        ku = cert.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+        for label, present in (
+            ("digital signature", ku.digital_signature),
+            ("key encipherment", ku.key_encipherment),
+            ("certificate signing", ku.key_cert_sign),
+            ("CRL signing", ku.crl_sign),
+        ):
+            if present:
+                usage.append(label)
+    except Exception:
+        pass
+    try:
+        from cryptography.x509.oid import ExtensionOID
+        eku = cert.extensions.get_extension_for_oid(
+            ExtensionOID.EXTENDED_KEY_USAGE).value
+        usage += [getattr(oid, "_name", None) or oid.dotted_string for oid in eku]
+    except Exception:
+        pass
+
+    key = cert.public_key()
+    if isinstance(key, rsa.RSAPublicKey):
+        described = f"RSA {key.key_size}"
+    elif isinstance(key, ec.EllipticCurvePublicKey):
+        described = f"EC {key.curve.name}"
+    elif isinstance(key, ed25519.Ed25519PublicKey):
+        described = "Ed25519"
+    else:
+        described = type(key).__name__
+
+    try:
+        fingerprint = "SHA256:" + cert.fingerprint(hashes.SHA256()).hex(":")
+    except Exception:
+        fingerprint = ""
+
+    # The dates as epoch seconds, matching the OpenSSH side so the verdict
+    # and the interface do not need to know which reader ran.
+    def _epoch(value) -> int:
+        try:
+            return int(value.timestamp())
+        except Exception:
+            return 0
+
+    after = _epoch(getattr(cert, "not_valid_before_utc", None)
+                   or cert.not_valid_before)
+    before = _epoch(getattr(cert, "not_valid_after_utc", None)
+                    or cert.not_valid_after)
+
+    subject = _name(cert.subject)
+    issuer = _name(cert.issuer)
+
+    return CertInfo(
+        ok=True,
+        family="x509",
+        type="X.509 certificate",
+        kind="CA" if is_ca else "end entity",
+        subject=subject,
+        issuer=issuer,
+        # The names it is actually valid for. A browser ignores the CN and
+        # reads these, so they answer "why does this warn on that hostname".
+        principals=sans or ([_common_name(cert.subject)]
+                            if _common_name(cert.subject) else []),
+        sans=sans,
+        key_id=_common_name(cert.subject),
+        serial=cert.serial_number,
+        valid_after=after,
+        valid_before=before,
+        public_key=described,
+        signature_algorithm=getattr(cert.signature_hash_algorithm, "name", "") or "",
+        is_ca=is_ca,
+        key_usage=usage,
+        self_signed=subject == issuer,
+        fingerprint=fingerprint,
+    )
+
+
+def _parse_openssh(text: str) -> CertInfo:
     """
     Read a certificate from the one-line OpenSSH form.
 
