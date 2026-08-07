@@ -1418,8 +1418,13 @@
     [
       { action: 'clear', icon: 'backspace', label: 'Clear console',
         setting: 'clear' },
-      { action: 'copy', icon: 'content_copy', label: 'Copy history',
+      // Named for what it has always done (#298): the loop walks the whole
+      // xterm buffer, scrollback included. "Copy history" undersold it and
+      // left people looking for the entry that copies everything.
+      { action: 'copy', icon: 'content_copy', label: 'Copy all scrollback',
         setting: 'copy' },
+      { action: 'copy-screen', icon: 'content_copy', label: 'Copy visible screen',
+        setting: 'copy_screen' },
       // The address is what you need somewhere else: a ticket, a chat, a
       // firewall rule. The tab shows the device's *name* once it announces
       // itself, which is exactly when the address stops being on screen.
@@ -1494,6 +1499,7 @@
   const TAB_MENU_SECTIONS = [
     { setting: 'panes', label: 'Move to pane' },
     { setting: 'quick_broadcast', label: 'Quick broadcast' },
+    { setting: 'special_commands', label: 'Send special command' },
   ];
 
   /** Every toggleable entry, for the Settings panel to render itself from. */
@@ -1593,6 +1599,7 @@
     document.body.appendChild(_ctxMenu);
 
     // Filled in behind the menu, so a right-click never waits on a request.
+    if (_menuEnabled('special_commands')) _appendSpecialCommands(_ctxMenu, tab);
     if (_menuEnabled('quick_broadcast')) _appendQuickBroadcast(_ctxMenu, tab);
 
     // Position near cursor, clamped to viewport
@@ -1623,7 +1630,8 @@
             else if (typeof window.showConnectionDialog === 'function') window.showConnectionDialog();
             break;
           case 'clear':     _clearConsole(tab);       break;
-          case 'copy':      _copyHistory(tab);        break;
+          case 'copy':        _copyHistory(tab);        break;
+          case 'copy-screen': _copyHistory(tab, true);  break;
           case 'copy-address': _copyAddress(tab);      break;
           case 'save-connection': _saveConnection(tab);  break;
           case 'duplicate': _duplicateSession(tab);   break;
@@ -1854,11 +1862,22 @@
   }
 
   /** Copy all lines from the terminal buffer to clipboard. */
-  function _copyHistory(tab) {
+  /**
+   * Copy the buffer — everything, or just what is on screen (#298).
+   *
+   * Everything means the scrollback too, which is what this always did;
+   * the visible screen is the narrower answer for pasting one command's
+   * output into a ticket without the hour that preceded it.
+   */
+  function _copyHistory(tab, visibleOnly) {
     try {
       const buf   = tab.terminalInstance.buffer.active;
       const lines = [];
-      for (let i = 0; i < buf.length; i++) {
+      const first = visibleOnly ? buf.viewportY : 0;
+      const last  = visibleOnly
+        ? Math.min(buf.length, buf.viewportY + tab.terminalInstance.rows)
+        : buf.length;
+      for (let i = first; i < last; i++) {
         const line = buf.getLine(i);
         if (line) lines.push(line.translateToString(true));
       }
@@ -2314,6 +2333,85 @@
    * Appended after the menu is on screen rather than built into it, so a
    * right-click is never waiting on a request.
    */
+  /**
+   * The control sequences a keyboard cannot send (#299).
+   *
+   * Data from settings rather than a list here, because which ones matter
+   * depends on the estate — and because a break is worth reaching in a
+   * hurry, halfway through a device booting. Break goes as its own message:
+   * it is an out-of-band signal on the serial line, not a character.
+   */
+  function _appendSpecialCommands(menu, tab) {
+    if (menu.dataset.specialAdded) return;
+    menu.dataset.specialAdded = '1';
+
+    const commands = ((window.shellmateSettings || {}).interface || {})
+      .special_commands || [];
+    if (!commands.length) return;
+
+    if (menu.children.length) {
+      const sep = document.createElement('div');
+      sep.className = 'ctx-sep';
+      menu.appendChild(sep);
+    }
+
+    const heading = document.createElement('div');
+    heading.className = 'ctx-heading';
+    heading.textContent = 'Send special command';
+    menu.appendChild(heading);
+
+    commands.forEach(entry => {
+      if (!entry || !entry.name) return;
+      const button = document.createElement('button');
+      button.type = 'button';
+
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-outlined';
+      icon.textContent = entry.kind === 'break' ? 'stop_circle' : 'keyboard';
+
+      button.appendChild(icon);
+      button.appendChild(document.createTextNode(entry.name));
+      if (entry.hint) button.title = entry.hint;
+
+      // A break only means something on a serial line; offering it elsewhere
+      // is offering something that will silently do nothing.
+      const serialOnly = entry.kind === 'break'
+                      && (tab.connectionType || 'ssh') !== 'serial';
+      if (serialOnly || !tab.isConnected) {
+        button.disabled = true;
+        button.title = serialOnly
+          ? 'Break is a serial signal — this session is not a serial console.'
+          : 'The session is not connected.';
+      } else {
+        button.addEventListener('click', () => {
+          _hideTabContextMenu();
+          _sendSpecial(tab, entry);
+        });
+      }
+      menu.appendChild(button);
+    });
+  }
+
+  /** Put one special command on the wire. */
+  function _sendSpecial(tab, entry) {
+    const ws = tab.websocket;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (entry.kind === 'break') {
+      ws.send(JSON.stringify({ type: 'break' }));
+    } else if (entry.data) {
+      ws.send(JSON.stringify({ type: 'input', data: entry.data }));
+    }
+    if (window.shellmateAlerts && window.shellmateAlerts.notify) {
+      // Said out loud, like every other thing this application types into a
+      // live session on somebody's behalf.
+      window.shellmateAlerts.notify({
+        icon:  'keyboard',
+        title: `Sent ${entry.name} to ${tab.label}`,
+        sessionId: tab.sessionId,
+      });
+    }
+  }
+
   async function _appendQuickBroadcast(menu, tab) {
     // Guard against being appended twice to one menu. The fetch is async, so
     // two calls can be in flight against the same element and the entries

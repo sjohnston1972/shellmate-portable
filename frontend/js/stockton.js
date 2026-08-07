@@ -254,7 +254,63 @@
 
     text.append(label, summary, meta);
     el.append(text, control(setting));
+
+    // A setting you can only judge by using it gets somewhere to use it
+    // (#300). Word separators decide what a double-click selects, and the
+    // only way to tell was to save, close Settings and try it on a device.
+    if (setting.key === 'terminal.word_separators') {
+      el.classList.add('setting-row-stack');
+      el.appendChild(_separatorTester(setting));
+    }
     return el;
+  }
+
+  /**
+   * Double-click a sample line and see what the current separators select.
+   *
+   * The same rule xterm applies: a word runs until it meets one of these
+   * characters. Read from the field beside it rather than from the saved
+   * value, so an edit can be judged before it is committed.
+   */
+  function _separatorTester(setting) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sep-tester';
+
+    const sample = document.createElement('div');
+    sample.className = 'sep-tester-sample';
+    sample.title = 'Double-click a word to see what would be selected';
+    sample.textContent =
+      'GigabitEthernet0/1 10.20.30.40/24 up/up  vrf:MGMT  "core-sw-01"';
+
+    const result = document.createElement('div');
+    result.className = 'sep-tester-result';
+    result.textContent = 'Double-click anywhere above.';
+
+    sample.addEventListener('dblclick', (e) => {
+      const field = document.getElementById(fieldId(setting));
+      const separators = field ? field.value : setting.value;
+      const text = sample.textContent;
+      // Where the click landed, from the caret rather than a guess.
+      const caret = document.caretPositionFromPoint
+        ? document.caretPositionFromPoint(e.clientX, e.clientY)
+        : null;
+      let index = caret ? caret.offset : 0;
+      if (index >= text.length) index = text.length - 1;
+
+      const isSep = (ch) => ch === undefined || separators.includes(ch);
+      if (isSep(text[index])) {
+        result.textContent = 'That character is a separator — nothing selected.';
+        return;
+      }
+      let start = index;
+      let end = index;
+      while (start > 0 && !isSep(text[start - 1])) start -= 1;
+      while (end < text.length - 1 && !isSep(text[end + 1])) end += 1;
+      result.textContent = `Selects: "${text.slice(start, end + 1)}"`;
+    });
+
+    wrap.append(sample, result);
+    return wrap;
   }
 
   function describeDefault(setting, showCategory) {

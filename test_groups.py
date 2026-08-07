@@ -278,6 +278,46 @@ def test_a_nested_group_can_be_reached_over_the_api() -> None:
           f"HTTP {res.status_code}: {res.text[:120]}")
 
 
+def test_moving_a_group_takes_its_subtree_with_it() -> None:
+    """
+    Renaming a parent must rename everything beneath it (#294).
+
+    Nesting is the name, so `glasgow` becoming `edinburgh` leaves
+    `glasgow/switches` naming a parent that no longer exists — the branch
+    and every connection in it present in the file and absent from the tree.
+    Dragging a group to re-parent it is a rename, so this is the whole
+    feature's foundation as well as a long-standing hazard of the rename
+    button.
+    """
+    print("\n-- Moving a group carries its subgroups --")
+
+    gm.create_group("glasgow")
+    gm.create_group("glasgow/switches")
+    saved = pm.save_profile({"name": "sw1", "hostname": "10.0.0.1",
+                             "connection_type": "ssh",
+                             "tags": ["glasgow/switches"]})
+
+    gm.update_group("glasgow", {"name": "edinburgh"})
+
+    keys = {g["key"] for g in gm.list_groups()}
+    check("the parent moved", "edinburgh" in keys and "glasgow" not in keys,
+          str(sorted(k for k in keys if "burgh" in k or "asgow" in k)))
+    check("the subgroup moved with it",
+          "edinburgh/switches" in keys and "glasgow/switches" not in keys,
+          str(sorted(k for k in keys if "switches" in k)))
+
+    moved = next((p for p in pm.get_profiles() if p["id"] == saved["id"]), {})
+    tags = moved.get("tags") or []
+    check("and the connection in it was re-tagged",
+          tags == ["edinburgh/switches"], str(tags))
+
+    # And it is reachable where the tree would look for it.
+    members = [p for p in pm.get_profiles()
+               if "edinburgh/switches" in (p.get("tags") or [])]
+    check("so the subgroup still has its member", len(members) == 1,
+          f"{len(members)} found")
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Groups")
@@ -293,6 +333,7 @@ def main() -> int:
         test_a_group_that_predates_icons_still_has_one,
         test_an_implicit_group_gets_an_icon_too,
         test_a_nested_group_can_be_reached_over_the_api,
+        test_moving_a_group_takes_its_subtree_with_it,
     )
     for test in tests:
         try:

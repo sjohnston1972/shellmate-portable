@@ -324,13 +324,18 @@
   }
 
   /** Does this group, or a connection in it, match the search? */
+  /** Whether one connection answers the current search. */
+  function _profileMatches(profile) {
+    if (!query) return true;
+    return (profile.name || '').toLowerCase().includes(query)
+        || (profile.hostname || '').toLowerCase().includes(query);
+  }
+
   function _matches(node) {
     if (!query) return true;
     if (node.key.toLowerCase().includes(query)) return true;
     // The devices inside it too, so searching a hostname finds its group.
-    return (_byTag.get(node.key) || []).some(p =>
-      (p.name || '').toLowerCase().includes(query) ||
-      (p.hostname || '').toLowerCase().includes(query));
+    return (_byTag.get(node.key) || []).some(_profileMatches);
   }
 
   /** True when this branch, or anything beneath it, matches. */
@@ -541,7 +546,14 @@
       roots = roots.filter(_branchMatches);
       matchOpen = new Set();
       const mark = (n) => {
-        if (n.children.some(_branchMatches)) matchOpen.add(n.key);
+        // Open a branch when the match is below it — in a subgroup, or in
+        // one of its own connections. The second half was missing, so
+        // searching a device name found its group and then hid the device
+        // inside a closed branch, which is the one thing the search is for.
+        if (n.children.some(_branchMatches)
+            || (_byTag.get(n.key) || []).some(_profileMatches)) {
+          matchOpen.add(n.key);
+        }
         n.children.forEach(mark);
       };
       roots.forEach(mark);
@@ -549,7 +561,7 @@
     const pinned = roots.filter(n => n.group && n.group.favourite);
     const rest = roots.filter(n => !(n.group && n.group.favourite));
 
-    // The root (#260): every group is a child of "All connections", so the
+    // The root (#260, renamed #295): every group is a child of "Root", so the
     // hierarchy has a visible top rather than a flat button floating over a
     // separate list. Selecting it clears the selection; the chevron folds
     // the whole tree.
@@ -562,7 +574,9 @@
     chevron.textContent = rootOpen ? 'keyboard_arrow_down' : 'keyboard_arrow_right';
 
     const rootLabel = document.createElement('span');
-    rootLabel.textContent = `All connections (${profileCache.length})`;
+    // "Root" (#295) — it is the top of the tree, and naming it for what it
+    // is beats naming it for what it contains.
+    rootLabel.textContent = `Root (${profileCache.length})`;
     all.append(chevron, rootLabel);
 
     const children = document.createElement('div');
@@ -575,6 +589,21 @@
       chevron.textContent = rootOpen ? 'keyboard_arrow_down' : 'keyboard_arrow_right';
       children.classList.toggle('hidden', !rootOpen);
     });
+    // Dropping a group here takes it out to the top level (#294) — the only
+    // way back out of a parent, since every other target puts it inside
+    // something.
+    all.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      all.classList.add('group-drop');
+    });
+    all.addEventListener('dragleave', () => all.classList.remove('group-drop'));
+    all.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      all.classList.remove('group-drop');
+      const movedKey = e.dataTransfer.getData('application/x-shellmate-group');
+      if (movedKey) await _reparent(movedKey, '');
+    });
+
     all.addEventListener('click', () => {
       // The row toggles too (#287) — aiming for a 16px chevron to fold the
       // tree is a precision the rest of the tree does not ask for.
@@ -726,7 +755,7 @@
       // click on the same group deselected it while leaving it open — which
       // read as the click doing nothing. Selection cannot simply move to the
       // twist arrow: it decides which tiles are painted (#177) and what the
-      // hero names (#179), so a click does both and "All connections" stays
+      // hero names (#179), so a click does both and the root row stays
       // the way to clear it. Collapsing and emptying the dashboard on one
       // click would be two answers to one gesture.
       if (expanded.has(node.key)) expanded.delete(node.key);
@@ -774,8 +803,11 @@
                  .forEach(child => wrap.appendChild(_branch(child)));
 
     // The connections themselves, which is the half a tile could never show.
+    // Narrowed to the matches while searching, or a hit in a group of fifty
+    // arrives with the forty-nine it is not.
     if (node.group) {
       (_byTag.get(node.key) || [])
+        .filter(_profileMatches)
         .forEach(profile => wrap.appendChild(_leaf(profile, node)));
     }
     return wrap;
@@ -940,6 +972,19 @@
   }
 
   function _bindTreeDrop(chip, node) {
+    // A branch can be picked up as well as dropped onto (#294). Its own
+    // MIME type, so a group being dragged and a connection being dragged
+    // cannot be mistaken for one another.
+    if (node.group) {
+      chip.draggable = true;
+      chip.addEventListener('dragstart', (e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('application/x-shellmate-group', node.key);
+        chip.classList.add('group-dragging');
+      });
+      chip.addEventListener('dragend', () => chip.classList.remove('group-dragging'));
+    }
+
     chip.addEventListener('dragover', (e) => {
       e.preventDefault();
       chip.classList.add('group-drop');
@@ -947,10 +992,80 @@
     chip.addEventListener('dragleave', () => chip.classList.remove('group-drop'));
     chip.addEventListener('drop', async (e) => {
       e.preventDefault();
+      e.stopPropagation();
       chip.classList.remove('group-drop');
+
       const profileId = e.dataTransfer.getData('application/x-shellmate-profile');
-      if (profileId && node.group) await _addMember(node.group, profileId);
+      if (profileId && node.group) { await _addMember(node.group, profileId); return; }
+
+      const movedKey = e.dataTransfer.getData('application/x-shellmate-group');
+      if (movedKey && node.group) await _reparent(movedKey, node.key);
     });
+  }
+
+  /**
+   * Move a group under another, or out to the top (#294).
+   *
+   * Nesting is the name — `glasgow/switches` is a branch under `glasgow` —
+   * so re-parenting is a rename, and renaming a group re-tags every
+   * connection in it. The backend already does that for a rename, and does
+   * it for the subgroups too; this only has to work out the new name and
+   * refuse the moves that make no sense.
+   */
+  async function _reparent(movedKey, targetKey) {
+    if (!movedKey || movedKey === targetKey) return;
+
+    const moved = groupCache.find(g => g.key === movedKey);
+    if (!moved) return;
+
+    // Into itself or into its own descendant: the group would become its own
+    // ancestor, and every connection in it would be renamed into a path that
+    // no longer has a top.
+    if (targetKey && (targetKey === movedKey
+                      || targetKey.startsWith(`${movedKey}${SEPARATOR}`))) {
+      _warn('That would put a group inside itself',
+            `"${moved.name}" cannot become a subgroup of something beneath it.`);
+      return;
+    }
+
+    const leaf = moved.name.split(SEPARATOR).pop();
+    const target = targetKey ? groupCache.find(g => g.key === targetKey) : null;
+    const newName = target ? `${target.name}${SEPARATOR}${leaf}` : leaf;
+    if (newName === moved.name) return;
+
+    if (groupCache.some(g => g.key !== movedKey && g.name === newName)) {
+      _warn('There is already a group there',
+            `"${newName}" exists. Rename one of them first.`);
+      return;
+    }
+
+    const members = _membersUnder(movedKey).length;
+    const ok = await window.shellmateDialog.confirm({
+      title: target ? `Move "${leaf}" into "${target.name}"?`
+                    : `Move "${leaf}" to the top level?`,
+      body:  `It becomes "${newName}". Every connection in it, and in any `
+             + 'group beneath it, is re-tagged to match — nothing leaves a '
+             + 'group and no session is touched.',
+      list:  members ? [{ text: `${members} connection${members === 1 ? '' : 's'} affected` }] : [],
+      confirmLabel: 'Move it',
+    });
+    if (!ok) return;
+
+    try {
+      const res = await fetch('/api/groups/' + encodeURIComponent(movedKey), {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ name: newName }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || 'Could not move it.');
+      // The moved branch is where somebody will look next.
+      expanded.add(newName);
+      if (target) expanded.add(target.key);
+      if (activeGroup === movedKey) activeGroup = newName;
+      _refresh();
+    } catch (e) {
+      _warn('Could not move the group', e.message);
+    }
   }
 
   // -------------------------------------------------------------------------

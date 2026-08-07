@@ -1211,6 +1211,18 @@ GigEth0/2     unassigned    YES unset  down     down
                Definitions, where the rest of each platform lives. -->
           <div id="dangerous-lists"></div>
 
+          <!-- The control sequences offered on the tab menu (#299). -->
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label"
+                   data-tip="The sequences offered under 'Send special command' on a tab's right-click menu — the characters a keyboard cannot type at a device, like Ctrl+C or the escape that leaves a nested telnet session.||Break is the exception: it is an out-of-band signal on a serial line rather than a character, so it is offered only on serial sessions. Write a sequence as text with \\xNN for a control byte — \\x03 is Ctrl+C — and \\r for return. Removing one only removes it from the menu; nothing on any device changes.">Special commands</label>
+            <p class="settings-section-hint">Sent to the session you right-clicked, and announced afterwards like anything else ShellMate types for you.</p>
+            <div id="special-rows"></div>
+            <button type="button" id="btn-special-add" class="btn-tertiary">
+              <span class="material-symbols-outlined">add</span>
+              Add a special command
+            </button>
+          </div>
+
           <!-- Advanced values for this area render here as a
                subsection (#152) — the same rows, one heading fewer. The slot
                moved here with the behaviour rows (#219): word separators,
@@ -1933,12 +1945,16 @@ GigEth0/2     unassigned    YES unset  down     down
   </div>
 
   <div id="broadcast-overlay" class="panel-overlay hidden">
-    <div id="broadcast-panel" class="side-panel side-panel-wide">
+    <!-- settings-like (#297): the same width as Settings, since this is
+         reached from there and a panel that changes size on the way is a
+         jolt. The class exists for exactly this. -->
+    <div id="broadcast-panel" class="side-panel side-panel-wide settings-like">
       <div class="panel-header">
         <h2 class="panel-title">Broadcast a command</h2>
         <!-- Shown only when something sent you here (#283), so a trip from
-             Settings is not one-way. -->
-        <button id="broadcast-back" class="btn-tertiary hidden"></button>
+             Settings is not one-way. Primary styling (#297): it is the way
+             back, not a footnote. -->
+        <button id="broadcast-back" class="btn-primary hidden"></button>
         <button id="broadcast-close" class="icon-btn" aria-label="Close">
           <span class="material-symbols-outlined">close</span>
         </button>

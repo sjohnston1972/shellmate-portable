@@ -3428,6 +3428,47 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .history-snippet { position: relative; }
 .history-snippet .history-copy { float: right; }
 
+/* Editing the special commands offered on the tab menu (#299). */
+.special-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.special-row .special-name { flex: 2 1 0; min-width: 0; }
+.special-row .special-seq  {
+  flex: 1 1 0;
+  min-width: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+}
+
+/* Trying the word separators where they are set (#300). */
+.sep-tester {
+  flex-basis: 100%;
+  margin-top: 6px;
+}
+
+.sep-tester-sample {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 6px 8px;
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  color: var(--on-surface);
+  user-select: text;
+  cursor: text;
+}
+
+.sep-tester-result {
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
 /* A dialog field that is present but not editable (#293). */
 .sm-dialog-row-disabled {
   opacity: 0.55;

@@ -152,6 +152,12 @@
       }
     });
 
+    const addSpecial = document.getElementById('btn-special-add');
+    if (addSpecial) addSpecial.addEventListener('click', () => {
+      const host = document.getElementById('special-rows');
+      if (host) host.appendChild(_specialRow({ name: '', kind: 'input', data: '' }));
+    });
+
     // The door to the per-platform command lists (#251).
     const editDangerous = document.getElementById('behaviour-edit-dangerous');
     if (editDangerous) editDangerous.addEventListener('click', () => {
@@ -382,6 +388,80 @@
         host.appendChild(row);
       });
     } catch (_) { /* the edit button still works; the preview is a bonus */ }
+  }
+
+  // -------------------------------------------------------------------------
+  // Special commands (#299)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Show a sequence as something a person can read and retype.
+   *
+   * A raw control byte in a text box is invisible — it looks like an empty
+   * field that somehow works — so the editor speaks in escapes and converts
+   * both ways.
+   */
+  function _showSequence(data) {
+    return String(data || '').replace(/[\x00-\x1f\x7f]/g, (ch) => {
+      if (ch === '\r') return '\\r';
+      if (ch === '\n') return '\\n';
+      if (ch === '\t') return '\\t';
+      return '\\x' + ch.charCodeAt(0).toString(16).padStart(2, '0');
+    });
+  }
+
+  function _parseSequence(text) {
+    return String(text || '')
+      .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+      .replace(/\\r/g, '\r').replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+  }
+
+  function _renderSpecialRows(commands) {
+    const host = document.getElementById('special-rows');
+    if (!host) return;
+    host.innerHTML = '';
+    (commands || []).forEach(entry => host.appendChild(_specialRow(entry)));
+  }
+
+  function _specialRow(entry) {
+    const row = document.createElement('div');
+    row.className = 'special-row';
+
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.className = 'setting-input special-name';
+    name.placeholder = 'Name';
+    name.value = entry.name || '';
+
+    const seq = document.createElement('input');
+    seq.type = 'text';
+    seq.className = 'setting-input special-seq';
+    seq.placeholder = '\\x03';
+    seq.value = entry.kind === 'break' ? 'break' : _showSequence(entry.data);
+    seq.title = entry.kind === 'break'
+      ? 'The serial break signal, not a character — leave this as "break".'
+      : 'The characters to send. \\x03 is Ctrl+C, \\r is return.';
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn-tertiary';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', () => row.remove());
+
+    row.append(name, seq, remove);
+    return row;
+  }
+
+  function _collectSpecialCommands() {
+    const host = document.getElementById('special-rows');
+    if (!host) return undefined;   // section absent: leave the setting alone
+    return [...host.querySelectorAll('.special-row')].map(row => {
+      const name = (row.querySelector('.special-name').value || '').trim();
+      const raw  = (row.querySelector('.special-seq').value || '').trim();
+      if (!name) return null;
+      if (raw.toLowerCase() === 'break') return { name, kind: 'break' };
+      return { name, kind: 'input', data: _parseSequence(raw) };
+    }).filter(Boolean);
   }
 
   // -------------------------------------------------------------------------
@@ -664,6 +744,7 @@
     _checked('setting-connection-dot',    ui.show_connection_dot !== false);
     _checked('setting-sidebar-labels',    ui.sidebar_labels === true);
     _checked('setting-colourful-groups',  ui.colourful_groups !== false);
+    _renderSpecialRows(ui.special_commands);
     _val('setting-font-scale',            ui.font_scale || 1);
     _val('setting-toast-position',        ui.toast_position || 'bottom-right');
     _val('setting-chat-enter',            ui.chat_enter || 'send');
@@ -804,6 +885,7 @@
         show_connection_dot: _gchecked('setting-connection-dot'),
         sidebar_labels:      _gchecked('setting-sidebar-labels'),
         colourful_groups:    _gchecked('setting-colourful-groups'),
+        special_commands:    _collectSpecialCommands(),
         font_scale:          parseFloat(_gval('setting-font-scale')) || 1,
         toast_position:      _gval('setting-toast-position'),
         chat_enter:          _gval('setting-chat-enter'),

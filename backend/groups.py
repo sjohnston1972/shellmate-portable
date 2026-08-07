@@ -273,6 +273,28 @@ def update_group(key: str, changes: dict) -> dict:
         if new_key != key:
             if any(g.get("key") == new_key for g in groups if g is not entry):
                 raise ValueError(f"A group called '{new_name}' already exists.")
+
+            # The subtree moves with it (#294).
+            #
+            # Nesting is the name, so `glasgow` becoming `edinburgh` leaves
+            # `glasgow/switches` naming a parent that no longer exists — the
+            # branch and every connection in it orphaned, present in the file
+            # and absent from the tree. Renaming the descendants is not a
+            # nicety here; without it a rename silently loses groups.
+            prefix = f"{key}/"
+            for child in groups:
+                child_key = child.get("key") or ""
+                if not child_key.startswith(prefix):
+                    continue
+                child_new = new_key + child_key[len(key):]
+                if any(g.get("key") == child_new for g in groups if g is not child):
+                    raise ValueError(
+                        f"Moving this would collide with '{child_new}'."
+                    )
+                _retag(child_key, child_new)
+                child["key"] = child_new
+                child["name"] = new_name + (child.get("name") or child_key)[len(key):]
+
             _retag(key, new_key)
             entry["key"] = new_key
         entry["name"] = new_name

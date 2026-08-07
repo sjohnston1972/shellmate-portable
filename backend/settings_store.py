@@ -134,6 +134,27 @@ DEFAULT_SETTINGS: dict = {
         # because the colour is what makes a strip of a dozen tabs readable
         # at a glance; off for anyone who wants the chrome to sit still.
         "colourful_groups": True,
+        # Control sequences a keyboard cannot send, offered on the tab menu
+        # (#299). Data rather than code, and editable, because which ones
+        # matter depends on the estate: a break drops a booting Cisco into
+        # ROMMON, Ctrl+Shift+6 x escapes a nested telnet session, and
+        # somebody somewhere needs one nobody here thought of.
+        #
+        # `kind` is "break" — the out-of-band signal, serial only — or
+        # "input", whose `data` is sent as if typed.
+        "special_commands": [
+            {"name": "Break", "kind": "break",
+             "hint": "Serial only. Drops a booting Cisco into ROMMON."},
+            {"name": "Ctrl+C — interrupt", "kind": "input", "data": "\x03"},
+            {"name": "Ctrl+D — end of input", "kind": "input", "data": "\x04"},
+            {"name": "Ctrl+Z — exit config mode", "kind": "input", "data": "\x1a"},
+            {"name": "Ctrl+U — clear the line", "kind": "input", "data": "\x15"},
+            {"name": "Ctrl+Shift+6 then x — escape a telnet session",
+             "kind": "input", "data": "\x1ex"},
+            {"name": "Escape", "kind": "input", "data": "\x1b"},
+            {"name": "Return", "kind": "input", "data": "\r"},
+            {"name": "Space — page through --More--", "kind": "input", "data": " "},
+        ],
         # Which split layout to open with. See frontend/js/layout.js.
         "default_layout": "single",
         # Fraction of the window the chat pane takes. Dragging the divider
