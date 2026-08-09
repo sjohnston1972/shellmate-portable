@@ -828,6 +828,41 @@ def set_tags(profile_id: str, tags) -> list[str]:
     return []
 
 
+def retag_many(renames: dict[str, str]) -> int:
+    """
+    Rewrite several tags across every connection in one pass (#327).
+
+    An empty replacement removes the tag. One load and one save however many
+    tags move: the per-profile set_tags() loop parsed and rewrote the whole
+    file once per matching connection, which at the documented estate size is
+    the 62-second class of mistake get_profiles()'s comment records.
+
+    Returns how many connections were touched — each counted once, even when
+    it carried several of the renamed tags.
+    """
+    if not renames:
+        return 0
+    profiles = _load()
+    touched = 0
+    for profile in profiles:
+        tags = normalise_tags(profile.get("tags"))
+        if not any(t in renames for t in tags):
+            continue
+        rewritten: list[str] = []
+        for tag in tags:
+            replacement = renames.get(tag, tag)
+            if replacement and replacement not in rewritten:
+                rewritten.append(replacement)
+        if rewritten:
+            profile["tags"] = rewritten
+        else:
+            profile.pop("tags", None)
+        touched += 1
+    if touched:
+        _save(profiles)
+    return touched
+
+
 def profiles_tagged(tag: str, include_nested: bool = False) -> list[dict]:
     """
     Every connection carrying a tag.
@@ -975,6 +1010,10 @@ def record_detected_hostname(target: str, port: int, username: str, detected: st
         if username and profile.get("username") not in ("", username):
             continue
 
+        # Read before writing (#322): assigning first made the comparison
+        # below always False, so a profile with a user-chosen name recorded
+        # the detection in memory only and _save() never ran.
+        previous = profile.get("detected_hostname")
         profile["detected_hostname"] = detected
 
         # Only replace a name that is still just the address.
@@ -982,7 +1021,7 @@ def record_detected_hostname(target: str, port: int, username: str, detected: st
         if current in ("", target) and current != detected:
             profile["name"] = detected
             changed = True
-        elif profile.get("detected_hostname") != detected:
+        elif previous != detected:
             changed = True
 
     if changed:

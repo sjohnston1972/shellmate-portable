@@ -70,6 +70,16 @@
       else newGroup();
     });
     _bindPanelControls();
+
+    // Escape lets go of a multi-selection. Only when one exists — the key
+    // already means "close this" to every dialog and menu, and an empty
+    // selection has nothing to let go of.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && selected.size) {
+        _clearSelection();
+        renderTree(profileCache);
+      }
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -204,6 +214,12 @@
       activeGroup = '';
     }
 
+    // Same for the multi-selection: a bulk action must never apply to a key
+    // that no longer names a group.
+    selected = new Set(
+      [...selected].filter(k => groupCache.some(g => g.key === k)));
+    if (anchor && !groupCache.some(g => g.key === anchor)) anchor = '';
+
     if (liveStale) await _loadLive();
     renderTree(profiles || []);
   }
@@ -230,6 +246,46 @@
 
   /** Which branches are open, by full key. */
   let expanded = new Set();
+
+  /**
+   * Multi-selection, for bulk delete and bulk edit (#groups-multi).
+   *
+   * Ctrl-click toggles a group in and out; shift-click takes the run between
+   * the last group clicked and this one, in the order the tree paints them.
+   * Selection is not the active filter: the active group decides what the
+   * dashboard shows, the selection decides what a bulk action applies to,
+   * and conflating them would filter the dashboard to the last of five
+   * groups somebody is about to delete.
+   */
+  let selected = new Set();
+
+  /** Where a shift range starts: the group chip last clicked. */
+  let anchor = '';
+
+  /** Group keys in the order the last render painted them, for shift runs. */
+  let renderOrder = [];
+
+  function _clearSelection() {
+    if (!selected.size && !anchor) return;
+    selected = new Set();
+    anchor = '';
+  }
+
+  /** Shift-click: everything between the anchor and here, inclusive. */
+  function _rangeSelect(key) {
+    const from = renderOrder.indexOf(anchor);
+    const to = renderOrder.indexOf(key);
+    if (from === -1 || to === -1) {
+      // The anchor scrolled out of existence — a collapse or a search
+      // narrowed the tree since it was set. Fall back to a single pick.
+      selected.add(key);
+    } else {
+      const [lo, hi] = from < to ? [from, to] : [to, from];
+      for (let i = lo; i <= hi; i++) selected.add(renderOrder[i]);
+    }
+    anchor = key;
+    renderTree(profileCache);
+  }
 
   /** Connections, so a branch can list what is in it without another fetch. */
   let profileCache = [];
@@ -379,6 +435,13 @@
     return found;
   }
 
+  /** How many groups sit beneath this one, at any depth. */
+  function _descendants(node) {
+    let total = node.children.length;
+    node.children.forEach(child => { total += _descendants(child); });
+    return total;
+  }
+
   /** Everything in this branch, including nested groups. */
   function _countUnder(node) {
     let total = node.group ? node.group.count : 0;
@@ -485,6 +548,7 @@
 
     profileCache = profiles || [];
     _indexProfiles();
+    renderOrder = [];
 
     // Nothing to show is nothing to show. An empty rail taking a fifth of the
     // dashboard on a fresh install would be the tiles' mistake again.
@@ -605,6 +669,7 @@
     });
 
     all.addEventListener('click', () => {
+      _clearSelection();
       // The row toggles too (#287) — aiming for a 16px chevron to fold the
       // tree is a precision the rest of the tree does not ask for.
       rootOpen = !rootOpen;
@@ -708,8 +773,13 @@
     const colour = node.group ? node.group.colour : 'slate';
     chip.className = `tree-chip group-${colour}`
                    + (activeGroup === node.key ? ' tree-active' : '')
+                   + (node.group && selected.has(node.key) ? ' tree-selected' : '')
                    + (node.group && node.group.favourite ? ' group-favourite' : '');
     chip.dataset.key = node.key;
+
+    // Only real groups take part in shift runs — a bare path segment has
+    // nothing a bulk action could apply to.
+    if (node.group) renderOrder.push(node.key);
 
     // The group's face (#180). A branch with no group of its own — a path
     // segment that exists only because something below it is named after it —
@@ -748,7 +818,23 @@
     }
 
     chip.append(glyph, name, count);
-    chip.addEventListener('click', () => {
+    chip.addEventListener('click', (e) => {
+      // Ctrl and shift build a multi-selection instead of navigating —
+      // the tree must not fold, filter or change view under a gesture whose
+      // whole point is picking several things before acting on them.
+      if (node.group && (e.ctrlKey || e.metaKey)) {
+        if (selected.has(node.key)) selected.delete(node.key);
+        else selected.add(node.key);
+        anchor = node.key;
+        renderTree(profileCache);
+        return;
+      }
+      if (node.group && e.shiftKey && anchor) {
+        _rangeSelect(node.key);
+        return;
+      }
+      _clearSelection();
+
       // Clicking opens and closes it (#200), and selects it.
       //
       // It used to toggle the *selection* and only ever expand, so a second
@@ -761,6 +847,7 @@
       if (expanded.has(node.key)) expanded.delete(node.key);
       else expanded.add(node.key);
       activeGroup = node.key;
+      if (node.group) anchor = node.key;
       _select();
       // The dashboard has to come forward to show what was just selected —
       // with a terminal on screen, the tiles were painted into a hidden
@@ -1471,12 +1558,24 @@
   async function deleteGroup(group) {
     // Named for what survives. Nothing else on the dashboard destroys
     // anything, and "delete group" reads like it takes the devices with it.
+    //
+    // The counts are the subtree's, not the group's own: a site holds nothing
+    // directly, so `group.count` said "empty" while twelve devices sat in its
+    // subgroups — and the subgroups go with it now, which the dialog says.
+    const node = _findNode(group.key);
+    const subgroups = node ? _descendants(node) : 0;
+    const members = _membersUnder(group.key).length;
     const ok = await window.shellmateDialog.confirm({
       title: `Delete the group "${group.name}"?`,
-      body:  group.count
-        ? `The ${group.count} connection${group.count === 1 ? '' : 's'} in it are kept — `
-          + 'they simply stop being grouped. Only the group and its colour go.'
-        : 'It is empty, so nothing else changes.',
+      body:  members
+        ? `The ${members} connection${members === 1 ? '' : 's'} in it are kept — `
+          + 'they simply stop being grouped. Only the group'
+          + (subgroups ? `, its ${subgroups} subgroup${subgroups === 1 ? '' : 's'}` : '')
+          + ' and its colour go.'
+        : (subgroups
+            ? `It and its ${subgroups} subgroup${subgroups === 1 ? '' : 's'} are `
+              + 'empty, so nothing else changes.'
+            : 'It is empty, so nothing else changes.'),
       confirmLabel: 'Delete the group',
       danger: true,
     });
@@ -1525,6 +1624,13 @@
    * would be the kind of drift the interface has been kept free of.
    */
   function _tileMenu(event, group) {
+    // A menu opened on one of several selected groups speaks for all of
+    // them — that is what selecting several was for. On a group outside the
+    // selection it behaves as ever, for just that group.
+    if (selected.size > 1 && selected.has(group.key)) {
+      _bulkMenu(event);
+      return;
+    }
     document.querySelectorAll('.group-menu').forEach(el => el.remove());
 
     const menu = document.createElement('div');
@@ -1604,6 +1710,154 @@
     setTimeout(() => {
       document.addEventListener('click', () => menu.remove(), { once: true });
     }, 0);
+  }
+
+  // -------------------------------------------------------------------------
+  // Bulk actions (#groups-multi)
+  // -------------------------------------------------------------------------
+
+  /** The menu a multi-selection gets: act on all of them, or let them go. */
+  function _bulkMenu(event) {
+    document.querySelectorAll('.group-menu').forEach(el => el.remove());
+
+    const menu = document.createElement('div');
+    menu.className = 'tab-context-menu group-menu';
+    const n = selected.size;
+
+    const item = (icon, text, onClick, danger) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      if (danger) button.className = 'ctx-danger';
+      button.innerHTML = `<span class="material-symbols-outlined">${icon}</span>`;
+      button.appendChild(document.createTextNode(text));
+      button.addEventListener('click', () => { menu.remove(); onClick(); });
+      return button;
+    };
+
+    menu.appendChild(item('tune', `Edit ${n} groups…`, _bulkEdit));
+
+    const sep = document.createElement('div');
+    sep.className = 'ctx-sep';
+    menu.appendChild(sep);
+
+    menu.appendChild(item('delete_forever', `Delete ${n} groups…`,
+                          _bulkDelete, true));
+    menu.appendChild(item('close', 'Clear selection', () => {
+      _clearSelection();
+      renderTree(profileCache);
+    }));
+
+    document.body.appendChild(menu);
+    menu.style.left = `${Math.max(8, Math.min(event.clientX,
+      window.innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(event.clientY,
+      window.innerHeight - menu.offsetHeight - 8))}px`;
+    setTimeout(() => {
+      document.addEventListener('click', () => menu.remove(), { once: true });
+    }, 0);
+  }
+
+  /** Recolour or pin every selected group in one pass. */
+  async function _bulkEdit() {
+    const keys = [...selected];
+    if (!keys.length) return;
+
+    // Three-state on purpose: "leave as they are" is the difference between
+    // editing five groups and accidentally painting them all one colour.
+    const KEEP = { value: '', label: 'Leave as they are' };
+    const answer = await window.shellmateDialog.form({
+      title: `Edit ${keys.length} groups`,
+      body:  'What you choose here applies to every selected group; '
+             + '"leave as they are" keeps each group\'s own setting.',
+      confirmLabel: 'Apply',
+      fields: [
+        { name: 'colour', label: 'Colour', type: 'select',
+          disabled: !_coloursOn(),
+          hint: _coloursOn() ? '' : 'Group colours are switched off in Settings.',
+          options: [KEEP, ...colours.map(c => ({ value: c, label: _colourName(c) }))] },
+        { name: 'favourite', label: 'Pinned to the top', type: 'select',
+          options: [KEEP, { value: 'pin', label: 'Pinned' },
+                          { value: 'unpin', label: 'Not pinned' }] },
+      ],
+    });
+    if (!answer) return;
+
+    const changes = {};
+    if (answer.colour) changes.colour = answer.colour;
+    if (answer.favourite) changes.favourite = answer.favourite === 'pin';
+    if (!Object.keys(changes).length) return;
+
+    const failed = [];
+    for (const key of keys) {
+      try {
+        const res = await fetch('/api/groups/' + encodeURIComponent(key), {
+          method:  'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(changes),
+        });
+        if (!res.ok) failed.push(key);
+      } catch (_) {
+        failed.push(key);
+      }
+    }
+    if (failed.length) {
+      _warn('Some groups were not updated', failed.join(', '));
+    }
+    _refresh();
+  }
+
+  /** Delete every selected group. One confirmation, named in full. */
+  async function _bulkDelete() {
+    const keys = [...selected];
+    if (!keys.length) return;
+
+    const names = keys.map(k => {
+      const group = groupCache.find(g => g.key === k);
+      return group ? group.name : k;
+    });
+    // Unique across the lot — a device in two selected groups is one device.
+    const affected = new Set();
+    keys.forEach(k => _membersUnder(k).forEach(p => affected.add(p.id)));
+
+    const ok = await window.shellmateDialog.confirm({
+      title: `Delete ${keys.length} groups?`,
+      body:  (affected.size
+        ? `The ${affected.size} connection${affected.size === 1 ? '' : 's'} in them `
+          + 'are kept — they simply stop being grouped. '
+        : '')
+        + 'Each group goes along with any subgroups beneath it.',
+      list:  names.map(text => ({ text })),
+      confirmLabel: 'Delete them',
+      danger: true,
+    });
+    if (!ok) return;
+
+    // Longest key first, so a selected subgroup is deleted before the parent
+    // whose deletion would take it anyway — no request ever 404s on a key
+    // an earlier delete already swept up.
+    keys.sort((a, b) => b.length - a.length);
+    const failed = [];
+    for (const key of keys) {
+      try {
+        const res = await fetch('/api/groups/' + encodeURIComponent(key),
+                                { method: 'DELETE' });
+        if (!res.ok) failed.push(key);
+      } catch (_) {
+        failed.push(key);
+      }
+    }
+    _clearSelection();
+    if (failed.length) {
+      _warn('Some groups were not deleted', failed.join(', '));
+    } else if (window.shellmateAlerts) {
+      window.shellmateAlerts.notify({
+        title: `${keys.length} groups deleted`,
+        body:  affected.size
+          ? `${affected.size} connection${affected.size === 1 ? '' : 's'} kept.`
+          : '',
+      });
+    }
+    _refresh();
   }
 
   // -------------------------------------------------------------------------

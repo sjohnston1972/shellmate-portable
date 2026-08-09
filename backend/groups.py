@@ -274,28 +274,51 @@ def update_group(key: str, changes: dict) -> dict:
             if any(g.get("key") == new_key for g in groups if g is not entry):
                 raise ValueError(f"A group called '{new_name}' already exists.")
 
-            # The subtree moves with it (#294).
+            # The subtree moves with it (#294) — the *whole* subtree (#321).
             #
             # Nesting is the name, so `glasgow` becoming `edinburgh` leaves
             # `glasgow/switches` naming a parent that no longer exists — the
             # branch and every connection in it orphaned, present in the file
-            # and absent from the tree. Renaming the descendants is not a
-            # nicety here; without it a rename silently loses groups.
+            # and absent from the tree. And "every tag is a group": a nested
+            # tag nobody ever styled is a subgroup too, so the sweep covers
+            # tags in use as well as entries in this file, exactly as
+            # delete_group does.
             prefix = f"{key}/"
+            moving = {key}
+            for child in groups:
+                child_key = child.get("key") or ""
+                if child_key.startswith(prefix):
+                    moving.add(child_key)
+            for tag in profiles_module.all_tags():
+                if tag["tag"].startswith(prefix):
+                    moving.add(tag["tag"])
+
+            renames = {old: new_key + old[len(key):] for old in moving}
+            for moved_to in renames.values():
+                if any((g.get("key") or "") == moved_to
+                       and (g.get("key") or "") not in moving
+                       for g in groups):
+                    raise ValueError(
+                        f"Moving this would collide with '{moved_to}'."
+                    )
+
+            # Display names move by whole segments (#321). Slicing by the
+            # length of the parent's *key* corrupted any child whose display
+            # name normalises to a different length — "Glasgow  Site" has
+            # thirteen characters, its key "glasgow site" twelve, and the
+            # one-off slice mangled every child name under it.
+            depth = key.count("/") + 1
             for child in groups:
                 child_key = child.get("key") or ""
                 if not child_key.startswith(prefix):
                     continue
-                child_new = new_key + child_key[len(key):]
-                if any(g.get("key") == child_new for g in groups if g is not child):
-                    raise ValueError(
-                        f"Moving this would collide with '{child_new}'."
-                    )
-                _retag(child_key, child_new)
-                child["key"] = child_new
-                child["name"] = new_name + (child.get("name") or child_key)[len(key):]
+                child["key"] = renames[child_key]
+                tail = (child.get("name") or child_key).split("/")[depth:]
+                child["name"] = "/".join([new_name, *tail])
 
-            _retag(key, new_key)
+            # One pass over the profiles for the whole subtree (#327), not a
+            # file rewrite per connection per moved tag.
+            profiles_module.retag_many(renames)
             entry["key"] = new_key
         entry["name"] = new_name
 
@@ -305,18 +328,39 @@ def update_group(key: str, changes: dict) -> dict:
 
 def delete_group(key: str) -> dict:
     """
-    Remove a group. **The connections in it survive.**
+    Remove a group and everything nested beneath it. **The connections in it
+    survive.**
 
-    Nothing else on the dashboard destroys anything, so this removes the tag
+    Nothing else on the dashboard destroys anything, so this removes the tags
     and the presentation and leaves every connection exactly where it was.
     The count is returned so the interface can say what it let go of rather
     than what it deleted.
+
+    The subtree goes too. Nesting is the name, so deleting ``site`` while
+    ``site/access`` survives leaves the tree rebuilding ``site`` as a bare
+    path segment — a folder-iconed ghost of the group that was just deleted,
+    which reads as the deletion having failed.
     """
     key = _key(key)
-    groups = [g for g in _load() if g.get("key") != key]
-    _save(groups)
-    released = _retag(key, "")
-    return {"key": key, "released": released}
+    prefix = f"{key}/"
+
+    # Every group in the subtree, stored or implicit — a tag in use under the
+    # prefix is a subgroup even if nobody ever gave it a colour.
+    doomed = {key}
+    for entry in _load():
+        entry_key = entry.get("key") or ""
+        if entry_key.startswith(prefix):
+            doomed.add(entry_key)
+    for tag in profiles_module.all_tags():
+        if tag["tag"].startswith(prefix):
+            doomed.add(tag["tag"])
+
+    _save([g for g in _load() if g.get("key") not in doomed])
+
+    # One load and one save for the whole subtree (#327): a connection in
+    # both the group and a subgroup counts once and is written once.
+    released = profiles_module.retag_many({gone: "" for gone in doomed})
+    return {"key": key, "released": released, "subgroups": len(doomed) - 1}
 
 
 def set_order(keys: list[str]) -> list[dict]:
@@ -361,21 +405,3 @@ def set_membership(profile_id: str, key: str, member: bool) -> list[str]:
     return profiles_module.set_tags(profile_id, tags)
 
 
-def _retag(old: str, new: str) -> int:
-    """
-    Rewrite one tag across every connection. Returns how many were touched.
-
-    An empty `new` removes it. Goes through set_tags() rather than writing the
-    file directly, so normalisation and the secret-stripping on save are the
-    same ones every other path uses.
-    """
-    touched = 0
-    for profile in profiles_module.get_profiles():
-        tags = profiles_module.normalise_tags(profile.get("tags"))
-        if old not in tags:
-            continue
-        tags = [new if t == old else t for t in tags] if new else \
-               [t for t in tags if t != old]
-        profiles_module.set_tags(profile["id"], tags)
-        touched += 1
-    return touched

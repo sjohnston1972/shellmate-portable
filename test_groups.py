@@ -318,6 +318,82 @@ def test_moving_a_group_takes_its_subtree_with_it() -> None:
           f"{len(members)} found")
 
 
+def test_renaming_carries_implicit_subgroups_and_child_names_survive() -> None:
+    """
+    The rename sweep must cover the whole subtree, not just the styled part
+    of it (#321) — and child display names move by segments, not by slicing
+    at the parent key's length.
+    """
+    print("\n-- Renaming carries implicit subgroups --")
+    _reset()
+
+    # Display name and key have different lengths ("Glasgow  Site" is 13
+    # characters, its key "glasgow site" is 12) — the slicing bug's trigger.
+    gm.create_group("Glasgow  Site", "blue")
+    gm.create_group("Glasgow  Site/switches")
+    # An implicit subgroup: a tag in use that nobody ever styled.
+    kept = pm.save_profile({"name": "fw1", "hostname": "10.0.0.2",
+                            "connection_type": "ssh",
+                            "tags": ["glasgow site/firewalls"]})
+
+    gm.update_group("glasgow site", {"name": "Edinburgh"})
+
+    listed = {g["key"]: g for g in gm.list_groups()}
+    check("the stored subgroup moved", "edinburgh/switches" in listed,
+          str(sorted(listed)))
+    check("its display name moved by segments",
+          listed.get("edinburgh/switches", {}).get("name") == "Edinburgh/switches",
+          f"got {listed.get('edinburgh/switches', {}).get('name')!r}")
+    check("the implicit subgroup moved too", "edinburgh/firewalls" in listed
+          and "glasgow site/firewalls" not in listed, str(sorted(listed)))
+
+    survivor = next((p for p in pm.get_profiles() if p["id"] == kept["id"]), {})
+    check("and its connection was re-tagged",
+          (survivor.get("tags") or []) == ["edinburgh/firewalls"],
+          str(survivor.get("tags")))
+
+
+def test_deleting_a_group_takes_its_subtree_with_it() -> None:
+    """
+    Deleting a parent must delete its subgroups too.
+
+    It used to remove only the parent's own entry and tag, so `site/access`
+    survived — and the tree, rebuilding branches from the names, drew `site`
+    again as a bare path segment with the default folder icon. The group
+    looked undeleted, because to any reasonable eye it was.
+    """
+    print("\n-- Deleting a group carries its subgroups --")
+    _reset()
+
+    gm.create_group("site")
+    gm.create_group("site/access")
+    # An implicit subgroup: a tag in use that nobody ever styled.
+    kept = pm.save_profile({"name": "sw1", "hostname": "10.0.0.1",
+                            "connection_type": "ssh",
+                            "tags": ["site/access", "site/core", "other"]})
+    gm.create_group("site-b")   # a sibling that shares the prefix's letters
+
+    result = gm.delete_group("site")
+
+    keys = {g["key"] for g in gm.list_groups()}
+    check("the group is gone", "site" not in keys, str(sorted(keys)))
+    check("its stored subgroup is gone", "site/access" not in keys,
+          str(sorted(keys)))
+    check("its implicit subgroup is gone", "site/core" not in keys,
+          str(sorted(keys)))
+    check("a sibling sharing the letters survives", "site-b" in keys,
+          "'site-b' was swept up by a prefix match without the separator")
+
+    survivor = next((p for p in pm.get_profiles() if p["id"] == kept["id"]), {})
+    tags = survivor.get("tags") or []
+    check("the connection survives with its other tags", tags == ["other"],
+          str(tags))
+    check("it is counted once, not once per subgroup",
+          result["released"] == 1, str(result))
+    check("and the subgroups are counted", result["subgroups"] == 2,
+          str(result))
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Groups")
@@ -334,6 +410,8 @@ def main() -> int:
         test_an_implicit_group_gets_an_icon_too,
         test_a_nested_group_can_be_reached_over_the_api,
         test_moving_a_group_takes_its_subtree_with_it,
+        test_renaming_carries_implicit_subgroups_and_child_names_survive,
+        test_deleting_a_group_takes_its_subtree_with_it,
     )
     for test in tests:
         try:

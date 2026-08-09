@@ -7573,13 +7573,18 @@ body {
 #group-tree-body {
   flex: 1;
   overflow-y: auto;
-  /* Right padding clears the 6px drag strip, so a chip's menu button is not
-     flush against the thing you grab to resize. */
-  padding: 8px 12px 16px 8px;
+  /* The margin keeps the body — and, crucially, its scrollbar — clear of the
+     6px drag strip. The scrollbar paints at the body's own edge, so padding
+     alone left it underneath the absolutely-positioned handle, and a click on
+     the scrollbar started a resize drag instead of a scroll. */
+  margin-right: 6px;
+  padding: 8px 6px 16px 8px;
 }
 
 #group-tree.group-tree-right #group-tree-body {
-  padding-left: 12px;
+  margin-right: 0;
+  margin-left: 6px;
+  padding-left: 6px;
   padding-right: 8px;
 }
 
@@ -7679,6 +7684,17 @@ body {
 .tree-chip:hover { border-color: var(--primary-container); }
 .tree-chip.tree-active { background: var(--surface-high); }
 .tree-chip.group-drop { border-color: var(--primary); background: var(--surface-high); }
+
+/* Multi-selected (ctrl/shift-click), distinct from the single active chip:
+   activity is what the dashboard is filtered to, selection is what a bulk
+   action applies to. Three sides only — the left border stays the group's
+   colour spine (#286). */
+.tree-chip.tree-selected {
+  background: var(--primary-tint);
+  border-top-color: var(--primary);
+  border-right-color: var(--primary);
+  border-bottom-color: var(--primary);
+}
 
 /* The group's icon (#180). Takes the group's colour, so the icon and the
    left border say the same thing rather than competing. */
