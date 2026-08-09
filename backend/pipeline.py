@@ -77,8 +77,22 @@ class OutboundPipeline:
     # "reload in 10" the moment Enter is pressed, and this is the one place
     # where a line is known to be complete.
     completed_commands: list[str] = field(default_factory=list, init=False)
-    #: A destructive command waiting for an answer. Nothing has been sent.
-    held_command: str = field(default="", init=False)
+
+    #: Destructive commands waiting for an answer, oldest first. Nothing has
+    #: been sent for any of them. A queue rather than one slot (#343): a
+    #: pasted batch can hold two commands, and one slot kept only the last —
+    #: the first vanished with no prompt and no record. And a pending hold
+    #: survives unrelated keystrokes: it is cleared by release() or drop(),
+    #: never by the next call to process().
+    held_commands: list[str] = field(default_factory=list, init=False)
+
+    #: What the *latest* process() call held, for the caller to prompt on.
+    newly_held: list[str] = field(default_factory=list, init=False)
+
+    @property
+    def held_command(self) -> str:
+        """The oldest command still waiting for an answer, or ""."""
+        return self.held_commands[0] if self.held_commands else ""
 
     def process(self, data: str) -> str:
         """
@@ -96,7 +110,7 @@ class OutboundPipeline:
         out: list[str] = []
         self.last_expansion = None
         self.completed_commands = []
-        self.held_command = ""
+        self.newly_held = []
 
         for char in data:
             if char in (CR, LF):
@@ -175,7 +189,6 @@ class OutboundPipeline:
         """
         from backend.advanced import get as advanced
 
-        self.held_command = ""
         command = line.strip()
         if not command or not advanced("terminal.confirm_dangerous"):
             return None
@@ -192,23 +205,36 @@ class OutboundPipeline:
         if not matches_dangerous(platform, command):
             return None
 
-        self.held_command = command
+        self.held_commands.append(command)
+        self.newly_held.append(command)
         logger.info("Holding %r for confirmation", command)
         # Clear what the device echoed. Nothing is sent until the answer
         # comes back, so an unanswered prompt leaves the device untouched.
         return CTRL_U
 
-    def release(self) -> str:
-        """The held command plus a carriage return, and forget it."""
-        command = self.held_command
-        self.held_command = ""
-        return (command + CR) if command else ""
+    def _take(self, command: str | None) -> str:
+        """Remove and return a pending hold — the named one, or the oldest."""
+        if not self.held_commands:
+            return ""
+        if command:
+            if command not in self.held_commands:
+                return ""
+            self.held_commands.remove(command)
+            return command
+        return self.held_commands.pop(0)
 
-    def drop(self) -> str:
-        """Forget the held command. Returns what was dropped, for the log."""
-        command = self.held_command
-        self.held_command = ""
-        return command
+    def release(self, command: str | None = None) -> str:
+        """A held command plus a carriage return, and forget it.
+
+        Named, so two prompts answered out of order each act on their own
+        command (#343); unnamed, the oldest — the order they were prompted.
+        """
+        taken = self._take(command)
+        return (taken + CR) if taken else ""
+
+    def drop(self, command: str | None = None) -> str:
+        """Forget a held command. Returns what was dropped, for the log."""
+        return self._take(command)
 
     def _expand(self, line: str) -> str | None:
         """The alias expansion for a line, or None if there is not one."""
@@ -236,7 +262,8 @@ class OutboundPipeline:
         self._line = ""
         self.last_expansion = None
         self.completed_commands = []
-        self.held_command = ""
+        self.held_commands = []
+        self.newly_held = []
 
     @property
     def current_line(self) -> str:

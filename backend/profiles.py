@@ -472,16 +472,22 @@ FIELD_LABELS = {
 }
 
 
-def credential_fields(profile_id: str) -> dict[str, str]:
+def credential_fields(profile_id: str,
+                      plaintext_store: dict | None = None) -> dict[str, str]:
     """
     Which credentials are saved for a profile, and where each one lives.
 
     Returns field -> "vault" or "plaintext". A locked vault reports only the
     plaintext ones — see ``vault.is_locked()``; the caller has to say so on
     screen rather than presenting a short list as a complete one.
+
+    ``plaintext_store`` lets a caller listing many profiles read the file
+    once and share it (#328) — the same fix get_profiles() already carries;
+    per-call loading here re-parsed credentials-plaintext.json once per row.
     """
     found: dict[str, str] = {}
-    plaintext = _load_plaintext().get(profile_id, {})
+    store = _load_plaintext() if plaintext_store is None else plaintext_store
+    plaintext = store.get(profile_id, {})
 
     for field in CREDENTIAL_FIELDS:
         if vault.has(_credential_key(profile_id, field)):

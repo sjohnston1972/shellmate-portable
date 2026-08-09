@@ -47,7 +47,10 @@ def _build_user_prompt(
         parts.append("\n=== Chat history (user ↔ AI) ===")
         for m in chat_messages:
             role = m.get("role", "user")
-            text = (m.get("text") or "").strip()
+            # Redacted like the buffers above (#320): the chat quotes device
+            # output constantly, and this text leaves the machine for a
+            # third-party API.
+            text = outbound.redact_text((m.get("text") or "").strip())
             if text:
                 parts.append(f"[{role}] {text}")
 

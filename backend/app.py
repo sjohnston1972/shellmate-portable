@@ -18,6 +18,7 @@ REST endpoints:
 """
 
 import asyncio
+import contextlib
 import datetime
 import json
 import logging
@@ -422,6 +423,7 @@ async def create_session(request: CreateSessionRequest) -> dict:
     # A shared credential, chosen in the dialog for a device with no profile.
     # Filled first so a password typed in the dialog still wins over it, the
     # same precedence a profile's own saved credentials have.
+    filled_from_set: set[str] = set()
     if request.credential_ref and not request.password:
         # resolve_set, not _read_credentials: the secrets are in the vault and
         # the username is on the set entry, so reading one store yields half a
@@ -430,6 +432,7 @@ async def create_session(request: CreateSessionRequest) -> dict:
         for field, value in profiles_module.resolve_set(request.credential_ref).items():
             if not getattr(params, field, ""):
                 setattr(params, field, value)
+                filled_from_set.add(field)
                 if field == "password":
                     params.credential_source = "saved"
 
@@ -445,9 +448,17 @@ async def create_session(request: CreateSessionRequest) -> dict:
 
     # Captured before connecting because the handler scrubs them from params
     # the moment authentication succeeds.
+    #
+    # A value that came from a shared credential set stays with the set
+    # (#324). Snapshotting it onto the profile would work today and rot
+    # later: a profile's own credentials permanently shadow the set, so the
+    # day the shared password is rotated, this one device keeps the stale
+    # copy — precisely the forty-switch failure the sets exist to prevent —
+    # and nothing on screen shows the fork happened.
     to_remember = {
         field: getattr(params, field, "")
         for field in CREDENTIAL_FIELDS
+        if field not in filled_from_set
     } if (request.remember_credentials and request.profile_id) else {}
 
     try:
@@ -927,9 +938,13 @@ def _credential_rows() -> dict:
     locked = vault.is_locked()
     entries = []
 
+    # One read of the plaintext store for the whole listing (#328), not one
+    # per profile — the identical per-row-reload pattern get_profiles() had.
+    plaintext_store = profiles_module._load_plaintext()
     for profile in get_profiles():
         profile_id = profile.get("id", "")
-        for field, storage in profiles_module.credential_fields(profile_id).items():
+        for field, storage in profiles_module.credential_fields(
+                profile_id, plaintext_store).items():
             entries.append({
                 "profile_id":      profile_id,
                 "profile_name":    profile.get("name") or profile.get("hostname") or "",
@@ -1575,11 +1590,16 @@ async def connect_tag(tag: str) -> dict:
         raise HTTPException(status_code=404,
                             detail=f"Nothing is tagged '{tag}'.")
 
-    limit = asyncio.Semaphore(max(1, int(advanced_setting("broadcast.concurrency"))))
+    # The same reading of broadcast.concurrency as broadcast itself (#333):
+    # 0 is documented as "no limit". max(1, 0) turned the default into
+    # Semaphore(1), and "Connect all" on fifty devices opened them strictly
+    # one at a time — worst case fifty connect timeouts end to end.
+    concurrency = int(advanced_setting("broadcast.concurrency"))
+    limit = asyncio.Semaphore(concurrency) if concurrency else None
     results: list[dict] = []
 
     async def open_one(profile: dict) -> None:
-        async with limit:
+        async with (limit or contextlib.nullcontext()):
             kind = profile.get("connection_type") or "ssh"
             params = ConnectionParams(
                 connection_type=kind,
@@ -2230,9 +2250,12 @@ async def post_session_to_jira(request: Request) -> dict:
         })
 
     # The conversation goes into the ticket too, and the assistant quotes
-    # device output back at you constantly.
+    # device output back at you constantly. The key is "text" (#320): that is
+    # what the frontend sends and what build_adf reads — this used to redact
+    # a "content" key the messages never had, so every secret in the chat
+    # went into the ticket under a comment claiming otherwise.
     chat_messages = [
-        {**m, "content": outbound.redact_text(m.get("content", ""))}
+        {**m, "text": outbound.redact_text(str(m.get("text", "")))}
         if isinstance(m, dict) else m
         for m in chat_messages
     ]
@@ -2285,8 +2308,9 @@ class BroadcastRequest(BaseModel):
     commands: list[str] = []
     # Milliseconds between one command and the next on the same device. Devices
     # do not answer instantly, and a save in particular needs a moment before
-    # it will accept anything else.
-    wait_ms: int = 500
+    # it will accept anything else. None means "use the configured default";
+    # an explicit 0 means no wait, and is honoured as such (#337).
+    wait_ms: int | None = None
     # Enter is pressed unless the caller says otherwise. The alternative
     # default leaves a half-typed line sitting at the prompt on every device,
     # which is a worse thing to do by accident than running the command.
@@ -2336,8 +2360,11 @@ async def broadcast(request: BroadcastRequest) -> dict:
     if not request.session_ids:
         raise HTTPException(status_code=400, detail="No sessions selected.")
 
-    wait = max(0, min(60_000, request.wait_ms or
-                      advanced_setting("broadcast.default_wait"))) / 1000
+    # `is None`, not `or` (#337): an explicit 0 is "no wait", a valid choice
+    # for a read-only sequence, and `or` silently replaced it with the default.
+    wait_ms = (advanced_setting("broadcast.default_wait")
+               if request.wait_ms is None else request.wait_ms)
+    wait = max(0, min(60_000, wait_ms)) / 1000
 
     # A cap on how many devices are in flight. Two hundred at once is two
     # hundred SSH channels through the same jump host.
@@ -2357,14 +2384,53 @@ async def broadcast(request: BroadcastRequest) -> dict:
             return {"session_id": session_id, "ok": False, "label": label,
                     "error": "Not connected", "sent": []}
 
+        pipeline = session["pipeline"]
+
+        # The user may be mid-line in this tab (#332). The device's input
+        # buffer already holds their echo, so a broadcast would append to it
+        # — "conf t" plus "show version" executes "conf tshow version". Clear
+        # both sides first: Ctrl-U wipes the device's line, reset() wipes the
+        # assembler's, and the user's half-typed text goes rather than being
+        # silently merged into a command nobody wrote.
+        if pipeline.current_line:
+            await asyncio.to_thread(handler.send, b"\x15")
+            pipeline.reset()
+
         sent = []
         for index, command in enumerate(commands):
             try:
-                outbound = session["pipeline"].process(
+                outbound = pipeline.process(
                     command + ("\r" if request.execute else ""))
+
+                # Held by the guardrail, and there is nobody here to ask
+                # (#330): broadcast is not interactive. Nothing is sent for
+                # this command — not even the echo — and the device is failed
+                # honestly rather than counted as a success it never ran.
+                if pipeline.newly_held:
+                    for held in list(pipeline.newly_held):
+                        pipeline.drop(held)
+                    note = (f'"{command}" needs confirmation (destructive on '
+                            f"this platform) — broadcast cannot ask. "
+                            f"Run it in the device's own tab.")
+                    if advanced_setting("broadcast.stop_on_error"):
+                        return {"session_id": session_id, "ok": False,
+                                "label": label,
+                                "error": f"{note} (after {len(sent)} of {len(commands)})",
+                                "sent": sent}
+                    sent.append(f"{command}  [held: needs confirmation]")
+                    continue
+
                 await asyncio.to_thread(
                     handler.send, outbound.encode("utf-8", errors="replace"))
-                expansion = session["pipeline"].last_expansion
+                # The alert tracker has to see "reload in 10" however it was
+                # sent (#330) — typed or broadcast, it schedules the same
+                # reload.
+                for completed in pipeline.completed_commands:
+                    try:
+                        session["alerts"].observe_command(completed)
+                    except Exception:
+                        pass
+                expansion = pipeline.last_expansion
                 sent.append(expansion[1] if expansion else command)
             except Exception as exc:
                 logger.warning("Broadcast to %s failed on %r: %s", label, command, exc)
@@ -3068,9 +3134,14 @@ def _open_session_log(session: dict, session_id: str) -> None:
         return
 
     session["_log_redact"] = bool(settings["logging"].get("redact_secrets", True))
-    session["_log_path"] = (
-        log_directory() / f"{session_id[:8]}-{session.get('hostname', 'session')}.log"
-    )
+    # Windows forbids <>:"/\|?* in filenames, and a detected IPv6 target
+    # carries colons — the first write raised OSError and _append_to_log
+    # permanently gave up, so logging was silently unavailable for every
+    # IPv6/odd-named session (#338). Replaced rather than rejected: the log
+    # must still exist, whatever the device is called.
+    host = re.sub(r'[<>:"/\\|?*]', "-",
+                  str(session.get("hostname") or "session"))
+    session["_log_path"] = log_directory() / f"{session_id[:8]}-{host}.log"
 
 
 def _discard_if_empty(path) -> None:
@@ -3213,6 +3284,17 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
         return
 
     handler = session["handler"]
+
+    # A reattach after a refresh or a dropped socket (#331). The old teardown
+    # marked the session disconnected unconditionally and nothing ever set it
+    # back, so after the first F5 every consumer of the flag was permanently
+    # wrong: the tray's quit confirmation saw zero live sessions and skipped
+    # itself, /api/sessions and the dashboard badges reported everything
+    # dead, and live capture refused to run. The handler knows whether the
+    # transport is actually up; believe it.
+    if handler.is_connected and not session.get("is_connected"):
+        session["is_connected"] = True
+
     hostname_sent = False  # Only send hostname_detected once per session
 
     async def read_from_client() -> None:
@@ -3262,9 +3344,10 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         # A destructive command is held rather than sent. The
                         # device has had CTRL_U — enough to clear what it
                         # echoed — and nothing else, so an unanswered prompt
-                        # leaves it untouched.
-                        held = session["pipeline"].held_command
-                        if held:
+                        # leaves it untouched. One prompt per hold (#343): a
+                        # pasted batch can hold more than one, and reading a
+                        # single slot silently discarded all but the last.
+                        for held in session["pipeline"].newly_held:
                             await websocket.send_text(json.dumps({
                                 "type":    "guardrail_prompt",
                                 "command": held,
@@ -3324,10 +3407,13 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
 
                 elif msg_type == "guardrail_answer":
                     # The answer to a held command. Confirmed, it goes now;
-                    # refused, it is dropped and the terminal says so.
+                    # refused, it is dropped and the terminal says so. The
+                    # answer names its command (#343) so two prompts answered
+                    # out of order each act on their own hold; an old client
+                    # that sends no name gets the oldest.
                     pipeline = session["pipeline"]
                     if msg.get("confirmed"):
-                        outbound = pipeline.release()
+                        outbound = pipeline.release(msg.get("command") or None)
                         if outbound and handler.is_connected:
                             logger.info("Confirmed at the guardrail and sent: %r",
                                         outbound.strip())
@@ -3341,7 +3427,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                                 [session["alerts"].observe_command(outbound.strip())]
                             )
                     else:
-                        dropped = pipeline.drop()
+                        dropped = pipeline.drop(msg.get("command") or None)
                         if dropped:
                             logger.info("Cancelled at the guardrail: %r", dropped)
                             # The tracker armed at Enter, before this question
@@ -3470,15 +3556,28 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
         that nothing is sent silently, and forty announcements an hour would
         obey the letter of that while destroying its purpose.
         """
+        # The two values are cached with a short shelf life (#340). This runs
+        # on every idle poll — twice a second per session — and get_settings()
+        # is a file read, a JSON parse and a deep merge each call; a dozen
+        # idle tabs cost ~48 reads a second forever. The comment on the
+        # logging path below records this exact pattern being removed once
+        # already. A five-second staleness on a toggle that acts at 120s
+        # intervals costs nothing.
+        now = time.monotonic()
+        cached = session.get("_keep_alive_cache")
+        if not cached or now - cached[0] > 5.0:
+            terminal_cfg = get_settings().get("terminal", {})
+            cached = (now,
+                      bool(terminal_cfg.get("keep_alive", False)),
+                      float(terminal_cfg.get("keep_alive_seconds", 120)) or 120)
+            session["_keep_alive_cache"] = cached
+        _, default_wanted, interval = cached
+
         wanted = session.get("keep_alive")
         if wanted is None:
-            wanted = bool(get_settings().get("terminal", {}).get("keep_alive", False))
+            wanted = default_wanted
         if not wanted or not handler.is_connected:
             return
-
-        interval = float(get_settings().get("terminal", {})
-                         .get("keep_alive_seconds", 120)) or 120
-        now = time.monotonic()
         last = session.get("_last_activity") or now
         if now - last < interval:
             return
@@ -3488,7 +3587,11 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
             return
 
         session["_last_activity"] = now
-        await asyncio.to_thread(handler.send, b" ")
+        # The nudge is a space then a backspace, so it nets to nothing.
+        # \x08 spelled out rather than embedded as a raw byte: an invisible
+        # control character in a string literal defeats every reader and
+        # every search tool that ever looks at this line.
+        await asyncio.to_thread(handler.send, b" \x08")
 
         if not session.get("_keep_alive_told"):
             session["_keep_alive_told"] = True
@@ -3713,7 +3816,10 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
     for task in pending:
         task.cancel()
 
-    session["is_connected"] = False
+    # No `is_connected = False` here (#331). The bridge ending says the
+    # *browser* went away — a refresh, a hidden window — not that the device
+    # did. The genuine close signals are recv() returning b"" and the error
+    # path in read_from_channel, and both already write the flag.
 
     # The log handle is per-session now rather than per-chunk, so it has an
     # end as well as a beginning — including the partial last line.

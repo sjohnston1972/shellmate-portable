@@ -626,7 +626,10 @@
   function askBeforeSending(sessionId, websocket, command, device) {
     const reply = (confirmed) => {
       if (websocket.readyState === WebSocket.OPEN) {
-        websocket.send(JSON.stringify({ type: 'guardrail_answer', confirmed }));
+        // The command is named so the answer acts on this hold and no other
+        // — a pasted batch can put two prompts up, and an unnamed answer
+        // could confirm the wrong one.
+        websocket.send(JSON.stringify({ type: 'guardrail_answer', confirmed, command }));
       }
     };
 
