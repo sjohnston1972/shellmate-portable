@@ -107,9 +107,13 @@ def check_cookie(presented: str) -> bool:
     return hmac.compare_digest(presented or "", cookie_value())
 
 
-#: Paths reachable without a cookie — the login page and what it needs to
-#: render. Deliberately short: anything else would be a way round.
-PUBLIC_PATHS = frozenset({"/login", "/api/login", "/favicon.ico"})
+#: Paths reachable without a cookie — the login page, what it needs to
+#: render, and the liveness probe (#329): the startup wait and the
+#: single-instance check both poll /api/health before anyone can possibly
+#: have logged in, and a 401 there read as "not started". It answers with
+#: the app marker and nothing else. Deliberately short: anything else would
+#: be a way round.
+PUBLIC_PATHS = frozenset({"/login", "/api/login", "/favicon.ico", "/api/health"})
 
 
 def is_public(path: str) -> bool:

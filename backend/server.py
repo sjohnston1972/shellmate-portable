@@ -204,7 +204,9 @@ def _probe_instance(port: int, timeout: float = 1.5) -> bool:
     socket, so an unrelated service that has since claimed the port does not
     get mistaken for us.
     """
-    url = f"http://127.0.0.1:{port}/api/system/info"
+    # /api/health, not /api/system/info: the probe must work with auth
+    # enabled (#329), and health is the endpoint that stays public.
+    url = f"http://127.0.0.1:{port}/api/health"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))

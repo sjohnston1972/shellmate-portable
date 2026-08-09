@@ -1965,6 +1965,21 @@ async def remove_profile(profile_id: str) -> dict:
 # REST — Settings
 # ---------------------------------------------------------------------------
 
+@app.get("/api/health")
+async def health() -> dict:
+    """
+    The liveness probe, and nothing else.
+
+    Public even when auth is on (#329): `wait_until_serving()` and the
+    single-instance probe both poll before anyone can have logged in, and a
+    401 read as "not started" — the windowed build refused to launch, and a
+    second instance treated the lock file as stale and started over the same
+    data directory. This carries only the marker; `/api/system/info` keeps
+    its filesystem paths behind the login.
+    """
+    return {"app": "shellmate-portable"}
+
+
 @app.get("/api/system/info")
 async def system_info() -> dict:
     """

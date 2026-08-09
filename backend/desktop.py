@@ -127,7 +127,9 @@ def wait_until_serving(port: int, timeout: float = 15.0) -> bool:
     rescue the situation.
     """
     deadline = time.time() + timeout
-    url = f"http://127.0.0.1:{port}/api/system/info"
+    # /api/health, not /api/system/info: with auth enabled the info route
+    # answers 401, which read as "not started" and killed the launch (#329).
+    url = f"http://127.0.0.1:{port}/api/health"
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=1):
