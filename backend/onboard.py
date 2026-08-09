@@ -26,7 +26,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from backend.fingerprint import ACT_THRESHOLD, Fingerprint, identify
+from backend.fingerprint import Fingerprint, identify
 from backend.platforms import GENERIC, get_profile
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,11 @@ def summarise(fingerprint: Fingerprint, auto_paging: bool = True) -> dict:
     summary["paging_available"] = profile.paging_off
     summary["paging_skipped"] = skipped
     summary["confident"] = fingerprint.certain_enough_to_act
-    summary["act_threshold"] = ACT_THRESHOLD
+    # The *configured* threshold (#326), not the constant: quoting 0.6 to
+    # someone who raised it in Stockton is the label-drift CLAUDE.md warns
+    # about — an explanation citing a number the gate is not using.
+    from backend.advanced import get as advanced
+    summary["act_threshold"] = advanced("identify.act_threshold")
 
     # How many aliases the identification just brought into force.
     #

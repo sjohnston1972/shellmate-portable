@@ -104,8 +104,22 @@ def _match_signatures(text: str) -> tuple[str, float]:
 
     for platform_id, profile in load_profiles().items():
         for signature in profile.signatures:
-            if signature and signature.lower() in lowered and len(signature) > best_length:
-                best_platform, best_length = platform_id, len(signature)
+            sig = (signature or "").lower()
+            if not sig or len(sig) <= best_length:
+                continue
+            # A short signature must stand alone as a word (#323). "eos" as a
+            # bare substring matched "videos" and "GeoServer" and identified
+            # the device as Arista at acting confidence — and a banner match
+            # can override a platform the user set by hand. Word boundaries
+            # keep "EOS-4.30" and "NXOS:" while rejecting letters buried
+            # inside another word. Enforced here rather than in the data,
+            # because existing installs read signatures back from their own
+            # platforms.json and would never see a cleaned built-in list.
+            if len(sig) < 6:
+                if re.search(rf"\b{re.escape(sig)}\b", lowered):
+                    best_platform, best_length = platform_id, len(sig)
+            elif sig in lowered:
+                best_platform, best_length = platform_id, len(sig)
 
     if best_platform == GENERIC:
         return GENERIC, 0.0
