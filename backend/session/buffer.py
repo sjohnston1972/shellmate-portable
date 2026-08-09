@@ -30,8 +30,11 @@ class SessionBuffer:
         # Accumulates the current incomplete line until we see a newline
         self._pending: str = ""
 
-        # Raw data appended in arrival order (not length-limited for now)
-        self._raw: list[str] = []
+        # There is deliberately no raw-bytes copy here (#345). One existed,
+        # unbounded and with no reader — a session left on `terminal monitor`
+        # overnight held every byte in memory for a replay feature nothing
+        # implements. The deque above is the bound; full-fidelity recording
+        # is the session log's job.
 
     # ------------------------------------------------------------------
     # Public API
@@ -50,8 +53,6 @@ class SessionBuffer:
         """
         if not data:
             return
-
-        self._raw.append(data)
 
         # Combine any leftover partial line with the new data
         combined = self._pending + data
@@ -108,7 +109,6 @@ class SessionBuffer:
     def clear(self) -> None:
         """Discard all stored data and reset the pending line fragment."""
         self._lines.clear()
-        self._raw.clear()
         self._pending = ""
 
     # ------------------------------------------------------------------

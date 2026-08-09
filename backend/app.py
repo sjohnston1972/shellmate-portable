@@ -3626,11 +3626,38 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
     async def read_from_channel() -> None:
         """Forward device output to the browser and the session buffer."""
         nonlocal hostname_sent
+        def _recv_and_bank() -> bytes | None:
+            """
+            recv() whose bytes survive the awaiting task being cancelled.
+
+            On teardown this task is cancelled mid-await, but the worker
+            thread still completes the recv — and the returned bytes used to
+            be consumed off the channel and thrown away (#344): a refresh
+            mid-`show run` left a hole in the buffer, the transcript and the
+            log. Banking on the worker thread itself means cancellation can
+            discard only the *return value*; the bytes wait in the session
+            and the next attach (or the next loop turn) claims them.
+            """
+            data = handler.recv(4096)
+            if data:
+                session["_recv_pending"] = session.get("_recv_pending", b"") + data
+            return data
+
         try:
             while True:
-                # See ConnectionHandler.recv: None means idle (keep waiting),
-                # b"" means the far end closed.
-                data_bytes = await asyncio.to_thread(handler.recv, 4096)
+                # Banked output first — bytes recv'd by a cancelled
+                # predecessor of this loop (#344).
+                data_bytes = session.pop("_recv_pending", b"")
+                if not data_bytes:
+                    # See ConnectionHandler.recv: None means idle (keep
+                    # waiting), b"" means the far end closed.
+                    result = await asyncio.to_thread(_recv_and_bank)
+                    if result:
+                        # Claim what the thread banked — it may include more
+                        # than this recv if a cancelled one banked first.
+                        data_bytes = session.pop("_recv_pending", b"")
+                    else:
+                        data_bytes = result   # None (idle) or b"" (closed)
 
                 if data_bytes is None:
                     # Idle, but onboarding may still be due — see maybe_onboard.

@@ -269,6 +269,16 @@ class TranscriptParser:
         head, newline, tail = self._raw.rpartition("\n")
         self._raw = tail
 
+        # A stream with no newline at all must not grow the tail without
+        # bound (#346): an IOS `copy` printing `!` per block, an xmodem
+        # transfer, CR-only progress redraws. Left alone, the tail grows for
+        # the transfer's duration *and* clean() re-runs over all of it on
+        # every chunk — O(n²) on the per-output hot path. A prompt is at most
+        # 512 characters by match_prompt's own rule, so keeping the last 8 KB
+        # loses nothing the parser could have used.
+        if len(self._raw) > 32768:
+            self._raw = self._raw[-8192:]
+
         lines: list[str] = []
         if newline:
             # The trailing empty element after the final newline is not a line.
@@ -276,8 +286,9 @@ class TranscriptParser:
             lines.pop()
 
         # Re-cleaned in full each time, so an erase arriving later still finds
-        # the characters it is meant to remove.
-        self._partial = clean(tail)
+        # the characters it is meant to remove. From self._raw, not the local
+        # tail — the cap above may just have trimmed it.
+        self._partial = clean(self._raw)
 
         if not lines and not self._partial:
             return []

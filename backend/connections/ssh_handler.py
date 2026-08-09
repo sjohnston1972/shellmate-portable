@@ -387,6 +387,14 @@ class SSHHandler(ConnectionHandler):
             if self._wants_interactive_login(params):
                 if self._connect_interactive(params, username, sock, disabled):
                     return
+                # The probe wrapped the bastion's channel in its own transport,
+                # and closing that transport closed the channel with it (#342)
+                # — so the fallback below dialled through a dead sock and every
+                # interactive-login connection via a jump host failed with
+                # "Socket is closed" instead of falling back. Open a fresh
+                # channel; the bastion session itself is still up.
+                if sock is not None:
+                    sock = self._open_jump_channel()
 
             self._client.connect(
                 hostname=params.hostname,
@@ -422,6 +430,16 @@ class SSHHandler(ConnectionHandler):
             # channel having been closed.
             self._channel.settimeout(advanced("ssh.read_timeout"))
 
+        except ConnectionError_:
+            # Raised with the failure already phrased — jump auth refused, the
+            # bastion declining a channel, a bad key path — but possibly
+            # *after* the bastion login succeeded. Without this cleanup each
+            # failed attempt left an authenticated session open on the jump
+            # host for the life of the process (#341): five retries against a
+            # bastion that caps per-user sessions locked the user out of the
+            # door itself.
+            self.disconnect()
+            raise
         except paramiko.AuthenticationException as exc:
             transport = self._client.get_transport()
             still_up = bool(transport and transport.is_active())
