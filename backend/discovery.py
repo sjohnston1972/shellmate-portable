@@ -512,9 +512,16 @@ async def _reverse_dns(address: str, timeout: float) -> str:
     """A name for the address, or "". Never blocks the loop."""
     def _lookup() -> str:
         try:
-            socket.setdefaulttimeout(timeout)
             return socket.gethostbyaddr(address)[0]
         except (OSError, socket.herror):
             return ""
 
-    return await asyncio.to_thread(_lookup)
+    # Bounded by giving up on the thread, not by socket.setdefaulttimeout
+    # (#325): that mutated a process-wide global from worker threads and
+    # never restored it, leaving every future default-timeout socket in the
+    # application with the probe's timeout — and it never bounded this call
+    # anyway, because the resolver does not go through socket timeouts.
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_lookup), timeout)
+    except asyncio.TimeoutError:
+        return ""
