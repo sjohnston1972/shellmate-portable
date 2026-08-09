@@ -276,7 +276,14 @@
     if ([...select.options].some(o => o.value === previous)) {
       select.value = previous;
     }
+    // Marked synthetic (#312): chat.js syncs its state from this change but
+    // must not *persist* it. Unmarked, a rebuild while Ollama was briefly
+    // down dropped the selection to the first cloud option and saved that
+    // as the new default — the user's choice gone even after Ollama
+    // came back.
+    select.dataset.rebuilding = '1';
     select.dispatchEvent(new Event('change'));
+    delete select.dataset.rebuilding;
     // The list has just been rebuilt from what the providers actually offer,
     // so the saved default may only now have become selectable.
     window.dispatchEvent(new Event('shellmate:models-refreshed'));

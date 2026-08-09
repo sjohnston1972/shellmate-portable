@@ -659,6 +659,11 @@
     clearTileError(card);
 
     try {
+      // Field names must match CreateSessionRequest exactly (#309): Pydantic
+      // silently drops unknown keys, so the old `label`/`baudrate` spellings
+      // meant every tile connect lost its display name and every serial
+      // profile opened at the 9600 default — a saved 115200 console showed
+      // garbage. The serial framing fields ride along for the same reason.
       const response = await fetch('/api/sessions', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -668,9 +673,13 @@
           hostname:        p.hostname || '',
           port:            p.port || DEFAULT_PORTS[p.connection_type] || 22,
           username:        p.username || '',
-          label:           p.name || '',
+          display_label:   p.name || '',
           serial_port:     p.serial_port || '',
-          baudrate:        p.baudrate || 9600,
+          baud_rate:       p.baud_rate || 9600,
+          data_bits:       p.data_bits || 8,
+          parity:          p.parity || 'N',
+          stop_bits:       p.stop_bits || 1,
+          flow_control:    p.flow_control || 'none',
         }),
       });
 

@@ -168,6 +168,21 @@
    * @param {string} sessionId - The UUID of the session this terminal belongs to.
    * @returns {{terminal: Terminal, fitAddon: FitAddon, websocket: WebSocket, containerId: string}}
    */
+
+  // One status-bar update per 250ms, not per output chunk (#318).
+  // updateStatusBar walks 200 buffer lines to estimate the AI context, so
+  // calling it for every WebSocket message put hundreds of full extractions
+  // a second on the UI thread during a `show tech` dump. A quarter-second
+  // of staleness on a line counter is invisible.
+  let _statusTimer = 0;
+  function _queueStatusUpdate() {
+    if (_statusTimer) return;
+    _statusTimer = setTimeout(() => {
+      _statusTimer = 0;
+      if (typeof window.updateStatusBar === 'function') window.updateStatusBar();
+    }, 250);
+  }
+
   function initTerminal(sessionId) {
     // Running count of newlines received — used by the status bar
     let _bufferLines = 0;
@@ -236,7 +251,7 @@
           );
           // Count newlines to maintain a running buffer line total
           _bufferLines += (msg.data.match(/\n/g) || []).length;
-          if (typeof window.updateStatusBar === 'function') window.updateStatusBar();
+          _queueStatusUpdate();
           // Notify chat.js so it can feed command output back to the AI
           window.dispatchEvent(new CustomEvent('shellmate:terminal-output', {
             detail: { sessionId, data: msg.data, totalLines: _bufferLines }

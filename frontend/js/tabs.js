@@ -495,6 +495,14 @@
       if (!ok) return;
     }
 
+    // Re-found by sessionId, not trusted by position (#313): the confirm
+    // above is an await, and the array can mutate under it — auto-reconnect
+    // replaces tabs, sortTabs() reorders them. Splicing the captured index
+    // then removed the wrong tab: a live entry vanished from the array while
+    // the closed one lingered, pointing at a disposed terminal.
+    index = tabs.findIndex(t => t === tab);
+    if (index === -1) return;   // something else already closed it
+
     const { sessionId, websocket, terminalInstance, containerId, tabEl } = tab;
     const wasConnected = tab.isConnected;
 
@@ -668,8 +676,14 @@
 
     // Ctrl+W — close active tab
     if (e.ctrlKey && e.key === 'w') {
-      // Only intercept when a terminal is active (not when a form has focus)
-      if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+      // Only intercept when a terminal is active — not when any text entry
+      // has focus (#314). The chat box and the broadcast command box are
+      // textareas, and Ctrl+W there is delete-word muscle memory from
+      // readline; answering it by closing the active tab destroyed a
+      // disconnected tab's scrollback with no confirmation at all.
+      const el = document.activeElement;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'
+                 || el.isContentEditable)) return;
       e.preventDefault();
       if (activeTabIndex >= 0) closeTab(activeTabIndex);
       return;
@@ -830,7 +844,11 @@
     if (mode === 'profile' && prefs.new_tab_profile) {
       profile = await _profileById(prefs.new_tab_profile);
     } else if (mode === 'last') {
-      const last = (prefs.open_tabs || [])[prefs.open_tabs.length - 1];
+      // The guard has to cover the .length read too (#311): with no tab list
+      // ever recorded this was a TypeError, and the New Tab button did
+      // nothing at all.
+      const recorded = prefs.open_tabs || [];
+      const last = recorded[recorded.length - 1];
       if (last) {
         profile = await _profileForQuiet({
           label:          last.label,
@@ -891,8 +909,12 @@
     try {
       const res = await fetch('/api/profiles');
       if (!res.ok) return null;
-      const data = await res.json();
-      return (data.profiles || []).find(p => p.id === id) || null;
+      // A bare array (#310) — `data.profiles` was always undefined here, so
+      // "New tab opens: chosen profile" never found its profile and every
+      // New Tab click silently fell through to an empty dialog.
+      let profiles = await res.json();
+      if (!Array.isArray(profiles)) profiles = profiles.profiles || [];
+      return profiles.find(p => p.id === id) || null;
     } catch (_) {
       return null;
     }

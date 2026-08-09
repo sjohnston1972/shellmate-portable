@@ -21,7 +21,7 @@
   let currentModel    = 'claude-sonnet-5'; // specific model string
   let contextMode     = 'active'; // 'active' | 'all' | '1'..'9'
   let streamingBubble = null;     // the <div> currently being filled
-  let _outputWatcher  = null;     // active command output watcher
+  const _outputWatchers = new Map();  // active command output watchers, by session (#317)
 
   const QUICK_BUTTONS_KEY  = 'mate:quick-buttons';
   const DEFAULT_QUICK_BTNS = [
@@ -149,6 +149,10 @@
     backendSelect.addEventListener('change', () => {
       _applySelection(backendSelect.value);
       updateContextIndicator();
+      // A picker rebuild dispatches a synthetic change to sync this state,
+      // marked so it is not *persisted* (#312) — only a person choosing a
+      // model should overwrite the saved default.
+      if (backendSelect.dataset.rebuilding) return;
       saveModelChoice(backendSelect.value);
     });
 
@@ -182,6 +186,13 @@
 
     chatWs.addEventListener('message', handleWsMessage);
     chatWs.addEventListener('close', () => {
+      // A drop mid-reply must release the chat (#315): isStreaming stayed
+      // true and the send button stayed disabled forever — the reconnected
+      // socket was unusable until "Clear chat" happened to be clicked.
+      if (isStreaming) {
+        finishStreaming();
+        appendErrorBubble('The connection dropped mid-reply. Reconnecting…');
+      }
       // Reconnect after a delay
       setTimeout(connectChatWs, 2000);
     });
@@ -258,8 +269,13 @@
     inputEl.value = '';
     inputEl.style.height = 'auto';
 
-    // Start streaming AI bubble
+    // Start streaming AI bubble. The bubble remembers which session the
+    // question was asked about (#308), so the command blocks in the answer
+    // can be sent to that session however many tabs are switched meanwhile.
     startStreamingBubble();
+    if (streamingBubble && sessionId) {
+      streamingBubble.dataset.contextSession = sessionId;
+    }
     isStreaming = true;
     sendBtn.disabled = true;
 
@@ -326,9 +342,20 @@
       streamingBubble.appendChild(streamEl);
     }
     streamingBubble.dataset.raw = (streamingBubble.dataset.raw || '') + text;
-    // Just update the text in-place — no full DOM rebuild on every chunk
     const streamEl = streamingBubble.querySelector('.chat-stream-live');
-    if (streamEl) streamEl.innerHTML = formatText(streamingBubble.dataset.raw);
+    if (streamEl) {
+      // The delta as a text node, with a full format pass at most every
+      // 300ms (#319). Re-running formatText over the whole accumulated
+      // message per chunk was six regex passes plus a DOM parse, O(n²)
+      // across a long answer. Raw markdown may show for a beat between
+      // passes; finishStreaming renders the exact final form.
+      streamEl.appendChild(document.createTextNode(text));
+      const now = performance.now();
+      if (!streamingBubble._lastFormat || now - streamingBubble._lastFormat > 300) {
+        streamingBubble._lastFormat = now;
+        streamEl.innerHTML = formatText(streamingBubble.dataset.raw);
+      }
+    }
     scrollToBottom();
   }
 
@@ -365,6 +392,9 @@
 
     // No user bubble — just start the AI bubble with a subtle "auto" badge
     startStreamingBubble(true);
+    if (streamingBubble && sid) {
+      streamingBubble.dataset.contextSession = sid;
+    }
     isStreaming = true;
     sendBtn.disabled = true;
 
@@ -437,7 +467,8 @@
       const cmdMatch = part.match(/^\[(?:SUGGEST_CMD|ADD_CMD)(?::(\d+))?\]([\s\S]*?)\[\/(?:SUGGEST_CMD|ADD_CMD)\]$/);
       if (cmdMatch) {
         const tabNum = cmdMatch[1] ? parseInt(cmdMatch[1], 10) : null;
-        bubble.appendChild(buildCommandBlock(cmdMatch[2].trim(), tabNum));
+        bubble.appendChild(buildCommandBlock(cmdMatch[2].trim(), tabNum,
+                                             bubble.dataset.contextSession || ''));
       } else if (part) {
         const textNode = document.createElement('div');
         textNode.className = 'chat-text';
@@ -459,16 +490,26 @@
       .replace(/\n/g, '<br>');
   }
 
-  function buildCommandBlock(cmd, targetTabNum = null) {
+  function buildCommandBlock(cmd, targetTabNum = null, contextSession = '') {
     const wrap = document.createElement('div');
     wrap.className = 'cmd-block';
-    if (targetTabNum) wrap.dataset.targetTab = targetTabNum;
 
-    // Resolve label for the target tab
+    // The block is bound to a *session*, at render time (#308, #316). Tab
+    // numbers are positions, and positions move: a `[SUGGEST_CMD:2]` block
+    // resolved at click time injected into whatever had been re-sorted into
+    // slot 2, and an untargeted block went to whichever tab was active when
+    // it was clicked — the wrong-session approval failure the design forbids.
     let tabLabel = '';
     if (targetTabNum) {
       const t = typeof window.getTabByNumber === 'function' ? window.getTabByNumber(targetTabNum) : null;
+      if (t) wrap.dataset.targetSession = t.sessionId;
       tabLabel = t ? `→ Tab ${targetTabNum}: ${t.label}` : `→ Tab ${targetTabNum}`;
+    } else if (contextSession) {
+      // The session the question was asked about — not the active tab.
+      wrap.dataset.targetSession = contextSession;
+      const tabs = typeof window.getOpenTabs === 'function' ? window.getOpenTabs() : [];
+      const t = tabs.find(x => x.sessionId === contextSession);
+      if (t) tabLabel = `→ ${t.label}`;
     }
 
     wrap.innerHTML = `
@@ -491,11 +532,11 @@
       const pre       = block.querySelector('.cmd-block-text');
       const sendBtn2  = block.querySelector('.cmd-send');
       const editBtn   = block.querySelector('.cmd-edit');
-      const targetTab = block.dataset.targetTab ? parseInt(block.dataset.targetTab, 10) : null;
+      const targetSession = block.dataset.targetSession || null;
 
       if (sendBtn2 && !sendBtn2.dataset.wired) {
         sendBtn2.dataset.wired = '1';
-        sendBtn2.addEventListener('click', () => injectCommand(pre.textContent, targetTab));
+        sendBtn2.addEventListener('click', () => injectCommand(pre.textContent, targetSession));
       }
 
       if (editBtn && !editBtn.dataset.wired) {
@@ -513,13 +554,17 @@
     });
   }
 
-  function injectCommand(cmd, targetTabNum = null) {
-    // If a specific tab number was given, route to that tab; otherwise use active tab
+  function injectCommand(cmd, targetSessionId = null) {
+    // Routed by session id, bound when the block was rendered (#308, #316).
+    // Falling back to the active tab is last resort only — for blocks that
+    // predate the binding (a restored chat) — because "active at click time"
+    // is exactly how a command meant for a core switch reaches a firewall.
     let tab = null;
-    if (targetTabNum && typeof window.getTabByNumber === 'function') {
-      tab = window.getTabByNumber(targetTabNum);
+    if (targetSessionId) {
+      const tabs = typeof window.getOpenTabs === 'function' ? window.getOpenTabs() : [];
+      tab = tabs.find(t => t.sessionId === targetSessionId) || null;
       if (!tab) {
-        appendErrorBubble(`Tab ${targetTabNum} is not open.`);
+        appendErrorBubble('The session this command was suggested for is no longer open.');
         return;
       }
       // Switch to target tab and flash it so the user notices the context change
@@ -537,7 +582,7 @@
 
     const ws = tab.websocket;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      appendErrorBubble(`Tab ${targetTabNum || 'active'} is not connected.`);
+      appendErrorBubble(`"${tab.label || 'The target session'}" is not connected.`);
       return;
     }
 
@@ -553,18 +598,26 @@
   // -----------------------------------------------------------------------
 
   function startOutputWatcher(cmd, baselineLines, sessionId) {
-    // Cancel any existing watcher
-    if (_outputWatcher) {
-      _outputWatcher.cancel();
-    }
+    // One watcher per session, not one global (#317): approving a command on
+    // tab B used to silently cancel tab A's still-collecting watcher, and
+    // A's analysis never arrived, with no sign why.
+    const existing = _outputWatchers.get(sessionId);
+    if (existing) existing.cancel();
 
     let collected  = '';
     let idleTimer  = null;
-    const IDLE_MS  = 2500; // wait this long after last output chunk before sending
+    let hardTimer  = null;
+    const IDLE_MS  = 2500;    // wait this long after last output chunk
+    const MAX_MS   = 30000;   // the ceiling, whatever the device is doing
+    const MAX_CHARS = 200000; // a flood flushes early rather than growing
 
     function onOutput(e) {
       if (e.detail.sessionId !== sessionId) return;
       collected += e.detail.data;
+      if (collected.length >= MAX_CHARS) {
+        flush();
+        return;
+      }
       resetIdle();
     }
 
@@ -596,14 +649,18 @@
     function cleanup() {
       window.removeEventListener('shellmate:terminal-output', onOutput);
       clearTimeout(idleTimer);
-      _outputWatcher = null;
+      clearTimeout(hardTimer);
+      _outputWatchers.delete(sessionId);
     }
 
     window.addEventListener('shellmate:terminal-output', onOutput);
-    // Safety timeout — give up after 30s regardless
-    idleTimer = setTimeout(flush, 30000);
+    idleTimer = setTimeout(flush, IDLE_MS * 4);   // nothing at all arriving
+    // A real ceiling (#317). The old "30s safety timeout" was the idle timer
+    // itself, so the first chunk of a debug flood cleared it and continuous
+    // output collected forever, never flushing.
+    hardTimer = setTimeout(flush, MAX_MS);
 
-    _outputWatcher = { cancel: cleanup };
+    _outputWatchers.set(sessionId, { cancel: cleanup });
   }
 
   // -----------------------------------------------------------------------
