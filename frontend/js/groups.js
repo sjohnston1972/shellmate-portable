@@ -71,14 +71,20 @@
     });
     _bindPanelControls();
 
-    // Escape lets go of a multi-selection. Only when one exists — the key
-    // already means "close this" to every dialog and menu, and an empty
-    // selection has nothing to let go of.
+    // Escape lets go of a multi-selection. Only when one exists, and only
+    // when nothing else on screen is what the key was aimed at (#352):
+    // dialogs stop propagation themselves, but the overlay panels and the
+    // context menus close on their own document-level Escape without
+    // consuming it — and that press must not also throw away a selection
+    // built with five careful clicks.
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && selected.size) {
-        _clearSelection();
-        renderTree(profileCache);
-      }
+      if (e.key !== 'Escape' || !selected.size) return;
+      if (document.querySelector('.tab-context-menu')) return;
+      const overlayOpen = [...document.querySelectorAll('[id$="-overlay"]')]
+        .some(el => !el.classList.contains('hidden'));
+      if (overlayOpen) return;
+      _clearSelection();
+      renderTree(profileCache);
     });
   });
 
@@ -394,9 +400,19 @@
     return (_byTag.get(node.key) || []).some(_profileMatches);
   }
 
+  /** Memoised per render (#358): a search render used to evaluate this
+   *  three times per node — in the root filter, in mark(), and again per
+   *  branch — each recursing over the whole subtree, O(n × subtree) per
+   *  debounced keystroke. */
+  const _matchMemo = new Map();
+
   /** True when this branch, or anything beneath it, matches. */
   function _branchMatches(node) {
-    return _matches(node) || node.children.some(_branchMatches);
+    const cached = _matchMemo.get(node.key);
+    if (cached !== undefined) return cached;
+    const result = _matches(node) || node.children.some(_branchMatches);
+    _matchMemo.set(node.key, result);
+    return result;
   }
 
   /**
@@ -425,13 +441,33 @@
     return out;
   }
 
+  /**
+   * The built tree, cached against the cache it was built from (#357).
+   *
+   * `_findNode` runs from every `renderWelcomeTiles()` — per click, per
+   * sessions-changed event — and rebuilding the whole tree (a sort plus
+   * full construction) for one lookup is real work at the 1,100-group
+   * scale the rest of this file is engineered for. groupCache is replaced,
+   * never mutated, so identity is the invalidation.
+   */
+  let _treeCache = null;
+  let _treeCacheFor = null;
+
+  function _builtTree() {
+    if (_treeCacheFor !== groupCache || !_treeCache) {
+      _treeCache = _tree(groupCache);
+      _treeCacheFor = groupCache;
+    }
+    return _treeCache;
+  }
+
   /** The tree node for a key, so a menu can ask about its children. */
   function _findNode(key) {
     let found = null;
     const walk = (nodes) => nodes.forEach(n => {
       if (n.key === key) found = n; else walk(n.children);
     });
-    walk(_tree(groupCache));
+    walk(_builtTree());
     return found;
   }
 
@@ -549,6 +585,9 @@
     profileCache = profiles || [];
     _indexProfiles();
     renderOrder = [];
+    // Per render, not per query: the profiles a device-name search matches
+    // can change between renders with the query unchanged.
+    _matchMemo.clear();
 
     // Nothing to show is nothing to show. An empty rail taking a fifth of the
     // dashboard on a fresh install would be the tiles' mistake again.
@@ -603,7 +642,7 @@
     // reordering is invisible, so the action appeared to do nothing. A rule
     // makes the effect a position rather than a subtlety, and the menu now
     // names it for what it does: "Pin to the top".
-    let roots = _tree(groupCache);
+    let roots = _builtTree();
     if (query) {
       // Only branches with a match somewhere beneath them, each one forced
       // open so the match is actually reachable.
@@ -1145,10 +1184,15 @@
         body:    JSON.stringify({ name: newName }),
       });
       if (!res.ok) throw new Error((await res.json()).detail || 'Could not move it.');
+      // The server's key, not the display name (#349): keys are lowercased,
+      // and booking "Glasgow/Switches" into sets compared against
+      // "glasgow/switches" left the moved branch closed and silently
+      // cleared the active filter.
+      const movedGroup = await res.json();
       // The moved branch is where somebody will look next.
-      expanded.add(newName);
+      expanded.add(movedGroup.key || newName);
       if (target) expanded.add(target.key);
-      if (activeGroup === movedKey) activeGroup = newName;
+      if (activeGroup === movedKey) activeGroup = movedGroup.key || newName;
       _refresh();
     } catch (e) {
       _warn('Could not move the group', e.message);

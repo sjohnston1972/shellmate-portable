@@ -88,9 +88,24 @@
   }
 
   // Anything unsaved when the page goes away would otherwise be lost inside
-  // the debounce window.
+  // the debounce window. A plain fetch is routinely aborted during unload
+  // (#354), so this uses a keepalive send — the drag-then-close that loses a
+  // divider width or a tree width is exactly the case the debounce created.
   window.addEventListener('beforeunload', () => {
-    if (timer) { clearTimeout(timer); flush(); }
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+    const body = pending;
+    pending = {};
+    if (!Object.keys(body).length) return;
+    try {
+      fetch('/api/settings', {
+        method:    'POST',
+        headers:   { 'Content-Type': 'application/json' },
+        body:      JSON.stringify({ settings: { interface: body } }),
+        keepalive: true,
+      });
+    } catch (_) { /* nothing more can be done as the page unloads */ }
   });
 
   /**

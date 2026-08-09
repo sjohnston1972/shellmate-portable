@@ -170,8 +170,13 @@
   function show(index) {
     active = index;
     if (search) search.value = '';
-    const stockton = document.getElementById('settings-stockton-results');
-    if (stockton) stockton.remove();
+    // The current id (#351). This read `settings-stockton-results`, an id
+    // nothing creates any more — so the "Elsewhere in Settings" block
+    // (`settings-extra-results`) was never cleared, and it lingered under
+    // whatever section was shown after a search until the next 2+-char query
+    // happened to replace it.
+    const extras = document.getElementById('settings-extra-results');
+    if (extras) extras.remove();
     sections.forEach((section, i) => {
       section.classList.toggle('hidden', i !== index);
       section.querySelectorAll('.settings-hidden-by-search')

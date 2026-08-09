@@ -1628,7 +1628,12 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 .sm-dialog-overlay {
   position: fixed;
   inset: 0;
-  z-index: 600;
+  /* Above the popped-out chat (#350). That pane is a fixed element at
+     z-index 1000, and a blocking modal — a delete confirmation, a vault
+     unlock — rendered behind it, its buttons hidden while the chat stayed
+     clickable over the scrim. Every true modal below carries the same
+     1100+ so modality holds wherever the chat is floating. */
+  z-index: 1100;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3619,7 +3624,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   inset: 0;
   background: rgba(0,0,0,0.72);
   backdrop-filter: blur(4px);
-  z-index: 650;
+  z-index: 1150;   /* above the popped-out chat (#350) */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3756,7 +3761,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   inset: 0;
   background: rgba(0,0,0,0.72);
   backdrop-filter: blur(4px);
-  z-index: 600;
+  z-index: 1120;   /* above the popped-out chat (#350) */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3855,7 +3860,7 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   inset: 0;
   background: rgba(0,0,0,0.65);
   backdrop-filter: blur(4px);
-  z-index: 500;
+  z-index: 1110;   /* above the popped-out chat (#350) */
   display: flex;
   align-items: center;
   justify-content: center;

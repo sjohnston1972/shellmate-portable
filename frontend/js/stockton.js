@@ -110,6 +110,16 @@
     // rather than in a block of their own at the end. A category with no slot
     // lands in the fallback — a new one added to CATEGORIES is then unsorted
     // rather than invisible, which is the failure worth avoiding.
+    // Park the prompt editor before wiping (#348). It is *adopted* into the
+    // ai slot below, so the innerHTML wipe destroyed it on the second render
+    // — every advanced-value save or Save Settings — and "The system
+    // prompts" was gone until a full page reload.
+    const promptEditor = document.getElementById('prompt-editor-block');
+    if (promptEditor) {
+      promptEditor.hidden = true;
+      document.body.appendChild(promptEditor);
+    }
+
     document.querySelectorAll('.settings-slot').forEach(s => { s.innerHTML = ''; });
     fallback.innerHTML = '';
 
@@ -522,7 +532,15 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ values: { [setting.key]: value } }),
       });
-      registry = await res.json();
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // An error body is not a registry (#353): adopting it made the
+        // next line throw "cannot read properties of undefined" and left
+        // `registry` corrupted until the next successful load.
+        report(payload.detail || `The server refused it (HTTP ${res.status}).`, true);
+        return;
+      }
+      registry = payload;
 
       // Re-read rather than trust what was typed: the backend clamps, and a
       // field still showing a rejected value would be a quiet lie.
@@ -557,7 +575,12 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(what),
       });
-      registry = await res.json();
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        report(payload.detail || `The server refused it (HTTP ${res.status}).`, true);
+        return;
+      }
+      registry = payload;
       render();
       report('Back to the defaults.');
     } catch (e) {

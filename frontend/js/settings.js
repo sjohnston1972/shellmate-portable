@@ -892,7 +892,11 @@
         tab_menu:            _collectTabMenu(),
         restore_tabs:        _gchecked('setting-restore-tabs'),
         new_tab_opens:       _gval('setting-new-tab-opens'),
-        new_tab_profile:     _gval('setting-new-tab-profile'),
+        // An empty select means "not loaded yet", not "clear it" (#355):
+        // the options arrive async, and saving before they do — or after
+        // the fetch failed — must keep the configured profile.
+        new_tab_profile:     _gval('setting-new-tab-profile')
+          || (((window.shellmateSettings || {}).interface || {}).new_tab_profile || ''),
         tab_order:           _gval('setting-tab-order'),
         confirm_close_tab:   _gchecked('setting-confirm-close-tab'),
         confirm_quit:        _gchecked('setting-confirm-quit'),
@@ -928,7 +932,18 @@
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ settings: s }),
       });
-      currentSettings = await res.json();
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // A refused save is an error body, not settings (#347). Adopting it
+        // set window.shellmateSettings to {detail: ...}, fired the changed
+        // event with it (resetting theme and fonts to defaults), wiped the
+        // form, and closed the panel as if it had worked — a locked vault
+        // plus one typed API key silently discarded everything.
+        _saveFailed(payload.detail
+          || `The server refused the save (HTTP ${res.status}).`);
+        return;
+      }
+      currentSettings = payload;
       window.shellmateSettings = currentSettings;
       _applyHighlightRules(currentSettings);
       _applyUiFontSize((currentSettings.appearance || {}).ui_font_size || 14);
@@ -947,6 +962,20 @@
       if (!opts.keepOpen) closeSettings();
     } catch (e) {
       console.error('Failed to save settings:', e);
+      // Say so where the user is looking (#356): the only signal used to be
+      // the panel *not* closing, which reads as nothing at all.
+      _saveFailed('Could not reach the server — nothing was saved.');
+    }
+  }
+
+  /** A failed save, reported in place. The panel stays open with the
+   *  user's edits intact, because closing is the success signal. */
+  function _saveFailed(reason) {
+    if (window.shellmateAlerts) {
+      window.shellmateAlerts.notify({
+        severity: 'warning', icon: 'error',
+        title: 'Settings were not saved', body: reason || '',
+      });
     }
   }
 
@@ -1106,8 +1135,12 @@
     select.innerHTML = '';
     try {
       const res = await fetch('/api/profiles');
-      const data = res.ok ? await res.json() : { profiles: [] };
-      (data.profiles || []).forEach(profile => {
+      // A bare array (#355) — reading `data.profiles` left this select
+      // permanently empty, so the picker offered nothing and every save
+      // wrote '' over the configured profile.
+      let profiles = res.ok ? await res.json() : [];
+      if (!Array.isArray(profiles)) profiles = profiles.profiles || [];
+      profiles.forEach(profile => {
         const option = document.createElement('option');
         option.value = profile.id;
         option.textContent = profile.name
