@@ -8,6 +8,7 @@ for API keys, model URLs, and the Chroma DB URL.
 """
 import json
 import logging
+import threading
 from pathlib import Path
 
 from backend import config as env_config
@@ -428,6 +429,13 @@ def get_settings_for_ui() -> dict:
     return s_out
 
 
+# One writer at a time (#336). update_settings is read-modify-write, and it
+# runs on the event loop, on to_thread workers (Stockton saves), and on the
+# tray/GUI thread (window geometry on close) — two overlapping writers lose
+# whichever merge finished first, silently.
+_write_lock = threading.Lock()
+
+
 def update_settings(partial: dict) -> dict:
     """
     Persist a partial settings update.
@@ -449,25 +457,26 @@ def update_settings(partial: dict) -> dict:
         except VaultError as exc:
             raise VaultError(f"Could not save to the vault: {exc}") from exc
 
-    current = get_settings()
-    merged = _deep_merge(current, incoming)
+    with _write_lock:
+        current = get_settings()
+        merged = _deep_merge(current, incoming)
 
-    # "advanced" is replaced wholesale rather than merged. A deep merge can add
-    # a key and change one, but never remove one — so resetting a setting back
-    # to its default would leave the old value in the file, and it would come
-    # straight back on the next read.
-    if isinstance(incoming.get("advanced"), dict):
-        merged["advanced"] = dict(incoming["advanced"])
+        # "advanced" is replaced wholesale rather than merged. A deep merge
+        # can add a key and change one, but never remove one — so resetting a
+        # setting back to its default would leave the old value in the file,
+        # and it would come straight back on the next read.
+        if isinstance(incoming.get("advanced"), dict):
+            merged["advanced"] = dict(incoming["advanced"])
 
-    # Belt and braces: even if a secret slipped through the extraction above,
-    # it must not be written to disk in the clear.
-    for field in SECRET_FIELDS:
-        if field in merged.get("providers", {}):
-            merged["providers"][field] = ""
+        # Belt and braces: even if a secret slipped through the extraction
+        # above, it must not be written to disk in the clear.
+        for field in SECRET_FIELDS:
+            if field in merged.get("providers", {}):
+                merged["providers"][field] = ""
 
-    settings_file = paths.settings_file()
-    settings_file.parent.mkdir(parents=True, exist_ok=True)
-    settings_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+        settings_file = paths.settings_file()
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        settings_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
     return get_settings_for_ui()
 
 
