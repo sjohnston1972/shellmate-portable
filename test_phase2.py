@@ -196,7 +196,7 @@ async def run():
             ws_connected = await page.evaluate("""
                 async () => {
                     return new Promise((resolve) => {
-                        const ws = new WebSocket('ws://127.0.0.1:8765/ws/chat');
+                        const ws = new WebSocket(`ws://${location.host}/ws/chat`);
                         ws.onopen  = () => { ws.close(); resolve(true); };
                         ws.onerror = () => resolve(false);
                         setTimeout(() => resolve(false), 3000);
