@@ -48,7 +48,7 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 
 
 def _reset() -> None:
-    for stem in ("groups.json", "profiles.json"):
+    for stem in ("groups.json", "profiles.json", "credentials-plaintext.json"):
         path = _TEMP / stem
         if path.exists():
             path.unlink()
@@ -394,6 +394,81 @@ def test_deleting_a_group_takes_its_subtree_with_it() -> None:
           str(result))
 
 
+def test_deleting_a_group_can_take_its_connections_too() -> None:
+    """
+    "Delete the connections too" (#360) removes exactly the connections that
+    would otherwise land in Ungrouped — and no others.
+
+    A connection also tagged into an unrelated group is still wanted there
+    and must survive with that tag; an untagged connection was never in the
+    group and must not be swept up either. Credentials go with the deleted
+    ones, or the vault keeps secrets nothing can reach.
+    """
+    print("\n-- Deleting a group can take its connections --")
+    _reset()
+
+    gm.create_group("site")
+    gm.create_group("other")
+    only_here = pm.save_profile({"name": "sw1", "hostname": "10.0.0.1",
+                                 "connection_type": "ssh", "tags": ["site"]})
+    nested = pm.save_profile({"name": "sw2", "hostname": "10.0.0.2",
+                              "connection_type": "ssh",
+                              "tags": ["site/access", "site/core"]})
+    shared = pm.save_profile({"name": "sw3", "hostname": "10.0.0.3",
+                              "connection_type": "ssh",
+                              "tags": ["site", "other"]})
+    untagged = pm.save_profile({"name": "sw4", "hostname": "10.0.0.4",
+                                "connection_type": "ssh"})
+    pm.save_plaintext_credentials(only_here["id"], {"password": "s3cret"})
+    check("the credential was remembered before the delete",
+          pm.has_credentials(only_here["id"]))
+
+    # The default still keeps everything.
+    kept = gm.delete_group("site")
+    ids = {p["id"] for p in pm.get_profiles()}
+    check("by default every connection survives",
+          ids == {only_here["id"], nested["id"], shared["id"], untagged["id"]},
+          str(ids))
+    check("and nothing is reported deleted", kept.get("deleted") == 0, str(kept))
+
+    # Same estate again, deleting the connections this time.
+    _reset()
+    gm.create_group("site")
+    gm.create_group("other")
+    only_here = pm.save_profile({"name": "sw1", "hostname": "10.0.0.1",
+                                 "connection_type": "ssh", "tags": ["site"]})
+    nested = pm.save_profile({"name": "sw2", "hostname": "10.0.0.2",
+                              "connection_type": "ssh",
+                              "tags": ["site/access", "site/core"]})
+    shared = pm.save_profile({"name": "sw3", "hostname": "10.0.0.3",
+                              "connection_type": "ssh",
+                              "tags": ["site", "other"]})
+    untagged = pm.save_profile({"name": "sw4", "hostname": "10.0.0.4",
+                                "connection_type": "ssh"})
+    pm.save_plaintext_credentials(only_here["id"], {"password": "s3cret"})
+
+    result = gm.delete_group("site", delete_connections=True)
+
+    survivors = {p["id"]: p for p in pm.get_profiles()}
+    check("a connection only in the group is deleted",
+          only_here["id"] not in survivors, str(sorted(survivors)))
+    check("a connection only in its subgroups is deleted",
+          nested["id"] not in survivors, str(sorted(survivors)))
+    check("a connection also in another group survives",
+          shared["id"] in survivors, str(sorted(survivors)))
+    check("with only its other tag",
+          (survivors.get(shared["id"]) or {}).get("tags") == ["other"],
+          str(survivors.get(shared["id"])))
+    check("an untagged connection is not swept up",
+          untagged["id"] in survivors, str(sorted(survivors)))
+    check("its credentials went with it",
+          not pm.has_credentials(only_here["id"]))
+    check("the counts say what happened",
+          result["deleted"] == 2 and result["released"] == 1, str(result))
+    check("the group is gone",
+          "site" not in {g["key"] for g in gm.list_groups()})
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Groups")
@@ -412,6 +487,7 @@ def main() -> int:
         test_moving_a_group_takes_its_subtree_with_it,
         test_renaming_carries_implicit_subgroups_and_child_names_survive,
         test_deleting_a_group_takes_its_subtree_with_it,
+        test_deleting_a_group_can_take_its_connections_too,
     )
     for test in tests:
         try:

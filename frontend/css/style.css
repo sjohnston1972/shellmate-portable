@@ -6737,6 +6737,34 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
   color: var(--on-surface-dim);
 }
 
+/* A choice between two outcomes, each with its own sentence — deleting a
+   group keeps its connections or takes them too (#360). Radios rather than
+   a checkbox: neither outcome is a modifier on the other, and the safe one
+   is selected when the dialog opens. */
+.sm-dialog-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.sm-dialog-choice-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 8px;
+  align-items: start;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--on-surface);
+  cursor: pointer;
+}
+
+.sm-dialog-choice-row input {
+  margin: 3px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
 /* Shown before the dialog closes, so a rule the server enforces is stated
    here rather than after the fact. */
 .sm-dialog-error {

@@ -326,10 +326,10 @@ def update_group(key: str, changes: dict) -> dict:
     return get_group(entry["key"])
 
 
-def delete_group(key: str) -> dict:
+def delete_group(key: str, delete_connections: bool = False) -> dict:
     """
-    Remove a group and everything nested beneath it. **The connections in it
-    survive.**
+    Remove a group and everything nested beneath it. **By default the
+    connections in it survive.**
 
     Nothing else on the dashboard destroys anything, so this removes the tags
     and the presentation and leaves every connection exactly where it was.
@@ -340,6 +340,19 @@ def delete_group(key: str) -> dict:
     ``site/access`` survives leaves the tree rebuilding ``site`` as a bare
     path segment — a folder-iconed ghost of the group that was just deleted,
     which reads as the deletion having failed.
+
+    ``delete_connections`` is the other reading of "delete the group" (#360):
+    the connections go with it. Kept as an explicit choice rather than the
+    default because it takes saved credentials with it and cannot be undone.
+    It deletes only the connections that live *solely* in this subtree — the
+    ones that would otherwise land in Ungrouped. A connection that also
+    belongs to another group is evidently still wanted there, and deleting a
+    device out of "Core" because "Glasgow" was cleared out is the kind of
+    surprise a destructive action must not spring. Those are untagged and
+    counted under ``released`` as before.
+
+    Returns ``key``, ``subgroups`` (how many went with it), ``released``
+    (connections untagged and kept) and ``deleted`` (connections removed).
     """
     key = _key(key)
     prefix = f"{key}/"
@@ -357,10 +370,17 @@ def delete_group(key: str) -> dict:
 
     _save([g for g in _load() if g.get("key") not in doomed])
 
+    # Decided here from the file, not from a list the interface sent: the
+    # tree it was drawn from can be a refresh behind, and a connection tagged
+    # into another group in the meantime must survive.
+    deleted = (profiles_module.delete_solely_tagged(doomed)
+               if delete_connections else 0)
+
     # One load and one save for the whole subtree (#327): a connection in
     # both the group and a subgroup counts once and is written once.
     released = profiles_module.retag_many({gone: "" for gone in doomed})
-    return {"key": key, "released": released, "subgroups": len(doomed) - 1}
+    return {"key": key, "released": released, "deleted": deleted,
+            "subgroups": len(doomed) - 1}
 
 
 def set_order(keys: list[str]) -> list[dict]:

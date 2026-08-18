@@ -1608,39 +1608,136 @@
     // subgroups — and the subgroups go with it now, which the dialog says.
     const node = _findNode(group.key);
     const subgroups = node ? _descendants(node) : 0;
-    const members = _membersUnder(group.key).length;
+    const members = _membersUnder(group.key);
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+    // Two readings of "delete the group" (#360), offered as a choice rather
+    // than decided here. Keeping the connections drops any that lived only
+    // in this group into Ungrouped, which reads as the delete not having
+    // worked; deleting them takes saved credentials with them and cannot be
+    // undone. Neither is right for everyone, so the dialog says what each
+    // does and keeps the reversible one selected.
+    //
+    // Only the connections that would land in Ungrouped are offered for
+    // deletion. One that also belongs to another group is evidently still
+    // wanted there — the server applies the same rule from the file, so this
+    // count is for the wording, not the decision.
+    const prefix = `${group.key}${SEPARATOR}`;
+    const inHere = tag => tag === group.key || tag.startsWith(prefix);
+    const orphans = members.filter(p => (p.tags || []).every(inHere)).length;
+    const shared = members.length - orphans;
+
+    let choice = null;
+    let body;
+    if (!members.length) {
+      body = subgroups
+        ? `It and its ${plural(subgroups, 'subgroup')} are empty, so nothing else changes.`
+        : 'It is empty, so nothing else changes.';
+    } else {
+      body = 'Only the group'
+        + (subgroups ? `, its ${plural(subgroups, 'subgroup')}` : '')
+        + ` and its colour go. Its ${plural(members.length, 'connection')}:`;
+      const all = orphans === members.length;
+      choice = _deleteChoice({
+        keep: !orphans
+          ? 'Keep them where they are — they all belong to other groups too.'
+          : all
+            ? 'Keep them — they move to Ungrouped.'
+            : `Keep them — ${orphans} move to Ungrouped, ${shared} `
+              + `${shared === 1 ? 'stays in its' : 'stay in their'} other groups.`,
+        remove: orphans
+          ? `Also delete ${all ? 'them' : `the ${orphans} that are only in this group`}`
+            + ' — the saved connections and any credentials go, and cannot be recovered.'
+          : '',
+      });
+    }
+
+    const KEEP_LABEL = 'Delete the group';
+    const REMOVE_LABEL = 'Delete group and connections';
+    if (choice) {
+      choice.onChange = (removing) => {
+        // The button says what will happen; the label is what a hurried
+        // reader looks at, and "Delete the group" must not be what they see
+        // while twenty connections are about to go with it.
+        const box = choice.el.closest('.sm-dialog');
+        const button = box && box.querySelector('.sm-dialog-actions .btn-danger');
+        if (button) button.textContent = removing ? REMOVE_LABEL : KEEP_LABEL;
+      };
+    }
+
     const ok = await window.shellmateDialog.confirm({
       title: `Delete the group "${group.name}"?`,
-      body:  members
-        ? `The ${members} connection${members === 1 ? '' : 's'} in it are kept — `
-          + 'they simply stop being grouped. Only the group'
-          + (subgroups ? `, its ${subgroups} subgroup${subgroups === 1 ? '' : 's'}` : '')
-          + ' and its colour go.'
-        : (subgroups
-            ? `It and its ${subgroups} subgroup${subgroups === 1 ? '' : 's'} are `
-              + 'empty, so nothing else changes.'
-            : 'It is empty, so nothing else changes.'),
-      confirmLabel: 'Delete the group',
+      body,
+      content: choice ? choice.el : undefined,
+      confirmLabel: KEEP_LABEL,
       danger: true,
     });
     if (!ok) return;
+    const removing = Boolean(choice && choice.removing());
 
     try {
-      const res = await fetch(`/api/groups/${encodeURIComponent(group.key)}`,
+      const query = removing ? '?connections=delete' : '';
+      const res = await fetch(`/api/groups/${encodeURIComponent(group.key)}${query}`,
                               { method: 'DELETE' });
       if (!res.ok) throw new Error('Could not delete it.');
       const data = await res.json();
       if (activeGroup === group.key) activeGroup = '';
       _refresh();
-      if (window.shellmateAlerts && data.released) {
+      if (window.shellmateAlerts && (data.released || data.deleted)) {
+        const parts = [];
+        if (data.deleted)  parts.push(`${plural(data.deleted, 'connection')} deleted`);
+        if (data.released) parts.push(`${plural(data.released, 'connection')} kept`);
         window.shellmateAlerts.notify({
           title: `Group "${group.name}" deleted`,
-          body:  `${data.released} connection${data.released === 1 ? '' : 's'} kept.`,
+          body:  parts.join(', ') + '.',
         });
       }
     } catch (e) {
       _warn('Could not delete the group', e.message);
     }
+  }
+
+  /**
+   * The keep-or-delete choice for deleteGroup, as radios rather than a
+   * checkbox: both outcomes get a sentence, and neither is a modifier on the
+   * other. "Keep" is selected first, because it is the one that can be undone.
+   *
+   * @param {{keep: string, remove: string}} labels — an empty `remove`
+   *        (nothing would be orphaned) renders the keep row alone, so the
+   *        dialog still says where the connections go.
+   * @returns {{el: Element, removing: () => boolean, onChange: Function}}
+   */
+  function _deleteChoice(labels) {
+    const el = document.createElement('div');
+    el.className = 'sm-dialog-choice';
+    const api = { el, removing: () => false, onChange: null };
+
+    const row = (value, text, checked) => {
+      const label = document.createElement('label');
+      label.className = 'sm-dialog-choice-row';
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'sm-dialog-group-delete';
+      radio.value = value;
+      radio.checked = checked;
+      radio.addEventListener('change', () => {
+        if (radio.checked && typeof api.onChange === 'function') {
+          api.onChange(value === 'delete');
+        }
+      });
+      const span = document.createElement('span');
+      span.textContent = text;   // a group name can reach this
+      label.append(radio, span);
+      el.appendChild(label);
+      return radio;
+    };
+
+    row('keep', labels.keep, true);
+    if (labels.remove) {
+      const remove = row('delete', labels.remove, false);
+      api.removing = () => remove.checked;
+    }
+    return api;
   }
 
   async function _update(key, changes) {

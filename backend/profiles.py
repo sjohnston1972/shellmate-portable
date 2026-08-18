@@ -1115,10 +1115,44 @@ def delete_profile(profile_id: str) -> bool:
     Forgetting the credentials matters: without it, deleting a profile would
     leave orphaned secrets in the vault that no UI can ever reach or remove.
     """
+    return _delete_where(lambda p: p.get("id") == profile_id) == 1
+
+
+def delete_solely_tagged(tags) -> int:
+    """
+    Delete every connection whose tags all fall within ``tags`` — the ones a
+    group deletion would otherwise leave in Ungrouped (#360).
+
+    A connection that also carries a tag outside the set is evidently still
+    wanted in that other group and survives untouched; an untagged connection
+    was never in the group and survives too. Returns how many went.
+    """
+    doomed = set(normalise_tags(list(tags)))
+    if not doomed:
+        return 0
+
+    def orphaned(profile: dict) -> bool:
+        own = normalise_tags(profile.get("tags"))
+        return bool(own) and all(t in doomed for t in own)
+
+    return _delete_where(orphaned)
+
+
+def _delete_where(predicate) -> int:
+    """
+    Remove every profile the predicate matches, and its credentials.
+
+    One load and one save however many go (#327): deleting a group's twenty
+    connections through delete_profile() would rewrite the file twenty times.
+    Credentials are forgotten per profile because the vault is keyed that way.
+    Returns how many were removed.
+    """
     profiles = _load()
-    new_profiles = [p for p in profiles if p.get("id") != profile_id]
-    if len(new_profiles) == len(profiles):
-        return False
-    _save(new_profiles)
-    forget_credentials(profile_id)
-    return True
+    kept = [p for p in profiles if not predicate(p)]
+    removed = [p.get("id") for p in profiles if predicate(p)]
+    if not removed:
+        return 0
+    _save(kept)
+    for profile_id in removed:
+        forget_credentials(profile_id)
+    return len(removed)

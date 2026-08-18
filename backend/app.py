@@ -1544,11 +1544,17 @@ async def update_group_endpoint(key: str, request: GroupRequest) -> dict:
 
 
 @app.delete("/api/groups/{key:path}")
-async def delete_group_endpoint(key: str) -> dict:
+async def delete_group_endpoint(key: str, connections: str = "keep") -> dict:
     """
-    Remove a group. The connections in it survive — see groups.delete_group.
+    Remove a group. The connections in it survive unless
+    ``?connections=delete`` — see groups.delete_group for exactly which go.
     """
-    return await asyncio.to_thread(groups_module.delete_group, key)
+    if connections not in ("keep", "delete"):
+        raise HTTPException(
+            status_code=400,
+            detail="connections must be 'keep' or 'delete'")
+    return await asyncio.to_thread(
+        groups_module.delete_group, key, connections == "delete")
 
 
 @app.get("/api/profiles/tags")
