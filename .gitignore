@@ -37,3 +37,6 @@ test_ui.py
 # OS
 .DS_Store
 Thumbs.db
+
+# wrangler's local state (relay deploys)
+relay/.wrangler/
