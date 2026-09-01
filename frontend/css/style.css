@@ -8099,36 +8099,16 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
-   The feedback chat head (#370). A floating surface, so its colours come
-   from the overlay tokens — hardcoding a background here is exactly the bug
-   the theme rule exists to prevent.
+   The feedback reporter (#370), opened from the sidebar's Feedback entry
+   and anchored beside it. A floating surface, so its colours come from the
+   overlay tokens — hardcoding a background here is exactly the bug the
+   theme rule exists to prevent.
 --------------------------------------------------------------------------- */
-
-#feedback-head {
-  position: fixed;
-  right: 18px;
-  bottom: 52px;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--overlay-solid);
-  border: 1px solid var(--outline);
-  color: var(--on-surface-muted);
-  cursor: pointer;
-  z-index: 7500;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
-  transition: color 0.12s, border-color 0.12s;
-}
-#feedback-head:hover { color: var(--primary); border-color: var(--primary); }
-#feedback-head .material-symbols-outlined { font-size: 20px; }
 
 #feedback-panel {
   position: fixed;
-  right: 18px;
-  bottom: 100px;
+  left: calc(var(--sidebar-width) + 10px);
+  bottom: 16px;
   width: 320px;
   padding: 14px;
   background: var(--overlay-solid);

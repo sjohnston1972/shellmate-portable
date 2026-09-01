@@ -327,7 +327,7 @@ in the sidebar — and works offline.
 | Copy terminal text | `Ctrl+C` (with selection), or `Ctrl+Shift+C` |
 | Paste into terminal | `Ctrl+V` or right-click |
 | Dismiss a pending reload | Click the countdown in the status bar |
-| Report a bug / request a feature | The bug icon floating at the bottom right |
+| Report a bug / request a feature | **Feedback** (bug icon) at the bottom of the sidebar |
 | Open settings | Gear icon in the left sidebar |
 | Configure provider keys / Chroma | Settings → *AI Providers* and *Knowledge Base (Chroma DB)* |
 | Toggle light/dark theme | Moon icon in the left sidebar |

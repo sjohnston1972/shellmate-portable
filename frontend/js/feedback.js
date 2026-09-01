@@ -1,16 +1,16 @@
 /**
- * feedback.js — The bug / feature-request chat head (#370).
+ * feedback.js — The bug / feature-request reporter (#370).
  *
- * A small floating button that opens a report form. Not an AI feature — it
+ * A sidebar entry that opens a report form. Not an AI feature — it
  * posts to /api/feedback, which relays the report to a GitHub issue the
  * maintainer reviews. The form is deliberately tiny: type, title,
  * description. Everything attached beyond that (platform, build) is stated
  * on the form itself, because a feedback box that quietly gathers things is
  * how trust in the rest of the application dies.
  *
- * Built entirely here rather than in index.html: the widget is self-contained,
- * touches nothing else, and being able to remove it by deleting one script
- * tag is worth more than markup consistency.
+ * The launcher is the Feedback entry in the sidebar (index.html); the panel
+ * itself is built here, so everything about what a report contains stays in
+ * one file.
  */
 (function () {
   'use strict';
@@ -19,13 +19,11 @@
   let kind = 'bug';
 
   document.addEventListener('DOMContentLoaded', () => {
-    const head = document.createElement('button');
-    head.type = 'button';
-    head.id = 'feedback-head';
-    head.title = 'Report a bug or request a feature';
-    head.innerHTML = '<span class="material-symbols-outlined">bug_report</span>';
-    head.addEventListener('click', toggle);
-    document.body.appendChild(head);
+    // A sidebar entry beside Support, not a floating chat head — one rail
+    // holds everything that is not a session, and a second floating control
+    // was the inconsistency.
+    const link = document.getElementById('sidebar-link-feedback');
+    if (link) link.addEventListener('click', (e) => { e.preventDefault(); toggle(); });
   });
 
   function toggle() {
