@@ -92,12 +92,13 @@
     // consuming it — and that press must not also throw away a selection
     // built with five careful clicks.
     document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || !selected.size) return;
+      if (e.key !== 'Escape' || (!selected.size && !leafSelection.size)) return;
       if (document.querySelector('.tab-context-menu')) return;
       const overlayOpen = [...document.querySelectorAll('[id$="-overlay"]')]
         .some(el => !el.classList.contains('hidden'));
       if (overlayOpen) return;
       _clearSelection();
+      _clearLeafSelection();
       renderTree(profileCache);
     });
   });
@@ -289,6 +290,29 @@
     if (!selected.size && !anchor) return;
     selected = new Set();
     anchor = '';
+  }
+
+  /**
+   * Multi-selected connection leaves (#372), kept apart from the group
+   * selection above for the same reason that is kept apart from activity:
+   * they answer different questions, and a bulk group action must never
+   * sweep up half-selected devices.
+   *
+   * profile id → the group key it was selected under, because that is what
+   * a *move* has to take it out of — a connection can sit in several groups
+   * and only the one it was picked from should let go.
+   */
+  let leafSelection = new Map();
+
+  /** Where a shift range of leaves starts: the leaf last clicked. */
+  let leafAnchor = null;
+
+  function _clearLeafSelection() {
+    if (!leafSelection.size && !leafAnchor) return;
+    leafSelection = new Map();
+    leafAnchor = null;
+    document.querySelectorAll('.tree-leaf-selected')
+      .forEach(el => el.classList.remove('tree-leaf-selected'));
   }
 
   /** Shift-click: everything between the anchor and here, inclusive. */
@@ -722,7 +746,12 @@
 
       // A leaf dropped here leaves its group (#362) — the same way out the
       // groups themselves have, since every other target puts it inside
-      // something.
+      // something. A multi-selection all lets go at once (#372).
+      const batchRaw = e.dataTransfer.getData('application/x-shellmate-profiles');
+      if (batchRaw) {
+        try { await _dropProfiles(JSON.parse(batchRaw), ''); } catch (_) {}
+        return;
+      }
       const profileId = e.dataTransfer.getData('application/x-shellmate-profile');
       const from = e.dataTransfer.getData('application/x-shellmate-profile-from');
       if (profileId && from) {
@@ -979,7 +1008,8 @@
     leaf.type = 'button';
     leaf.className = 'tree-leaf';
     leaf.style.setProperty('--depth', String(node.depth + 1));
-    leaf.title = profile.hostname || '';
+    leaf.title = (profile.hostname ? profile.hostname + '\n' : '')
+      + 'Ctrl+click to select several; a drag then moves them together.';
 
     // Whether this device is open right now (#166). The same test the group
     // counts use, so a member's light and its group's live badge cannot
@@ -1003,7 +1033,21 @@
       lock.title = 'A saved credential is stored for this connection';
       leaf.appendChild(lock);
     }
-    leaf.addEventListener('click', () => {
+    // Selection state survives a re-render; the class does not.
+    leaf.dataset.pid = profile.id;
+    if (leafSelection.get(profile.id) === (node.group ? node.key : '')) {
+      leaf.classList.add('tree-leaf-selected');
+    }
+
+    leaf.addEventListener('click', (e) => {
+      // Ctrl/shift-click selects rather than connects (#372) — the same
+      // gesture the group chips answer, on the rows people tried it on.
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+        _leafSelect(e, leaf, profile, node);
+        return;
+      }
+      // A plain click lets a selection go, the way it does everywhere else.
+      _clearLeafSelection();
       if (typeof window.connectProfile === 'function') window.connectProfile(profile);
       else if (typeof window.showConnectionDialog === 'function') {
         window.showConnectionDialog(profile);
@@ -1014,17 +1058,28 @@
     // A leaf can be picked up (#362). It carries where it came from as well
     // as what it is, so a drop on another group *moves* it — the dashboard
     // tiles set no source and stay a copy, which is right for them: a tile
-    // is not "in" anywhere.
+    // is not "in" anywhere. Dragging one of a multi-selection carries the
+    // whole selection (#372).
     leaf.draggable = true;
     leaf.addEventListener('dragstart', (e) => {
       e.dataTransfer.effectAllowed = 'move';
+      if (leafSelection.has(profile.id) && leafSelection.size > 1) {
+        const batch = [...leafSelection.entries()]
+          .map(([id, from]) => ({ id, from }));
+        e.dataTransfer.setData('application/x-shellmate-profiles',
+                               JSON.stringify(batch));
+        document.querySelectorAll('.tree-leaf-selected')
+          .forEach(el => el.classList.add('group-dragging'));
+      }
       e.dataTransfer.setData('application/x-shellmate-profile', profile.id);
       if (node.group) {
         e.dataTransfer.setData('application/x-shellmate-profile-from', node.key);
       }
       leaf.classList.add('group-dragging');
     });
-    leaf.addEventListener('dragend', () => leaf.classList.remove('group-dragging'));
+    leaf.addEventListener('dragend', () => document
+      .querySelectorAll('.group-dragging')
+      .forEach(el => el.classList.remove('group-dragging')));
 
     // The × deletes the saved connection itself (#369), through the same
     // confirmation the menu's delete uses — it is not "remove from group".
@@ -1038,6 +1093,59 @@
     });
     leaf.appendChild(del);
     return leaf;
+  }
+
+  /**
+   * Select a leaf without connecting to it (#372).
+   *
+   * Ctrl toggles; shift takes the run between the last-clicked leaf and
+   * this one, but only inside one group — a range that silently crossed
+   * into the next branch would grab devices nobody was looking at.
+   */
+  function _leafSelect(event, leaf, profile, node) {
+    const fromKey = node.group ? node.key : '';
+
+    if (event.shiftKey && leafAnchor && leafAnchor.fromKey === fromKey) {
+      const siblings = [...leaf.parentElement.querySelectorAll(':scope > .tree-leaf')];
+      const ids = siblings.map(el => el.dataset.pid);
+      const from = ids.indexOf(leafAnchor.id);
+      const to = ids.indexOf(profile.id);
+      if (from !== -1 && to !== -1) {
+        const [lo, hi] = from < to ? [from, to] : [to, from];
+        for (let i = lo; i <= hi; i++) {
+          leafSelection.set(ids[i], fromKey);
+          siblings[i].classList.add('tree-leaf-selected');
+        }
+        leafAnchor = { id: profile.id, fromKey };
+        return;
+      }
+      // The anchor is gone — a re-render or search moved it. Fall through.
+    }
+
+    if (leafSelection.get(profile.id) === fromKey) {
+      leafSelection.delete(profile.id);
+      leaf.classList.remove('tree-leaf-selected');
+      if (leafAnchor && leafAnchor.id === profile.id) leafAnchor = null;
+    } else {
+      leafSelection.set(profile.id, fromKey);
+      leaf.classList.add('tree-leaf-selected');
+      leafAnchor = { id: profile.id, fromKey };
+    }
+  }
+
+  /**
+   * Drop several leaves onto a group (#372): each one moves — out of the
+   * group it was picked from, into the target — through the same membership
+   * call the single-leaf drop uses, then one refresh at the end.
+   */
+  async function _dropProfiles(batch, targetKey) {
+    for (const { id, from } of batch) {
+      if (!id) continue;
+      if (from && from !== targetKey) await _setMembership(id, from, false);
+      if (targetKey) await _setMembership(id, targetKey, true);
+    }
+    _clearLeafSelection();
+    _refresh();
   }
 
   /**
@@ -1189,6 +1297,13 @@
       e.preventDefault();
       e.stopPropagation();
       chip.classList.remove('group-drop');
+
+      // A multi-selection arrives as one batch (#372).
+      const batchRaw = e.dataTransfer.getData('application/x-shellmate-profiles');
+      if (batchRaw && node.group) {
+        try { await _dropProfiles(JSON.parse(batchRaw), node.key); } catch (_) {}
+        return;
+      }
 
       const profileId = e.dataTransfer.getData('application/x-shellmate-profile');
       if (profileId && node.group) {

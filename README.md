@@ -16,7 +16,8 @@ Ships as a **single portable executable** — no Python, no installer, no admini
 - **Multi-tab terminal** — connect to multiple network devices simultaneously, each in its own tab with an independent session, buffer and WebSocket
 - **Split views** — fifteen tile layouts up to a 4×4 grid (`Ctrl+Alt+1`–`9` for the first nine, the rest in the picker), with tabs assigned to panes from their context menu. Sessions in hidden panes keep running and keep their scrollback. Quick text-size arrows sit beside the layout button, so a wall of panes is two clicks from readable
 - **Tab management** — drag to reorder, `Ctrl+1–9` shortcuts, `Ctrl+T`/`Ctrl+W`, and a right-click menu that earns its place: reconnect (one tab or all), duplicate, new connection, per-tab colour scheme, keep-alive, copy address/history, disconnect, close tab and close all — closing sends an explicit disconnect to the device before teardown
-- **Groups** — organise thousands of saved connections in a collapsible tree with a real root node, colours, icons (picked at creation, site icon first), favourites and nested subgroups. Per-group connect-all/disconnect-all, drag-and-drop membership, and a New Sub-Group button that follows your selection
+- **Groups** — organise thousands of saved connections in a collapsible tree with a real root node, colours, icons (picked at creation, site icon first), favourites and nested subgroups. Per-group connect-all/disconnect-all, drag-and-drop membership, and a New Sub-Group button that follows your selection. Right-click the root (or empty space) to create a top-level group; right-click a device for edit, copy/move and delete, or use the hover **×** on its row. Ctrl/shift-click selects several devices at once and a single drag moves them all between groups — or out to the root
+- **Names that fix themselves** — a connection saved by IP address is renamed to the device's real hostname the first time you connect, read from its own prompt. Names you typed deliberately are never touched
 - **SFTP file browser** — pull a config off a device or push an image to it over the SSH connection the tab already has open. No second login, no separate tool
 - **Network discovery** — scan a subnet, range or list, fingerprint what answers, and save the results as connections
 - **Smart copy/paste** — `Ctrl+C` (smart — copies selection or passes SIGINT), `Ctrl+Shift+C/V`, right-click paste, and confirmation with chunked pacing for large pastes
@@ -27,7 +28,7 @@ Ships as a **single portable executable** — no Python, no installer, no admini
 - **Cross-vendor aliases** — type `ints` and get `show ip interface brief` on IOS, `show interfaces terse` on Junos, `show interface all` on PAN-OS. The terminal shows what was actually sent
 - **Destructive-command confirmation** — `reload`, `write erase` and friends get an "are you sure" before they reach the device. One global switch covers typing and AI suggestions, and every platform's command list is visible and editable in Settings
 - **Pending-action alerts** — `reload in 10` and Junos `commit confirmed` are tracked per session with a live countdown on the tab and in the status bar. The countdown arms only when the **device itself confirms** the schedule ("Reload scheduled in 5 minutes by admin"), re-synchronises against its announcements, escalates through flash/tone/toast thresholds, throws an unmissable centre-screen warning at 20 seconds with a jump-to-tab button — and can be dismissed from the status bar when you know better
-- **Broadcast** — send a command or sequence to many devices at once, from a vendor-grouped snippet library with per-entry quick-broadcast bolts (electric blue when armed). Every run confirms exactly what goes to exactly which devices first
+- **Broadcast** — send a command or sequence to many devices at once, from a vendor-grouped snippet library with per-entry quick-broadcast bolts (electric blue when armed). Saving a command asks which vendor to file it under, right-click edits a saved entry in place (name, commands, vendor, timing), and the vendor groups stay open while you work. Every run confirms exactly what goes to exactly which devices first
 
 ![Broadcast — the vendor-grouped command library](docs/screenshot-broadcast.png)
 
@@ -56,6 +57,7 @@ Ships as a **single portable executable** — no Python, no installer, no admini
 - **Encrypted credentials vault** — API keys and remembered device passwords are encrypted on disk, never in plain text. By default they are tied to your Windows account, so a lost USB stick is useless to anyone else; switch to a master password if you need the vault to work on any machine
 - **Light / dark theme** — toggle from the sidebar; every surface is token-driven and contrast-checked in both
 - **A manual that matches the software** — eleven bundled pages, re-verified against the code, readable offline from the sidebar
+- **In-app bug and feature reporting** — a small floating reporter (ShellMate is in active development, and reports genuinely shape it) that files each report as a tagged GitHub issue for review. It sends only what you type plus the Windows version and build type — never anything from your terminal sessions — and on an air-gapped machine it queues the report locally and offers copy-to-clipboard instead
 
 ![Settings — Terminal Behaviour with the destructive-command lists in plain sight](docs/screenshot-settings.png)
 
@@ -325,6 +327,7 @@ in the sidebar — and works offline.
 | Copy terminal text | `Ctrl+C` (with selection), or `Ctrl+Shift+C` |
 | Paste into terminal | `Ctrl+V` or right-click |
 | Dismiss a pending reload | Click the countdown in the status bar |
+| Report a bug / request a feature | The bug icon floating at the bottom right |
 | Open settings | Gear icon in the left sidebar |
 | Configure provider keys / Chroma | Settings → *AI Providers* and *Knowledge Base (Chroma DB)* |
 | Toggle light/dark theme | Moon icon in the left sidebar |
@@ -332,8 +335,8 @@ in the sidebar — and works offline.
 ## Project structure
 
 The tree below is a summary. `CLAUDE.md` carries the authoritative one with a
-line explaining each module — this is 24 backend modules, 35 frontend scripts
-and 24 test suites, so a full listing here would be a second copy to keep in
+line explaining each module — this is 29 backend modules, 40 frontend scripts
+and 35 test suites, so a full listing here would be a second copy to keep in
 step and it would lose.
 
 ```
@@ -356,16 +359,18 @@ shellmate-portable/
 │   ├── store.py               # SQLite session history with FTS5
 │   ├── configs.py             # Config capture, diff, drift-on-connect
 │   ├── desktop.py             # Native window, tray, self-restart
+│   ├── feedback.py            # In-app bug/feature reports → GitHub issues
 │   ├── session/               # ANSI handling, transcript parsing, buffers, redaction
 │   ├── connections/           # ssh / serial / telnet handlers, SFTP, session manager
 │   └── ai/                    # Provider clients, router, prompts
 ├── frontend/
 │   ├── index.html
 │   ├── css/style.css
-│   ├── js/                    # 35 modules — one per panel or concern
+│   ├── js/                    # 40 modules — one per panel or concern
 │   ├── docs/                  # The bundled manual, including licences/
 │   └── vendor/                # xterm.js and fonts — no CDN at runtime
-└── test_*.py                  # 24 suites, run individually: python test_vault.py
+├── relay/                     # Cloudflare Worker that files feedback as issues
+└── test_*.py                  # 35 suites, run individually: python test_vault.py
 ```
 
 ## Design

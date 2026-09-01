@@ -8090,6 +8090,14 @@ body {
 /* A leaf being dragged to another group (#362). */
 .tree-leaf.group-dragging { opacity: 0.5; }
 
+/* Multi-selected leaves (#372): ctrl/shift-click, then drag them together.
+   The same tint the group chips use for their multi-selection, so one
+   visual answer means "picked for a bulk action" everywhere in the tree. */
+.tree-leaf.tree-leaf-selected {
+  background: var(--primary-tint);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
 /* ---------------------------------------------------------------------------
    The feedback chat head (#370). A floating surface, so its colours come
    from the overlay tokens — hardcoding a background here is exactly the bug
