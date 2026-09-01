@@ -51,6 +51,7 @@ from backend.profiles import (
     save_plaintext_credentials, save_profile,
 )
 from backend import discovery
+from backend import feedback as feedback_module
 from backend import platforms as platforms_module
 from backend import snippets
 from backend import support
@@ -1346,8 +1347,12 @@ async def discovery_save(request: DiscoverySaveRequest) -> dict:
                 continue
 
             kind = device.get("suggested_type") or "ssh"
+            # Trim the DNS domain from a hostname ("sw1.example.com" → "sw1"),
+            # but never from a bare address — splitting an IP on dots named
+            # every device on a subnet "192" (#363).
+            hostname = (device.get("hostname") or "").strip()
             profile = save_profile({
-                "name": (device.get("hostname") or address).split(".")[0],
+                "name": hostname.split(".")[0] if hostname else address,
                 "hostname": address,
                 "port": 22 if kind == "ssh" else 23,
                 "username": request.username,
@@ -1375,6 +1380,42 @@ async def discovery_save(request: DiscoverySaveRequest) -> dict:
     logger.info("Discovery: saved %d new profile(s), %d already known",
                 result["saved"], result["already_saved"])
     return result
+
+
+# ---------------------------------------------------------------------------
+# Feedback (#370)
+# ---------------------------------------------------------------------------
+
+class FeedbackRequest(BaseModel):
+    """Body for POST /api/feedback."""
+
+    kind: str
+    title: str
+    description: str = ""
+
+
+@app.post("/api/feedback")
+async def send_feedback(request: FeedbackRequest) -> dict:
+    """
+    File a bug report or feature request.
+
+    The report goes to the feedback relay (which turns it into a GitHub
+    issue), or into the local outbox when the relay is unreachable — the
+    response says which, so the interface never claims "sent" for "saved".
+    """
+    try:
+        return await asyncio.to_thread(
+            feedback_module.submit,
+            request.kind, request.title, request.description)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.on_event("startup")
+async def _flush_feedback_outbox() -> None:
+    """Retry reports queued while the relay was unreachable. Fire and
+    forget — a slow relay must not delay the server coming up."""
+    asyncio.get_running_loop().run_in_executor(None, feedback_module.flush)
 
 
 class TagsRequest(BaseModel):

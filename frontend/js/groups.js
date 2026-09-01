@@ -71,6 +71,20 @@
     });
     _bindPanelControls();
 
+    // Empty space in the tree behaves like the root row (#361): background
+    // is the "nowhere in particular" that means the top level. Bound to the
+    // panel body once — it survives renders; its contents do not — and only
+    // when the click landed on the background itself, so rows keep their own
+    // menus.
+    const treeBody = document.getElementById('group-tree-body');
+    if (treeBody) treeBody.addEventListener('contextmenu', (e) => {
+      const background = e.target === treeBody
+        || e.target.classList.contains('tree-root-children');
+      if (!background) return;
+      e.preventDefault();
+      _rootMenu(e);
+    });
+
     // Escape lets go of a multi-selection. Only when one exists, and only
     // when nothing else on screen is what the key was aimed at (#352):
     // dialogs stop propagation themselves, but the overlay panels and the
@@ -704,7 +718,27 @@
       e.preventDefault();
       all.classList.remove('group-drop');
       const movedKey = e.dataTransfer.getData('application/x-shellmate-group');
-      if (movedKey) await _reparent(movedKey, '');
+      if (movedKey) { await _reparent(movedKey, ''); return; }
+
+      // A leaf dropped here leaves its group (#362) — the same way out the
+      // groups themselves have, since every other target puts it inside
+      // something.
+      const profileId = e.dataTransfer.getData('application/x-shellmate-profile');
+      const from = e.dataTransfer.getData('application/x-shellmate-profile-from');
+      if (profileId && from) {
+        await _setMembership(profileId, from, false);
+        _refresh();
+      }
+    });
+
+    // Right-click makes a top-level group (#361). Groups and members both
+    // answer the gesture, so the row at the top answering nothing read as a
+    // gap rather than a choice — and it is the only row where "new group"
+    // can mean the root rather than a parent.
+    all.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _rootMenu(e);
     });
 
     all.addEventListener('click', () => {
@@ -976,6 +1010,33 @@
       }
     });
     leaf.addEventListener('contextmenu', (e) => _memberMenu(e, profile, node));
+
+    // A leaf can be picked up (#362). It carries where it came from as well
+    // as what it is, so a drop on another group *moves* it — the dashboard
+    // tiles set no source and stay a copy, which is right for them: a tile
+    // is not "in" anywhere.
+    leaf.draggable = true;
+    leaf.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('application/x-shellmate-profile', profile.id);
+      if (node.group) {
+        e.dataTransfer.setData('application/x-shellmate-profile-from', node.key);
+      }
+      leaf.classList.add('group-dragging');
+    });
+    leaf.addEventListener('dragend', () => leaf.classList.remove('group-dragging'));
+
+    // The × deletes the saved connection itself (#369), through the same
+    // confirmation the menu's delete uses — it is not "remove from group".
+    const del = document.createElement('span');
+    del.className = 'material-symbols-outlined tree-leaf-delete';
+    del.textContent = 'close';
+    del.title = 'Delete this saved connection';
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _deleteMember(profile);
+    });
+    leaf.appendChild(del);
     return leaf;
   }
 
@@ -1005,6 +1066,14 @@
       button.addEventListener('click', () => { menu.remove(); onClick(); });
       return button;
     };
+
+    // The same route the dashboard tiles take (#365): clicking connects, so
+    // editing needs its own way in.
+    menu.appendChild(item('tune', 'Edit connection...', () => {
+      if (typeof window.showConnectionDialog === 'function') {
+        window.showConnectionDialog(profile);
+      }
+    }));
 
     menu.appendChild(item('content_copy', 'Copy to group...',
                           () => _moveMember(profile, node, false)));
@@ -1122,7 +1191,16 @@
       chip.classList.remove('group-drop');
 
       const profileId = e.dataTransfer.getData('application/x-shellmate-profile');
-      if (profileId && node.group) { await _addMember(node.group, profileId); return; }
+      if (profileId && node.group) {
+        // Dragged out of another group it moves (#362): membership is
+        // overlapping, but a drag between branches reads as "put it there",
+        // not "put it in both places". A tile drop carries no source and
+        // still copies.
+        const from = e.dataTransfer.getData('application/x-shellmate-profile-from');
+        if (from && from !== node.key) await _setMembership(profileId, from, false);
+        await _addMember(node.group, profileId);
+        return;
+      }
 
       const movedKey = e.dataTransfer.getData('application/x-shellmate-group');
       if (movedKey && node.group) await _reparent(movedKey, node.key);
@@ -1843,6 +1921,37 @@
     document.body.appendChild(menu);
     // Clamped on both axes (#264): a group near the bottom of a full tree
     // used to open its menu half off screen.
+    menu.style.left = `${Math.max(8, Math.min(event.clientX,
+      window.innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(event.clientY,
+      window.innerHeight - menu.offsetHeight - 8))}px`;
+
+    setTimeout(() => {
+      document.addEventListener('click', () => menu.remove(), { once: true });
+    }, 0);
+  }
+
+  /**
+   * The root row's menu (#361).
+   *
+   * One entry, because the root offers one thing a right-click cannot get
+   * anywhere else: a group at the top level. Everything else on the root —
+   * folding, selecting — is already a left-click.
+   */
+  function _rootMenu(event) {
+    document.querySelectorAll('.group-menu').forEach(el => el.remove());
+
+    const menu = document.createElement('div');
+    menu.className = 'tab-context-menu group-menu';
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.innerHTML = '<span class="material-symbols-outlined">add</span>';
+    button.appendChild(document.createTextNode('New group...'));
+    button.addEventListener('click', () => { menu.remove(); newGroup(); });
+    menu.appendChild(button);
+
+    document.body.appendChild(menu);
     menu.style.left = `${Math.max(8, Math.min(event.clientX,
       window.innerWidth - menu.offsetWidth - 8))}px`;
     menu.style.top = `${Math.max(8, Math.min(event.clientY,

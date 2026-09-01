@@ -15,6 +15,7 @@ profile id and the backend fills the credentials in server-side, so a
 remembered password exists only on disk (encrypted) and in memory during the
 handshake.
 """
+import ipaddress
 import json
 import uuid
 
@@ -982,6 +983,15 @@ def save_profile(fields: dict) -> dict:
     return profile
 
 
+def _looks_like_an_address(name: str) -> bool:
+    """Whether a profile name is a bare IPv4/IPv6 address rather than a name."""
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        return False
+
+
 def record_detected_hostname(target: str, port: int, username: str, detected: str) -> bool:
     """
     Note the device's real name against the profile used to reach it.
@@ -1022,9 +1032,16 @@ def record_detected_hostname(target: str, port: int, username: str, detected: st
         previous = profile.get("detected_hostname")
         profile["detected_hostname"] = detected
 
-        # Only replace a name that is still just the address.
+        # Only replace a name the user never chose: empty, the address
+        # itself, anything that reads as a bare IP (#364 — "10.20.30.40" as
+        # a name says nothing the address field does not), or the first
+        # octet left behind by the scanner's naming bug (#363).
         current = (profile.get("name") or "").strip()
-        if current in ("", target) and current != detected:
+        replaceable = (
+            current in ("", target, target.split(".")[0])
+            or _looks_like_an_address(current)
+        )
+        if replaceable and current != detected:
             profile["name"] = detected
             changed = True
         elif previous != detected:

@@ -8074,6 +8074,154 @@ body {
 
 .tree-leaf-lock { margin-left: auto; flex-shrink: 0; }
 
+/* Delete a saved connection from its row (#369). Revealed on hover like the
+   tiles' ×, and pushed to the right edge; when the padlock is there too, the
+   padlock keeps the auto margin and the × just follows it. */
+.tree-leaf .tree-leaf-delete {
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.12s;
+}
+.tree-leaf .tree-leaf-lock + .tree-leaf-delete { margin-left: 5px; }
+.tree-leaf:hover .tree-leaf-delete { opacity: 1; }
+.tree-leaf .tree-leaf-delete:hover { color: var(--error); }
+
+/* A leaf being dragged to another group (#362). */
+.tree-leaf.group-dragging { opacity: 0.5; }
+
+/* ---------------------------------------------------------------------------
+   The feedback chat head (#370). A floating surface, so its colours come
+   from the overlay tokens — hardcoding a background here is exactly the bug
+   the theme rule exists to prevent.
+--------------------------------------------------------------------------- */
+
+#feedback-head {
+  position: fixed;
+  right: 18px;
+  bottom: 52px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--overlay-solid);
+  border: 1px solid var(--outline);
+  color: var(--on-surface-muted);
+  cursor: pointer;
+  z-index: 7500;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  transition: color 0.12s, border-color 0.12s;
+}
+#feedback-head:hover { color: var(--primary); border-color: var(--primary); }
+#feedback-head .material-symbols-outlined { font-size: 20px; }
+
+#feedback-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 100px;
+  width: 320px;
+  padding: 14px;
+  background: var(--overlay-solid);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  z-index: 7500;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  color: var(--on-surface);
+  font-size: 12.5px;
+}
+
+.feedback-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.feedback-close {
+  background: none;
+  border: none;
+  color: var(--on-surface-muted);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+}
+.feedback-close:hover { color: var(--on-surface); }
+.feedback-close .material-symbols-outlined { font-size: var(--icon-sm); }
+
+.feedback-welcome {
+  margin: 0;
+  color: var(--on-surface-dim);
+  line-height: 1.45;
+}
+
+.feedback-kinds { display: flex; gap: 6px; }
+
+.feedback-kind {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 0;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface-dim);
+  cursor: pointer;
+  font-size: 12px;
+}
+.feedback-kind .material-symbols-outlined { font-size: var(--icon-sm); }
+.feedback-kind.on {
+  background: var(--primary-tint);
+  border-color: var(--primary);
+  color: var(--on-surface);
+}
+
+#feedback-panel input,
+#feedback-panel textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  font-family: inherit;
+  font-size: 12.5px;
+  resize: vertical;
+}
+
+.feedback-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+  line-height: 1.4;
+}
+
+.feedback-actions { display: flex; justify-content: flex-end; }
+
+.feedback-status { min-height: 1em; line-height: 1.45; color: var(--on-surface-dim); }
+.feedback-status.feedback-ok { color: var(--ok); }
+.feedback-status.feedback-error { color: var(--error); }
+
+.feedback-copy {
+  background: none;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+  margin-left: 4px;
+}
+.feedback-copy:hover { border-color: var(--primary); }
+
 /* The notification stack while the dashboard is in front (#168). Hidden, not
    emptied: a sticky drift prompt or a reload countdown must still be there
    when you come back. */

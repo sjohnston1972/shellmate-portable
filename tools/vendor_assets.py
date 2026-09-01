@@ -119,6 +119,17 @@ def vendor_font_stylesheet(filename: str, url: str) -> list[Path]:
 
     (VENDOR_DIR / filename).write_text(css, encoding="utf-8")
     print(f"  {filename:<28} {len(font_urls):>3} font files, {total:>9,} bytes")
+
+    # Prune superseded versions of the same face (inter-v20-... after a bump
+    # to v21). A leftover is worse than clutter: test_icons.py checks the
+    # first file its glob finds, and a stale subset sitting alphabetically
+    # earlier made it fail an icon the shipped CSS never references.
+    fresh = {p.name for p in written}
+    for old in FONTS_DIR.iterdir():
+        family = old.name.split("-v")[0]
+        if old.name not in fresh and any(f.startswith(f"{family}-v") for f in fresh):
+            old.unlink()
+            print(f"    pruned superseded {old.name}")
     return written
 
 

@@ -1,0 +1,17 @@
+# The ShellMate feedback relay (#370). Deploy with `wrangler deploy`.
+name = "shellmate-feedback"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+GITHUB_REPO = "sjohnston1972/shellmate-portable"
+
+# 5 reports per minute per IP. On top of the app key, not instead of it.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 5, period = 60 }
+
+# Secrets are NOT set here — never write a token into this file:
+#   wrangler secret put GITHUB_TOKEN
+#   wrangler secret put APP_KEY

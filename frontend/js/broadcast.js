@@ -267,6 +267,11 @@
    *  library being hidden (#239). */
   let libraryError = false;
 
+  /** Vendor groups the user has opened (#366). Every library action —
+   *  toggling a bolt, deleting, saving — re-renders the list, and rebuilding
+   *  the <details> closed folded the group under the pointer mid-use. */
+  const openGroups = new Set();
+
   async function loadLibrary() {
     try {
       const res = await fetch('/api/snippets');
@@ -361,10 +366,14 @@
 
       const group = document.createElement('details');
       group.className = 'snippet-group';
-      // All closed (#284). Two open by default put a hundred rows above the
-      // vendor you were actually looking for; the list of vendors is the
-      // useful first view, and opening one is a click.
-      group.open = false;
+      // All closed (#284) until the user opens one — and then it *stays*
+      // open across re-renders (#366), or clicking a bolt folded the group
+      // being worked in.
+      group.open = openGroups.has(platform);
+      group.addEventListener('toggle', () => {
+        if (group.open) openGroups.add(platform);
+        else openGroups.delete(platform);
+      });
 
       const summary = document.createElement('summary');
       summary.className = 'snippet-group-head';
@@ -432,6 +441,14 @@
       applySnippet(snippet, e.ctrlKey || e.metaKey || e.shiftKey);
     });
 
+    // Right-click edits in place (#368). Until now changing a saved command
+    // meant deleting it and typing it again — or hand-editing snippets.json.
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      editSnippet(snippet);
+    });
+    load.title += '\nRight-click to edit.';
+
     const add = document.createElement('button');
     add.type = 'button';
     add.className = 'snippet-add';
@@ -496,6 +513,77 @@
   }
 
   /**
+   * Edit a saved command in place (#368).
+   *
+   * The dialog's fields are single-line, so the commands — the one part that
+   * is genuinely multi-line — go in as caller-built content, the same route
+   * the icon picker takes. Everything not on the form (quick, send_return)
+   * is carried over unchanged: an edit must not knock a command off the tab
+   * menu as a side effect.
+   */
+  async function editSnippet(snippet) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sm-dialog-field';
+    const label = document.createElement('label');
+    label.className = 'sm-dialog-label';
+    label.textContent = 'Commands, one per line';
+    const box = document.createElement('textarea');
+    box.className = 'sm-dialog-input';
+    box.rows = Math.min(10, Math.max(3, snippet.commands.length + 1));
+    box.spellcheck = false;
+    box.value = snippet.commands.join('\n');
+    wrap.append(label, box);
+
+    const answer = await window.shellmateDialog.form({
+      title: 'Edit "' + snippet.name + '"',
+      content: wrap,
+      confirmLabel: 'Save',
+      fields: [
+        { name: 'name', label: 'Name', required: true, value: snippet.name },
+        { name: 'description', label: 'Description',
+          value: snippet.description || '' },
+        { name: 'platform', label: 'Vendor', type: 'select',
+          value: snippet.platform || '',
+          options: Object.entries(VENDOR)
+            .map(([value, label2]) => ({ value, label: label2 })) },
+        { name: 'wait_ms', label: 'Wait between commands (ms)',
+          value: String(snippet.wait_ms ?? 500) },
+      ],
+    });
+    if (!answer) return;
+
+    const commands = box.value.split('\n').map(l => l.trim()).filter(Boolean);
+    if (!commands.length) {
+      report('error', 'A library entry needs at least one command.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/snippets/' + encodeURIComponent(snippet.id), {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          name: answer.name,
+          commands,
+          description: answer.description || '',
+          platform: answer.platform || '',
+          wait_ms: parseInt(answer.wait_ms, 10) || 0,
+          writes: commands.some(looksLikeAWrite),
+          quick: snippet.quick,
+          send_return: snippet.send_return !== false,
+        }),
+      });
+      if (!res.ok) { report('error', (await res.json()).detail || 'Could not save it.'); return; }
+      // The tab menu shows quick commands by name; a rename must reach it.
+      window.dispatchEvent(new CustomEvent('shellmate:snippets-changed'));
+      await loadLibrary();
+      report('ok', `Updated "${answer.name}".`);
+    } catch (e) {
+      report('error', `Could not save it: ${e.message}`);
+    }
+  }
+
+  /**
    * Put a snippet into the command box.
    *
    * Appending takes the *largest* wait of the snippets involved rather than
@@ -523,22 +611,32 @@
     const commands = commandList();
     if (!commands.length) { report('error', 'Type a command before saving it.'); return; }
 
-    const name = await window.shellmateDialog.prompt({
+    // The vendor is offered at save time (#367), because that is when the
+    // person knows what they were sending it to — filed under "Any device"
+    // it would sit in the one group that grows without bound.
+    const answer = await window.shellmateDialog.form({
       title: 'Save to the library',
-      label: 'Call it',
-      value: commands[0].slice(0, 40),
       list: commands.map(c => ({ text: c, mono: true })),
       confirmLabel: 'Save',
+      fields: [
+        { name: 'name', label: 'Call it', required: true,
+          value: commands[0].slice(0, 40) },
+        { name: 'platform', label: 'Vendor', type: 'select',
+          hint: 'Which group of the library it is filed under.',
+          options: Object.entries(VENDOR)
+            .map(([value, label]) => ({ value, label })) },
+      ],
     });
-    if (!name) return;
+    if (!answer || !answer.name) return;
 
     try {
       const res = await fetch('/api/snippets/new', {
         method:  'PUT',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          name,
+          name: answer.name,
           commands,
+          platform: answer.platform || '',
           wait_ms: waitMs(),
           // Flagged from what it looks like, so the library shows a warning on
           // the ones that change something. The user can correct it by editing
@@ -548,7 +646,7 @@
       });
       if (!res.ok) { report('error', (await res.json()).detail || 'Could not save.'); return; }
       await loadLibrary();
-      report('ok', `Saved "${name}" to the library.`);
+      report('ok', `Saved "${answer.name}" to the library.`);
     } catch (e) {
       report('error', `Could not save: ${e.message}`);
     }

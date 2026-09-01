@@ -188,6 +188,7 @@ CATEGORIES = {
     # section (#222), and a subsection repeating its section's name reads as
     # a rendering fault.
     "diag":      "Logging and startup",
+    "feedback":  "Bug and feature reports",
 }
 
 
@@ -676,6 +677,13 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("diag.port_scan_attempts", "Ports to try if 8765 is busy", 20, "int",
             "ShellMate walks upward from its preferred port.",
             "", minimum=1, maximum=100, applies="restart"),
+
+    # --- Feedback reporting (#370) -----------------------------------------
+    Setting("feedback.relay_url", "Feedback relay URL", "", "text",
+            "Where in-app bug reports and feature requests are sent.",
+            "The relay files each report as a GitHub issue. Left empty, "
+            "reports are saved to feedback-outbox.json in the data folder "
+            "instead of being sent anywhere."),
 )
 
 SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}
