@@ -25,7 +25,13 @@ from backend import paths
 _TEMP = Path(tempfile.mkdtemp(prefix="shellmate-feedback-"))
 paths._data_dir_cache = _TEMP
 
-from backend import feedback                               # noqa: E402
+from backend import advanced, feedback                     # noqa: E402
+
+# The shipped default points at the LIVE relay. Left in place, this test
+# files its reports as real GitHub issues — which it did once, twenty-one
+# of them. Every test below runs against an explicitly empty relay unless
+# it sets one itself, and none may ever use the real default.
+advanced.update({"feedback.relay_url": ""})
 
 passed = 0
 failed: list[str] = []

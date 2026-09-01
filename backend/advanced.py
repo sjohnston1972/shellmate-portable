@@ -679,9 +679,10 @@ SETTINGS: tuple[Setting, ...] = (
             "", minimum=1, maximum=100, applies="restart"),
 
     # --- Feedback reporting (#370) -----------------------------------------
-    Setting("feedback.relay_url", "Feedback relay URL", "", "text",
+    Setting("feedback.relay_url", "Feedback relay URL",
+            "https://shellmate-feedback.stevie-johnston.workers.dev", "text",
             "Where in-app bug reports and feature requests are sent.",
-            "The relay files each report as a GitHub issue. Left empty, "
+            "The relay files each report as a GitHub issue. Emptied, "
             "reports are saved to feedback-outbox.json in the data folder "
             "instead of being sent anywhere."),
 )

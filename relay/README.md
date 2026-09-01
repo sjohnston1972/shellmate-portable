@@ -11,13 +11,19 @@ inside it can be read out of it — so the only credential lives here.
    `shellmate-reporter`. Issues will arrive authored by it — which is what
    makes GitHub notify you (GitHub never notifies you of your *own*
    activity, so using your own token would silently kill notifications).
-   The repo is public, so the account needs no access grant to open issues.
+   The repo is **private**, so invite the machine account as a collaborator
+   (`gh api repos/<owner>/<repo>/collaborators/<account> -X PUT
+   -f permission=push` — personal repos offer no lighter role that can
+   apply labels) and accept the invitation as that account.
 
 2. **Token.** Signed in as the machine account:
    Settings → Developer settings → Personal access tokens → **classic** →
-   generate with only the `public_repo` scope. (A fine-grained token won't
-   work here — it can't reach a repo the machine account doesn't own.)
-   Set an expiry and put a reminder in your calendar.
+   generate with the `repo` scope — the only classic scope that reaches a
+   private repo; `public_repo` gets a 404. (A fine-grained token won't
+   work here at all — it can't reach a repo the machine account doesn't
+   own.) Set an expiry and put a reminder in your calendar. The trade-off,
+   stated plainly: this token can write to the repo, it lives only in
+   Cloudflare's secret store, and deleting the machine account revokes it.
 
 3. **Labels.** In the repo, create the `user-reported` label
    (`bug` and `enhancement` already exist).
@@ -36,10 +42,12 @@ inside it can be read out of it — so the only credential lives here.
    Deploy prints the URL, e.g.
    `https://shellmate-feedback.<your-subdomain>.workers.dev`.
 
-5. **Point ShellMate at it.** Settings → Advanced (Stockton) →
-   *Bug and feature reports* → **Feedback relay URL** → paste the URL.
-   Until this is set, reports queue in `ShellMate-Data/feedback-outbox.json`
-   and are sent when a relay becomes reachable.
+5. **Point ShellMate at it.** The deployed URL is the default of the
+   `feedback.relay_url` advanced setting, so a build after that change
+   needs nothing. If the worker moves: Settings → Advanced (Stockton) →
+   *Bug and feature reports* → **Feedback relay URL**. While unreachable,
+   reports queue in `ShellMate-Data/feedback-outbox.json` and are sent
+   when a relay next answers.
 
 6. **Check notifications.** You watch your own repos by default; confirm
    under the repo's Watch settings that Issues are included, and open a test
