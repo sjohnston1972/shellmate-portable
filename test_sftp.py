@@ -140,6 +140,35 @@ class _SFTPServer(paramiko.SFTPServerInterface):
         except OSError as exc:
             return paramiko.SFTPServer.convert_errno(exc.errno)
 
+    def rename(self, oldpath, newpath):
+        try:
+            os.rename(self._real(oldpath), self._real(newpath))
+            return paramiko.SFTP_OK
+        except OSError as exc:
+            return paramiko.SFTPServer.convert_errno(exc.errno)
+
+    def mkdir(self, path, attr):
+        try:
+            os.mkdir(self._real(path))
+            return paramiko.SFTP_OK
+        except OSError as exc:
+            return paramiko.SFTPServer.convert_errno(exc.errno)
+
+    def rmdir(self, path):
+        try:
+            os.rmdir(self._real(path))
+            return paramiko.SFTP_OK
+        except OSError as exc:
+            return paramiko.SFTPServer.convert_errno(exc.errno)
+
+    def chattr(self, path, attr):
+        try:
+            if attr.st_mode is not None:
+                os.chmod(self._real(path), attr.st_mode & 0o7777)
+            return paramiko.SFTP_OK
+        except OSError as exc:
+            return paramiko.SFTPServer.convert_errno(exc.errno)
+
     def canonicalize(self, path):
         # Keep everything inside the served root; "." resolves to "/".
         if path in ("", "."):
@@ -268,6 +297,30 @@ def test_sftp_operations() -> None:
 
         check("missing file raises a clear error",
               _raises_message(lambda: sftp_module.read_file(session, "/nope.txt"), "No such file"))
+
+        # The folder operations (#418).
+        sftp_module.make_directory(session, "/newdir")
+        check("mkdir creates the folder", (Path(root) / "newdir").is_dir())
+        sftp_module.write_file(session, "/newdir/a.txt", b"a\n")
+        sftp_module.make_directory(session, "/newdir/inner")
+        sftp_module.write_file(session, "/newdir/inner/b.txt", b"bb\n")
+        sftp_module.rename(session, "/newdir/a.txt", "/newdir/renamed.txt")
+        check("rename moves the file", (Path(root) / "newdir" / "renamed.txt").exists()
+              and not (Path(root) / "newdir" / "a.txt").exists())
+        import zipfile, io
+        archive = zipfile.ZipFile(io.BytesIO(sftp_module.read_directory_zip(session, "/newdir")))
+        names_in_zip = set(archive.namelist())
+        check("a folder downloads as a zip with its tree",
+              {"newdir/renamed.txt", "newdir/inner/b.txt"} <= names_in_zip, str(names_in_zip))
+        check("chmod refuses a mode that is not octal",
+              _raises_message(lambda: sftp_module.set_permissions(session, "/newdir/renamed.txt", "rw"), "octal"))
+        result = sftp_module.set_permissions(session, "/newdir/renamed.txt", "0600")
+        check("chmod reports the mode it set", result["mode"] == "600", str(result))
+        check("deleting the root is refused",
+              _raises_message(lambda: sftp_module.delete_directory(session, "/"), "root"))
+        gone = sftp_module.delete_directory(session, "/newdir")
+        check("a folder delete takes the tree with it",
+              not (Path(root) / "newdir").exists() and gone["files"] == 2, str(gone))
 
         check("SFTP channel is cached on the session", session.get("sftp") is not None)
 

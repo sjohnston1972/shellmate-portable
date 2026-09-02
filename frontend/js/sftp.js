@@ -35,6 +35,16 @@
       .addEventListener('click', () => uploadInput.click());
 
     uploadInput.addEventListener('change', handleUpload);
+    // Folders (#418): a directory picker uploads every file in it, and a
+    // button makes an empty one.
+    const folderInput = document.getElementById('sftp-upload-folder-input');
+    const folderBtn = document.getElementById('sftp-upload-folder-btn');
+    if (folderInput && folderBtn) {
+      folderBtn.addEventListener('click', () => folderInput.click());
+      folderInput.addEventListener('change', handleUploadFolder);
+    }
+    const mkdirBtn = document.getElementById('sftp-mkdir-btn');
+    if (mkdirBtn) mkdirBtn.addEventListener('click', handleMkdir);
 
     pathInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); browse(pathInput.value); }
@@ -160,32 +170,36 @@
       row.appendChild(icon);
       row.appendChild(info);
 
+      // Every row gets rename and permissions (#418); files download and
+      // delete singly, folders as a zip and recursively.
+      const action = (icon, title, onClick, danger) => {
+        const button = document.createElement('button');
+        button.className = 'sftp-action' + (danger ? ' sftp-action-danger' : '');
+        button.title = title;
+        button.innerHTML = `<span class="material-symbols-outlined">${icon}</span>`;
+        button.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+        return button;
+      };
       if (entry.is_dir) {
         row.addEventListener('click', () => browse(entry.path));
+        row.appendChild(action('download', `Download ${entry.name} as a zip`, () => {
+          const sessionId = activeSessionId();
+          window.location.href =
+            `/api/sftp/${sessionId}/download-directory?path=${encodeURIComponent(entry.path)}`;
+        }));
       } else {
-        const download = document.createElement('button');
-        download.className = 'sftp-action';
-        download.title = `Download ${entry.name}`;
-        download.innerHTML = '<span class="material-symbols-outlined">download</span>';
-        download.addEventListener('click', (e) => {
-          e.stopPropagation();
+        row.appendChild(action('download', `Download ${entry.name}`, () => {
           const sessionId = activeSessionId();
           window.location.href =
             `/api/sftp/${sessionId}/download?path=${encodeURIComponent(entry.path)}`;
-        });
-
-        const remove = document.createElement('button');
-        remove.className = 'sftp-action sftp-action-danger';
-        remove.title = `Delete ${entry.name}`;
-        remove.innerHTML = '<span class="material-symbols-outlined">delete_sweep</span>';
-        remove.addEventListener('click', (e) => {
-          e.stopPropagation();
-          handleDelete(entry);
-        });
-
-        row.appendChild(download);
-        row.appendChild(remove);
+        }));
       }
+      row.appendChild(action('edit', `Rename ${entry.name}`, () => handleRename(entry)));
+      row.appendChild(action('key', `Permissions of ${entry.name} (${entry.permissions})`,
+                             () => handleChmod(entry)));
+      row.appendChild(action('delete_sweep',
+                             entry.is_dir ? `Delete ${entry.name} and everything in it` : `Delete ${entry.name}`,
+                             () => handleDelete(entry), true));
 
       listEl.appendChild(row);
     });
@@ -224,11 +238,115 @@
     }
   }
 
+  /** A small JSON POST to one of the panel's operations (#418). */
+  async function postOp(op, body) {
+    const sessionId = activeSessionId();
+    if (!sessionId) { showMessage('Open an SSH session first.'); return null; }
+    const res = await fetch(`/api/sftp/${sessionId}/${op}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showStatus(data.detail || `${op} failed (${res.status})`, true); return null; }
+    return data;
+  }
+
+  async function handleRename(entry) {
+    const name = await window.shellmateDialog.prompt({
+      title: `Rename ${entry.name}`,
+      body: 'A name moves it within this folder; a full path moves it elsewhere.',
+      value: entry.name,
+      confirmLabel: 'Rename',
+    });
+    if (!name || name === entry.name) return;
+    const target = name.includes('/') ? name
+      : `${entry.path.replace(/\/[^/]*$/, '')}/${name}`;
+    const done = await postOp('rename', { path: entry.path, new_path: target });
+    if (done) { showStatus(`Renamed to ${target}.`); await browse(currentPath); }
+  }
+
+  async function handleChmod(entry) {
+    const mode = await window.shellmateDialog.prompt({
+      title: `Permissions of ${entry.name}`,
+      body: `Now ${entry.permissions}. Enter an octal mode such as 644 or 755.`,
+      value: '',
+      confirmLabel: 'Apply',
+    });
+    if (!mode) return;
+    const done = await postOp('chmod', { path: entry.path, mode: String(mode).trim() });
+    if (done) { showStatus(`Set ${entry.name} to ${done.mode}.`); await browse(currentPath); }
+  }
+
+  async function handleMkdir() {
+    const name = await window.shellmateDialog.prompt({
+      title: 'New folder',
+      body: `Created in ${currentPath}.`,
+      value: '',
+      confirmLabel: 'Create',
+    });
+    if (!name) return;
+    const target = `${currentPath.replace(/\/$/, '')}/${String(name).trim().replace(/^\/+/, '')}`;
+    const done = await postOp('mkdir', { path: target });
+    if (done) { showStatus(`Created ${target}.`); await browse(currentPath); }
+  }
+
+  /**
+   * Upload a folder: files one at a time, creating each subfolder as it is
+   * first needed. Sequential on purpose — an SFTP channel is one channel,
+   * and forty parallel opens against a switch is a good way to lose it.
+   */
+  async function handleUploadFolder(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    const sessionId = activeSessionId();
+    if (!sessionId) { showMessage('Open an SSH session first.'); return; }
+    const made = new Set();
+    let sent = 0;
+    for (const file of files) {
+      const rel = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
+      const target = `${currentPath.replace(/\/$/, '')}/${rel}`;
+      const parts = rel.split('/').slice(0, -1);
+      let dir = currentPath.replace(/\/$/, '');
+      for (const part of parts) {
+        dir = `${dir}/${part}`;
+        if (made.has(dir)) continue;
+        made.add(dir);
+        // Best effort: an existing folder answers with an error we ignore.
+        await fetch(`/api/sftp/${sessionId}/mkdir`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: dir }),
+        }).catch(() => {});
+      }
+      showStatus(`Uploading ${rel} (${sent + 1} of ${files.length})…`);
+      const body = new FormData();
+      body.append('file', file);
+      try {
+        const res = await fetch(`/api/sftp/${sessionId}/upload?path=${encodeURIComponent(target)}`,
+                                { method: 'POST', body });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          showStatus(`${rel}: ${data.detail || 'upload failed'}. Stopped.`, true);
+          await browse(currentPath);
+          return;
+        }
+        sent += 1;
+      } catch (err) {
+        showStatus(`${rel}: upload failed. Stopped.`, true);
+        await browse(currentPath);
+        return;
+      }
+    }
+    showStatus(`Uploaded ${sent} file${sent === 1 ? '' : 's'}.`);
+    await browse(currentPath);
+  }
+
   async function handleDelete(entry) {
     // Deleting a file off a live device is not undoable, so make the target
     // explicit rather than asking a generic "are you sure?".
     const ok = await window.shellmateDialog.confirm({
-      title: 'Delete this file from the device?',
+      title: entry.is_dir ? 'Delete this folder and everything in it?' : 'Delete this file from the device?',
       list: [{ text: entry.path, mono: true }],
       note: 'This cannot be undone. There is no recycle bin on a switch.',
       confirmLabel: 'Delete',
@@ -237,6 +355,19 @@
     if (!ok) return;
 
     const sessionId = activeSessionId();
+    if (entry.is_dir) {
+      try {
+        const res = await fetch(`/api/sftp/${sessionId}/directory?path=${encodeURIComponent(entry.path)}`,
+                                { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { showStatus(data.detail || `Delete failed (${res.status})`, true); return; }
+        showStatus(`Deleted ${entry.name} (${data.files} file${data.files === 1 ? '' : 's'}).`);
+        await browse(currentPath);
+      } catch (err) {
+        showStatus('Delete failed.', true);
+      }
+      return;
+    }
     try {
       const res = await fetch(
         `/api/sftp/${sessionId}/file?path=${encodeURIComponent(entry.path)}`,

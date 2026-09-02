@@ -20,6 +20,7 @@ downloaded file may be named, and how large an upload may be.
 """
 
 import logging
+import re
 import stat
 from dataclasses import dataclass
 
@@ -240,6 +241,157 @@ def write_file(session: dict, path: str, data: bytes) -> dict:
 
     logger.info("Uploaded %s bytes to %s", len(data), path)
     return {"path": path, "size": len(data)}
+
+
+def rename(session: dict, path: str, new_path: str) -> dict:
+    """Rename or move a file or directory (#418)."""
+    sftp = _sftp_for(session)
+    try:
+        sftp.rename(path, new_path)
+    except FileNotFoundError as exc:
+        raise ConnectionError_(f"No such file: {path}") from exc
+    except PermissionError as exc:
+        raise ConnectionError_(f"Permission denied renaming {path}") from exc
+    except OSError as exc:
+        raise ConnectionError_(f"Could not rename {path}: {exc}") from exc
+    logger.info("Renamed %s to %s", path, new_path)
+    return {"path": new_path, "renamed_from": path}
+
+
+def make_directory(session: dict, path: str) -> dict:
+    """Create a directory (#418). Parents must exist."""
+    sftp = _sftp_for(session)
+    try:
+        sftp.mkdir(path)
+    except PermissionError as exc:
+        raise ConnectionError_(f"Permission denied creating {path}") from exc
+    except OSError as exc:
+        raise ConnectionError_(f"Could not create {path}: {exc}") from exc
+    logger.info("Created directory %s", path)
+    return {"path": path, "created": True}
+
+
+def set_permissions(session: dict, path: str, mode: str) -> dict:
+    """
+    chmod (#418). ``mode`` is octal text — "644", "0755" — as a person
+    types it; anything else is refused before it reaches the device.
+    """
+    text = str(mode).strip()
+    if not re.fullmatch(r"0?[0-7]{3,4}", text):
+        raise ConnectionError_(f"'{mode}' is not an octal mode like 644 or 0755.")
+    value = int(text, 8) & 0o7777
+    sftp = _sftp_for(session)
+    try:
+        sftp.chmod(path, value)
+    except FileNotFoundError as exc:
+        raise ConnectionError_(f"No such file: {path}") from exc
+    except PermissionError as exc:
+        raise ConnectionError_(f"Permission denied changing {path}") from exc
+    except OSError as exc:
+        raise ConnectionError_(f"Could not change {path}: {exc}") from exc
+    logger.info("chmod %o %s", value, path)
+    return {"path": path, "mode": f"{value:o}"}
+
+
+def _walk(sftp: paramiko.SFTPClient, path: str, budget: dict):
+    """Yield (relative_path, attrs) for every file under *path*, bounded."""
+    for attr in sftp.listdir_attr(path):
+        child = f"{path.rstrip('/')}/{attr.filename}"
+        budget["entries"] -= 1
+        if budget["entries"] < 0:
+            raise ConnectionError_(
+                "That folder holds more entries than the transfer limit. "
+                "Move in smaller pieces.")
+        if stat.S_ISDIR(attr.st_mode or 0):
+            yield from _walk(sftp, child, budget)
+        else:
+            yield child, attr
+
+
+def delete_directory(session: dict, path: str) -> dict:
+    """
+    Delete a directory and everything beneath it (#418).
+
+    Bounded by the same entry budget as a folder download, so a mistyped
+    "/" does not become a device wipe: the walk refuses before removing
+    anything.
+    """
+    if path.strip() in ("", "/", "."):
+        raise ConnectionError_("Refusing to delete the root of the filesystem.")
+    sftp = _sftp_for(session)
+    try:
+        budget = {"entries": _max_entries()}
+        files = [child for child, _ in _walk(sftp, path, budget)]
+        for child in files:
+            sftp.remove(child)
+        # Directories, deepest first.
+        dirs: list[str] = []
+
+        def collect(base: str) -> None:
+            for attr in sftp.listdir_attr(base):
+                if stat.S_ISDIR(attr.st_mode or 0):
+                    child = f"{base.rstrip('/')}/{attr.filename}"
+                    collect(child)
+                    dirs.append(child)
+        collect(path)
+        for folder in reversed(dirs):
+            sftp.rmdir(folder)
+        sftp.rmdir(path)
+    except FileNotFoundError as exc:
+        raise ConnectionError_(f"No such directory: {path}") from exc
+    except PermissionError as exc:
+        raise ConnectionError_(f"Permission denied deleting {path}") from exc
+    except OSError as exc:
+        raise ConnectionError_(f"Could not delete {path}: {exc}") from exc
+    logger.info("Deleted directory %s (%d files)", path, len(files))
+    return {"path": path, "deleted": True, "files": len(files)}
+
+
+def read_directory_zip(session: dict, path: str) -> bytes:
+    """
+    A directory as a zip archive, in memory (#418).
+
+    The download limit applies to the total, and the entry budget to the
+    count, so a whole flash: does not get pulled by accident.
+    """
+    import io
+    import zipfile
+
+    sftp = _sftp_for(session)
+    buffer = io.BytesIO()
+    total = 0
+    limit = _max_download_bytes()
+    base = path.rstrip("/") or "/"
+    name = base.rsplit("/", 1)[-1] or "root"
+    try:
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            budget = {"entries": _max_entries()}
+            for child, attr in _walk(sftp, base, budget):
+                total += attr.st_size or 0
+                if total > limit:
+                    raise ConnectionError_(
+                        f"The folder is above the {limit / 1e6:.0f} MB download "
+                        f"limit. Raise it in Stockton if you mean it.")
+                with sftp.open(child, "rb") as handle:
+                    handle.prefetch()
+                    data = handle.read()
+                inside = f"{name}/{child[len(base):].lstrip('/')}"
+                archive.writestr(inside, data)
+    except FileNotFoundError as exc:
+        raise ConnectionError_(f"No such directory: {path}") from exc
+    except PermissionError as exc:
+        raise ConnectionError_(f"Permission denied reading {path}") from exc
+    except OSError as exc:
+        raise ConnectionError_(f"Could not read {path}: {exc}") from exc
+    return buffer.getvalue()
+
+
+def _max_entries() -> int:
+    """Files a folder operation may touch. Bounded in Stockton."""
+    try:
+        return int(advanced("files.max_folder_entries"))
+    except Exception:
+        return 2000
 
 
 def delete_file(session: dict, path: str) -> dict:

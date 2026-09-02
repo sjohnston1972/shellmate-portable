@@ -24,7 +24,8 @@ from pathlib import Path
 
 import paramiko
 
-from backend.connections.base import ConnectionError_, ConnectionHandler, ConnectionParams
+from backend.connections.base import (ConnectionError_, ConnectionHandler,
+                                      ConnectionParams, InteractiveRequired)
 
 from backend.advanced import get as advanced
 
@@ -324,6 +325,91 @@ class SSHHandler(ConnectionHandler):
                 pass
             return False
 
+    def _interactive_login(self, params, username, sock, disabled) -> None:
+        """
+        Authenticate by keyboard-interactive, asking the user what the
+        device asks (#406).
+
+        Runs the challenge with a handler that answers a password prompt
+        from the password and any other prompt from ``interactive_answers``
+        in order. A prompt with no answer available is answered blank —
+        the device refuses, the attempt ends — and the prompts seen are
+        raised as :class:`InteractiveRequired` so the interface can ask.
+        The next attempt arrives with the answers and goes straight here.
+
+        A one-time code is consumed by the attempt that carries it, which
+        is why the ordinary password-first connect is bypassed when answers
+        are present: paramiko's own fallback would spend the code on a
+        prompt it answers with the password.
+        """
+        import socket as _socket
+
+        answers = [str(a) for a in (params.interactive_answers or [])]
+        password = params.password or ""
+        seen: list[dict] = []
+        unanswered: list[str] = []
+        state = {"title": "", "instructions": ""}
+
+        def handler(title, instructions, prompts):
+            state["title"] = title or ""
+            state["instructions"] = instructions or ""
+            responses = []
+            for text, echo in prompts:
+                seen.append({"text": str(text), "echo": bool(echo)})
+                lowered = str(text).lower()
+                if "password" in lowered and password:
+                    responses.append(password)
+                elif answers:
+                    responses.append(answers.pop(0))
+                else:
+                    unanswered.append(str(text))
+                    responses.append("")
+            return responses
+
+        transport = None
+        try:
+            raw = sock or _socket.create_connection(
+                (params.hostname, params.port), advanced("ssh.connect_timeout"))
+            transport = paramiko.Transport(raw, disabled_algorithms=(
+                disabled or {}).get("disabled_algorithms"))
+            transport.start_client(timeout=advanced("ssh.banner_timeout"))
+            transport.auth_interactive(username, handler)
+        except paramiko.AuthenticationException as exc:
+            if transport is not None:
+                try:
+                    transport.close()
+                except Exception:
+                    pass
+            if unanswered:
+                raise InteractiveRequired(state["title"], state["instructions"], seen) from exc
+            raise ConnectionError_(
+                f"{params.hostname} refused the answers given for {username}."
+                + (" Check the code and try again." if params.interactive_answers else "")
+            ) from exc
+        except (paramiko.SSHException, OSError) as exc:
+            if transport is not None:
+                try:
+                    transport.close()
+                except Exception:
+                    pass
+            raise ConnectionError_(f"SSH error connecting to {params.target()}: {exc}") from exc
+
+        # Authenticated. Hand the transport to an SSHClient so every existing
+        # path — is_connected, disconnect, the second channel — works as it
+        # does for a password login.
+        self._client = paramiko.SSHClient()
+        self._client.set_missing_host_key_policy(_host_key_policy())
+        self._client._transport = transport
+        keepalive = advanced("ssh.keepalive_seconds")
+        if keepalive:
+            transport.set_keepalive(int(keepalive))
+        self._channel = transport.open_session()
+        self._channel.get_pty(term="xterm-256color", width=80, height=24)
+        self._channel.invoke_shell()
+        self._channel.settimeout(advanced("ssh.read_timeout"))
+        params.scrub_secrets()
+        logger.info("Connected to %s by keyboard-interactive", params.target())
+
     def connect(self) -> None:
         """Establish the SSH connection and open an interactive shell."""
         params = self.params
@@ -396,6 +482,15 @@ class SSHHandler(ConnectionHandler):
                 if sock is not None:
                     sock = self._open_jump_channel()
 
+            # Answers to an earlier challenge (#406): the device asked for
+            # something beyond a password last time, and the user has typed
+            # it. Go straight to the keyboard-interactive exchange rather
+            # than through paramiko's password-first sequence, which would
+            # burn the one-time code on a prompt it answers with the password.
+            if params.interactive_answers:
+                self._interactive_login(params, username, sock, disabled)
+                return
+
             self._client.connect(
                 hostname=params.hostname,
                 port=params.port,
@@ -443,7 +538,15 @@ class SSHHandler(ConnectionHandler):
         except paramiko.AuthenticationException as exc:
             transport = self._client.get_transport()
             still_up = bool(transport and transport.is_active())
+            allowed = [str(a) for a in getattr(exc, "allowed_types", []) or []]
             self.disconnect()
+            # The device offers keyboard-interactive: find out what it wants
+            # to ask (#406). A prompt the password cannot answer comes back
+            # as InteractiveRequired for the interface to put to the user.
+            if "keyboard-interactive" in allowed:
+                sock2 = self._open_jump_channel() if params.jump_host else None
+                self._interactive_login(params, username, sock2, disabled)
+                return
             raise ConnectionError_(
                 _explain_auth_failure(exc, params, username,
                                       offered_keys=discover_keys,

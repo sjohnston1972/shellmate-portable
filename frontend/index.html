@@ -2466,7 +2466,14 @@ GigEth0/2     unassigned    YES unset  down     down
         <button id="sftp-upload-btn" class="btn-tertiary" title="Upload a file here">
           <span class="material-symbols-outlined">upload</span>
         </button>
+        <button id="sftp-upload-folder-btn" class="btn-tertiary" title="Upload a folder here (every file in it, folders recreated)">
+          <span class="material-symbols-outlined">folder_open</span>
+        </button>
+        <button id="sftp-mkdir-btn" class="btn-tertiary" title="New folder here">
+          <span class="material-symbols-outlined">folder</span>
+        </button>
         <input type="file" id="sftp-upload-input" class="hidden" />
+        <input type="file" id="sftp-upload-folder-input" class="hidden" webkitdirectory directory multiple />
       </div>
 
       <div class="panel-body">

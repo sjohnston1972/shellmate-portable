@@ -648,6 +648,60 @@
   const failedRecently = new Set();
 
   /**
+   * POST /api/sessions, answering a keyboard-interactive challenge (#406).
+   *
+   * A 409 carrying `interactive` means the device asked something only the
+   * user can answer — a one-time code, a second factor. This puts the
+   * prompts up as a small form and posts again with the answers, up to
+   * three rounds, so every caller gets MFA for free. Resolves to
+   * `{ response, data }` exactly as a plain fetch would.
+   */
+  async function postSession(payload) {
+    let body = Object.assign({}, payload);
+    for (let round = 0; round < 3; round++) {
+      const response = await fetch('/api/sessions', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => ({}));
+      const ask = response.status === 409 && data.detail && data.detail.interactive;
+      if (!ask) return { response, data };
+
+      const answers = await askInteractive(data.detail.interactive, body.hostname);
+      if (answers === null) {
+        return { response: { ok: false, status: 409 },
+                 data: { detail: 'Cancelled: the device was still asking.' } };
+      }
+      body = Object.assign({}, body, { interactive_answers: answers });
+    }
+    return { response: { ok: false, status: 409 },
+             data: { detail: 'The device kept asking after three attempts.' } };
+  }
+
+  /** Put the device's prompts to the user; null if they cancel. */
+  async function askInteractive(challenge, hostname) {
+    const prompts = (challenge && challenge.prompts) || [];
+    if (!prompts.length) return [];
+    const fields = prompts.map((p, i) => ({
+      name: `p${i}`,
+      label: (p.text || `Prompt ${i + 1}`).replace(/:\s*$/, ''),
+      type: p.echo ? 'text' : 'password',
+    }));
+    const answer = await window.shellmateDialog.form({
+      title: challenge.title || `${hostname || 'The device'} is asking`,
+      body:  challenge.instructions
+        || 'The device wants an answer beyond the password — a code, a second factor, or a confirmation.',
+      confirmLabel: 'Send',
+      fields,
+    });
+    if (!answer) return null;
+    return fields.map(f => String(answer[f.name] || ''));
+  }
+
+  window.postSession = postSession;
+
+  /**
    * Connect straight from a tile.
    *
    * The credentials are never sent from here: `POST /api/sessions` takes the
@@ -664,10 +718,7 @@
       // meant every tile connect lost its display name and every serial
       // profile opened at the 9600 default — a saved 115200 console showed
       // garbage. The serial framing fields ride along for the same reason.
-      const response = await fetch('/api/sessions', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
+      const { response, data } = await postSession({
           profile_id:      p.id,
           connection_type: p.connection_type || 'ssh',
           hostname:        p.hostname || '',
@@ -680,10 +731,8 @@
           parity:          p.parity || 'N',
           stop_bits:       p.stop_bits || 1,
           flow_control:    p.flow_control || 'none',
-        }),
       });
 
-      const data = await response.json();
       if (!response.ok) throw new Error(data.detail || `Server error ${response.status}`);
 
       failedRecently.delete(p.id);
@@ -1284,13 +1333,7 @@
     setLoading(true);
 
     try {
-      const response = await fetch('/api/sessions', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload),
-      });
-
-      const data = await response.json();
+      const { response, data } = await postSession(payload);
       if (!response.ok) throw new Error(data.detail || `Server error ${response.status}`);
 
       // Capture before hiding — hideConnectionDialog resets the form, and the

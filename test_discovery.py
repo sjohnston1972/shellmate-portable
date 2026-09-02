@@ -128,6 +128,32 @@ def test_targets() -> None:
           == ["switch01.example.net"])
 
 
+def test_ipv6_targets() -> None:
+    """IPv6 subnets, ranges and the short last-group form (#419)."""
+    print("\n-- IPv6 targets --")
+    from backend import discovery
+    full = discovery.parse_targets("2001:db8::1-2001:db8::4", 100)
+    check("a full IPv6 range expands", full == ["2001:db8::1", "2001:db8::2", "2001:db8::3", "2001:db8::4"], str(full))
+    short = discovery.parse_targets("2001:db8::a-c", 100)
+    check("the short last-group form works", short == ["2001:db8::a", "2001:db8::b", "2001:db8::c"], str(short))
+    cidr = discovery.parse_targets("2001:db8::/126", 100)
+    check("an IPv6 subnet expands to its hosts", len(cidr) == 3 and "2001:db8::1" in cidr, str(cidr))
+    mixed = discovery.parse_targets("10.0.0.1, 2001:db8::1", 100)
+    check("v4 and v6 can be listed together", mixed == ["10.0.0.1", "2001:db8::1"], str(mixed))
+    check("a range that mixes families is refused",
+          _raises(lambda: discovery.parse_targets("10.0.0.1-2001:db8::1", 100)))
+    check("a literal IPv6 host is bracketed for HTTP", discovery._url_host("2001:db8::1") == "[2001:db8::1]")
+    check("an IPv4 host is left alone", discovery._url_host("10.0.0.1") == "10.0.0.1")
+
+
+def _raises(fn) -> bool:
+    try:
+        fn()
+    except Exception:
+        return True
+    return False
+
+
 def test_the_size_limit_is_not_optional() -> None:
     """
     A /16 is 65,534 addresses and nobody means it the first time.
@@ -399,7 +425,7 @@ def main() -> int:
     print("  Network discovery")
     print("=" * 52)
 
-    for test in (test_targets,
+    for test in (test_targets, test_ipv6_targets,
                  test_the_size_limit_is_not_optional,
                  test_it_finds_something_that_is_there,
                  test_it_reports_nothing_for_a_dead_address,

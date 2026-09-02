@@ -43,7 +43,7 @@ from backend import auth, config_archive, desktop, paths
 from backend import groups as groups_module
 from backend import schemes as schemes_module
 from backend.configs import capture_config, diff_snapshots, drift_report
-from backend.connections.base import ConnectionError_, ConnectionParams
+from backend.connections.base import ConnectionError_, ConnectionParams, InteractiveRequired
 from backend.connections import sftp
 from backend.connections.manager import SessionManager
 from backend.connections.serial_handler import available_ports
@@ -414,6 +414,9 @@ class CreateSessionRequest(BaseModel):
     # "vault" (encrypted, the default) or "plaintext". The two are alternatives
     # rather than independent choices — a credential lives in one place.
     credential_storage: str = "vault"
+    # Answers to a keyboard-interactive challenge from a previous attempt
+    # (#406). Never stored; the vault does not want a one-time code.
+    interactive_answers: list[str] = []
 
     def to_params(self) -> ConnectionParams:
         """Convert to the transport-layer parameter object."""
@@ -527,6 +530,14 @@ async def create_session(request: CreateSessionRequest) -> dict:
         # Every transport blocks while connecting, so run it off the event loop.
         session = await asyncio.to_thread(session_manager.create_session, params,
                                           request.profile_id)
+    except InteractiveRequired as exc:
+        # Not a failure: the device wants an answer only the user has (#406).
+        # 409 with the prompts; the interface asks and posts again with
+        # `interactive_answers`.
+        logger.info("%s is asking: %s", params.hostname,
+                    ", ".join(p["text"] for p in exc.prompts))
+        raise HTTPException(status_code=409,
+                            detail={"interactive": exc.as_dict()}) from exc
     except ConnectionError_ as exc:
         # Already phrased for the user by the handler.
         logger.info("Connection failed: %s", exc)
@@ -1246,6 +1257,76 @@ async def sftp_upload(session_id: str, path: str, file: UploadFile = File(...)) 
         return await asyncio.to_thread(sftp.write_file, session, path, data)
     except ConnectionError_ as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class SftpRenameRequest(BaseModel):
+    path: str
+    new_path: str
+
+
+class SftpPathRequest(BaseModel):
+    path: str
+
+
+class SftpModeRequest(BaseModel):
+    path: str
+    mode: str
+
+
+@app.post("/api/sftp/{session_id}/rename")
+async def sftp_rename(session_id: str, request: SftpRenameRequest) -> dict:
+    """Rename or move a remote file or directory (#418)."""
+    session = _require_session(session_id)
+    try:
+        return await asyncio.to_thread(sftp.rename, session, request.path, request.new_path)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/sftp/{session_id}/mkdir")
+async def sftp_mkdir(session_id: str, request: SftpPathRequest) -> dict:
+    """Create a remote directory (#418)."""
+    session = _require_session(session_id)
+    try:
+        return await asyncio.to_thread(sftp.make_directory, session, request.path)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/sftp/{session_id}/chmod")
+async def sftp_chmod(session_id: str, request: SftpModeRequest) -> dict:
+    """Change permissions on a remote path (#418)."""
+    session = _require_session(session_id)
+    try:
+        return await asyncio.to_thread(sftp.set_permissions, session, request.path, request.mode)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/sftp/{session_id}/directory")
+async def sftp_rmdir(session_id: str, path: str) -> dict:
+    """Delete a remote directory and its contents (#418)."""
+    session = _require_session(session_id)
+    try:
+        return await asyncio.to_thread(sftp.delete_directory, session, path)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/sftp/{session_id}/download-directory")
+async def sftp_download_directory(session_id: str, path: str) -> Response:
+    """Download a remote directory as a zip (#418)."""
+    session = _require_session(session_id)
+    try:
+        data = await asyncio.to_thread(sftp.read_directory_zip, session, path)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    filename = re.sub(r'[^\w\-. ]', "_", path.rstrip("/").rsplit("/", 1)[-1] or "folder") + ".zip"
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.delete("/api/sftp/{session_id}/file")

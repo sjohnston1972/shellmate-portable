@@ -82,6 +82,13 @@ class ConnectionParams:
     # Set by the API layer, which is the only part that knows.
     credential_source: str = ""
 
+    # Answers to a keyboard-interactive challenge the device raised on a
+    # previous attempt (#406): a one-time code, a second factor, a
+    # "press Enter to continue". Consumed in prompt order; a prompt that
+    # asks for a password is answered with the password instead. Never
+    # saved anywhere — scrubbed with the other secrets.
+    interactive_answers: list = field(default_factory=list)
+
     def effective_username(self) -> str:
         """
         The account to authenticate as.
@@ -119,11 +126,37 @@ class ConnectionParams:
         self.private_key_passphrase = ""
         self.jump_password = ""
         self.jump_private_key_passphrase = ""
+        self.interactive_answers = []
 
 
 # ---------------------------------------------------------------------------
 # Handler contract
 # ---------------------------------------------------------------------------
+
+
+class InteractiveRequired(Exception):
+    """
+    The device asked something only the user can answer (#406).
+
+    Raised out of an SSH connect when the server's keyboard-interactive
+    challenge carried a prompt that is not a password prompt — a one-time
+    code, a Duo push confirmation, a "verification code:". The connection
+    attempt is abandoned; the API returns the prompts; the interface asks;
+    the next attempt carries the answers in ``interactive_answers``.
+
+    ``prompts`` is ``[{"text": str, "echo": bool}]`` in the order the
+    server asked. ``echo`` False means what is typed should be masked.
+    """
+
+    def __init__(self, title: str, instructions: str, prompts: list[dict]) -> None:
+        self.title = title or ""
+        self.instructions = instructions or ""
+        self.prompts = prompts
+        super().__init__(f"The device is asking: {', '.join(p['text'] for p in prompts) or 'a question'}")
+
+    def as_dict(self) -> dict:
+        return {"title": self.title, "instructions": self.instructions,
+                "prompts": [dict(p) for p in self.prompts]}
 
 
 class ConnectionError_(Exception):

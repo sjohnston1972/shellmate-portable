@@ -2303,10 +2303,9 @@
 
     if (profile && profile.has_saved_credentials) {
       try {
-        const res = await fetch('/api/sessions', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({
+        // Through the shared helper (#406), so a device that asks for a
+        // second factor on reconnect gets asked, not refused.
+        const posted = await window.postSession({
             connection_type: profile.connection_type || 'ssh',
             hostname:        profile.hostname || '',
             port:            profile.port || 22,
@@ -2315,10 +2314,10 @@
             baud_rate:       profile.baud_rate || 9600,
             display_label:   profile.name || '',
             profile_id:      profile.id,
-          }),
         });
+        const res = posted.response;
         if (res.ok) {
-          const data = await res.json();
+          const data = posted.data;
           // force: the tab being replaced is the dead one the user asked to
           // reconnect. It would not be asked about today — a disconnected tab
           // closes without a word — but saying so keeps this correct if that

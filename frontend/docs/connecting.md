@@ -34,6 +34,18 @@ for the SSH layer and then prompt for an enable or AAA password.
 Making a key, choosing its type, and getting the public half onto a Cisco,
 Junos or Linux device are covered on their own page: [SSH keys](#ssh-keys).
 
+### When the device asks a question
+
+A device or bastion behind two-factor authentication asks for something
+beyond a password — a one-time code, a push confirmation, a "verification
+code:" prompt. ShellMate cannot know the answer, so it stops, shows you what
+the device asked, and sends your answer with the next attempt. The password
+still answers the password prompt; only the extra question reaches you. A
+one-time code is used by the attempt that carries it and never stored.
+
+The same happens on a reconnect, and when a connection is opened straight
+from a tile.
+
 ### Jump hosts
 
 Fill in **Jump host** to reach a device through a bastion. This is the same
@@ -210,6 +222,17 @@ one costs nothing. A saved connection opens on whichever form it uses, and
 key-based ones carry a key icon on the dashboard — worth knowing before
 you click, because when a key connection fails the cause is usually the key
 rather than a password.
+
+## Files
+
+The **Files** panel in the sidebar browses the device over the same SSH
+session, without a second login. Files download and upload singly; a folder
+downloads as a zip and uploads file by file with its structure recreated.
+Every entry can be renamed or moved, have its permissions set as an octal
+mode, or deleted — a folder together with everything in it. The folder
+operations count what they would touch before touching anything and refuse
+above the limit under Stockton → SSH & Serial, so a slip does not become a
+wiped flash. Deleting the root is refused outright.
 
 ## Finding devices
 

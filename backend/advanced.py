@@ -353,6 +353,13 @@ SETTINGS: tuple[Setting, ...] = (
             "Every multi-line paste asks today. Somebody pasting short "
             "configuration blocks all day may want 5.",
             minimum=1, maximum=1000, unit="lines"),
+    Setting("files.max_folder_entries", "Most entries a folder transfer may touch", 2000, "int",
+            "The ceiling on files and folders in one folder download or "
+            "folder delete.",
+            "A whole flash: pulled by accident is slow; a whole flash: "
+            "deleted by accident is a day. The walk counts first and "
+            "refuses before touching anything (#418).",
+            minimum=10, maximum=100000, unit="entries"),
     Setting("terminal.copy_output_lines", "Lines the Copy output button takes", 200, "int",
             "How much of the active terminal the status-bar copy button puts "
             "on the clipboard.",

@@ -136,15 +136,25 @@ def _expand(piece: str) -> list[str]:
         start_text, _, end_text = piece.partition("-")
         try:
             start = ipaddress.ip_address(start_text.strip())
-            # "10.20.30.1-60" — the short form people actually type.
-            if "." not in end_text:
+            end_text = end_text.strip()
+            # "10.20.30.1-60" — the short form people actually type. For
+            # IPv6 the short form is the last group: "2001:db8::1-1f" (#419).
+            if start.version == 6:
+                if ":" not in end_text:
+                    prefix = start_text.strip().rsplit(":", 1)[0]
+                    end = ipaddress.ip_address(f"{prefix}:{end_text}")
+                else:
+                    end = ipaddress.ip_address(end_text)
+            elif "." not in end_text:
                 prefix = start_text.strip().rsplit(".", 1)[0]
-                end = ipaddress.ip_address(f"{prefix}.{end_text.strip()}")
+                end = ipaddress.ip_address(f"{prefix}.{end_text}")
             else:
-                end = ipaddress.ip_address(end_text.strip())
+                end = ipaddress.ip_address(end_text)
         except ValueError as exc:
             raise TargetError(f"'{piece}' is not a range ShellMate understands.") from exc
 
+        if start.version != end.version:
+            raise TargetError(f"'{piece}' mixes IPv4 and IPv6.")
         if int(end) < int(start):
             start, end = end, start
         return [str(ipaddress.ip_address(n)) for n in range(int(start), int(end) + 1)]
@@ -424,6 +434,11 @@ async def _connect(address: str, port: int, timeout: float,
     return True, text
 
 
+def _url_host(address: str) -> str:
+    """A literal IPv6 address needs brackets in a URL and in http.client (#419)."""
+    return f"[{address}]" if ":" in address and not address.startswith("[") else address
+
+
 async def _http(address: str, port: int, timeout: float, secure: bool) -> dict:
     """
     Fetch ``/`` and keep what identifies the device.
@@ -446,9 +461,9 @@ async def _http(address: str, port: int, timeout: float, secure: bool) -> dict:
                 context.check_hostname = False
                 context.verify_mode = ssl.CERT_NONE
                 connection = http.client.HTTPSConnection(
-                    address, port, timeout=timeout, context=context)
+                    _url_host(address), port, timeout=timeout, context=context)
             else:
-                connection = http.client.HTTPConnection(address, port, timeout=timeout)
+                connection = http.client.HTTPConnection(_url_host(address), port, timeout=timeout)
 
             connection.request("GET", "/", headers={"User-Agent": "ShellMate-discovery"})
             response = connection.getresponse()
