@@ -1618,17 +1618,14 @@
       _ctxMenu.appendChild(row);
     }
 
-    document.body.appendChild(_ctxMenu);
+    // Positioning, dismissal and the keyboard model come from the shared
+    // menu (#425) — this one is only *built* here, because it is driven by
+    // its own table and grows submenus after opening.
+    window.shellmateMenu.attach(_ctxMenu, e);
 
     // Filled in behind the menu, so a right-click never waits on a request.
     if (_menuEnabled('special_commands')) _appendSpecialCommands(_ctxMenu, tab);
     if (_menuEnabled('quick_broadcast')) _appendQuickBroadcast(_ctxMenu, tab);
-
-    // Position near cursor, clamped to viewport
-    const x = Math.min(e.clientX, window.innerWidth  - 200);
-    const y = Math.min(e.clientY, window.innerHeight - 160);
-    _ctxMenu.style.left = `${x}px`;
-    _ctxMenu.style.top  = `${y}px`;
 
     _ctxMenu.addEventListener('click', (ev) => {
       const btn = ev.target.closest('[data-action]');
@@ -1673,14 +1670,6 @@
       }
       _hideTabContextMenu();
     });
-
-    // Dismiss on outside click or Escape
-    setTimeout(() => {
-      document.addEventListener('click',   _hideTabContextMenu, { once: true });
-      document.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Escape') _hideTabContextMenu();
-      }, { once: true });
-    }, 0);
   }
 
   /**
@@ -1755,12 +1744,10 @@
   }
 
   function _hideTabContextMenu() {
-    // Remove by class, not only the tracked reference. The dismissal
-    // listeners are registered per menu with { once: true }, so an older
-    // menu's handler can fire after a newer one has replaced the reference —
-    // removing the new menu and orphaning the old one, which then stays in
-    // the DOM for the life of the page.
-    document.querySelectorAll('.tab-context-menu').forEach(el => el.remove());
+    // The shared menu removes every `.tab-context-menu` on the page, the
+    // submenus included, and takes its own listeners off (#429).
+    if (window.shellmateMenu) window.shellmateMenu.close();
+    else document.querySelectorAll('.tab-context-menu').forEach(el => el.remove());
     _ctxMenu = null;
   }
 
@@ -1930,65 +1917,25 @@
       if (res.ok) profiles = await res.json();
     } catch (_) { /* the New session option still works */ }
 
-    _ctxMenu = document.createElement('div');
-    _ctxMenu.className = 'tab-context-menu';
-
-    const newBtn = document.createElement('button');
-    newBtn.dataset.action = 'new';
-    newBtn.innerHTML =
-      '<span class="material-symbols-outlined">add_circle</span> New session';
-    _ctxMenu.appendChild(newBtn);
-
+    const items = [
+      { icon: 'add_circle', label: 'New session', onClick: () => {
+          if (typeof window.showConnectionDialog === 'function') window.showConnectionDialog();
+        } },
+    ];
     if (profiles.length) {
-      const sep = document.createElement('div');
-      sep.className = 'ctx-sep';
-      _ctxMenu.appendChild(sep);
-
-      const heading = document.createElement('div');
-      heading.className = 'ctx-heading';
-      heading.textContent = 'Saved connections';
-      _ctxMenu.appendChild(heading);
-
-      profiles.slice(0, 12).forEach(p => {
-        const btn = document.createElement('button');
-        btn.dataset.action = 'open';
-        btn.dataset.profileId = p.id;
-        const icon = document.createElement('span');
-        icon.className = 'material-symbols-outlined';
-        icon.textContent = p.connection_type === 'serial' ? 'cable' : 'terminal';
-        const label = document.createElement('span');
-        // textContent — a profile name is user input.
-        label.textContent = p.name || p.hostname || p.serial_port || 'unnamed';
-        btn.appendChild(icon);
-        btn.appendChild(label);
-        _ctxMenu.appendChild(btn);
-      });
+      items.push('sep', { heading: 'Saved connections' });
+      profiles.slice(0, 12).forEach(p => items.push({
+        icon: p.connection_type === 'serial' ? 'cable' : 'terminal',
+        // A profile name is user input; the builder sets it as text.
+        label: p.name || p.hostname || p.serial_port || 'unnamed',
+        onClick: () => {
+          if (typeof window.showConnectionDialog === 'function') {
+            window.showConnectionDialog(p);
+          }
+        },
+      }));
     }
-
-    document.body.appendChild(_ctxMenu);
-    _ctxMenu.style.left = `${Math.min(e.clientX, window.innerWidth - 240)}px`;
-    _ctxMenu.style.top  = `${Math.min(e.clientY, window.innerHeight - 60 - _ctxMenu.offsetHeight)}px`;
-
-    _ctxMenu.addEventListener('click', (ev) => {
-      const btn = ev.target.closest('[data-action]');
-      if (!btn) return;
-      if (btn.dataset.action === 'new') {
-        if (typeof window.showConnectionDialog === 'function') window.showConnectionDialog();
-      } else if (btn.dataset.action === 'open') {
-        const profile = profiles.find(p => p.id === btn.dataset.profileId);
-        if (profile && typeof window.showConnectionDialog === 'function') {
-          window.showConnectionDialog(profile);
-        }
-      }
-      _hideTabContextMenu();
-    });
-
-    setTimeout(() => {
-      document.addEventListener('click', _hideTabContextMenu, { once: true });
-      document.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Escape') _hideTabContextMenu();
-      }, { once: true });
-    }, 0);
+    _ctxMenu = window.shellmateMenu.open(e, items);
   }
 
   /**
@@ -2485,10 +2432,8 @@
     submenu.style.left = `${right}px`;
     submenu.style.top = `${Math.max(8,
       Math.min(anchor.top - 4, window.innerHeight - height - 8))}px`;
-
-    setTimeout(() => {
-      document.addEventListener('click', _hideTabContextMenu, { once: true });
-    }, 0);
+    // No dismissal of its own: it shares the class, so the shared menu's
+    // outside-click, Escape and close() all sweep it up with the parent.
   }
 
   /** Put one special command on the wire. */

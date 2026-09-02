@@ -2698,8 +2698,22 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   transition: background 0.1s;
 }
 
-.tab-context-menu button:hover {
+.tab-context-menu button:hover,
+.tab-context-menu button:focus-visible {
   background: var(--surface-high);
+}
+
+/* The menu itself takes focus when it opens so the arrows and Escape work;
+   a ring on the container would outline the whole menu for no reason. The
+   entries keep theirs. */
+.tab-context-menu:focus { outline: none; }
+.tab-context-menu button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.tab-context-menu button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .tab-context-menu button .material-symbols-outlined {

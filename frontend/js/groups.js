@@ -93,7 +93,7 @@
     // built with five careful clicks.
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || (!selected.size && !leafSelection.size)) return;
-      if (document.querySelector('.tab-context-menu')) return;
+      if (window.shellmateMenu && window.shellmateMenu.isOpen()) return;
       const overlayOpen = [...document.querySelectorAll('[id$="-overlay"]')]
         .some(el => !el.classList.contains('hidden'));
       if (overlayOpen) return;
@@ -1169,56 +1169,27 @@
       _leafBulkMenu(event);
       return;
     }
-    document.querySelectorAll('.group-menu').forEach(el => el.remove());
-
-    const menu = document.createElement('div');
-    menu.className = 'tab-context-menu group-menu';
-
-    const item = (icon, text, onClick, danger) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      if (danger) button.className = 'ctx-danger';
-      button.innerHTML = '<span class="material-symbols-outlined">' + icon + '</span>';
-      button.appendChild(document.createTextNode(text));
-      button.addEventListener('click', () => { menu.remove(); onClick(); });
-      return button;
-    };
-
-    // The same route the dashboard tiles take (#365): clicking connects, so
-    // editing needs its own way in.
-    menu.appendChild(item('tune', 'Edit connection...', () => {
-      if (typeof window.showConnectionDialog === 'function') {
-        window.showConnectionDialog(profile);
-      }
-    }));
-
-    menu.appendChild(item('content_copy', 'Copy to group...',
-                          () => _moveMember(profile, node, false)));
-    menu.appendChild(item('tab_duplicate', 'Move to group...',
-                          () => _moveMember(profile, node, true)));
-
-    const sep = document.createElement('div');
-    sep.className = 'ctx-sep';
-    menu.appendChild(sep);
-
-    menu.appendChild(item('backspace', 'Remove from "' + node.label + '"',
-                          () => _removeMember(profile, node)));
-    // Named unmistakably. In a tree of groups "delete" reads as "remove from
-    // this group", and it would actually delete the saved connection, which
-    // is not undoable.
-    menu.appendChild(item('delete_forever', 'Delete this connection...',
-                          () => _deleteMember(profile), true));
-
-    document.body.appendChild(menu);
-    // Clamped like the group menu (#264) — a member at the bottom of the
-    // tree deserves a reachable menu too.
-    menu.style.left = `${Math.max(8, Math.min(event.clientX,
-      window.innerWidth - menu.offsetWidth - 8))}px`;
-    menu.style.top = `${Math.max(8, Math.min(event.clientY,
-      window.innerHeight - menu.offsetHeight - 8))}px`;
-    setTimeout(() => {
-      document.addEventListener('click', () => menu.remove(), { once: true });
-    }, 0);
+    window.shellmateMenu.open(event, [
+      // The same route the dashboard tiles take (#365): clicking connects,
+      // so editing needs its own way in.
+      { icon: 'tune', label: 'Edit connection...', onClick: () => {
+          if (typeof window.showConnectionDialog === 'function') {
+            window.showConnectionDialog(profile);
+          }
+        } },
+      { icon: 'content_copy', label: 'Copy to group...',
+        onClick: () => _moveMember(profile, node, false) },
+      { icon: 'tab_duplicate', label: 'Move to group...',
+        onClick: () => _moveMember(profile, node, true) },
+      'sep',
+      { icon: 'backspace', label: 'Remove from "' + node.label + '"',
+        onClick: () => _removeMember(profile, node) },
+      // Named unmistakably. In a tree of groups "delete" reads as "remove
+      // from this group", and it would actually delete the saved connection,
+      // which is not undoable.
+      { icon: 'delete_forever', label: 'Delete this connection...', danger: true,
+        onClick: () => _deleteMember(profile) },
+    ], { className: 'group-menu' });
   }
 
   async function _moveMember(profile, node, removeFromCurrent) {
@@ -1279,31 +1250,14 @@
    * confusion this menu exists to remove.
    */
   function _leafBulkMenu(event) {
-    document.querySelectorAll('.group-menu').forEach(el => el.remove());
-
-    const menu = document.createElement('div');
-    menu.className = 'tab-context-menu group-menu';
     const n = leafSelection.size;
-
-    const item = (icon, text, onClick, danger) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      if (danger) button.className = 'ctx-danger';
-      button.innerHTML = `<span class="material-symbols-outlined">${icon}</span>`;
-      button.appendChild(document.createTextNode(text));
-      button.addEventListener('click', () => { menu.remove(); onClick(); });
-      return button;
-    };
-
-    menu.appendChild(item('content_copy', `Copy ${n} to group…`,
-                          () => _bulkMoveLeaves(false)));
-    menu.appendChild(item('tab_duplicate', `Move ${n} to group…`,
-                          () => _bulkMoveLeaves(true)));
-
-    const sep = document.createElement('div');
-    sep.className = 'ctx-sep';
-    menu.appendChild(sep);
-
+    const items = [
+      { icon: 'content_copy', label: `Copy ${n} to group…`,
+        onClick: () => _bulkMoveLeaves(false) },
+      { icon: 'tab_duplicate', label: `Move ${n} to group…`,
+        onClick: () => _bulkMoveLeaves(true) },
+      'sep',
+    ];
     // Only for rows that are in a group. A selection made under "Ungrouped"
     // has nothing to be removed from, and an entry that did nothing would
     // read as a bug.
@@ -1311,23 +1265,15 @@
     if (sources.size && !sources.has('')) {
       const from = sources.size === 1
         ? '"' + _groupLabel([...sources][0]) + '"' : 'their groups';
-      menu.appendChild(item('backspace', `Remove ${n} from ${from}`,
-                            _bulkRemoveLeaves));
+      items.push({ icon: 'backspace', label: `Remove ${n} from ${from}`,
+                   onClick: _bulkRemoveLeaves });
     }
-    menu.appendChild(item('delete_forever', `Delete ${n} connections…`,
-                          _bulkDeleteLeaves, true));
-    menu.appendChild(item('close', 'Clear selection', () => {
-      _clearLeafSelection();
-    }));
-
-    document.body.appendChild(menu);
-    menu.style.left = `${Math.max(8, Math.min(event.clientX,
-      window.innerWidth - menu.offsetWidth - 8))}px`;
-    menu.style.top = `${Math.max(8, Math.min(event.clientY,
-      window.innerHeight - menu.offsetHeight - 8))}px`;
-    setTimeout(() => {
-      document.addEventListener('click', () => menu.remove(), { once: true });
-    }, 0);
+    items.push(
+      { icon: 'delete_forever', label: `Delete ${n} connections…`, danger: true,
+        onClick: _bulkDeleteLeaves },
+      { icon: 'close', label: 'Clear selection', onClick: _clearLeafSelection },
+    );
+    window.shellmateMenu.open(event, items, { className: 'group-menu' });
   }
 
   /** The distinct group keys the selected leaves were picked under. */
@@ -2144,85 +2090,52 @@
       _bulkMenu(event);
       return;
     }
-    document.querySelectorAll('.group-menu').forEach(el => el.remove());
 
-    const menu = document.createElement('div');
-    menu.className = 'tab-context-menu group-menu';
-
-    const item = (icon, text, onClick, danger, disabled) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      if (danger) button.className = 'ctx-danger';
-      button.innerHTML = `<span class="material-symbols-outlined">${icon}</span>`;
-      button.appendChild(document.createTextNode(text));
-      if (disabled) {
-        // Present but grey (#262): an entry that vanishes leaves someone
-        // wondering where it went; one that explains itself does not.
-        button.disabled = true;
-        button.title = 'The group has no connections in it.';
-      } else {
-        button.addEventListener('click', () => { menu.remove(); onClick(); });
-      }
-      return button;
-    };
-
-    menu.appendChild(item('tune', 'Rename or recolour…', () => editGroup(group)));
-    menu.appendChild(item('palette', 'Change the icon...', () => pickIcon(group)));
-    // Nesting was already rendered - a group named "site-3/access" becomes
-    // a branch under "site-3" - but the only way to make one was typing the
-    // separator by hand into the name field, which nothing explained (#163).
-    menu.appendChild(item('add', 'New subgroup...', () => newSubgroup(group)));
-    // Straight into this group (#263): the dialog opens with the Groups
-    // field prefilled, so the new profile lands where the click was.
-    menu.appendChild(item('add_circle', 'New connection...', () => {
-      if (typeof window.showConnectionDialog === 'function') {
-        window.showConnectionDialog({ connection_type: 'ssh', tags: [group.key] });
-      }
-    }));
+    const items = [
+      { icon: 'tune', label: 'Rename or recolour…', onClick: () => editGroup(group) },
+      { icon: 'palette', label: 'Change the icon...', onClick: () => pickIcon(group) },
+      // Nesting was already rendered - a group named "site-3/access" becomes
+      // a branch under "site-3" - but the only way to make one was typing
+      // the separator by hand into the name field, which nothing explained
+      // (#163).
+      { icon: 'add', label: 'New subgroup...', onClick: () => newSubgroup(group) },
+      // Straight into this group (#263): the dialog opens with the Groups
+      // field prefilled, so the new profile lands where the click was.
+      { icon: 'add_circle', label: 'New connection...', onClick: () => {
+          if (typeof window.showConnectionDialog === 'function') {
+            window.showConnectionDialog({ connection_type: 'ssh', tags: [group.key] });
+          }
+        } },
+    ];
 
     // At 100 sites of 10 subgroups, opening a tree by hand is not a thing
     // anybody is going to do (#182).
     const node = _findNode(group.key);
     if (node && node.children.length) {
-      menu.appendChild(item('unfold_more', 'Expand all below',
-                            () => _expandAll(node, true)));
-      menu.appendChild(item('unfold_less', 'Collapse all below',
-                            () => _expandAll(node, false)));
+      items.push(
+        { icon: 'unfold_more', label: 'Expand all below', onClick: () => _expandAll(node, true) },
+        { icon: 'unfold_less', label: 'Collapse all below', onClick: () => _expandAll(node, false) },
+      );
     }
 
-    const sweep = document.createElement('div');
-    sweep.className = 'ctx-sep';
-    menu.appendChild(sweep);
     // Grey for an empty group (#262) — the actions could only ever say
     // "nothing to connect", and a menu entry that always fails is a trap.
     const empty = _membersUnder(group.key).length === 0;
-    menu.appendChild(item('add_circle', 'Connect all',
-                          () => _connectAll(group), false, empty));
-    menu.appendChild(item('stop_circle', 'Disconnect all',
-                          () => _disconnectAll(group), true, empty));
-    menu.appendChild(item(
-      'bookmark_add',
-      group.favourite ? 'Unpin from the top' : 'Pin to the top',
-      () => _update(group.key, { favourite: !group.favourite })));
-
-    const sep = document.createElement('div');
-    sep.className = 'ctx-sep';
-    menu.appendChild(sep);
-
-    menu.appendChild(item('delete_forever', 'Delete group…',
-                          () => deleteGroup(group), true));
-
-    document.body.appendChild(menu);
-    // Clamped on both axes (#264): a group near the bottom of a full tree
-    // used to open its menu half off screen.
-    menu.style.left = `${Math.max(8, Math.min(event.clientX,
-      window.innerWidth - menu.offsetWidth - 8))}px`;
-    menu.style.top = `${Math.max(8, Math.min(event.clientY,
-      window.innerHeight - menu.offsetHeight - 8))}px`;
-
-    setTimeout(() => {
-      document.addEventListener('click', () => menu.remove(), { once: true });
-    }, 0);
+    const why = empty ? 'The group has no connections in it.' : '';
+    items.push(
+      'sep',
+      { icon: 'add_circle', label: 'Connect all', disabled: empty, title: why,
+        onClick: () => _connectAll(group) },
+      { icon: 'stop_circle', label: 'Disconnect all', danger: true, disabled: empty, title: why,
+        onClick: () => _disconnectAll(group) },
+      { icon: 'bookmark_add',
+        label: group.favourite ? 'Unpin from the top' : 'Pin to the top',
+        onClick: () => _update(group.key, { favourite: !group.favourite }) },
+      'sep',
+      { icon: 'delete_forever', label: 'Delete group…', danger: true,
+        onClick: () => deleteGroup(group) },
+    );
+    window.shellmateMenu.open(event, items, { className: 'group-menu' });
   }
 
   /**
@@ -2233,27 +2146,9 @@
    * folding, selecting — is already a left-click.
    */
   function _rootMenu(event) {
-    document.querySelectorAll('.group-menu').forEach(el => el.remove());
-
-    const menu = document.createElement('div');
-    menu.className = 'tab-context-menu group-menu';
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.innerHTML = '<span class="material-symbols-outlined">add</span>';
-    button.appendChild(document.createTextNode('New group...'));
-    button.addEventListener('click', () => { menu.remove(); newGroup(); });
-    menu.appendChild(button);
-
-    document.body.appendChild(menu);
-    menu.style.left = `${Math.max(8, Math.min(event.clientX,
-      window.innerWidth - menu.offsetWidth - 8))}px`;
-    menu.style.top = `${Math.max(8, Math.min(event.clientY,
-      window.innerHeight - menu.offsetHeight - 8))}px`;
-
-    setTimeout(() => {
-      document.addEventListener('click', () => menu.remove(), { once: true });
-    }, 0);
+    window.shellmateMenu.open(event, [
+      { icon: 'add', label: 'New group...', onClick: () => newGroup() },
+    ], { className: 'group-menu' });
   }
 
   // -------------------------------------------------------------------------
@@ -2262,43 +2157,17 @@
 
   /** The menu a multi-selection gets: act on all of them, or let them go. */
   function _bulkMenu(event) {
-    document.querySelectorAll('.group-menu').forEach(el => el.remove());
-
-    const menu = document.createElement('div');
-    menu.className = 'tab-context-menu group-menu';
     const n = selected.size;
-
-    const item = (icon, text, onClick, danger) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      if (danger) button.className = 'ctx-danger';
-      button.innerHTML = `<span class="material-symbols-outlined">${icon}</span>`;
-      button.appendChild(document.createTextNode(text));
-      button.addEventListener('click', () => { menu.remove(); onClick(); });
-      return button;
-    };
-
-    menu.appendChild(item('tune', `Edit ${n} groups…`, _bulkEdit));
-
-    const sep = document.createElement('div');
-    sep.className = 'ctx-sep';
-    menu.appendChild(sep);
-
-    menu.appendChild(item('delete_forever', `Delete ${n} groups…`,
-                          _bulkDelete, true));
-    menu.appendChild(item('close', 'Clear selection', () => {
-      _clearSelection();
-      renderTree(profileCache);
-    }));
-
-    document.body.appendChild(menu);
-    menu.style.left = `${Math.max(8, Math.min(event.clientX,
-      window.innerWidth - menu.offsetWidth - 8))}px`;
-    menu.style.top = `${Math.max(8, Math.min(event.clientY,
-      window.innerHeight - menu.offsetHeight - 8))}px`;
-    setTimeout(() => {
-      document.addEventListener('click', () => menu.remove(), { once: true });
-    }, 0);
+    window.shellmateMenu.open(event, [
+      { icon: 'tune', label: `Edit ${n} groups…`, onClick: _bulkEdit },
+      'sep',
+      { icon: 'delete_forever', label: `Delete ${n} groups…`, danger: true,
+        onClick: _bulkDelete },
+      { icon: 'close', label: 'Clear selection', onClick: () => {
+          _clearSelection();
+          renderTree(profileCache);
+        } },
+    ], { className: 'group-menu' });
   }
 
   /** Recolour or pin every selected group in one pass. */
