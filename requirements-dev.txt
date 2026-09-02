@@ -16,3 +16,9 @@ brotli>=1.1.0
 # browser uses, so a pass here means the icons will not silently degrade
 # into plain text.
 uharfbuzz>=0.39.0
+
+# The test suite. pytest collects the test_*.py scripts; playwright drives
+# the browser for test_phase2.py and test_caching.py (run
+# `playwright install chromium` once after installing).
+pytest>=8.0
+playwright>=1.40

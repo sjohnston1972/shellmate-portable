@@ -1,6 +1,10 @@
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 paramiko>=3.3.1
+# Imported directly by backend/keys.py and backend/certs.py. It arrives
+# with paramiko anyway, but an undeclared import is one paramiko release
+# away from an ImportError at startup.
+cryptography>=42.0
 pyserial>=3.5
 httpx>=0.25.0
 python-dotenv>=1.0.0

@@ -121,8 +121,8 @@ git clone https://github.com/sjohnston1972/shellmate-portable.git
 cd shellmate-portable
 
 # 2. Install the runtime and build dependencies
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+pip install -r requirements.lock      # exact versions, for a release build
+pip install -r requirements-dev.txt   # (or requirements.txt for the floors only)
 
 # 3. (Optional) run the test suites — each is a standalone script
 python test_vault.py
