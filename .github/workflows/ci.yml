@@ -1,0 +1,88 @@
+# CI for ShellMate Portable (#422, #423).
+#
+# One job, on Windows, because that is what ships: the tests exercise DPAPI,
+# icacls, the Edge lookup and the WebView2 window fallbacks, none of which a
+# Linux runner can vouch for. Every test_*.py runs through tools/run_tests.py
+# so a single failing file fails the job, then the executable is built the
+# same way a release is built and kept as an artifact.
+#
+# A tag of the form v1.2.3 also publishes a GitHub release carrying the exe,
+# which is what the in-app update check compares itself against.
+#
+# Code signing runs only when the repository holds a certificate:
+#   SIGN_CERT_PFX_BASE64  the .pfx, base64-encoded
+#   SIGN_CERT_PASSWORD    its password
+# Without them the step is skipped and the build is unsigned, as it is
+# today. Windows SDK signtool ships on the hosted runner.
+
+name: CI
+
+on:
+  push:
+    branches: [main, portable]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to attach the exe to a release
+
+jobs:
+  test-and-build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # build_info.json records the commit
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+          pip install -r requirements-dev.txt
+          python -m playwright install chromium
+
+      - name: Run every test
+        run: python tools/run_tests.py
+        env:
+          PYTHONUTF8: "1"
+
+      - name: Build the portable executable
+        run: pyinstaller build.spec --noconfirm
+
+      - name: Sign the executable
+        if: ${{ env.SIGN_CERT_PFX_BASE64 != '' }}
+        shell: pwsh
+        env:
+          SIGN_CERT_PFX_BASE64: ${{ secrets.SIGN_CERT_PFX_BASE64 }}
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_CERT_PFX_BASE64))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          & $signtool sign /f $pfx /p $env:SIGN_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist\ShellMate-Portable.exe
+          & $signtool verify /pa dist\ShellMate-Portable.exe
+          Remove-Item $pfx
+
+      - name: Keep the executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShellMate-Portable-${{ github.sha }}
+          path: dist/ShellMate-Portable.exe
+          if-no-files-found: error
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ShellMate-Portable.exe
+          generate_release_notes: true

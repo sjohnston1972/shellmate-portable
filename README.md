@@ -124,11 +124,11 @@ cd shellmate-portable
 pip install -r requirements.lock      # exact versions, for a release build
 pip install -r requirements-dev.txt   # (or requirements.txt for the floors only)
 
-# 3. (Optional) run the test suites — each is a standalone script
-python test_vault.py
-python test_alerts.py
-#    ...or the lot:
-#    for %f in (test_*.py) do @python %f
+# 3. (Optional) run the tests — each is a standalone script, and the
+#    runner gives the lot one exit code and a summary
+python test_vault.py                      # one
+python tools/run_tests.py                 # all of them
+python tools/run_tests.py --skip phase2,caching   # without the browser ones
 
 # 4. Build
 pyinstaller build.spec --noconfirm
@@ -157,6 +157,17 @@ Worth knowing before you build:
   likely to be flagged.
 - The application icon is generated during the build from
   `backend/branding.py`; a failure there costs the icon, never the build.
+- **CI does the same on every push** (`.github/workflows/ci.yml`): a Windows
+  runner installs `requirements.lock`, runs every test through
+  `tools/run_tests.py`, builds the executable and keeps it as an artifact. A
+  tag of the form `v1.2.3` also publishes a GitHub release carrying the exe,
+  which is what the in-app update check compares itself against.
+- **Code signing** happens in that workflow when the repository holds a
+  certificate — `SIGN_CERT_PFX_BASE64` and `SIGN_CERT_PASSWORD` as Actions
+  secrets. Without them the build is unsigned, which is what corporate
+  antivirus objects to; with them, `signtool` signs and timestamps the exe
+  before it is kept. The step is in the workflow rather than `build.spec`
+  because PyInstaller's `codesign_identity` is macOS-only.
 
 ### Source install
 
@@ -370,7 +381,7 @@ shellmate-portable/
 │   ├── docs/                  # The bundled manual, including licences/
 │   └── vendor/                # xterm.js and fonts — no CDN at runtime
 ├── relay/                     # Cloudflare Worker that files feedback as issues
-└── test_*.py                  # 35 suites, run individually: python test_vault.py
+└── test_*.py                  # 35 suites: python tools/run_tests.py, or one at a time
 ```
 
 ## Design
