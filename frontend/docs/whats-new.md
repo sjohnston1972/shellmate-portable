@@ -1,4 +1,10 @@
-# What's new in 1.0
+# What's new
+
+One section per release, newest first. The first run of a new version
+offers this page; **Updates** in the sidebar asks GitHub whether a newer one
+exists.
+
+## 1.0.0
 
 The first numbered release. Everything below arrived since the last build
 that had no number, and each item links to the page that explains it.

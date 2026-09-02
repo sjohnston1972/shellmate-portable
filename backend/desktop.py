@@ -215,6 +215,9 @@ class Tray:
                 pystray.MenuItem("Restart", self._restart,
                                  visible=lambda item: self._on_restart is not None
                                                       and can_restart()),
+                # Asks the running server (#441): the answer arrives as a
+                # tray notification, and a newer release opens its page.
+                pystray.MenuItem("Check for updates", self._check_updates),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Quit", self._quit),
             )
@@ -237,6 +240,36 @@ class Tray:
 
     def _browser(self, icon=None, item=None):
         webbrowser.open(f"http://localhost:{self.port}")
+
+    def _check_updates(self, icon=None, item=None):
+        """Ask our own server whether a newer release exists (#441)."""
+        def run():
+            message = "Could not check for updates."
+            url = ""
+            try:
+                import httpx
+                data = httpx.get(f"http://127.0.0.1:{self.port}/api/system/update",
+                                 timeout=10.0).json()
+                if data.get("error"):
+                    message = data["error"]
+                elif data.get("note"):
+                    message = f"{data['note']} You are running {data.get('current', '')}."
+                elif data.get("newer"):
+                    message = (f"ShellMate {data.get('latest')} is available; you are running "
+                               f"{data.get('current')}. Opening the release page.")
+                    url = data.get("url", "")
+                else:
+                    message = f"You are up to date ({data.get('current', '')})."
+            except Exception as exc:                      # pragma: no cover - UI
+                message = f"Could not check for updates: {exc}"
+            try:
+                if self._icon is not None:
+                    self._icon.notify(message, "ShellMate")
+            except Exception:
+                logger.info("Update check: %s", message)
+            if url:
+                webbrowser.open(url)
+        threading.Thread(target=run, daemon=True, name="update-check").start()
 
     def _restart(self, icon=None, item=None):
         """

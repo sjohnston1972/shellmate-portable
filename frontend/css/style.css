@@ -1606,6 +1606,75 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   .tab-palette-row.active { forced-color-adjust: none; background: Highlight; color: HighlightText; }
 }
 
+/* A checkbox field in a dialog: control and label on one line (#439). */
+.sm-dialog-field.sm-dialog-field-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sm-dialog-field-check .sm-dialog-label { margin: 0; font-size: 13px; color: var(--on-surface); cursor: pointer; }
+.sm-dialog-field-check input[type="checkbox"] { width: auto; margin: 0; flex: none; }
+.sm-dialog-field-check .sm-dialog-hint { flex-basis: 100%; margin: 2px 0 0 24px; }
+
+/* Search hits in the manual and Settings (#436). */
+mark.search-hit {
+  background: color-mix(in srgb, var(--primary) 38%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+mark.search-hit.search-current { outline: 2px solid var(--primary); }
+.docs-search-wrap { display: flex; align-items: center; gap: 6px; }
+.docs-search-count { font-size: 11px; color: var(--on-surface-muted); white-space: nowrap; }
+.docs-nav-count {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--surface-high);
+  color: var(--on-surface-muted);
+}
+.setting-row.settings-search-strong .setting-label { font-weight: 600; }
+
+/* Whole-tab group colour (#434), when the switch is on. Mixed with the
+   surface so the label keeps its contrast in both themes. */
+#tab-list.tab-fill .tab.tab-group-member {
+  background: color-mix(in srgb, var(--group-colour) 22%, var(--surface));
+  border-color: color-mix(in srgb, var(--group-colour) 55%, transparent);
+}
+#tab-list.tab-fill .tab.tab-group-member:hover:not(.active) {
+  background: color-mix(in srgb, var(--group-colour) 32%, var(--surface-high));
+}
+#tab-list.tab-fill .tab.tab-group-member.active {
+  background: color-mix(in srgb, var(--group-colour) 45%, var(--surface-highest));
+  box-shadow: 0 0 0 1px var(--group-colour) inset;
+}
+#tab-list.tab-fill .tab.tab-group-member::before { opacity: 1; }
+
+/* The tab hover card (#435). */
+.tab-tip {
+  position: fixed;
+  z-index: 9200;
+  min-width: 220px;
+  max-width: 340px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--surface-highest);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  font-size: 12px;
+  color: var(--on-surface);
+  pointer-events: none;
+}
+.tab-tip-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.tab-tip-sub { color: var(--on-surface-muted); font-weight: 400; font-size: 11px; }
+.tab-tip-row { display: grid; grid-template-columns: 80px 1fr; gap: 2px 8px; }
+.tab-tip-key { color: var(--on-surface-muted); }
+.tab-tip-val { font-family: 'JetBrains Mono', monospace; font-size: 11px; word-break: break-all; }
+.tab-tip-groups .tab-tip-val { font-family: 'Inter', sans-serif; font-size: 12px; }
+.tab-tip-state-up { color: var(--tab-connected, #4ade80); }
+.tab-tip-state-down { color: var(--error, #f38ba8); }
+
 /* Port forwards dialog (#405) */
 .forwards-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
 .forwards-row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -2795,6 +2864,11 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
   padding: 4px;
   min-width: 180px;
+  /* Never taller than the window (#437): a long menu on a small screen
+     scrolls inside itself rather than losing its last entries. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .tab-context-menu button {
