@@ -35,7 +35,7 @@
     <div id="sidebar-logo">
       <img src="/static/Untitled-removebg-preview.png" alt="ShellMate" id="sidebar-logo-img" />
     </div>
-    <nav id="sidebar-nav">
+    <nav id="sidebar-nav" aria-label="Panels">
       <a href="#" id="sidebar-link-sessions" class="sidebar-link active" title="Sessions">
         <span class="material-symbols-outlined">terminal</span>
         <span class="sidebar-label">Sessions</span>
@@ -107,7 +107,7 @@
     ================================================================ -->
     <header id="tab-bar">
       <button id="tab-bar-brand" title="Home / Quick connect">ShellMate Portable</button>
-      <div id="tab-list"></div>
+      <div id="tab-list" role="tablist" aria-label="Open sessions"></div>
 
       <!-- The Tshoot/Learn toggle used to live here. It controls the
            assistant, so it now sits in the chat header beside Conclude and
@@ -368,7 +368,7 @@
     <!-- ================================================================
          STATUS BAR
     ================================================================ -->
-    <footer id="status-bar">
+    <footer id="status-bar" role="status" aria-live="off" aria-label="Session status">
       <!-- The clock sits beside the state (#227): "SSH: name | Connected
            01:05:12". Two spans, because the text is rewritten on every output
            message while the clock ticks once a second — separate elements
@@ -2405,6 +2405,21 @@ GigEth0/2     unassigned    YES unset  down     down
         </button>
       </div>
       <div id="replay-meta"></div>
+      <!-- Timed playback (#415): the session as it happened, at a chosen speed. -->
+      <div id="replay-controls">
+        <button type="button" id="replay-play" class="btn-secondary" title="Play the session back with its original timing">
+          <span class="material-symbols-outlined">replay</span> Play
+        </button>
+        <button type="button" id="replay-stop" class="btn-tertiary" disabled>Stop</button>
+        <label for="replay-speed" class="replay-speed-label">Speed</label>
+        <select id="replay-speed" class="setting-input">
+          <option value="1">1×</option>
+          <option value="4" selected>4×</option>
+          <option value="16">16×</option>
+          <option value="1000">Instant</option>
+        </select>
+      </div>
+      <div id="replay-player" class="hidden"></div>
       <div class="panel-body">
         <div id="replay-commands"></div>
       </div>
@@ -2655,6 +2670,8 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/usage.js"></script>
   <script src="/static/js/tabs.js"></script>
   <script src="/static/js/palette.js"></script>
+  <script src="/static/js/forwards.js"></script>
+  <script src="/static/js/config_push.js"></script>
   <script src="/static/js/layout.js"></script>
   <script src="/static/js/alerts.js"></script>
   <script src="/static/js/terminal.js"></script>

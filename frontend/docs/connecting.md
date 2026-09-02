@@ -223,6 +223,32 @@ key-based ones carry a key icon on the dashboard — worth knowing before
 you click, because when a key connection fails the cause is usually the key
 rather than a password.
 
+## Port forwards
+
+A tab's right-click menu has **Port forwards**. Three kinds, the same three
+OpenSSH offers: a **local** forward makes a port on this machine reach a host
+as the device sees it — the web page of a switch on the management network,
+say; a **dynamic** forward is a SOCKS5 proxy on this machine, so a browser
+pointed at it reaches anything the device can; a **remote** forward makes a
+port on the device reach a host here. Listeners bind to this machine only,
+there is a per-session limit in Stockton, and every forward stops when the
+session ends. Tick *start with every session* and the forward is kept on the
+saved connection.
+
+## Applying configuration
+
+**Apply configuration** in a tab's menu takes a block of lines, shows each
+one marked against the running configuration — new, already present, or a
+removal — and sends nothing until you have read that and pressed Apply. The
+lines then go into your own session, wrapped in the platform's enter and
+exit commands, paced, and echoed on screen like anything typed; a line on
+the platform's dangerous list refuses the push unless you confirm it. The
+configuration is captured before and after, so the change is a diff in the
+archive, and the diff panel offers to **propose the way back**: a best-effort
+inverse of what changed, opened as a new preview for you to read and edit —
+never applied on its own. Which platforms can be pushed to, and with what
+commands, is under Settings → Platform Definitions.
+
 ## Files
 
 The **Files** panel in the sidebar browses the device over the same SSH

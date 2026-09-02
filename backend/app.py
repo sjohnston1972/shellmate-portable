@@ -76,6 +76,8 @@ from backend.ai.router import stream_chat
 from backend.ai import chroma_client, providers
 from backend.config import DEFAULT_AI_BACKEND, JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
 from backend import version as app_version
+from backend import config_push, scheduler
+from backend.connections import forwards as forwards_module
 from backend.config import HOST as BIND_HOST
 
 logger = logging.getLogger(__name__)
@@ -461,6 +463,9 @@ class SaveProfileRequest(BaseModel):
     #: Free-text groupings. Tags rather than folders because the useful ones
     #: overlap — a device is both "glasgow" and "production" and "access".
     tags: list[str] = []
+    # Port forwards to start with every session from this profile (#405):
+    # [{kind, listen_port, host, port}].
+    forwards: list[dict] = []
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -548,6 +553,12 @@ async def create_session(request: CreateSessionRequest) -> dict:
 
     # Only remember credentials that actually worked — storing them before the
     # handshake would persist a typo the user is about to correct.
+    # A profile's saved forwards start with the session (#405). Failures are
+    # reported on the session rather than failing the connect: a port in use
+    # on this machine is not a reason to be unable to reach the device.
+    if request.profile_id:
+        await asyncio.to_thread(_start_profile_forwards, session, request.profile_id)
+
     if to_remember:
         if request.credential_storage == "plaintext":
             # The user asked for this explicitly. Logged at warning level
@@ -1259,6 +1270,120 @@ async def sftp_upload(session_id: str, path: str, file: UploadFile = File(...)) 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _start_profile_forwards(session_view: dict, profile_id: str) -> None:
+    profile = next((p for p in get_profiles() if p.get("id") == profile_id), None)
+    wanted = (profile or {}).get("forwards") or []
+    if not wanted:
+        return
+    session = session_manager.get_session(session_view.get("session_id", ""))
+    if not session:
+        return
+    try:
+        manager = forwards_module.manager_for(session)
+    except ConnectionError_:
+        return
+    for spec in wanted:
+        try:
+            manager.add(spec.get("kind", "local"), int(spec.get("listen_port", 0)),
+                        spec.get("host", ""), int(spec.get("port", 0) or 0))
+        except Exception as exc:
+            logger.warning("Forward from profile %s not started: %s", profile_id, exc)
+
+
+class ForwardRequest(BaseModel):
+    kind: str = "local"
+    listen_port: int
+    host: str = ""
+    port: int = 0
+    remember: bool = False
+
+
+@app.get("/api/sessions/{session_id}/forwards")
+async def list_forwards(session_id: str) -> dict:
+    """The port forwards a session holds (#405)."""
+    session = _require_session(session_id)
+    manager = session.get("forwards")
+    return {"forwards": manager.list() if manager else [],
+            "limit": int(advanced_setting("ssh.max_forwards"))}
+
+
+@app.post("/api/sessions/{session_id}/forwards")
+async def add_forward(session_id: str, request: ForwardRequest) -> dict:
+    """Start a forward on a session, and optionally save it to its profile."""
+    session = _require_session(session_id)
+    try:
+        manager = forwards_module.manager_for(session)
+        forward = await asyncio.to_thread(
+            manager.add, request.kind, request.listen_port, request.host, request.port)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if request.remember and session.get("profile_id"):
+        spec = {"kind": request.kind, "listen_port": request.listen_port,
+                "host": request.host, "port": request.port}
+        await asyncio.to_thread(profiles_module.set_forwards, session["profile_id"], spec, True)
+    return forward
+
+
+@app.delete("/api/sessions/{session_id}/forwards/{forward_id}")
+async def remove_forward(session_id: str, forward_id: str, forget: bool = False) -> dict:
+    """Stop a forward; with forget=true also drop it from the profile."""
+    session = _require_session(session_id)
+    manager = session.get("forwards")
+    listed = next((f for f in (manager.list() if manager else []) if f["id"] == forward_id), None)
+    removed = bool(manager and manager.remove(forward_id))
+    if forget and listed and session.get("profile_id"):
+        spec = {k: listed[k] for k in ("kind", "listen_port", "host", "port")}
+        await asyncio.to_thread(profiles_module.set_forwards, session["profile_id"], spec, False)
+    return {"removed": removed}
+
+
+class ConfigTextRequest(BaseModel):
+    text: str
+    fresh: bool = False
+    save: bool = False
+    force: bool = False
+
+
+@app.post("/api/configs/{session_id}/preview")
+async def config_preview(session_id: str, request: ConfigTextRequest) -> dict:
+    """What applying the text would change, without sending anything (#407)."""
+    session = _require_session(session_id)
+    try:
+        return await asyncio.to_thread(config_push.preview, session, request.text, request.fresh)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/configs/{session_id}/apply")
+async def config_apply(session_id: str, request: ConfigTextRequest) -> dict:
+    """Send the lines into the live session, then capture and diff."""
+    session = _require_session(session_id)
+    try:
+        return await asyncio.to_thread(config_push.apply, session, request.text,
+                                       request.save, request.force)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/configs/{session_id}/restore/{snapshot_id}")
+async def config_restore_proposal(session_id: str, snapshot_id: int) -> dict:
+    """A proposed change back to an earlier capture, for the engineer to read."""
+    session = _require_session(session_id)
+    try:
+        return await asyncio.to_thread(config_push.restore_proposal, session, snapshot_id)
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/groups/{key:path}/backup/run")
+async def run_group_backup(key: str) -> dict:
+    """Back up every device in a group now (#408)."""
+    try:
+        return await asyncio.to_thread(scheduler.run_now, key)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 class SftpRenameRequest(BaseModel):
     path: str
     new_path: str
@@ -1554,10 +1679,29 @@ async def send_feedback(request: FeedbackRequest) -> dict:
 
 
 @app.on_event("startup")
+async def _start_backup_scheduler() -> None:
+    """The once-a-minute check for scheduled backups (#408)."""
+    scheduler.start()
+
+
+@app.on_event("startup")
 async def _flush_feedback_outbox() -> None:
     """Retry reports queued while the relay was unreachable. Fire and
     forget — a slow relay must not delay the server coming up."""
     asyncio.get_running_loop().run_in_executor(None, feedback_module.flush)
+
+
+class ProfileForwardsRequest(BaseModel):
+    forwards: list[dict] = []
+
+
+@app.put("/api/profiles/{profile_id}/forwards")
+async def set_profile_forwards(profile_id: str, request: ProfileForwardsRequest) -> dict:
+    """Replace the forwards a profile starts with (#405)."""
+    try:
+        return await asyncio.to_thread(profiles_module.replace_forwards, profile_id, request.forwards)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 class TagsRequest(BaseModel):
@@ -1581,6 +1725,8 @@ class GroupRequest(BaseModel):
     icon: str = ""
     favourite: bool | None = None
     order: int | None = None
+    # A backup schedule (#408): {enabled, every, at, day}. None leaves it.
+    backup: dict | None = None
 
 
 class GroupOrderRequest(BaseModel):
@@ -2354,7 +2500,7 @@ def _build_time() -> str:
     built = app_version.build_info().get("built", "")
     if built:
         try:
-            return datetime.fromisoformat(built).strftime("%Y-%m-%d %H:%M")
+            return datetime.datetime.fromisoformat(built).strftime("%Y-%m-%d %H:%M")
         except ValueError:
             return built
     try:

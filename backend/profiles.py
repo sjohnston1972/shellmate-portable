@@ -870,6 +870,51 @@ def retag_many(renames: dict[str, str]) -> int:
     return touched
 
 
+def _clean_forward(spec: dict) -> dict | None:
+    """One forward as stored: kind, listen_port, host, port — nothing else."""
+    if not isinstance(spec, dict):
+        return None
+    kind = str(spec.get("kind", "local")).lower()
+    if kind not in ("local", "dynamic", "remote"):
+        return None
+    try:
+        listen_port = int(spec.get("listen_port", 0))
+        port = int(spec.get("port", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= listen_port <= 65535:
+        return None
+    return {"kind": kind, "listen_port": listen_port,
+            "host": str(spec.get("host", "")), "port": port}
+
+
+def set_forwards(profile_id: str, spec: dict, present: bool) -> list[dict]:
+    """Add or drop one forward on a profile (#405)."""
+    cleaned = _clean_forward(spec)
+    profiles = _load()
+    profile = next((p for p in profiles if p.get("id") == profile_id), None)
+    if profile is None or cleaned is None:
+        return []
+    current = [f for f in (profile.get("forwards") or []) if _clean_forward(f)]
+    current = [f for f in current if _clean_forward(f) != cleaned]
+    if present:
+        current.append(cleaned)
+    profile["forwards"] = current
+    _save(profiles)
+    return current
+
+
+def replace_forwards(profile_id: str, forwards: list) -> dict:
+    """Replace a profile's forwards outright."""
+    profiles = _load()
+    profile = next((p for p in profiles if p.get("id") == profile_id), None)
+    if profile is None:
+        raise ValueError("Profile not found")
+    profile["forwards"] = [f for f in (_clean_forward(x) for x in forwards or []) if f]
+    _save(profiles)
+    return profile
+
+
 def profiles_tagged(tag: str, include_nested: bool = False) -> list[dict]:
     """
     Every connection carrying a tag.

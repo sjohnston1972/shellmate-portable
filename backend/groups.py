@@ -179,6 +179,9 @@ def list_groups() -> list[dict]:
             # the interface can offer to give it a colour rather than treating
             # it as already configured.
             "implicit":  key not in stored,
+            # Scheduled backups (#408): the schedule, and how the last one went.
+            "backup":      entry.get("backup") or None,
+            "backup_last": entry.get("backup_last") or None,
         })
 
     # Favourites first, then the hand-arranged order, then alphabetically for
@@ -259,6 +262,18 @@ def update_group(key: str, changes: dict) -> dict:
         entry["icon"] = changes["icon"]
     if "favourite" in changes:
         entry["favourite"] = bool(changes["favourite"])
+    if "backup" in changes:
+        from backend import scheduler
+        plan = changes["backup"]
+        if plan and isinstance(plan, dict):
+            kept = scheduler.normalise(plan) or {"enabled": False}
+            if plan.get("armed_at"):
+                kept["armed_at"] = plan["armed_at"]
+            entry["backup"] = kept
+        else:
+            entry.pop("backup", None)
+    if "backup_last" in changes and isinstance(changes["backup_last"], dict):
+        entry["backup_last"] = changes["backup_last"]
     if "order" in changes:
         try:
             entry["order"] = int(changes["order"])

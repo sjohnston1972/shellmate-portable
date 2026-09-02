@@ -2,6 +2,23 @@
 
 Every session is recorded, automatically, with nothing to switch on.
 
+## Scheduled backups
+
+A group's menu has **Schedule backups**: every device in it has its
+configuration captured every hour, day or week at a time you choose. A
+device with an open session is captured through that session's second
+channel; one without is logged into for as long as the capture takes, using
+its saved credentials, and skipped if it has none. Devices are taken one at
+a time. The group's menu shows the last run's result, and **Back up
+configurations now** runs it on demand.
+
+## Playing a session back
+
+The replay panel's **Play** button runs the recorded session into a terminal
+with its original timing — the pauses between commands and the time each
+took — at 1×, 4×, 16× or instantly. Nothing extra is recorded for this; it
+is the same command history, played rather than listed.
+
 ## What gets recorded
 
 Not a flat log file. ShellMate reconstructs the structure of the session:

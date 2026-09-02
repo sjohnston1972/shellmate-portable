@@ -1584,6 +1584,52 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
 }
 .tab-palette-empty { padding: 12px; color: var(--on-surface-muted); font-size: 13px; }
 
+/* ------------------------------------------------------------------------
+   Keyboard focus and forced colours (#428)
+   ------------------------------------------------------------------------ */
+/* One visible ring for anything reached with the keyboard, and none for a
+   mouse click. Where a control paints its own ring this one is overridden
+   by that rule's specificity. */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.tab[role="tab"]:focus-visible { outline-offset: -2px; }
+/* Windows High Contrast / forced colours: rely on system colours and make
+   the edges that were only ever a background shade into real borders. */
+@media (forced-colors: active) {
+  .tab, .tab-context-menu, .sm-dialog, .side-panel, #tab-palette, .cmd-block, .plan-card {
+    border: 1px solid CanvasText;
+  }
+  .tab.active { border-width: 2px; }
+  .tab-context-menu button:hover, .tab-context-menu button:focus-visible,
+  .tab-palette-row.active { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+}
+
+/* Port forwards dialog (#405) */
+.forwards-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.forwards-row { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 8px; border: 1px solid var(--outline); border-radius: var(--radius-sm); }
+.forwards-text { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+.forwards-empty { color: var(--on-surface-muted); font-size: 13px; }
+
+/* Configuration preview (#407) */
+.sm-dialog-textarea { width: 100%; box-sizing: border-box; font-family: 'JetBrains Mono', monospace;
+  font-size: 12px; background: var(--surface-high); color: var(--on-surface);
+  border: 1px solid var(--outline); border-radius: var(--radius-sm); padding: 8px; resize: vertical; }
+.push-preview { max-height: 40vh; overflow: auto; font-family: 'JetBrains Mono', monospace; font-size: 12px;
+  border: 1px solid var(--outline); border-radius: var(--radius-sm); padding: 6px; margin-bottom: 8px; }
+.push-preview .push-add { color: var(--tab-connected, #4ade80); }
+.push-preview .push-remove { color: var(--error, #f38ba8); }
+.push-preview .push-present { color: var(--on-surface-muted); }
+.push-danger { margin-top: 6px; color: var(--error, #f38ba8); font-size: 12px; }
+
+/* Timed replay (#415) */
+#replay-controls { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.replay-speed-label { font-size: 12px; color: var(--on-surface-muted); }
+#replay-player { height: 40vh; min-height: 200px; background: #1e1e2e; border-radius: var(--radius-sm);
+  padding: 4px; margin-bottom: 8px; }
+
 /* A button that sits in the status bar's text line (#414). */
 #status-bar .status-btn {
   display: inline-flex;

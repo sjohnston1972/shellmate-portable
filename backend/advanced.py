@@ -263,6 +263,11 @@ SETTINGS: tuple[Setting, ...] = (
             "connections work.||`reject` is the right answer on a managed "
             "estate where every device's key is already known.",
             choices=("auto-add", "warn", "reject")),
+    Setting("ssh.max_forwards", "Port forwards per session", 8, "int",
+            "How many local, dynamic or remote forwards one session may hold.",
+            "Each is a listener on this machine or on the device. Eight is "
+            "plenty for a web page and a couple of internal hosts (#405).",
+            minimum=1, maximum=64),
     Setting("ssh.look_for_keys", "Try keys in ~/.ssh", True, "bool",
             "Let paramiko offer keys it finds in the usual place.",
             "Only consulted when you have given no password and named no key "
@@ -448,6 +453,12 @@ SETTINGS: tuple[Setting, ...] = (
             "Wait after connecting before asking for the configuration.",
             "A device still printing its banner will not answer cleanly.",
             minimum=0, maximum=60000, unit="ms"),
+    Setting("capture.push_line_delay_ms", "Delay between pushed config lines", 150, "int",
+            "Pacing when ShellMate applies a block of configuration (#407).",
+            "A device's input buffer is small and a paste that outruns it "
+            "drops characters silently — which in configuration is a wrong "
+            "line, not a missing one.",
+            minimum=0, maximum=5000, unit="ms"),
     Setting("capture.diff_context", "Diff context lines", 3, "int",
             "Unchanged lines shown either side of a change.",
             "More context makes a change easier to place and the diff longer.",

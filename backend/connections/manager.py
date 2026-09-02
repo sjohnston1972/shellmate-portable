@@ -205,6 +205,14 @@ class SessionManager:
             logger.warning("destroy_session called for unknown id: %s", session_id)
             return
 
+        # Port forwards are listeners on this machine; they must not outlive
+        # the transport they tunnel through (#405).
+        try:
+            from backend.connections import forwards as forwards_module
+            forwards_module.close_for(session)
+        except Exception as exc:
+            logger.debug("Closing forwards for %s: %s", session_id, exc)
+
         # A session usually ends mid-command — the tab is closed while output
         # is still arriving. Flush the parser so that last command is kept
         # rather than dropped, since it is often the interesting one.

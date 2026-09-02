@@ -82,6 +82,12 @@ class PlatformProfile:
     # a reboot, so it is tracked separately and worded differently.
     commit_confirm_patterns: list[str] = field(default_factory=list)
     commit_cancel_patterns: list[str] = field(default_factory=list)
+    # Applying configuration (#407): how to enter and leave configuration
+    # mode, and how to make it stick. Blank means ShellMate will not push
+    # to this platform — a wrong command here is worse than none.
+    config_enter: str = ""
+    config_exit: str = ""
+    save_command: str = ""
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -94,6 +100,9 @@ class PlatformProfile:
 BUILTIN: dict[str, PlatformProfile] = {
     "ios": PlatformProfile(
         id="ios",
+        config_enter="configure terminal",
+        config_exit="end",
+        save_command="write memory",
         name="Cisco IOS / IOS-XE",
         paging_off="terminal length 0",
         show_run="show running-config",
@@ -179,6 +188,9 @@ BUILTIN: dict[str, PlatformProfile] = {
     ),
     "nxos": PlatformProfile(
         id="nxos",
+        config_enter="configure terminal",
+        config_exit="end",
+        save_command="copy running-config startup-config",
         name="Cisco NX-OS",
         paging_off="terminal length 0",
         show_run="show running-config",
@@ -250,6 +262,9 @@ BUILTIN: dict[str, PlatformProfile] = {
     ),
     "asa": PlatformProfile(
         id="asa",
+        config_enter="configure terminal",
+        config_exit="end",
+        save_command="write memory",
         name="Cisco ASA",
         paging_off="terminal pager 0",
         show_run="show running-config",
@@ -283,6 +298,8 @@ BUILTIN: dict[str, PlatformProfile] = {
     ),
     "junos": PlatformProfile(
         id="junos",
+        config_enter="configure",
+        config_exit="commit and-quit",
         name="Juniper Junos",
         paging_off="set cli screen-length 0",
         show_run="show configuration | display set",
@@ -361,6 +378,9 @@ BUILTIN: dict[str, PlatformProfile] = {
     ),
     "panos": PlatformProfile(
         id="panos",
+        config_enter="configure",
+        config_exit="commit",
+        save_command="exit",
         name="Palo Alto PAN-OS",
         paging_off="set cli pager off",
         show_run="show config running",
@@ -395,6 +415,9 @@ BUILTIN: dict[str, PlatformProfile] = {
     ),
     "arista": PlatformProfile(
         id="arista",
+        config_enter="configure terminal",
+        config_exit="end",
+        save_command="write memory",
         name="Arista EOS",
         paging_off="terminal length 0",
         show_run="show running-config",

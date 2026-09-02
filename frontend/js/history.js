@@ -70,7 +70,7 @@
   }
 
   function closeHistory() { overlay.classList.add('hidden'); }
-  function closeReplay()  { replayOverlay.classList.add('hidden'); }
+  function closeReplay()  { _stopPlayer(); replayOverlay.classList.add('hidden'); }
 
 
   // -------------------------------------------------------------------------
@@ -319,6 +319,85 @@
   // Replay
   // -------------------------------------------------------------------------
 
+  // Timed playback (#415): the recorded commands, replayed into a terminal
+  // with the gaps between them and the time each took, at a chosen speed.
+  // The records already carry when each ran and how long it took; nothing
+  // new is stored.
+  let _player = null;
+
+  function _bindPlayer(session) {
+    const host = document.getElementById('replay-player');
+    const play = document.getElementById('replay-play');
+    const stop = document.getElementById('replay-stop');
+    const speed = document.getElementById('replay-speed');
+    if (!host || !play) return;
+    _stopPlayer();
+    host.classList.add('hidden');
+    play.onclick = () => _startPlayer(session, host, Number(speed.value) || 4);
+    stop.onclick = _stopPlayer;
+    play.disabled = !session.commands || !session.commands.length;
+  }
+
+  function _stopPlayer() {
+    if (_player) {
+      _player.cancelled = true;
+      try { _player.term.dispose(); } catch (_) { /* already gone */ }
+      _player = null;
+    }
+    const stop = document.getElementById('replay-stop');
+    if (stop) stop.disabled = true;
+  }
+
+  async function _startPlayer(session, host, speed) {
+    _stopPlayer();
+    host.classList.remove('hidden');
+    host.innerHTML = '';
+    const settings = (window.shellmateSettings || {}).terminal || {};
+    const term = new window.Terminal({
+      fontFamily: settings.font_family || "'JetBrains Mono', monospace",
+      fontSize: Number(settings.font_size) || 13,
+      scrollback: 5000,
+      disableStdin: true,
+      convertEol: true,
+      theme: { background: '#1e1e2e', foreground: '#cdd6f4' },
+    });
+    const fit = window.FitAddon ? new window.FitAddon.FitAddon() : null;
+    if (fit) term.loadAddon(fit);
+    term.open(host);
+    if (fit) { try { fit.fit(); } catch (_) { /* hidden */ } }
+    const player = { term, cancelled: false };
+    _player = player;
+    document.getElementById('replay-stop').disabled = false;
+
+    const wait = (ms) => new Promise(r => setTimeout(r, Math.max(0, ms / speed)));
+    let previousEnd = null;
+    for (const entry of session.commands) {
+      if (player.cancelled) return;
+      const ranAt = Number(entry.ran_at) || 0;
+      const took = Number(entry.duration_ms) || 0;
+      if (previousEnd !== null && ranAt) {
+        // The pause between the previous command finishing and this one.
+        await wait(Math.min(Math.max(0, (ranAt - previousEnd) * 1000), 60000));
+      }
+      if (player.cancelled) return;
+      term.write((entry.prompt || '') + entry.command + '\r\n');
+      // The output over the time it originally took, in a few slices so a
+      // long command visibly streams rather than lands at once.
+      const output = entry.output || '';
+      const slices = Math.min(20, Math.max(1, Math.ceil(output.length / 400)));
+      const size = Math.ceil(output.length / slices);
+      for (let i = 0; i < slices; i++) {
+        if (player.cancelled) return;
+        term.write(output.slice(i * size, (i + 1) * size));
+        await wait(took / slices);
+      }
+      if (output && !output.endsWith('\n')) term.write('\r\n');
+      previousEnd = ranAt + took / 1000;
+    }
+    term.write('\r\n\x1b[2m— end of recording —\x1b[0m\r\n');
+    document.getElementById('replay-stop').disabled = true;
+  }
+
   async function openReplay(sessionId) {
     replayOverlay.classList.remove('hidden');
     const list = document.getElementById('replay-commands');
@@ -336,6 +415,7 @@
   function renderReplay(session) {
     document.getElementById('replay-title').textContent =
       session.hostname || session.label || 'Session';
+    _bindPlayer(session);
 
     const meta = document.getElementById('replay-meta');
     const started = formatWhen(session.started_at);

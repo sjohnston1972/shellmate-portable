@@ -1276,6 +1276,60 @@
     window.shellmateMenu.open(event, items, { className: 'group-menu' });
   }
 
+  /** Set or clear a group's backup schedule (#408). */
+  async function _backupSchedule(group) {
+    const current = group.backup || {};
+    const last = group.backup_last;
+    const lastLine = last
+      ? `Last run ${new Date(last.at * 1000).toLocaleString()}: ${last.ok.length} ok, `
+        + `${last.failed.length} failed, ${last.skipped.length} skipped.`
+      : 'Not run yet.';
+    const answer = await window.shellmateDialog.form({
+      title: `Scheduled backups — ${group.name}`,
+      body: 'Every device in the group has its configuration captured on the schedule, '
+          + 'through an open session where there is one and a short headless login '
+          + 'otherwise. Devices without saved credentials are skipped. ' + lastLine,
+      confirmLabel: 'Save schedule',
+      fields: [
+        { name: 'enabled', label: 'Back up on a schedule', type: 'checkbox', value: !!current.enabled },
+        { name: 'every', label: 'Every', type: 'select', value: current.every || 'daily',
+          options: [{ value: 'hourly', label: 'Hour' }, { value: 'daily', label: 'Day' }, { value: 'weekly', label: 'Week' }] },
+        { name: 'at', label: 'At (HH:MM, for daily and weekly)', type: 'text', value: current.at || '02:00' },
+        { name: 'day', label: 'On (for weekly)', type: 'select', value: current.day || 'sun',
+          options: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map(d => ({ value: d, label: d[0].toUpperCase() + d.slice(1) })) },
+      ],
+      validate: (v) => (/^\d{1,2}:\d{2}$/.test(v.at || '') ? '' : 'The time needs to be HH:MM.'),
+    });
+    if (!answer) return;
+    await _update(group.key, { backup: {
+      enabled: !!answer.enabled, every: answer.every, at: answer.at, day: answer.day,
+    } });
+  }
+
+  /** Back the group up right now and say how it went. */
+  async function _backupNow(group) {
+    if (window.shellmateAlerts) {
+      window.shellmateAlerts.notify({ severity: 'info', icon: 'download',
+        title: `Backing up ${group.name}`, body: 'One device at a time. This can take a while.' });
+    }
+    try {
+      const res = await fetch('/api/groups/' + encodeURIComponent(group.key) + '/backup/run', { method: 'POST' });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(result.detail || `Server error ${res.status}`);
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          severity: result.failed.length ? 'warning' : 'info', icon: 'download',
+          title: `Backup of ${group.name} finished`,
+          body: `${result.ok.length} captured, ${result.failed.length} failed, ${result.skipped.length} skipped`
+            + (result.failed.length ? ': ' + result.failed.map(f => `${f.name} (${f.why})`).join('; ') : '.'),
+        });
+      }
+      _refresh();
+    } catch (err) {
+      _warn('Backup did not run', err.message);
+    }
+  }
+
   /** The distinct group keys the selected leaves were picked under. */
   function _leafSources() {
     return new Set(leafSelection.values());
@@ -2131,6 +2185,13 @@
       { icon: 'bookmark_add',
         label: group.favourite ? 'Unpin from the top' : 'Pin to the top',
         onClick: () => _update(group.key, { favourite: !group.favourite }) },
+      'sep',
+      // Configuration backups on a timer (#408), and on demand.
+      { icon: 'schedule', label: group.backup && group.backup.enabled
+          ? `Scheduled backup: ${group.backup.every} at ${group.backup.at}…` : 'Schedule backups…',
+        onClick: () => _backupSchedule(group) },
+      { icon: 'download', label: 'Back up configurations now', disabled: empty, title: why,
+        onClick: () => _backupNow(group) },
       'sep',
       { icon: 'delete_forever', label: 'Delete group…', danger: true,
         onClick: () => deleteGroup(group) },

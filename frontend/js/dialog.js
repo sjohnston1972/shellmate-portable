@@ -204,6 +204,15 @@
           control = document.createElement('input');
           control.type = 'checkbox';
           control.checked = Boolean(spec.value);
+        } else if (spec.type === 'textarea') {
+          // A block of text — configuration lines (#407). Monospace, because
+          // indentation is meaning on every platform ShellMate knows.
+          control = document.createElement('textarea');
+          control.rows = spec.rows || 10;
+          control.spellcheck = false;
+          control.value = spec.value || '';
+          control.classList.add('sm-dialog-textarea');
+          if (spec.placeholder) control.placeholder = spec.placeholder;
         } else {
           control = document.createElement('input');
           control.type = spec.type === 'password' ? 'password' : 'text';

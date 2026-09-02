@@ -159,6 +159,25 @@
     const tabEl = document.createElement('div');
     tabEl.className = 'tab';
     tabEl.dataset.sessionId = session_id;
+    // A tab in a tablist (#428): reachable by keyboard, announced as one.
+    tabEl.setAttribute('role', 'tab');
+    tabEl.setAttribute('aria-selected', 'false');
+    tabEl.tabIndex = -1;
+    tabEl.addEventListener('keydown', (e) => {
+      const index = tabs.findIndex(t => t.tabEl === tabEl);
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const next = (index + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+        switchToTab(next);
+        tabs[next].tabEl.focus();
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        switchToTab(index);
+      } else if (e.key === 'Delete') {
+        e.preventDefault();
+        closeTab(index);
+      }
+    });
 
     const dot = document.createElement('span');
     dot.className = 'tab-dot';
@@ -172,6 +191,8 @@
     closeBtn.className = 'tab-close';
     closeBtn.textContent = 'x';
     closeBtn.title = 'Close tab (Ctrl+W)';
+    closeBtn.setAttribute('aria-label', `Close ${label}`);
+    closeBtn.tabIndex = -1;
 
     tabEl.appendChild(dot);
     tabEl.appendChild(labelEl);
@@ -321,6 +342,8 @@
     // exactly one tab active, because exactly one has the keyboard.
     tabs.forEach((tab, i) => {
       tab.tabEl.classList.toggle('active', i === index);
+      tab.tabEl.setAttribute('aria-selected', i === index ? 'true' : 'false');
+      tab.tabEl.tabIndex = i === index ? 0 : -1;
       const container = document.getElementById(tab.containerId);
       if (container) container.classList.toggle('tab-current', i === index);
     });
@@ -1596,6 +1619,14 @@
       { action: 'rename', icon: 'edit', label: 'Rename tab…', setting: 'rename' },
     ],
     [
+      // Through the session that is already open (#405, #407): a web page
+      // on the far side, or a block of configuration with a preview first.
+      { action: 'forwards', icon: 'lan', label: 'Port forwards…',
+        setting: 'forwards', when: (tab) => tab && (tab.connectionType || 'ssh') === 'ssh' },
+      { action: 'apply-config', icon: 'tune', label: 'Apply configuration…',
+        setting: 'apply_config', when: (tab) => tab && tab.isConnected && (tab.connectionType || 'ssh') === 'ssh' },
+    ],
+    [
       // Colour-coding a tab is the thing a single global scheme could never
       // do: seeing at a glance which session is production.
       { action: 'scheme', icon: 'palette', label: 'Colour scheme',
@@ -1789,6 +1820,8 @@
           case 'save-connection': _saveConnection(tab);  break;
           case 'duplicate': _duplicateSession(tab);   break;
           case 'rename':    _renameTab(tab);          break;
+          case 'forwards':  window.shellmateForwards && window.shellmateForwards.open(tab); break;
+          case 'apply-config': window.shellmateConfigPush && window.shellmateConfigPush.open(tab); break;
           case 'scheme':    _chooseScheme(tab);       break;
           case 'keepalive':     _toggleKeepAlive([tab]);          break;
           case 'keepalive-all': _toggleKeepAlive(tabs.slice());   break;

@@ -88,6 +88,11 @@
   document.addEventListener('DOMContentLoaded', () => {
     toastHost = document.createElement('div');
     toastHost.id = 'alert-toasts';
+    // Announced by a screen reader as they arrive (#428), politely — a
+    // toast is never worth interrupting what is being read.
+    toastHost.setAttribute('role', 'status');
+    toastHost.setAttribute('aria-live', 'polite');
+    toastHost.setAttribute('aria-atomic', 'false');
     // Inside the terminal pane, so a toast is never over the chat controls.
     (document.getElementById('terminal-pane') || document.body).appendChild(toastHost);
 
