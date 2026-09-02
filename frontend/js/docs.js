@@ -30,7 +30,8 @@
 
   const SUPPORT_EMAIL = 'support@foundry-ns.com';
 
-  let overlay, nav, content, search;
+  let overlay, nav, content, search, countEl;
+  let hitIndex = -1;
   const cache = {};
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -59,6 +60,19 @@
     });
 
     search.addEventListener('input', () => filter(search.value.trim().toLowerCase()));
+    // Enter steps through the hits on the page; Escape clears (#436).
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); stepHit(e.shiftKey ? -1 : 1); }
+      if (e.key === 'Escape') { e.preventDefault(); search.value = ''; filter(''); }
+    });
+    // The count sits beside the box.
+    const wrap = document.createElement('span');
+    wrap.className = 'docs-search-wrap';
+    search.parentNode.insertBefore(wrap, search);
+    wrap.appendChild(search);
+    countEl = document.createElement('span');
+    countEl.className = 'docs-search-count';
+    wrap.appendChild(countEl);
 
     buildNav();
   });
@@ -112,6 +126,7 @@
       content.innerHTML = html;
       content.scrollTop = 0;
       wireInternalLinks();
+      highlight(search ? search.value.trim().toLowerCase() : '');
     } catch (e) {
       content.innerHTML = '';
       const err = document.createElement('div');
@@ -146,21 +161,92 @@
    * on disk, so there is nothing to be gained by being clever about it.
    */
   async function filter(query) {
+    nav.querySelectorAll('.docs-nav-count').forEach(el => el.remove());
     if (!query) {
       nav.querySelectorAll('.docs-nav-item').forEach(i => i.classList.remove('hidden'));
+      highlight('');
       return;
     }
 
     await Promise.all(PAGES.map(p => load(p.file).catch(() => '')));
 
+    let firstIndex = -1;
     nav.querySelectorAll('.docs-nav-item').forEach((item, i) => {
       const text = (cache[PAGES[i].file] || '').toLowerCase();
-      const matches = text.includes(query) || PAGES[i].title.toLowerCase().includes(query);
+      const hits = count(text, query);
+      const matches = hits > 0 || PAGES[i].title.toLowerCase().includes(query);
       item.classList.toggle('hidden', !matches);
+      if (matches && firstIndex < 0) firstIndex = i;
+      if (hits) {
+        // How many hits each page has, so the nav says where to look (#436).
+        const badge = document.createElement('span');
+        badge.className = 'docs-nav-count';
+        badge.textContent = String(hits);
+        item.appendChild(badge);
+      }
     });
 
-    const first = nav.querySelector('.docs-nav-item:not(.hidden)');
-    if (first) show(Number(first.dataset.index));
+    const active = nav.querySelector('.docs-nav-item.active');
+    const activeVisible = active && !active.classList.contains('hidden');
+    if (activeVisible) highlight(query);
+    else if (firstIndex >= 0) show(firstIndex);
+    else if (countEl) countEl.textContent = 'no matches';
+  }
+
+  function count(text, query) {
+    if (!query) return 0;
+    let n = 0, at = 0;
+    while ((at = text.indexOf(query, at)) !== -1) { n += 1; at += query.length; }
+    return n;
+  }
+
+  /**
+   * Wrap every occurrence on the rendered page in <mark> (#436). Text nodes
+   * only, so markup is never re-parsed, and skipping <mark>s already made.
+   */
+  function highlight(query) {
+    content.querySelectorAll('mark.search-hit').forEach(m => {
+      m.replaceWith(document.createTextNode(m.textContent));
+    });
+    content.normalize();
+    hitIndex = -1;
+    if (!query) { if (countEl) countEl.textContent = ''; return; }
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+    let total = 0;
+    nodes.forEach(node => {
+      const text = node.nodeValue;
+      const lower = text.toLowerCase();
+      if (!lower.includes(query)) return;
+      const frag = document.createDocumentFragment();
+      let at = 0, found;
+      while ((found = lower.indexOf(query, at)) !== -1) {
+        if (found > at) frag.appendChild(document.createTextNode(text.slice(at, found)));
+        const mark = document.createElement('mark');
+        mark.className = 'search-hit';
+        mark.textContent = text.slice(found, found + query.length);
+        frag.appendChild(mark);
+        at = found + query.length;
+        total += 1;
+      }
+      if (at < text.length) frag.appendChild(document.createTextNode(text.slice(at)));
+      node.replaceWith(frag);
+    });
+    if (countEl) countEl.textContent = total ? `${total} on this page` : 'not on this page';
+    if (total) stepHit(1);
+  }
+
+  /** Move to the next or previous hit on the page. */
+  function stepHit(delta) {
+    const marks = [...content.querySelectorAll('mark.search-hit')];
+    if (!marks.length) return;
+    marks.forEach(m => m.classList.remove('search-current'));
+    hitIndex = (hitIndex + delta + marks.length) % marks.length;
+    const mark = marks[hitIndex];
+    mark.classList.add('search-current');
+    mark.scrollIntoView({ block: 'center' });
+    if (countEl) countEl.textContent = `${hitIndex + 1} of ${marks.length} on this page`;
   }
 
   /**
@@ -199,4 +285,10 @@
   }
 
   window.openDocs = open;
+  /** Open the manual at a page, by file name — for the what's-new toast (#441). */
+  window.openDocsPage = async (file) => {
+    const index = PAGES.findIndex(p => p.file === file);
+    overlay.classList.remove('hidden');
+    await show(index >= 0 ? index : 0);
+  };
 })();

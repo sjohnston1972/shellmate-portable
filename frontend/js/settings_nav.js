@@ -131,6 +131,9 @@
       search.placeholder = 'Search settings…';
       search.autocomplete = 'off';
       search.addEventListener('input', applySearch);
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); search.value = ''; applySearch(); }
+    });
       searchWrap.appendChild(search);
 
       body.parentNode.insertBefore(searchWrap, body);
@@ -198,6 +201,7 @@
    */
   function applySearch() {
     const query = search.value.trim().toLowerCase();
+    unmark();
 
     if (!query) {
       show(active);
@@ -224,13 +228,52 @@
         const text = ((row.textContent || '') + ' ' + tips).toLowerCase();
         const matches = titleMatches || text.includes(query);
         row.classList.toggle('settings-hidden-by-search', !matches);
-        if (matches) anyVisible = true;
+        // A hit in the label itself outranks one buried in a tooltip (#436):
+        // the row is emphasised, and the matched words are marked.
+        const label = row.querySelector('.setting-label');
+        row.classList.toggle('settings-search-strong',
+          matches && !!label && label.textContent.toLowerCase().includes(query));
+        if (matches) { anyVisible = true; mark(row, query); }
       });
 
       section.classList.toggle('hidden', !anyVisible && !titleMatches);
     });
 
     showExtras(query);
+  }
+
+  /** Wrap the query in <mark> inside a row's visible text (#436). */
+  function mark(row, query) {
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => {
+        const parent = n.parentElement;
+        if (!parent || parent.closest('input, select, textarea, button, .tip-badge')) return NodeFilter.FILTER_REJECT;
+        return n.nodeValue.toLowerCase().includes(query) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+      },
+    });
+    const nodes = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+    nodes.forEach(node => {
+      const text = node.nodeValue;
+      const lower = text.toLowerCase();
+      const frag = document.createDocumentFragment();
+      let at = 0, found;
+      while ((found = lower.indexOf(query, at)) !== -1) {
+        if (found > at) frag.appendChild(document.createTextNode(text.slice(at, found)));
+        const m = document.createElement('mark');
+        m.className = 'search-hit';
+        m.textContent = text.slice(found, found + query.length);
+        frag.appendChild(m);
+        at = found + query.length;
+      }
+      if (at < text.length) frag.appendChild(document.createTextNode(text.slice(at)));
+      node.replaceWith(frag);
+    });
+  }
+
+  function unmark() {
+    panel.querySelectorAll('mark.search-hit').forEach(m => m.replaceWith(document.createTextNode(m.textContent)));
+    panel.querySelectorAll('.settings-search-strong').forEach(el => el.classList.remove('settings-search-strong'));
   }
 
   /**
