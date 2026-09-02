@@ -118,7 +118,7 @@ async def stream_chat(
             if sess and sess.get("buffer"):
                 extra_contexts.append({
                     "label":  sess.get("display_label") or sess.get("hostname", sid[:8]),
-                    "buffer": _session_text(sess, 100),
+                    "buffer": _session_text(sess, advanced("ai.extra_context_lines")),
                 })
     elif context_mode == "all":
         for s in all_sessions:
@@ -129,7 +129,7 @@ async def stream_chat(
             if sess and sess.get("buffer"):
                 extra_contexts.append({
                     "label":  sess.get("display_label") or sess.get("hostname", sid[:8]),
-                    "buffer": _session_text(sess, 100),
+                    "buffer": _session_text(sess, advanced("ai.extra_context_lines")),
                 })
     elif context_mode.isdigit():
         tab_num = int(context_mode)
@@ -144,7 +144,7 @@ async def stream_chat(
                             target.get("display_label") or
                             target.get("hostname", "")
                         ),
-                        "buffer": _session_text(sess, 100),
+                        "buffer": _session_text(sess, advanced("ai.extra_context_lines")),
                     })
 
     # Optional Chroma-backed design-guideline snippets. Only queried when a URL

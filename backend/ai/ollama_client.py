@@ -17,6 +17,25 @@ from backend.ai.prompts import SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 
+def _options() -> dict:
+    """
+    Ollama's per-request model options.
+
+    `num_predict` is Ollama's name for the reply ceiling and `num_ctx` the
+    window the model reads. The window defaults to 2048 in Ollama itself,
+    which a terminal buffer overruns silently — the prompt is truncated from
+    the front and the model answers about output it never saw.
+    """
+    options = {
+        "temperature": advanced("ai.temperature"),
+        "num_predict": advanced("ai.max_tokens"),
+    }
+    num_ctx = int(advanced("ai.ollama_num_ctx"))
+    if num_ctx > 0:
+        options["num_ctx"] = num_ctx
+    return options
+
+
 async def stream_response(
     user_message: str,
     context_block: str,
@@ -41,6 +60,11 @@ async def stream_response(
             {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
             {"role": "user", "content": full_user_message},
         ],
+        # The same settings the cloud clients honour, in Ollama's spelling.
+        # Without these, Temperature and Maximum response length in Stockton
+        # applied to every provider except the local one (#417).
+        "options": _options(),
+        "keep_alive": f"{int(advanced('ai.ollama_keep_alive'))}m",
     }
 
     async with httpx.AsyncClient(timeout=advanced("ai.request_timeout")) as client:

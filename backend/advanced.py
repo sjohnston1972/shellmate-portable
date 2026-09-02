@@ -551,9 +551,30 @@ SETTINGS: tuple[Setting, ...] = (
             "More context means better answers and more tokens. Zero sends "
             "none, which makes the assistant a general-purpose one.",
             minimum=0, maximum=5000, unit="lines"),
+    Setting("ai.extra_context_lines", "Lines sent for each extra session", 100, "int",
+            "Output from the other tabs when /context all or the tab picker "
+            "brings them in.",
+            "Lower than the active tab's figure on purpose: three extra "
+            "sessions at the full count is four times the tokens for context "
+            "that is usually background. Raise it when the comparison *is* "
+            "the question (#431).",
+            minimum=0, maximum=5000, unit="lines"),
     Setting("ai.context_commands", "Commands of history sent", 30, "int",
             "How many recent commands are listed alongside the output.",
             "", minimum=0, maximum=500),
+    Setting("ai.ollama_num_ctx", "Ollama context window", 8192, "int",
+            "How many tokens a local model is allowed to read per request.",
+            "Ollama's own default is 2048, which a 200-line buffer plus the "
+            "system prompt overruns without any warning — the model simply "
+            "never sees the start. Larger windows cost memory on the machine "
+            "running Ollama, not money. Zero leaves the model's default.",
+            minimum=0, maximum=262144, unit="tokens"),
+    Setting("ai.ollama_keep_alive", "Keep the local model loaded", 5, "int",
+            "How long Ollama keeps the model in memory after a reply.",
+            "Loading a 14B model takes several seconds; the first question "
+            "after a pause pays it again. Longer keeps the RAM taken. Zero "
+            "unloads it straight after each reply.",
+            minimum=0, maximum=1440, unit="min"),
     Setting("ai.request_timeout", "Request timeout", 120, "int",
             "How long to wait for a provider to finish answering.",
             "A long reply from a slow local model can legitimately take a "
