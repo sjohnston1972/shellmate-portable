@@ -28,7 +28,8 @@
   });
 
   function toast(spec) {
-    if (window.shellmateAlerts) window.shellmateAlerts.notify(spec);
+    // Shown wherever the person is looking, dashboard included: they asked.
+    if (window.shellmateAlerts) window.shellmateAlerts.notify({ global: true, ...spec });
   }
 
   async function fetchStatus() {

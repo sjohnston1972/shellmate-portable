@@ -539,7 +539,9 @@
     // somebody happens to be looking does not make that less true, and a
     // countdown suppressed because the dashboard was open is the single
     // worst outcome available here.
-    if (alert.deadline_ms || alert.severity === 'critical') return true;
+    // A toast the person asked for — an update check, say — is the same:
+    // hiding it because the dashboard is in front is hiding the answer.
+    if (alert.deadline_ms || alert.severity === 'critical' || alert.global) return true;
 
     if (typeof window.dashboardVisible === 'function' && window.dashboardVisible()) {
       return false;
@@ -573,7 +575,7 @@
     if (!toastHost) return;
     const onDashboard = typeof window.dashboardVisible === 'function'
       && window.dashboardVisible();
-    const holdsUrgent = toastHost.querySelector('.alert-critical, [data-urgent="1"]');
+    const holdsUrgent = toastHost.querySelector('.alert-critical, [data-urgent="1"], [data-global="1"]');
     toastHost.classList.toggle('alerts-hidden', Boolean(onDashboard) && !holdsUrgent);
   }
 
@@ -591,6 +593,7 @@
 
     const el = document.createElement('div');
     el.className = `alert-toast alert-${alert.severity}`;
+    if (alert.global) el.dataset.global = '1';
 
     const icon = document.createElement('span');
     icon.className = 'material-symbols-outlined';
