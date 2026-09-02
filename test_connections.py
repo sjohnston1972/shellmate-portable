@@ -462,7 +462,7 @@ def test_end_to_end_session() -> None:
     server = FakeTelnetServer(b"\r\nswitch01> ", echo=True)
     session_id = None
     try:
-        with TestClient(app) as client:
+        with TestClient(app, base_url="http://127.0.0.1") as client:
             response = client.post("/api/sessions", json={
                 "connection_type": "telnet",
                 "hostname": "127.0.0.1",
@@ -563,7 +563,7 @@ def test_a_session_records_which_connection_opened_it() -> None:
     adhoc_server = FakeTelnetServer(b"\r\nswitch02> ")
     opened: list[str] = []
     try:
-        with TestClient(app) as client:
+        with TestClient(app, base_url="http://127.0.0.1") as client:
             body = {"connection_type": "telnet", "hostname": "127.0.0.1",
                     "port": server.port, "display_label": "lab-switch"}
 
@@ -637,7 +637,7 @@ def test_a_dropped_session_stops_reporting_itself_as_open() -> None:
     server = FakeTelnetServer(b"\r\nswitch01> ")
     session_id = None
     try:
-        with TestClient(app) as client:
+        with TestClient(app, base_url="http://127.0.0.1") as client:
             made = client.post("/api/sessions", json={
                 "connection_type": "telnet", "hostname": "127.0.0.1",
                 "port": server.port, "display_label": "lab-switch",
@@ -689,7 +689,7 @@ def test_unknown_connection_type_rejected() -> None:
 
     from backend.app import app
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://127.0.0.1") as client:
         response = client.post("/api/sessions", json={
             "connection_type": "carrier-pigeon", "hostname": "10.0.0.1",
         })

@@ -175,7 +175,7 @@ def test_browsing_names_the_folder_that_is_missing() -> None:
 
     from backend.app import app
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     target = "a-folder-that-is-not-there"
 
     body = client.get(f"/api/local/browse?path={target}").json()
@@ -204,7 +204,7 @@ def test_creating_a_missing_folder() -> None:
 
     from backend.app import app
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     made = paths.data_dir() / "created-by-a-test"
     shutil.rmtree(made, ignore_errors=True)
 

@@ -252,7 +252,7 @@ def test_the_endpoint_answers() -> None:
 
     from backend.app import app
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     response = client.post("/api/keys/certificate", json={"text": USER_CERT})
     check("the endpoint answers", response.status_code == 200, response.text)
     if response.status_code != 200:

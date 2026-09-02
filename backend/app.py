@@ -75,6 +75,7 @@ from backend.ai.router import stream_chat
 from backend.ai import chroma_client, providers
 from backend.config import DEFAULT_AI_BACKEND, JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
 from backend import version as app_version
+from backend.config import HOST as BIND_HOST
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,62 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 # a revalidation is a stat and a 304, which is not worth a special case that
 # only ever applied to the stylesheet.
 # ---------------------------------------------------------------------------
+
+
+#: What the Host header may say while ShellMate is bound to loopback.
+LOOPBACK_HOST = re.compile(r"^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$")
+
+
+def cross_site_refusal(method: str, headers) -> str:
+    """
+    Why a request must be refused as not coming from our own page, or "".
+
+    Two holes the Origin regex and CORS left open (#424):
+
+    **DNS rebinding.** A page at evil.example whose name re-resolves to
+    127.0.0.1 is, to the browser, same-origin with whatever answers there —
+    so it sends no Origin, CORS never applies, and it can read everything.
+    The tell is the Host header, which the browser fills in from the URL it
+    believes it is talking to: ``evil.example``, never ``127.0.0.1``. While
+    ShellMate is bound to loopback, any other Host is refused. Bound wider
+    (the token deployment), the Host is whatever the reverse proxy passed and
+    the rule does not apply.
+
+    **Cross-site writes.** CORS stops a foreign page *reading* a response,
+    not sending the request. A form post or a multipart upload needs no
+    preflight, so a page anywhere could fire one at a state-changing
+    endpoint. Browsers say where such a request came from: ``Sec-Fetch-Site:
+    cross-site`` on anything modern, and an ``Origin`` that does not match
+    the Host. Either refuses the request for any method that changes
+    something. Reads are left to CORS, which already covers them.
+
+    Non-browser clients — a script with the API token, curl, the test suite
+    — send a loopback Host and no Origin, and pass.
+    """
+    host = (headers.get("host") or "").strip().lower()
+    if auth.is_loopback(BIND_HOST) and not LOOPBACK_HOST.match(host):
+        return ("Refused: the Host header is not a loopback address. ShellMate "
+                "answers only to its own address on this machine.")
+    if method.upper() in ("GET", "HEAD", "OPTIONS"):
+        return ""
+    if (headers.get("sec-fetch-site") or "").strip().lower() == "cross-site":
+        return "Refused: a cross-site request cannot change anything here."
+    origin = (headers.get("origin") or "").strip()
+    if origin:
+        origin_host = origin.split("://", 1)[-1].split("/", 1)[0].lower()
+        if origin_host != host and not ALLOWED_ORIGIN.match(origin):
+            return "Refused: the request's origin is not this server."
+    return ""
+
+
+@app.middleware("http")
+async def _same_site_only(request: Request, call_next):
+    """Refuse anything that did not come from our own page — see above."""
+    refusal = cross_site_refusal(request.method, request.headers)
+    if refusal:
+        logger.warning("%s %s: %s", request.method, request.url.path, refusal)
+        return JSONResponse({"detail": refusal}, status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")

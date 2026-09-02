@@ -52,7 +52,7 @@ def test_a_visited_page_cannot_open_a_websocket() -> None:
 
     from backend.app import app
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
 
     hostile = ("https://attacker.example", "http://attacker.example",
                "http://127.0.0.1.attacker.example", "null",
@@ -89,7 +89,7 @@ def test_our_own_pages_still_work() -> None:
 
     from backend.app import app
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
 
     for origin in ("http://127.0.0.1:8765", "http://localhost:8765",
                    "http://127.0.0.1:8766", "http://localhost"):
@@ -213,6 +213,52 @@ def test_the_browser_is_not_the_guarantee() -> None:
           "auto_analysis" in chat)
 
 
+def test_a_rebound_or_foreign_page_is_refused() -> None:
+    """
+    DNS rebinding and cross-site writes (#424).
+
+    A page whose name re-resolves to loopback is same-origin to the browser
+    and sends no Origin; the only tell is the Host header. A foreign page
+    cannot read our responses, but a form post or multipart upload needs no
+    preflight — so writes carry Sec-Fetch-Site or an Origin the browser will
+    not let the page forge, and either is enough to refuse.
+    """
+    print("\n-- A rebound or foreign page --")
+    from fastapi.testclient import TestClient
+
+    from backend.app import app, cross_site_refusal
+
+    client = TestClient(app, base_url="http://127.0.0.1")
+    ok = client.get("/api/health")
+    check("our own page still reaches the API", ok.status_code == 200,
+          f"got {ok.status_code}")
+
+    rebound = client.get("/api/health", headers={"host": "evil.example"})
+    check("a Host that is not loopback is refused", rebound.status_code == 403,
+          f"got {rebound.status_code}")
+    check("  and says why", "Host" in rebound.text)
+
+    for name, headers in (
+        ("Sec-Fetch-Site: cross-site", {"sec-fetch-site": "cross-site"}),
+        ("a foreign Origin", {"origin": "http://evil.example"}),
+        ("a null Origin", {"origin": "null"}),
+    ):
+        blocked = client.post("/api/settings", json={}, headers=headers)
+        check(f"a write with {name} is refused", blocked.status_code == 403,
+              f"got {blocked.status_code}")
+
+    read = client.get("/api/health", headers={"origin": "http://evil.example"})
+    check("a read with a foreign Origin is left to CORS", read.status_code == 200,
+          f"got {read.status_code}")
+
+    # Our own origins, on either loopback name and any port, are fine.
+    for origin in ("http://localhost:8765", "http://127.0.0.1:9001"):
+        check(f"{origin} may write",
+              cross_site_refusal("POST", {"host": "127.0.0.1:8765", "origin": origin}) == "")
+    check("a loopback Host with no Origin (curl, a script) may write",
+          cross_site_refusal("POST", {"host": "localhost:8765"}) == "")
+
+
 def test_binding_wide_without_a_token_refuses_to_start() -> None:
     """
     The shipped Docker deployment bound 0.0.0.0 with no authentication.
@@ -312,7 +358,8 @@ def main() -> int:
                  test_one_definition_of_an_allowed_origin,
                  test_approving_a_command_does_not_ship_the_reply_unasked,
                  test_the_browser_is_not_the_guarantee,
-                 test_binding_wide_without_a_token_refuses_to_start,
+                 test_a_rebound_or_foreign_page_is_refused,
+        test_binding_wide_without_a_token_refuses_to_start,
                  test_the_token_is_never_the_cookie):
         try:
             test()

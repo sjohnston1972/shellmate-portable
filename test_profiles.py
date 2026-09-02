@@ -503,7 +503,7 @@ def test_the_api_still_keeps_its_promise() -> None:
             "connection_type": "ssh", "name": "lab-sw"}])
     profiles.save_plaintext_credentials("plain1", {"password": "TOP-SECRET-VALUE"})
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
 
     listing = client.get("/api/credentials")
     check("the listing answers", listing.status_code == 200, listing.text)

@@ -109,6 +109,10 @@ def _assigned_icons() -> set[str]:
 
     for source in (ROOT / "frontend" / "js").glob("*.js"):
         text = source.read_text(encoding="utf-8")
+        # A property table needs no markup of its own: the menu builder or
+        # the alert code renders it. update.js and terminal.js both named
+        # icons that were not in the font and this gate hid them (#426).
+        names.update(prop.findall(text))
         if "material-symbols-outlined" not in text:
             continue
 

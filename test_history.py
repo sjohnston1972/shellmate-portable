@@ -340,7 +340,7 @@ def test_end_to_end_recording() -> None:
         app_module.store = store_module.store
         manager_module.store = store_module.store
 
-        with TestClient(app_module.app) as client:
+        with TestClient(app_module.app, base_url="http://127.0.0.1") as client:
             created = client.post("/api/sessions", json={
                 "connection_type": "telnet", "hostname": "127.0.0.1",
                 "port": server.port, "display_label": "lab-switch",

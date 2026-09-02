@@ -243,7 +243,7 @@ def test_a_nested_group_can_be_reached_over_the_api() -> None:
                                "port": 22, "connection_type": "ssh",
                                "username": "s"})
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     key = quote("site-001/firewalls", safe="")
 
     res = client.put(f"/api/groups/{key}", json={"colour": "teal"})

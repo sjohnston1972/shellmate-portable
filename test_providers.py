@@ -144,7 +144,7 @@ def test_cached_endpoint() -> None:
         "anthropic": result(True, [{"id": "claude-a", "label": "Claude A"}]),
     })
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     response = client.get("/api/providers/cached")
     check("the cache is served", response.status_code == 200, response.text)
     check("and holds what was remembered",

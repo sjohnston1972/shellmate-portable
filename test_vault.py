@@ -377,7 +377,7 @@ def test_api_never_leaks_secrets() -> None:
     try:
         from backend.app import app
 
-        with TestClient(app) as client:
+        with TestClient(app, base_url="http://127.0.0.1") as client:
             client.post("/api/settings", json={"settings": {
                 "providers": {"anthropic_api_key": SECRET}
             }})

@@ -57,7 +57,7 @@ def test_every_asset_carries_a_token() -> None:
 
     from backend.app import app
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
     page = client.get("/")
     check("the page is served", page.status_code == 200)
 
@@ -118,7 +118,7 @@ def test_nothing_is_served_without_cache_control() -> None:
 
     from backend.app import app
 
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1")
 
     for path in ("/", "/static/js/stockton.js", "/static/css/style.css",
                  "/static/vendor/xterm.js", "/static/docs/legal.md"):
