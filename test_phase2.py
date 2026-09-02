@@ -67,6 +67,16 @@ except Exception:                                        # pragma: no cover
     pass
 
 
+
+def _ollama_reachable() -> bool:
+    """Whether a local Ollama answers, so the picker can be expected to list it."""
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", 11434), timeout=1):
+            return True
+    except OSError:
+        return False
+
 async def run():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -153,10 +163,16 @@ async def run():
             # names — it gained a model picker after this was written. What
             # matters is unchanged: both backends are reachable from it.
             providers = {v.split(":", 1)[0] for v in vals if v}
-            assert "ollama" in providers and "claude" in providers, f"options: {vals}"
-            ok("backend selector offers both ollama and claude")
+            assert "claude" in providers, f"options: {vals}"
+            # Ollama is listed only where it answers — a CI runner has none,
+            # and the picker rightly leaves out a provider with no models.
+            if _ollama_reachable():
+                assert "ollama" in providers, f"Ollama answers here but is not offered: {vals}"
+                ok("backend selector offers both ollama and claude")
+            else:
+                ok("backend selector offers claude (no Ollama on this machine)")
         except Exception as e:
-            fail("backend selector offers both ollama and claude", str(e))
+            fail("backend selector offers the reachable providers", str(e))
 
         try:
             await expect(page.locator("#chat-messages")).to_be_visible()

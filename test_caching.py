@@ -289,7 +289,8 @@ def test_the_prompt_editor_is_visible_where_it_is_advertised() -> None:
 
             modes = page.eval_on_selector(
                 "#prompt-mode-select", "e => [...e.options].map(o => o.value)")
-            check("and both personas offered", set(modes) == {"tshoot", "learn"},
+            check("and all three personas offered",
+                  set(modes) == {"tshoot", "learn", "investigate"},
                   str(modes))
 
             browser.close()
