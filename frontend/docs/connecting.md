@@ -31,6 +31,9 @@ with any SSH client.
 You can supply a key *and* a password. Network devices commonly accept a key
 for the SSH layer and then prompt for an enable or AAA password.
 
+Making a key, choosing its type, and getting the public half onto a Cisco,
+Junos or Linux device are covered on their own page: [SSH keys](#ssh-keys).
+
 ### Jump hosts
 
 Fill in **Jump host** to reach a device through a bastion. This is the same

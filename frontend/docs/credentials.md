@@ -73,13 +73,17 @@ independent boxes would imply otherwise.
 
 ## Keys
 
+This section is about where keys live and how they are protected. Which
+kind to make, how to install the public half on each platform, jump hosts
+and what the failure messages mean are on the [SSH keys](#ssh-keys) page.
+
 ### Making one
 
 The **key** icon in the sidebar creates SSH keys, so nobody has to find
 `ssh-keygen` or PuTTYgen first. Name it, press Create — Ed25519, which is the
 right answer unless something refuses it.
 
-**Advanced** holds the rest: RSA when the device is too old to accept anything
+**Type** offers the rest: RSA when the device is too old to accept anything
 else, which plenty of network kit is, and ECDSA if a standard you have to meet
 asks for it.
 

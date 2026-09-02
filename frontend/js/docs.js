@@ -16,6 +16,7 @@
     { file: 'history-and-drift.md', title: 'History and drift',    icon: 'search' },
     { file: 'alerts.md',            title: 'Alerts',               icon: 'warning' },
     { file: 'credentials.md',       title: 'Credentials',          icon: 'bookmark_add' },
+    { file: 'ssh-keys.md',          title: 'SSH keys',             icon: 'key' },
     { file: 'assistant.md',         title: 'AI assistant',         icon: 'smart_toy' },
     { file: 'automation.md',        title: 'Broadcast and the API', icon: 'list_alt' },
     { file: 'settings.md',          title: 'Settings',             icon: 'settings' },

@@ -245,6 +245,61 @@ def test_paths_from_the_browser_are_not_trusted() -> None:
           keys.safe_name("") == "id_shellmate")
 
 
+def test_the_manual_covers_keys() -> None:
+    """
+    The bundled manual has a page on keys, reachable from the manual's list,
+    and it answers the questions #400 was opened for.
+
+    A page that exists in the folder but not in docs.js is invisible, and a
+    page that quietly lost its IOS example would send the reader back to
+    a search engine on the one platform where the paste is fiddly.
+    """
+    print("\n-- The manual --")
+    root = Path(__file__).parent
+    page = root / "frontend" / "docs" / "ssh-keys.md"
+    check("ssh-keys.md exists", page.exists())
+    if not page.exists():
+        return
+
+    docs_js = (root / "frontend" / "js" / "docs.js").read_text(encoding="utf-8")
+    check("ssh-keys.md is in PAGES", "ssh-keys.md" in docs_js,
+          "the file exists but nothing links to it")
+
+    text = page.read_text(encoding="utf-8")
+    expected = {
+        "why keys over passwords":  "## Why keys",
+        "which type to choose":     "Ed25519",
+        "the IOS example":          "ip ssh pubkey-chain",
+        "the NX-OS example":        "sshkey",
+        "the Junos example":        "set system login user",
+        "the Linux example":        "authorized_keys",
+        "attaching to a connection": "SSH — key or jump host",
+        "passphrase handling":      "### Passphrases",
+        "jump hosts":               "## Jump hosts",
+        "troubleshooting":          "## Troubleshooting",
+        "the PuTTY format trap":    ".ppk",
+        "the MD5 hash comparison":  "MD5",
+    }
+    for what, needle in expected.items():
+        check(f"the page covers {what}", needle in text, f"missing {needle!r}")
+
+    # Every message the page quotes has to be one the handler actually
+    # raises, or the reader searches for text that never appears.
+    handler = (root / "backend" / "connections" / "ssh_handler.py").read_text(encoding="utf-8")
+    for phrase in ("Private key not found",
+                   "is encrypted and the passphrase was",
+                   "Unsupported or malformed private key",
+                   "no password was given to fall back to",
+                   "It will only accept:"):
+        check(f"quoted message exists: {phrase!r}", phrase in handler)
+
+    # Pages link to each other by file name; a link to a page that is not
+    # registered silently does nothing when clicked.
+    for other in ("connecting.md", "credentials.md", "troubleshooting.md"):
+        source = (root / "frontend" / "docs" / other).read_text(encoding="utf-8")
+        check(f"{other} links to the page", "(#ssh-keys)" in source)
+
+
 def test_import_and_delete() -> None:
     print("\n-- Importing and removing --")
     clean()
@@ -288,6 +343,7 @@ def main() -> int:
         test_passphrases,
         test_refusals,
         test_paths_from_the_browser_are_not_trusted,
+        test_the_manual_covers_keys,
         test_import_and_delete,
     ):
         try:

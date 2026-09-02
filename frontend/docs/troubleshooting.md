@@ -48,6 +48,9 @@ which of those failed rather than reporting a generic error.
 A device that accepts a key for SSH and then prompts for an enable password
 needs both fields filled in.
 
+Each message a refused key can produce, and what to check on the device for
+it, is listed under *Troubleshooting* on the [SSH keys](#ssh-keys) page.
+
 ### The serial port will not open
 
 **Already in use** — PuTTY, another terminal, or a session that did not close
