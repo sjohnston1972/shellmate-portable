@@ -86,7 +86,7 @@ def _bullet_list(items: list[str]) -> dict:
 # Strip SUGGEST_CMD tags and HTML from AI message text
 # ---------------------------------------------------------------------------
 
-_SUGGEST_RE = re.compile(r"\[(?:SUGGEST_CMD|ADD_CMD)(?::\d+)?\](.*?)\[/(?:SUGGEST_CMD|ADD_CMD)\]", re.DOTALL)
+_SUGGEST_RE = re.compile(r"\[SUGGEST_CMD(?::\d+)?\](.*?)\[/SUGGEST_CMD\]", re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 

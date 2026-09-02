@@ -454,17 +454,19 @@
     //   "### SUGGEST_CMD]cmd[/SUGGEST_CMD]"   → "[SUGGEST_CMD]cmd[/SUGGEST_CMD]"  (heading + missing [)
     //   "SUGGEST_CMD]cmd[/SUGGEST_CMD]"        → "[SUGGEST_CMD]cmd[/SUGGEST_CMD]"  (missing opening [)
     //   "[SUGGEST_CMD]cmd[/[SUGGEST_CMD]"      → "[SUGGEST_CMD]cmd[/SUGGEST_CMD]"  (extra [ in closing tag)
-    raw = raw.replace(/^#{1,6}\s*\[?(SUGGEST_CMD|ADD_CMD)\]/gm, '[$1]');  // strip heading prefix
-    raw = raw.replace(/(?<!\[)(SUGGEST_CMD|ADD_CMD)\]/g, '[$1]');          // fix missing opening [
-    raw = raw.replace(/\[\/\[+(SUGGEST_CMD|ADD_CMD)\]/g, '[/$1]');         // fix extra [ in closing tag
+    raw = raw.replace(/^#{1,6}\s*\[?(SUGGEST_CMD)\]/gm, '[$1]');  // strip heading prefix
+    raw = raw.replace(/(?<!\[)(SUGGEST_CMD)\]/g, '[$1]');          // fix missing opening [
+    raw = raw.replace(/\[\/\[+(SUGGEST_CMD)\]/g, '[/$1]');         // fix extra [ in closing tag
 
     // Split on [SUGGEST_CMD]...[/SUGGEST_CMD] or [SUGGEST_CMD:N]...[/SUGGEST_CMD] blocks
-    const parts = raw.split(/(\[(?:SUGGEST_CMD|ADD_CMD)(?::\d+)?\][\s\S]*?\[\/(?:SUGGEST_CMD|ADD_CMD)\])/g);
+    // One tag only. An ADD_CMD variant was accepted here for years without
+    // ever being taught to the model, so no reply carried it (#430).
+    const parts = raw.split(/(\[SUGGEST_CMD(?::\d+)?\][\s\S]*?\[\/SUGGEST_CMD\])/g);
     bubble.innerHTML = '';
 
     parts.forEach(part => {
       // Group 1 = optional tab number, group 2 = command text
-      const cmdMatch = part.match(/^\[(?:SUGGEST_CMD|ADD_CMD)(?::(\d+))?\]([\s\S]*?)\[\/(?:SUGGEST_CMD|ADD_CMD)\]$/);
+      const cmdMatch = part.match(/^\[SUGGEST_CMD(?::(\d+))?\]([\s\S]*?)\[\/SUGGEST_CMD\]$/);
       if (cmdMatch) {
         const tabNum = cmdMatch[1] ? parseInt(cmdMatch[1], 10) : null;
         bubble.appendChild(buildCommandBlock(cmdMatch[2].trim(), tabNum,
