@@ -235,7 +235,14 @@
         }
         fields[spec.name] = { control, spec };
 
-        row.append(label, control);
+        // A checkbox sits on one line with its label, control first (#439);
+        // everything else stacks label over control.
+        if (spec.type === 'checkbox') {
+          row.classList.add('sm-dialog-field-check');
+          row.append(control, label);
+        } else {
+          row.append(label, control);
+        }
 
         // A password cannot be read back once it is in the vault, so being
         // able to check what was typed matters more here than the masking
@@ -365,6 +372,12 @@
         e.preventDefault();
         e.stopPropagation();
         close(cancelValue(opts.kind));
+        return;
+      }
+      // In a textarea Enter is a newline — configuration lines (#438).
+      // Ctrl+Enter submits from there, as it does in the chat box.
+      if (e.key === 'Enter' && e.target && e.target.tagName === 'TEXTAREA'
+          && !(e.ctrlKey || e.metaKey)) {
         return;
       }
       if (e.key === 'Enter' && (opts.kind !== 'confirm' || e.target !== cancel)) {
