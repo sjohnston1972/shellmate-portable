@@ -3,6 +3,7 @@ claude_client.py — Streaming Claude API client for ShellMate.
 Uses httpx to stream responses token by token.
 """
 import json
+import re
 import logging
 from collections.abc import AsyncIterator
 
@@ -44,6 +45,23 @@ def _fallback_model() -> str:
 
 
 
+#: Models that answered a `temperature` with a 400 this run. Learned, so the
+#: second request to such a model does not pay the round trip again.
+_NO_SAMPLING: set[str] = set()
+
+#: Families that have removed sampling parameters. Anything else is sent the
+#: temperature, and the reactive check above catches a family this misses.
+_NO_SAMPLING_FAMILIES = re.compile(
+    r"^claude-(fable|mythos|opus-5|opus-4-[789]|sonnet-5|sonnet-4-[789])")
+
+
+def _accepts_sampling(model: str) -> bool:
+    """Whether `temperature` may be sent to this model at all."""
+    if model in _NO_SAMPLING:
+        return False
+    return _NO_SAMPLING_FAMILIES.match(model or "") is None
+
+
 def _explain_api_error(status: int, body: bytes, model: str) -> str:
     """
     Turn an API failure into something a network engineer can act on.
@@ -63,7 +81,17 @@ def _explain_api_error(status: int, body: bytes, model: str) -> str:
     except Exception:
         detail = body.decode("utf-8", errors="replace")[:300]
 
-    if status == 404 or "model" in detail.lower():
+    error_type = ""
+    try:
+        error_type = str(((_json.loads(body.decode("utf-8", errors="replace"))
+                           .get("error") or {}).get("type", "")))
+    except Exception:
+        pass
+    # Only a genuine not-found is a retired model. Any 400 whose message
+    # happened to contain the word "model" — "`temperature` is deprecated
+    # for this model" — used to be reported as one, which sent people
+    # picking through a model list that was fine (#433).
+    if status == 404 or error_type == "not_found_error":
         return (f"Claude does not recognise the model '{model}'. It has "
                 f"probably been retired — pick another in the model list "
                 f"beside the chat box.")
@@ -111,49 +139,61 @@ async def stream_response(
     payload = {
         "model": model or _fallback_model(),
         "max_tokens": advanced("ai.max_tokens"),
-        "temperature": advanced("ai.temperature"),
         "system": system_blocks,
         "messages": messages,
         "stream": True,
     }
     usage: dict = {}
+    # Sampling parameters were removed from the Claude 5 family and from
+    # Opus 4.7 onwards: sending `temperature` is a 400, not a warning. It is
+    # sent only to models known to accept it, and dropped and retried once
+    # if a model turns out not to (#433).
+    if _accepts_sampling(payload["model"]):
+        payload["temperature"] = advanced("ai.temperature")
 
     async with httpx.AsyncClient(timeout=advanced("ai.request_timeout")) as client:
-        async with client.stream(
-            "POST", CLAUDE_API_URL, headers=headers, json=payload
-        ) as resp:
-            if resp.status_code != 200:
-                body = await resp.aread()
-                raise ValueError(_explain_api_error(resp.status_code, body,
-                                                    payload.get("model", "")))
+        for attempt in (1, 2):
+            async with client.stream(
+                "POST", CLAUDE_API_URL, headers=headers, json=payload
+            ) as resp:
+                if resp.status_code != 200:
+                    body = await resp.aread()
+                    if (attempt == 1 and resp.status_code == 400
+                            and "temperature" in payload and b"temperature" in body):
+                        _NO_SAMPLING.add(payload["model"])
+                        payload.pop("temperature", None)
+                        continue
+                    raise ValueError(_explain_api_error(resp.status_code, body,
+                                                        payload.get("model", "")))
 
-            async for line in resp.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                data = line[6:]
-                if data == "[DONE]":
-                    break
-                try:
-                    event = json.loads(data)
-                    kind = event.get("type")
-                    if kind == "content_block_delta":
-                        delta = event.get("delta", {})
-                        if delta.get("type") == "text_delta":
-                            yield delta.get("text", "")
-                    elif kind == "message_start":
-                        # Input-side counts arrive first, cache hits included.
-                        u = (event.get("message") or {}).get("usage") or {}
-                        usage.update({
-                            "input":       u.get("input_tokens", 0),
-                            "cache_read":  u.get("cache_read_input_tokens", 0),
-                            "cache_write": u.get("cache_creation_input_tokens", 0),
-                        })
-                    elif kind == "message_delta":
-                        u = event.get("usage") or {}
-                        if "output_tokens" in u:
-                            usage["output"] = u["output_tokens"]
-                except json.JSONDecodeError:
-                    continue
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                        kind = event.get("type")
+                        if kind == "content_block_delta":
+                            delta = event.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                yield delta.get("text", "")
+                        elif kind == "message_start":
+                            # Input-side counts arrive first, cache hits included.
+                            u = (event.get("message") or {}).get("usage") or {}
+                            usage.update({
+                                "input":       u.get("input_tokens", 0),
+                                "cache_read":  u.get("cache_read_input_tokens", 0),
+                                "cache_write": u.get("cache_creation_input_tokens", 0),
+                            })
+                        elif kind == "message_delta":
+                            u = event.get("usage") or {}
+                            if "output_tokens" in u:
+                                usage["output"] = u["output_tokens"]
+                    except json.JSONDecodeError:
+                        continue
+                break
     if usage:
         usage["provider"] = "anthropic"
         yield {"usage": usage}
