@@ -585,13 +585,45 @@
    * @param {string} sessionId
    * @param {string} label
    */
-  function updateTabLabel(sessionId, label) {
+  function updateTabLabel(sessionId, label, opts) {
     const tab = tabs.find(t => t.sessionId === sessionId);
     if (!tab) return;
+    // A detected hostname is remembered but does not overwrite a name the
+    // user typed (#409); it becomes the label again if the name is cleared.
+    if (!(opts && opts.custom)) {
+      tab.autoLabel = label;
+      if (tab.customLabel) {
+        tab.labelEl.title = `${tab.label}\n(${label})`;
+        return;
+      }
+    }
     tab.label = label;
     tab.labelEl.textContent = label;
     tab.labelEl.title = label;
     updateStatusBar();
+  }
+
+  /** Give a tab a name of your own, or clear it to get the detected one back. */
+  async function _renameTab(tab) {
+    const answer = await window.shellmateDialog.prompt({
+      title: 'Rename this tab',
+      body:  'Leave it blank to go back to the name the device gives itself.',
+      value: tab.customLabel ? tab.label : '',
+      placeholder: tab.autoLabel || tab.label,
+      confirmLabel: 'Rename',
+    });
+    if (answer === null || answer === undefined) return;
+    const name = String(answer).trim();
+    if (name) {
+      tab.customLabel = true;
+      updateTabLabel(tab.sessionId, name, { custom: true });
+      if (tab.autoLabel && tab.autoLabel !== name) {
+        tab.labelEl.title = `${name}\n(${tab.autoLabel})`;
+      }
+    } else {
+      tab.customLabel = false;
+      updateTabLabel(tab.sessionId, tab.autoLabel || tab.label);
+    }
   }
 
   /**
@@ -696,8 +728,107 @@
         e.preventDefault();
         switchToTab(targetIndex);
       }
+      return;
+    }
+
+    // The rest of the set (#413). Each one is also listed in isAppShortcut()
+    // so that a terminal with focus lets it through, and in the cheat-sheet.
+    const shortcut = SHORTCUTS.find(s => s.match(e));
+    if (shortcut) {
+      e.preventDefault();
+      shortcut.run();
     }
   }
+
+  /** Move to the next or previous tab, wrapping at the ends. */
+  function _stepTab(delta) {
+    if (!tabs.length) return;
+    const index = activeTabIndex < 0 ? 0
+      : (activeTabIndex + delta + tabs.length) % tabs.length;
+    switchToTab(index);
+  }
+
+  function _focusTerminal() {
+    const tab = getActiveTab();
+    if (tab && tab.terminalInstance) {
+      try { tab.terminalInstance.focus(); } catch (_) { /* not mounted yet */ }
+    }
+  }
+
+  function _focusChat() {
+    const input = document.getElementById('chat-input');
+    if (input && input.offsetParent !== null) input.focus();
+  }
+
+  function _call(name) {
+    return () => { if (typeof window[name] === 'function') window[name](); };
+  }
+
+  /**
+   * The application's keyboard shortcuts, in one table (#413).
+   *
+   * The table is the single source for three things: the document-level
+   * handler, the list a focused terminal lets through, and the cheat-sheet
+   * on Ctrl+/. Ctrl+T, Ctrl+W and Ctrl+1-9 stay in handleKeyboard() above
+   * because they need the tab index and a guard the table cannot express.
+   *
+   * Chosen to avoid what the browser reserves: Ctrl+L, Ctrl+N, Ctrl+Shift+T
+   * and Ctrl+Shift+N cannot be intercepted in Chromium, and Ctrl+Tab only
+   * in the desktop window — hence Ctrl+PageUp/PageDown as well.
+   */
+  const SHORTCUTS = [
+    { keys: 'Ctrl+Tab', what: 'Next tab',
+      match: e => e.ctrlKey && !e.shiftKey && e.key === 'Tab', run: () => _stepTab(1) },
+    { keys: 'Ctrl+Shift+Tab', what: 'Previous tab',
+      match: e => e.ctrlKey && e.shiftKey && e.key === 'Tab', run: () => _stepTab(-1) },
+    { keys: 'Ctrl+PageDown', what: 'Next tab',
+      match: e => e.ctrlKey && e.key === 'PageDown', run: () => _stepTab(1) },
+    { keys: 'Ctrl+PageUp', what: 'Previous tab',
+      match: e => e.ctrlKey && e.key === 'PageUp', run: () => _stepTab(-1) },
+    { keys: 'Ctrl+P', what: 'Find a tab by name',
+      match: e => e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'p',
+      run: _call('openTabPalette') },
+    { keys: 'Ctrl+`', what: 'Focus the terminal',
+      match: e => e.ctrlKey && e.key === '`', run: _focusTerminal },
+    { keys: 'Ctrl+Shift+A', what: 'Focus the assistant',
+      match: e => e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a', run: _focusChat },
+    { keys: 'Ctrl+,', what: 'Settings',
+      match: e => e.ctrlKey && e.key === ',', run: _call('openSettings') },
+    { keys: 'Ctrl+H', what: 'Session history',
+      match: e => e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'h', run: _call('openHistory') },
+    { keys: 'F1', what: 'The manual',
+      match: e => e.key === 'F1', run: _call('openDocs') },
+    { keys: 'Ctrl+/', what: 'This list',
+      match: e => e.ctrlKey && e.key === '/', run: () => _showShortcuts() },
+  ];
+
+  /** Shortcuts owned by the page rather than the device; terminal.js asks. */
+  function isAppShortcut(e) {
+    if (e.ctrlKey && !e.altKey && (e.key === 't' || e.key === 'w')) return true;
+    if (e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') return true;
+    return SHORTCUTS.some(s => s.match(e));
+  }
+
+  function _showShortcuts() {
+    const fixed = [
+      { keys: 'Ctrl+T', what: 'New connection' },
+      { keys: 'Ctrl+W', what: 'Close the current tab' },
+      { keys: 'Ctrl+1 … Ctrl+9', what: 'Switch to that tab' },
+      { keys: 'Ctrl+Alt+1 … Ctrl+Alt+9', what: 'Choose a split layout' },
+      { keys: 'Ctrl+F', what: 'Find in the terminal' },
+      { keys: 'Ctrl+Shift+B', what: 'Broadcast a command' },
+      { keys: 'Ctrl+Shift+C / Ctrl+Shift+V', what: 'Copy / paste' },
+      { keys: 'Shift+right-click', what: 'The terminal menu' },
+    ];
+    window.shellmateDialog.alert({
+      title: 'Keyboard shortcuts',
+      list: [...fixed, ...SHORTCUTS.filter(s => s.keys !== 'Ctrl+PageDown' && s.keys !== 'Ctrl+PageUp')]
+        .map(s => ({ text: s.keys, detail: s.what, mono: true })),
+      confirmLabel: 'Close',
+    });
+  }
+
+  window.isAppShortcut = isAppShortcut;
 
 
 
@@ -1460,6 +1591,9 @@
         label: 'Save this connection', setting: 'save_connection' },
       { action: 'duplicate', icon: 'tab_duplicate', label: 'Duplicate session',
         setting: 'duplicate' },
+      // Two consoles on the same stack print the same prompt (#409). A name
+      // given here is kept when the device announces its hostname.
+      { action: 'rename', icon: 'edit', label: 'Rename tab…', setting: 'rename' },
     ],
     [
       // Colour-coding a tab is the thing a single global scheme could never
@@ -1654,6 +1788,7 @@
           case 'copy-address': _copyAddress(tab);      break;
           case 'save-connection': _saveConnection(tab);  break;
           case 'duplicate': _duplicateSession(tab);   break;
+          case 'rename':    _renameTab(tab);          break;
           case 'scheme':    _chooseScheme(tab);       break;
           case 'keepalive':     _toggleKeepAlive([tab]);          break;
           case 'keepalive-all': _toggleKeepAlive(tabs.slice());   break;
@@ -2814,6 +2949,16 @@
     return idx === -1 ? Promise.resolve() : closeTab(idx, options);
   };
   window.getActiveTab     = getActiveTab;
+  /** What the tab palette (#410) searches: one plain object per tab. */
+  window.listTabs = () => tabs.map((t, index) => ({
+    sessionId:   t.sessionId,
+    index,
+    label:       t.label,
+    hostname:    t.hostname || '',
+    address:     _addressOf(t),
+    isConnected: !!t.isConnected,
+    groups:      Array.isArray(t.groupNames) ? t.groupNames : [],
+  }));
   window.updateTabLabel   = updateTabLabel;
   window.setTabOrder      = setTabOrder;
   window.tabMenuItems     = tabMenuItems;
