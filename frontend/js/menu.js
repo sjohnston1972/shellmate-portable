@@ -240,6 +240,8 @@
     }
     e.preventDefault();
     items[next].focus();
+    // A long menu scrolls (#437); the focused entry must stay in view.
+    try { items[next].scrollIntoView({ block: 'nearest' }); } catch (_) { /* old engine */ }
   }
 
   window.shellmateMenu = { open, attach, close, isOpen };
