@@ -579,6 +579,14 @@
 
   function toast(alert) {
     if (!toastHost) return;
+    // The master switch and the per-kind switches (#440). A suppressed
+    // toast is still logged, so the record of what happened survives.
+    const kind = alert.severity === 'critical' ? 'critical'
+               : alert.severity === 'warning' ? 'warning' : 'info';
+    if (!enabled('toasts_all', true) || !enabled('toast_' + kind, true)) {
+      console.info(`[toast suppressed: ${kind}] ${alert.title || ''} — ${alert.body || ''}`);
+      return;
+    }
     if (!shouldShow(alert)) return;
 
     const el = document.createElement('div');
