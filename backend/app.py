@@ -23,6 +23,8 @@ import datetime
 import json
 import logging
 import re
+
+import httpx
 import sys
 import time
 from pathlib import Path
@@ -72,6 +74,7 @@ from backend.ai import prompt_store
 from backend.ai.router import stream_chat
 from backend.ai import chroma_client, providers
 from backend.config import DEFAULT_AI_BACKEND, JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
+from backend import version as app_version
 
 logger = logging.getLogger(__name__)
 
@@ -2044,7 +2047,7 @@ async def health() -> dict:
     data directory. This carries only the marker; `/api/system/info` keeps
     its filesystem paths behind the login.
     """
-    return {"app": "shellmate-portable"}
+    return {"app": "shellmate-portable", "version": app_version.VERSION}
 
 
 @app.get("/api/system/info")
@@ -2071,6 +2074,50 @@ async def system_info() -> dict:
         # indistinguishable from the fix not working. That cost real time
         # once, so it is reported rather than left to be inferred.
         "built":          _build_time(),
+        # The release and the commit (#420): the two things a bug report
+        # needs that a timestamp cannot give.
+        "version":        app_version.build_info()["version"],
+        "commit":         app_version.build_info()["commit"],
+        "describe":       app_version.describe(),
+    }
+
+
+@app.get("/api/system/update")
+async def update_check() -> dict:
+    """
+    Compare this build with the latest GitHub release (#420).
+
+    Only ever on request — the button in Diagnostics, or the startup check
+    when `diag.update_check` is switched on. Nothing leaves the machine but
+    the version number in the User-Agent, and on an air-gapped site the
+    answer is "could not reach GitHub", not a stall: six seconds, then give
+    up. There is no download and no self-replacement; the reply carries the
+    release page's address and a person decides.
+    """
+    current = app_version.build_info()["version"]
+    url = f"https://api.github.com/repos/{app_version.RELEASES_REPO}/releases/latest"
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={
+                "Accept":     "application/vnd.github+json",
+                "User-Agent": f"ShellMate/{current}",
+            })
+    except httpx.HTTPError as exc:
+        return {"current": current,
+                "error": f"Could not reach GitHub ({exc.__class__.__name__})."}
+    if resp.status_code == 404:
+        return {"current": current, "latest": "", "newer": False,
+                "note": "No release has been published yet."}
+    if resp.status_code != 200:
+        return {"current": current, "error": f"GitHub answered {resp.status_code}."}
+    data = resp.json()
+    latest = str(data.get("tag_name") or data.get("name") or "")
+    return {
+        "current":   current,
+        "latest":    latest.lstrip("vV"),
+        "newer":     app_version.is_newer(latest, current),
+        "url":       data.get("html_url", ""),
+        "published": data.get("published_at", ""),
     }
 
 
@@ -2163,6 +2210,14 @@ def _build_time() -> str:
     the backend modules, which is the closest honest answer available — a
     source run has no build step to timestamp.
     """
+    # The build record, when there is one, is the truth (#420); the file
+    # time is the fallback for a checkout, which has no build step.
+    built = app_version.build_info().get("built", "")
+    if built:
+        try:
+            return datetime.fromisoformat(built).strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            return built
     try:
         if paths.is_frozen():
             stamp = Path(sys.executable).stat().st_mtime

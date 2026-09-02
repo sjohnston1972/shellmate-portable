@@ -84,6 +84,12 @@ def _built() -> str:
     return _build_time() or "unknown"
 
 
+def _version() -> str:
+    from backend import version
+
+    return version.describe()
+
+
 def _about(_ctx: dict) -> str:
     from backend import __init__ as _  # noqa: F401  (package marker)
 
@@ -97,6 +103,7 @@ def _about(_ctx: dict) -> str:
         # beside it has moved on, and an executable older than the fix looks
         # exactly like the fix not working.
         f"Built:          {_built()}",
+        f"Version:        {_version()}",
         f"Executable:     {sys.executable}",
         f"Application at: {paths.app_dir()}",
         f"Data folder:    {paths.data_dir()}",

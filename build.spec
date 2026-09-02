@@ -55,8 +55,40 @@ except Exception as exc:                          # pragma: no cover - build onl
 # here; it goes to data_dir() alongside the executable.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Build record (#420)
+#
+# Written now and bundled beside the frontend, so the running copy can say
+# which release it is, when it was built and from which commit — rather
+# than reporting the executable's modification time, which Explorer
+# rewrites when the file is copied.
+# ---------------------------------------------------------------------------
+import json
+import subprocess
+from datetime import datetime
+
+try:
+    from backend.version import VERSION as APP_VERSION
+except Exception as exc:                          # pragma: no cover - build only
+    print(f"build.spec: could not read the version ({exc})")
+    APP_VERSION = "0"
+try:
+    COMMIT = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                            capture_output=True, text=True, timeout=5).stdout.strip()
+except Exception:                                 # pragma: no cover - build only
+    COMMIT = ""
+BUILD_INFO = Path(SPECPATH) / "build" / "build_info.json"
+BUILD_INFO.parent.mkdir(parents=True, exist_ok=True)
+BUILD_INFO.write_text(json.dumps({
+    "version": APP_VERSION,
+    "built":   datetime.now().astimezone().isoformat(timespec="seconds"),
+    "commit":  COMMIT,
+}), encoding="utf-8")
+print(f"build.spec: ShellMate {APP_VERSION} ({COMMIT or 'no git'})")
+
 datas = [
     ("frontend", "frontend"),
+    (str(BUILD_INFO), "."),
 ]
 
 # ---------------------------------------------------------------------------

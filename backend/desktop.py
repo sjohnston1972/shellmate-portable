@@ -36,7 +36,9 @@ from backend import paths
 
 logger = logging.getLogger(__name__)
 
-WINDOW_TITLE = "ShellMate Portable"
+from backend.version import VERSION as _VERSION
+
+WINDOW_TITLE = f"ShellMate Portable {_VERSION}"
 DEFAULT_WIDTH = 1440
 DEFAULT_HEIGHT = 900
 MIN_WIDTH = 900

@@ -627,6 +627,44 @@
    * fallback-folder state can change between launches. A failed fetch leaves
    * the em-dash — Diagnostics failing must never break Settings.
    */
+  let _updateBound = false;
+
+  /** The Check for updates button (#420): on demand, and says what it found. */
+  function _bindUpdateCheck() {
+    if (_updateBound) return;
+    const button = document.getElementById('diag-check-update');
+    const result = document.getElementById('diag-update-result');
+    if (!button || !result) return;
+    _updateBound = true;
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      result.textContent = 'Asking GitHub…';
+      result.innerHTML = '';
+      try {
+        const info = await (await fetch('/api/system/update')).json();
+        if (info.error) {
+          result.textContent = info.error;
+        } else if (info.note) {
+          result.textContent = `${info.note} You are running ${info.current}.`;
+        } else if (info.newer) {
+          const link = document.createElement('a');
+          link.href = info.url;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.className = 'diag-link';
+          link.textContent = `Version ${info.latest} is available`;
+          result.append(link, document.createTextNode(` — you are running ${info.current}.`));
+        } else {
+          result.textContent = `You are up to date (${info.current}; latest is ${info.latest || info.current}).`;
+        }
+      } catch (e) {
+        result.textContent = 'The check failed: ' + e.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+
   async function _populateDiagnostics() {
     const set = (id, text) => {
       const el = document.getElementById(id);
@@ -634,11 +672,15 @@
     };
     try {
       const info = await (await fetch('/api/system/info')).json();
+      // "ShellMate 1.0.0 (a1b2c3d, built 2026-09-02 16:17)" from the build
+      // record (#420); the older fields are the fallback for a server that
+      // predates it.
       set('diag-version', [
-        info.app || 'ShellMate',
-        info.built ? `built ${info.built}` : '',
+        info.describe || info.app || 'ShellMate',
+        !info.describe && info.built ? `built ${info.built}` : '',
         info.portable ? '(portable)' : '',
       ].filter(Boolean).join(' — ').replace(' — (', ' ('));
+      _bindUpdateCheck();
       set('diag-data-dir', (info.data_dir || '') +
         (info.using_fallback
           ? ' — fallback: the folder beside the executable was not writable'

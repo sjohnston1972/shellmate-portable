@@ -145,6 +145,18 @@ one.
 
 ## Diagnostics
 
+**Version** names the release, the commit it was built from and when — the
+three things to quote in a bug report, and the way to tell whether the copy
+you double-clicked is the one you updated. A portable executable can be
+left behind anywhere, and nothing about the file says it is stale.
+
+**Check for updates** asks GitHub whether a newer release exists and, if so,
+links to it. Nothing is downloaded and nothing about your devices is sent:
+the request carries the version number. On a machine with no internet it
+says GitHub could not be reached, and that is all. The same check can run
+once at startup — off by default — from **Stockton → Diagnostics → Check
+for a newer release at startup**.
+
 The last section answers the questions a fault report starts with, without
 leaving the interface:
 

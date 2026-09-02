@@ -139,6 +139,10 @@ def main() -> int:
 
     _apply_log_level()
 
+    from backend import version as app_version  # noqa: E402
+
+    logger.info("%s", app_version.describe())
+
     logger.info("Data directory: %s", paths.data_dir())
     if paths.data_dir_is_fallback():
         logger.warning(

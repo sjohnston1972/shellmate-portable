@@ -1811,6 +1811,16 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
           <div class="setting-row">
             <label class="setting-label"
+                   data-tip="Asks GitHub whether a newer release has been published, only when you press the button — or shortly after launch, if the switch under Stockton → Diagnostics is on.||The request carries the version number and nothing about your devices. It downloads nothing; a newer release is a link to its page. On a machine with no internet it reports that GitHub could not be reached, and that is all.">Updates
+              <span class="setting-hint">Compare this build with the latest release on GitHub.</span>
+            </label>
+            <span class="setting-value">
+              <button type="button" id="diag-check-update" class="btn-tertiary">Check for updates</button>
+              <span id="diag-update-result" class="setting-hint"></span>
+            </span>
+          </div>
+          <div class="setting-row">
+            <label class="setting-label"
                    data-tip="The full path to the folder holding settings.json, the history database, the vault, platforms.json and your logs.||This is the whole installation state, so copying the folder moves your setup and protecting the folder protects your credentials. If it says fallback, the folder beside the executable was not writable and everything went to your user profile instead.">Data folder
               <span class="setting-hint">Settings, history, keys and logs all live here. It travels with the executable.</span>
             </label>
@@ -2643,6 +2653,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/mode.js"></script>
   <script src="/static/js/chat.js"></script>
   <script src="/static/js/settings.js"></script>
+  <script src="/static/js/update.js"></script>
   <script src="/static/js/credentials.js"></script>
   <script src="/static/js/discovery.js"></script>
   <script src="/static/js/panel_resize.js"></script>
