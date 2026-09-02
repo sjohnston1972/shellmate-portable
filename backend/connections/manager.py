@@ -127,8 +127,8 @@ class SessionManager:
             # demand, for the same reason live_capture is.
             "keep_alive":      None,
             "fingerprint":     None,
-            # Chokepoint for everything the user sends. Alias expansion today,
-            # guardrails and paste throttling next.
+            # Chokepoint for everything the user sends: alias expansion and
+            # the dangerous-command guardrail.
             "pipeline":        OutboundPipeline(),
             # Tracks anything scheduled on the device that has not happened
             # yet — a pending reload, a commit waiting to be confirmed.

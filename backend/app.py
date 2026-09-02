@@ -2511,7 +2511,7 @@ async def broadcast(request: BroadcastRequest) -> dict:
     the number of switches.
 
     Every command still passes through that session's outbound pipeline, so
-    alias expansion and (later) guardrails apply exactly as when typed.
+    alias expansion and the guardrail apply exactly as when typed.
     """
     commands = request.command_list()
     if not commands:

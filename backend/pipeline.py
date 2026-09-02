@@ -9,10 +9,11 @@ pacing a pasted configuration.
 The pipeline assembles keystrokes into candidate command lines and runs each
 through an ordered chain before it reaches the device:
 
-    keystrokes -> line assembly -> alias expansion -> [guardrails] -> [throttle] -> device
+    keystrokes -> line assembly -> alias expansion -> guardrails -> device
 
-Only alias expansion exists today; the guardrail and throttle stages are Phase
-6 and slot into the same chain.
+Alias expansion and the dangerous-command guardrail both run here. Paste
+pacing is done in the frontend (`terminal.js`), before the bytes reach the
+socket, which is the only place it can actually slow a paste down.
 
 Two things make this less trivial than it looks.
 

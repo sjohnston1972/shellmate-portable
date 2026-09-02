@@ -14,7 +14,7 @@ Each profile collects everything platform-specific in one place:
 ``show_run``           How to retrieve the running configuration.
 ``version_command``    How to ask what the device is.
 ``aliases``            Short names mapped to the real command per platform.
-``dangerous_commands``  Feeds the Phase 6 guardrails.
+``dangerous_commands``  What the guardrail holds for confirmation.
 ``config_mode_markers`` Prompt fragments meaning "you are editing live config".
 
 Profiles are **data**, not code.  The built-in set below is written to

@@ -55,68 +55,134 @@ User clicks approve → command sent via WebSocket with session_id → FastAPI �
 
 ## Project structure
 
+Generated from the tree and each module's own header line — regenerate
+rather than hand-edit (`python tools/claude_tree.py --write`). A module
+with no description has no header line yet; give it one.
+
 ```
-mate/
-├── CLAUDE.md                  # This file — project spec and instructions
-├── .env.example               # Template for configuration
-├── .env                       # User's local config (gitignored)
-├── requirements.txt           # Python dependencies
-├── requirements-dev.txt       # Build + asset-vendoring dependencies
-├── build.spec                 # PyInstaller definition for the portable .exe
-├── run.py                     # Entry point — starts the server and opens browser
+shellmate/
+├── CLAUDE.md                    # This file — project spec and instructions
+├── README.md                    # User and builder documentation
+├── requirements.txt             # Runtime dependency floors
+├── requirements.lock            # Exact versions a release is built from
+├── requirements-dev.txt         # Build, vendoring and test dependencies
+├── build.spec                   # PyInstaller definition; writes build_info.json
+├── run.py                       # Entry point — server on a thread, window on main
+├── Dockerfile, docker-compose.yml # Server deployment (token required)
+├── .github/workflows/ci.yml     # Tests, build, sign, release
+├── test_*.py                    # Standalone test scripts; tools/run_tests.py runs all
 ├── tools/
-│   └── vendor_assets.py       # Downloads/subsets frontend assets (build-time only)
+│   ├── claude_tree.py           # The project tree in CLAUDE.md, generated rather than typed
+│   ├── collect_licences.py      # Gather the licence texts ShellMate has to redistribute
+│   ├── run_tests.py             # Run every test_*.py and say, once, whether they all passed
+│   ├── seed_estate.py           # Fill a data folder with an estate, for scale testing
+│   ├── vendor_assets.py         # Download ShellMate's third-party frontend assets locally
+├── relay/                       # Cloudflare Worker: in-app feedback → GitHub issues
 ├── backend/
-│   ├── __init__.py
-│   ├── paths.py               # ALL filesystem locations resolve here
-│   ├── branding.py            # The application icon — one source for tray, taskbar, window
-│   ├── desktop.py             # Native window + system tray
-│   ├── server.py              # Port selection and single-instance lock
-│   ├── app.py                 # FastAPI application, routes, WebSocket handlers
-│   ├── platforms.py           # Per-platform commands, aliases (user-editable)
-│   ├── fingerprint.py         # Identify vendor/OS/version on connect
-│   ├── onboard.py             # Once-per-session identify-and-configure
-│   ├── alerts.py              # Pending reloads and commit-confirms, per session
-│   ├── pipeline.py            # Outbound chokepoint (aliases; guardrails next)
-│   ├── store.py               # SQLite session history + FTS5 search
-│   ├── configs.py             # Config capture, diff, drift-on-connect
-│   ├── config_archive.py      # Captures kept as files: redaction and retention
-│   ├── vault.py               # Encrypted credential storage
-│   ├── session/
-│   │   ├── ansi.py            # Escape/backspace/CR handling
-│   │   ├── transcript.py      # Prompt detection + command segmentation
-│   │   └── buffer.py          # Rolling screen buffer
-│   ├── connections/
-│   │   ├── __init__.py
-│   │   ├── base.py            # ConnectionHandler contract + ConnectionParams
-│   │   ├── manager.py         # Session lifecycle + transport registry
-│   │   ├── ssh_handler.py     # SSH via paramiko (key auth, jump host, 2nd channel)
-│   │   ├── serial_handler.py  # Serial console via pyserial
-│   │   ├── telnet_handler.py  # Telnet over a raw socket, with IAC negotiation
-│   │   └── sftp.py            # File transfer over an existing SSH transport
+│   ├── advanced.py              # Stockton. The settings that were constants in the source
+│   ├── alerts.py                # Things that will happen to a device unless somebody intervenes
+│   ├── app.py                   # FastAPI application for ShellMate
+│   ├── auth.py                  # Optional authentication, for the deployments that need it
+│   ├── branding.py              # One source for the application icon
+│   ├── certs.py                 # Read an OpenSSH certificate and say what it actually permits
+│   ├── config.py                # Configuration loader for ShellMate
+│   ├── config_archive.py        # Keeping the captured configurations as files
+│   ├── configs.py               # Configuration capture, storage and drift reporting
+│   ├── desktop.py               # Present ShellMate as a desktop application rather than a browser…
+│   ├── discovery.py             # Finding out what is on the wire
+│   ├── feedback.py              # The in-app bug and feature-request reporter (#370)
+│   ├── fingerprint.py           # Work out what kind of device is on the other end
+│   ├── groups.py                # Groups on the dashboard
+│   ├── jira_client.py           # Jira Cloud REST API client for ShellMate session reporting
+│   ├── keys.py                  # Making SSH keys, not just using them
+│   ├── onboard.py               # What happens in the first few seconds of a session
+│   ├── paths.py                 # Single source of truth for every filesystem location ShellMate…
+│   ├── pipeline.py              # The chokepoint every keystroke passes through on its way out
+│   ├── platforms.py             # What ShellMate knows about each kind of device
+│   ├── profiles.py              # Connection profile persistence
+│   ├── schemes.py               # Terminal colour schemes as data
+│   ├── server.py                # Startup orchestration for ShellMate: port selection and
+│   ├── settings_store.py        # Application settings persistence for ShellMate
+│   ├── snippets.py              # The saved command library
+│   ├── store.py                 # Persistent session history in SQLite
+│   ├── support.py               # Building a diagnostic bundle worth reading
+│   ├── vault.py                 # Encrypted storage for API keys and device credentials
+│   ├── version.py               # What this copy of ShellMate is
 │   ├── ai/
-│   │   ├── __init__.py
-│   │   ├── router.py          # Routes AI requests to selected backend
-│   │   ├── claude_client.py   # Claude API client
-│   │   ├── ollama_client.py   # Ollama API client
-│   │   └── prompts.py         # System prompts for the AI (network engineer persona)
+│   │   ├── chroma_client.py     # Optional Chroma vector-DB client for ShellMate
+│   │   ├── claude_client.py     # Streaming Claude API client for ShellMate
+│   │   ├── deepseek_client.py   # Streaming DeepSeek client for ShellMate
+│   │   ├── ollama_client.py     # Streaming Ollama API client for ShellMate
+│   │   ├── openai_client.py     # Streaming OpenAI client for ShellMate
+│   │   ├── prompt_store.py      # The system prompts, as data rather than code
+│   │   ├── prompts.py           # AI system prompts for ShellMate
+│   │   ├── providers.py         # Model discovery per provider, cached to models.json
+│   │   ├── router.py            # Routes AI chat requests to the correct backend (Claude / xAI /…
+│   │   ├── summarize.py         # One-shot AI summary of a terminal session for the
+│   │   ├── xai_client.py        # Streaming xAI (Grok) client for ShellMate
+│   ├── connections/
+│   │   ├── base.py              # ConnectionHandler contract and ConnectionParams
+│   │   ├── manager.py           # Session lifecycle and the transport registry
+│   │   ├── serial_handler.py    # Serial console via pyserial
+│   │   ├── sftp.py              # File transfer over an existing SSH transport
+│   │   ├── ssh_handler.py       # SSH via paramiko: keys, jump host, second channel
+│   │   ├── telnet_handler.py    # Telnet over a raw socket, with IAC negotiation
 │   ├── session/
-│   │   ├── __init__.py
-│   │   └── buffer.py          # Session buffer — one buffer per session ID, stores terminal I/O history
-│   └── config.py              # Configuration loading from .env
+│   │   ├── ansi.py              # Undo escape sequences, backspace and bare CR
+│   │   ├── buffer.py            # Rolling per-session screen buffer
+│   │   ├── outbound.py          # The one door out: redaction before any AI call
+│   │   ├── redact.py            # Secret-pattern redaction for logs and prompts
+│   │   ├── transcript.py        # Prompt detection and command segmentation
 ├── frontend/
-│   ├── index.html             # Main page — tab bar, split-screen layout
-│   ├── css/
-│   │   └── style.css          # All styling
+│   ├── index.html               # The one page: tab bar, split panes, every panel
+│   ├── css/style.css            # All styling; dark and light themes from tokens
+│   ├── docs/*.md                # The bundled manual, rendered offline by docs.js
+│   ├── vendor/                  # xterm.js, addons, fonts — no CDN at runtime
 │   └── js/
-│       ├── tabs.js            # Tab bar management — create, switch, close, reorder tabs
-│       ├── terminal.js        # xterm.js initialisation and per-tab WebSocket binding
-│       ├── chat.js            # AI chat panel logic
-│       ├── commands.js         # Command suggestion and approval UI
-│       └── connections.js      # Connection dialog and profile management
-├── frontend/vendor/           # Bundled xterm.js + fonts (no CDN at runtime)
-└── profiles/
-    └── examples.json          # Example connection profiles
+│       ├── ai_panel.js          # Provider testing, model discovery, and hiding the AI panel
+│       ├── alerts.js            # Telling someone that something is about to happen to a device
+│       ├── broadcast.js         # Send commands to several devices at once
+│       ├── chat.js              # AI chat panel for ShellMate
+│       ├── chat_context.js      # Choose which sessions the assistant can see
+│       ├── connections.js       # Connection dialog and profile management
+│       ├── credentials.js       # Managing the passwords ShellMate has been asked to remember
+│       ├── device.js            # Report what ShellMate has worked out about each device
+│       ├── dialog.js            # ShellMate's own confirm, prompt and alert
+│       ├── discovery.js         # The panel that finds devices on the network
+│       ├── docs.js              # The built-in manual, and the support link
+│       ├── drift.js             # "This device has changed since you were last here. Want to see?"
+│       ├── feedback.js          # The bug / feature-request reporter (#370)
+│       ├── filepicker.js        # Choosing a file on this machine
+│       ├── groups.js            # Groups on the dashboard
+│       ├── highlight.js         # Colour terminal output by regex rule
+│       ├── highlight_settings.js # Editor for the output colour rules
+│       ├── history.js           # Search across every session ever recorded
+│       ├── jira.js              # Conclude Session / Jira integration for ShellMate
+│       ├── keys.js              # Making an SSH key without leaving the application
+│       ├── layout.js            # Tiling. Show several sessions at once instead of one at a time
+│       ├── logs.js              # Logs panel for ShellMate
+│       ├── markdown.js          # A small Markdown renderer for the built-in documentation
+│       ├── menu.js              # The one context menu
+│       ├── mode.js              # Learn / Troubleshoot mode toggle
+│       ├── palette.js           # Find a tab by name (#410)
+│       ├── panel_resize.js      # Dragging a side panel wider
+│       ├── platforms_editor.js  # Edit device platform definitions in the app
+│       ├── prefs.js             # Interface preferences that used to live in localStorage
+│       ├── prompts_editor.js    # Reading and changing what the assistant is told
+│       ├── regex_builder.js     # Build and test an output-colour pattern
+│       ├── settings.js          # Settings panel for ShellMate
+│       ├── settings_nav.js      # Make Settings navigable instead of a long scroll
+│       ├── sftp.js              # Remote file browser for the active SSH tab
+│       ├── stockton.js          # The advanced settings, rendered from the registry
+│       ├── support.js           # Assembling a support request worth answering
+│       ├── tabs.js              # Tab bar management for ShellMate
+│       ├── terminal.js          # xterm.js terminal initialisation for ShellMate
+│       ├── tooltips.js          # The explanation that does not fit on the label
+│       ├── update.js            # The startup release check (#420), when it is switched on
+│       ├── uptime.js            # How long each session has been up
+│       ├── usage.js             # ShellMate's own footprint, in the status bar (#266)
+│       ├── vault.js             # Unlock prompt and vault settings
+└── profiles/examples.json       # Example connection profile
 ```
 
 ## Portable runtime — rules that must not be broken
@@ -247,8 +313,10 @@ and `onboard.as_chosen()` is the way out, not a higher score.
 
 `pipeline.py` is the chokepoint every keystroke passes through on its way out.
 It assembles keystrokes into lines and can rewrite one before it reaches the
-device. Alias expansion lives there today; Phase 6's guardrails and paste
-throttling extend the same chain.
+device. Alias expansion, the dangerous-command guardrail and the hold-and-
+confirm it raises all live there; paste pacing is the frontend's, in
+`terminal.js`, because the pacing has to happen before the bytes reach the
+socket.
 
 Two rules for anything that writes into a live session:
 
@@ -349,8 +417,18 @@ no file at all — sees the new one. `ai.panel_enabled` is the worked example.
 SHELLMATE_HOST=127.0.0.1
 SHELLMATE_PORT=8765
 
-# Claude API (optional — leave blank to disable)
+# AI providers (all optional — leave blank to disable; the vault wins over .env)
 ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+XAI_API_KEY=
+DEEPSEEK_API_KEY=
+
+# Optional Chroma store of design guidelines for the assistant
+CHROMA_URL=
+CHROMA_COLLECTION=design_guidelines
+
+# Optional: bind wider than loopback — refuses to start without a token
+# SHELLMATE_AUTH_TOKEN=
 
 # Ollama (optional — defaults shown)
 OLLAMA_HOST=http://localhost:11434
@@ -365,6 +443,12 @@ DEFAULT_BAUD_RATE=9600
 ```
 
 ## Build phases
+
+**Where this stands:** Phases 1–5 are complete, and the application has grown
+well past them — telnet, SFTP, discovery, groups, the vault, history and
+drift, broadcast, keys and certificates, Jira export, the feedback relay.
+The phases below are kept as the record of how it was built and what each
+step was for. Open work is tracked as GitHub issues, not here.
 
 Build ShellMate incrementally. Each phase should produce a working application that does something useful. Do not skip ahead — complete and test each phase before moving to the next.
 
@@ -561,8 +645,10 @@ Use a dark terminal theme by default (dark background, light text) as network en
 
 ## Security notes
 
-- API keys are stored in `.env` only, never in code or profiles
-- Passwords are never stored — prompted on each connection (keyring integration is a future enhancement)
+- API keys come from the vault or `.env`, never from code or profiles
+- Device passwords are not stored unless the user asks; when they are, they go
+  to the encrypted vault (`backend/vault.py`) or, by explicit choice, the
+  plaintext file — never to `profiles.json`. See *Secrets* above.
 - The web server binds to `127.0.0.1` only — not accessible from other machines
 - Serial connections are inherently local
 - Session buffers are in-memory only and cleared on disconnect (unless logging is explicitly enabled)

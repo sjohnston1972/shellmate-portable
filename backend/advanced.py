@@ -415,7 +415,7 @@ SETTINGS: tuple[Setting, ...] = (
             "the output, so both stop working for sessions recorded this way."),
     Setting("history.retention_days", "Discard history after", 0, "int",
             "Zero keeps it forever.",
-            "Nothing prunes the database today. Worth setting if ShellMate "
+            "Worth setting if ShellMate "
             "lives on a stick with limited room.",
             minimum=0, maximum=3650, unit="days"),
     Setting("history.prompt_pattern", "Prompt pattern override", "", "text",
