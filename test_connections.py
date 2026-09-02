@@ -65,15 +65,33 @@ class FakeTelnetServer:
         self._listener.listen(1)
         self.port = self._listener.getsockname()[1]
         self._conn: socket.socket | None = None
+        # A client can finish its TCP handshake (the OS accepts the SYN into
+        # the listen backlog) before this thread has actually been scheduled
+        # to run accept() and set self._conn. Under load that gap can be
+        # long enough that send(), called right after the client connects,
+        # would silently no-op on self._conn still being None and drop the
+        # data — the same telnet bytes look "sent" to the test but never hit
+        # the wire, and any assertion about what the client received then
+        # fails for a reason that has nothing to do with the parser under
+        # test. This event lets send()/recv() wait for the real handoff
+        # instead of racing it.
+        self._accepted = threading.Event()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._thread.start()
 
     def _serve(self) -> None:
         try:
-            self._listener.settimeout(5)
+            # Generous on purpose: this is how long the *listener* waits for
+            # an incoming connection, not a bound on the test's own timing
+            # assertions (those are untouched). Under CPU contention this
+            # thread can itself be scheduling-starved for many seconds before
+            # it gets to run accept() at all, even though the client's TCP
+            # handshake completed almost instantly at the OS level.
+            self._listener.settimeout(30)
             conn, _ = self._listener.accept()
             self._conn = conn
+            self._accepted.set()
             conn.settimeout(0.2)
             if self.script:
                 conn.sendall(self.script)
@@ -93,8 +111,16 @@ class FakeTelnetServer:
             pass
 
     def send(self, data: bytes) -> None:
-        if self._conn:
-            self._conn.sendall(data)
+        # Block until the server thread has actually accepted the connection
+        # (see the comment on self._accepted in __init__) instead of silently
+        # dropping data when self._conn happens not to be set yet. The
+        # timeout only guards against a genuine hang (e.g. the connection
+        # never arriving) -- it is not part of the behavior under test, so
+        # it is set generously rather than tuned to any observed timing.
+        if not self._accepted.wait(timeout=30):
+            raise RuntimeError("FakeTelnetServer.send(): no client connection accepted within 30s")
+        assert self._conn is not None
+        self._conn.sendall(data)
 
     def close(self) -> None:
         self._stop.set()
