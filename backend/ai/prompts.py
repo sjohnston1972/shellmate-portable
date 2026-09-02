@@ -46,10 +46,12 @@ Your behaviour:
 
 Context format you will receive:
 - A summary of all open sessions (tab number, device name, connection type)
+- What ShellMate has established about the active device: its platform and version, anything pending on it (a reload, a commit waiting to be confirmed), and when its configuration was last captured. Trust these over guessing from the prompt.
 - The last N lines of terminal output from the active (or requested) session
 - A list of commands run in the active session
 - Optionally, output from other sessions if the engineer requested cross-device context
 - Optionally, design-guideline snippets retrieved from a vector database
+- The earlier turns of this conversation, when there are any — a follow-up refers to them.
 
 You must not make up device output or invent configurations you cannot see. If you cannot see enough context to answer, say so and suggest which show command would help."""
 
@@ -81,10 +83,12 @@ Your behaviour:
 
 Context format you will receive:
 - A summary of all open sessions (tab number, device name, connection type)
+- What ShellMate has established about the active device: its platform and version, anything pending on it (a reload, a commit waiting to be confirmed), and when its configuration was last captured. Trust these over guessing from the prompt.
 - The last N lines of terminal output from the active (or requested) session
 - A list of commands run in the active session
 - Optionally, output from other sessions if the engineer requested cross-device context
 - Optionally, design-guideline snippets retrieved from a vector database
+- The earlier turns of this conversation, when there are any — a follow-up refers to them.
 
 You must not make up device output or invent configurations you cannot see. If you cannot see enough context to answer, say so and explain which show command would help and why."""
 
@@ -147,6 +151,54 @@ def get_system_prompt(mode: str | None) -> str:
     return prompt_store.rendered(mode)
 
 
+def render_device_facts(facts: dict) -> list[str]:
+    """
+    One line per thing established, worded for the model.
+
+    ``facts`` is what ``router._device_facts()`` gathers:
+    platform/name/version/model/confidence/source from the fingerprint,
+    ``pending`` from the alert tracker, ``last_capture`` and ``baseline``
+    from the config archive, and the connection type.
+    """
+    out: list[str] = []
+    name = facts.get("name") or ""
+    platform = facts.get("platform") or ""
+    confidence = float(facts.get("confidence") or 0.0)
+    if platform and platform != "generic":
+        how = {"banner": "from its banner", "prompt": "from the prompt shape",
+               "ssh-version": "from the SSH version string",
+               "version-command": "from its version command",
+               "you": "chosen by the engineer"}.get(facts.get("source", ""), "")
+        sure = ("certain" if confidence >= 0.9 else
+                "probable" if confidence >= 0.6 else "a guess")
+        detail = " ".join(x for x in (facts.get("version"), facts.get("model")) if x)
+        out.append(f"Platform: {name or platform}" + (f" {detail}" if detail else "")
+                   + f" — {sure}" + (f", {how}" if how else "") + ".")
+    else:
+        out.append("Platform: not identified yet — do not assume a vendor.")
+    if facts.get("connection_type"):
+        out.append(f"Connected over {str(facts['connection_type']).upper()}.")
+
+    pending = facts.get("pending") or None
+    if pending:
+        kind = pending.get("kind", "action")
+        left = pending.get("seconds_left")
+        when = (f"in about {int(left // 60)}m {int(left % 60)}s" if isinstance(left, (int, float)) and left >= 0
+                else "at a time the device stated")
+        cancel = pending.get("cancel_command") or ""
+        out.append(f"PENDING on this device: {kind.replace('_', ' ')} {when}."
+                   + (f" It is cancelled with: {cancel}" if cancel else "")
+                   + " Mention this if it bears on the question.")
+
+    last = facts.get("last_capture")
+    if last:
+        out.append(f"Configuration last captured by ShellMate: {last}"
+                   + (" (a baseline is set for this device)." if facts.get("baseline") else "."))
+    elif facts.get("capture_enabled") is False:
+        out.append("Configuration capture is switched off; ShellMate holds no snapshot.")
+    return out
+
+
 def build_context_prompt(
     sessions_summary: list[dict],
     active_buffer: str,
@@ -154,6 +206,7 @@ def build_context_prompt(
     command_history: list[str],
     extra_contexts: list[dict] | None = None,
     design_context: str = "",
+    device_context: dict | None = None,
 ) -> str:
     """Build the context block prepended to every user message."""
     lines = []
@@ -169,6 +222,16 @@ def build_context_prompt(
     else:
         lines.append("  (no active sessions)")
     lines.append("")
+
+    # What ShellMate already knows about the active device (#401). The
+    # fingerprint, the alert tracker and the config archive had all worked
+    # this out and none of it reached the model, which guessed the vendor
+    # from the prompt instead.
+    if device_context:
+        lines.append(f"=== DEVICE FACTS: {active_label} ===")
+        for fact in render_device_facts(device_context):
+            lines.append(f"  {fact}")
+        lines.append("")
 
     # Active session terminal output
     lines.append(f"=== ACTIVE SESSION: {active_label} ===")

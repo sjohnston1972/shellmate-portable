@@ -100,5 +100,6 @@ async def summarize_session(
     # and an empty context block so we get a clean summary.
     chunks: list[str] = []
     async for chunk in stream_response(user_prompt, "", model=model):
-        chunks.append(chunk)
+        if isinstance(chunk, str):
+            chunks.append(chunk)
     return "".join(chunks).strip()

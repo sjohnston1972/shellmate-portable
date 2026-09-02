@@ -79,7 +79,7 @@ SESSIONS = {sid: _session(sid, label) for sid, label in
 MANAGER = StubManager(SESSIONS)
 
 
-async def _fake_stream(message, context_block, model=None, system_prompt=None):
+async def _fake_stream(message, context_block, model=None, system_prompt=None, history=None):
     yield "ok"
 
 

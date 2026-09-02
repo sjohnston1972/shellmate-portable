@@ -205,6 +205,8 @@
 
     if (msg.type === 'chunk') {
       appendChunk(msg.data);
+    } else if (msg.type === 'usage') {
+      _recordUsage(msg);
     } else if (msg.type === 'done') {
       finishStreaming();
     } else if (msg.type === 'error') {
@@ -261,6 +263,9 @@
     const activeTab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
     const sessionId = activeTab ? activeTab.sessionId : null;
 
+    // The earlier turns, taken before this one is added to the transcript
+    // so the question is not sent twice (#402).
+    const history = _recentHistory();
     // Record in Jira chat history
     if (typeof window.addJiraChatMessage === 'function') window.addJiraChatMessage('user', text);
 
@@ -290,6 +295,7 @@
 
       chatWs.send(JSON.stringify({
         message,
+        history,
         session_id:        sessionId,
         // Always the real tab order. The selection used to be sent *as* this
         // list, which renumbered the AI's session summary over the subset —
@@ -408,6 +414,7 @@
       ? window.getChatContextSelection() : null;
     chatWs.send(JSON.stringify({
       message:       message || '',
+      history:       _recentHistory(),
       // The command and the device's reply as data. The server composes the
       // prompt from them, which is what lets it mask the output — composed
       // here it arrived as an ordinary user message with the configuration
@@ -968,6 +975,42 @@
   // -----------------------------------------------------------------------
 
   // -----------------------------------------------------------------------
+  // Memory (#402) and measured usage (#416)
+  // -----------------------------------------------------------------------
+
+  /**
+   * The earlier turns, newest last, for the request to carry. The server
+   * trims to the configured number of turns; this only caps the payload.
+   */
+  function _recentHistory() {
+    const all = typeof window.getJiraChatHistory === 'function'
+      ? window.getJiraChatHistory() : [];
+    return all.slice(-40).map(m => ({ role: m.role, text: m.text || '' }));
+  }
+
+  let lastUsage = null;
+  const totalUsage = { input: 0, output: 0, cache_read: 0, replies: 0 };
+
+  function _recordUsage(msg) {
+    lastUsage = {
+      input:      Number(msg.input) || 0,
+      output:     Number(msg.output) || 0,
+      cache_read: Number(msg.cache_read) || 0,
+      cache_write: Number(msg.cache_write) || 0,
+      provider:   msg.provider || currentBackend,
+    };
+    totalUsage.input      += lastUsage.input + lastUsage.cache_read;
+    totalUsage.output     += lastUsage.output;
+    totalUsage.cache_read += lastUsage.cache_read;
+    totalUsage.replies    += 1;
+  }
+
+  function _resetUsage() {
+    lastUsage = null;
+    totalUsage.input = totalUsage.output = totalUsage.cache_read = totalUsage.replies = 0;
+  }
+
+  // -----------------------------------------------------------------------
   // Context size estimator
   // -----------------------------------------------------------------------
   // Claude Sonnet context window (tokens).  Ollama models vary but 32k is a
@@ -1047,14 +1090,31 @@
     if (!statusEl) return;
 
     const limit  = CONTEXT_LIMITS[currentBackend] || 200_000;
-    const tokens = _estimateTokens();
+    // The provider's own count of the last request beats the chars/4 guess
+    // whenever there has been one (#416); cache reads are still context.
+    const measured = lastUsage && lastUsage.provider === currentBackend
+      ? lastUsage.input + lastUsage.cache_read : 0;
+    const tokens = measured || _estimateTokens();
     const pct    = Math.min(100, Math.round((tokens / limit) * 100));
-    const kTok   = tokens >= 1_000 ? `${Math.round(tokens / 1_000)}k` : `${tokens}`;
+    const kTok   = tokens >= 1_000 ? `${(tokens / 1_000).toFixed(tokens < 10_000 ? 1 : 0)}k` : `${tokens}`;
 
     // Dot character + label
     const dot = '●';
-    statusEl.textContent = `${dot} Context: ~${kTok} tok`;
-    statusEl.title = `~${tokens.toLocaleString()} estimated tokens · ${pct}% of ${Math.round(limit/1000)}k ${currentBackend} limit.\nGreen <25% · Amber 25–65% · Red >65%`;
+    statusEl.textContent = `${dot} Context: ${measured ? '' : '~'}${kTok} tok`;
+    let title = measured
+      ? `${tokens.toLocaleString()} tokens in the last request, as counted by the provider`
+      : `~${tokens.toLocaleString()} estimated tokens`;
+    title += ` · ${pct}% of ${Math.round(limit/1000)}k ${currentBackend} limit.`;
+    if (lastUsage) {
+      title += `\nLast reply: ${lastUsage.input.toLocaleString()} in`
+        + (lastUsage.cache_read ? ` (+${lastUsage.cache_read.toLocaleString()} from cache)` : '')
+        + ` / ${lastUsage.output.toLocaleString()} out.`;
+      title += `\nThis conversation: ${totalUsage.input.toLocaleString()} in / `
+        + `${totalUsage.output.toLocaleString()} out over ${totalUsage.replies} repl${totalUsage.replies === 1 ? 'y' : 'ies'}`
+        + (totalUsage.cache_read ? `, ${totalUsage.cache_read.toLocaleString()} served from cache.` : '.');
+    }
+    title += '\nGreen <25% · Amber 25–65% · Red >65%';
+    statusEl.title = title;
 
     statusEl.className = pct < 25 ? 'ctx-green'
                        : pct < 65 ? 'ctx-amber'
@@ -1072,6 +1132,7 @@
     streamingBubble      = null;
     isStreaming          = false;
     sendBtn.disabled     = false;
+    _resetUsage();
     // Reset Jira chat history so context estimate resets too
     if (typeof window._clearJiraChatHistory === 'function') window._clearJiraChatHistory();
     updateContextIndicator();

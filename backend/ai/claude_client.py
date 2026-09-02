@@ -12,6 +12,7 @@ from backend.advanced import get as advanced
 
 from backend.config import ANTHROPIC_API_KEY
 from backend.settings_store import get_effective
+from backend.ai import turns
 from backend.ai.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,8 @@ async def stream_response(
     context_block: str,
     model: str | None = None,
     system_prompt: str | None = None,
-) -> AsyncIterator[str]:
+    history: list[dict] | None = None,
+) -> AsyncIterator:
     """
     Stream a Claude API response token by token.
     Yields text chunks as they arrive.
@@ -102,14 +104,19 @@ async def stream_response(
         "content-type": "application/json",
     }
 
+    # The system prompt and the earlier turns are the stable prefix, marked
+    # cacheable (#416); the context block and the question come last.
+    system_blocks, messages = turns.anthropic_request(
+        system_prompt or SYSTEM_PROMPT, history, full_user_message)
     payload = {
         "model": model or _fallback_model(),
         "max_tokens": advanced("ai.max_tokens"),
         "temperature": advanced("ai.temperature"),
-        "system": system_prompt or SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": full_user_message}],
+        "system": system_blocks,
+        "messages": messages,
         "stream": True,
     }
+    usage: dict = {}
 
     async with httpx.AsyncClient(timeout=advanced("ai.request_timeout")) as client:
         async with client.stream(
@@ -128,9 +135,25 @@ async def stream_response(
                     break
                 try:
                     event = json.loads(data)
-                    if event.get("type") == "content_block_delta":
+                    kind = event.get("type")
+                    if kind == "content_block_delta":
                         delta = event.get("delta", {})
                         if delta.get("type") == "text_delta":
                             yield delta.get("text", "")
+                    elif kind == "message_start":
+                        # Input-side counts arrive first, cache hits included.
+                        u = (event.get("message") or {}).get("usage") or {}
+                        usage.update({
+                            "input":       u.get("input_tokens", 0),
+                            "cache_read":  u.get("cache_read_input_tokens", 0),
+                            "cache_write": u.get("cache_creation_input_tokens", 0),
+                        })
+                    elif kind == "message_delta":
+                        u = event.get("usage") or {}
+                        if "output_tokens" in u:
+                            usage["output"] = u["output_tokens"]
                 except json.JSONDecodeError:
                     continue
+    if usage:
+        usage["provider"] = "anthropic"
+        yield {"usage": usage}

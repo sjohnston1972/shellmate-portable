@@ -4093,6 +4093,9 @@ async def chat_websocket(websocket: WebSocket) -> None:
             open_session_ids = msg.get("open_session_ids") or None
             context_session_ids = msg.get("context_session_ids") or None
             mode             = msg.get("mode") or None  # "learn" | "tshoot"
+            # Earlier turns, as the browser kept them (#402). Trimmed and
+            # shaped per provider in ai/turns.py.
+            history          = msg.get("history") if isinstance(msg.get("history"), list) else None
 
             # Approving a suggested command used to also ship whatever the
             # device said back to the provider, with no setting governing it
@@ -4127,7 +4130,15 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     context_session_ids=context_session_ids,
                     model=model,
                     mode=mode,
+                    history=history,
                 ):
+                    if isinstance(chunk, dict) and "usage" in chunk:
+                        # Real counts from the provider (#416), so the meter
+                        # can stop estimating.
+                        await websocket.send_text(
+                            json.dumps({"type": "usage", **chunk["usage"]})
+                        )
+                        continue
                     await websocket.send_text(
                         json.dumps({"type": "chunk", "data": chunk})
                     )

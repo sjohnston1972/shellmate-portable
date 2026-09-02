@@ -12,6 +12,7 @@ from backend.advanced import get as advanced
 
 from backend.config import OLLAMA_HOST, OLLAMA_MODEL
 from backend.settings_store import get_effective
+from backend.ai import turns
 from backend.ai.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,8 @@ async def stream_response(
     context_block: str,
     model: str | None = None,
     system_prompt: str | None = None,
-) -> AsyncIterator[str]:
+    history: list[dict] | None = None,
+) -> AsyncIterator:
     """
     Stream an Ollama response token by token.
     Yields text chunks as they arrive.
@@ -56,10 +58,8 @@ async def stream_response(
     payload = {
         "model": model or OLLAMA_MODEL,
         "stream": True,
-        "messages": [
-            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
-            {"role": "user", "content": full_user_message},
-        ],
+        "messages": turns.openai_messages(
+            system_prompt or SYSTEM_PROMPT, history, full_user_message),
         # The same settings the cloud clients honour, in Ollama's spelling.
         # Without these, Temperature and Maximum response length in Stockton
         # applied to every provider except the local one (#417).
@@ -84,6 +84,14 @@ async def stream_response(
                     if chunk:
                         yield chunk
                     if event.get("done"):
+                        # Ollama's counts: what it read and what it wrote.
+                        if "prompt_eval_count" in event or "eval_count" in event:
+                            yield {"usage": {
+                                "provider": "ollama",
+                                "input":    event.get("prompt_eval_count", 0),
+                                "output":   event.get("eval_count", 0),
+                                "cache_read": 0,
+                            }}
                         break
                 except json.JSONDecodeError:
                     continue

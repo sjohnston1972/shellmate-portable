@@ -197,3 +197,35 @@ that reason. The assistant does not watch your sessions in the background.
 
 If that is more than you want leaving the machine, use Ollama, or turn the
 panel off.
+
+
+## What it knows without being told
+
+Every question carries, besides the terminal output, what ShellMate has
+already established about the active device: the platform and version from
+the fingerprint, how sure it is and how it found out, anything pending on the
+device — a reload counting down, a commit waiting to be confirmed — and when
+the configuration was last captured. The assistant used to guess the vendor
+from the shape of the prompt while the application knew the answer.
+
+## Memory
+
+The last few exchanges travel with each request, so "and the other
+interface?" means what you think it means. How many is **Earlier turns the
+assistant remembers** in Stockton, under AI Assistant; zero switches memory
+off. Clearing the chat clears it.
+
+On Claude the system prompt and those earlier turns are marked as a cacheable
+prefix, so each request re-reads the conversation from cache and pays full
+price only for the fresh terminal context and the new question. **Cache the
+conversation prefix** in Stockton is the switch, on by default; other
+providers ignore it.
+
+## The context meter
+
+The status bar's **Context** figure is an estimate until the provider has
+answered once; after that it is the provider's own count of what the last
+request contained, and the tooltip shows tokens in and out for the last reply
+and for the whole conversation, with how much came from the cache. Prices are
+not shown on purpose: they change without notice and a wrong figure is worse
+than none.

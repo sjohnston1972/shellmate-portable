@@ -12,6 +12,7 @@ from backend.advanced import get as advanced
 
 from backend.config import DEEPSEEK_API_KEY, DEEPSEEK_MODEL
 from backend.settings_store import get_effective
+from backend.ai import turns
 from backend.ai.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,8 @@ async def stream_response(
     context_block: str,
     model: str | None = None,
     system_prompt: str | None = None,
-) -> AsyncIterator[str]:
+    history: list[dict] | None = None,
+) -> AsyncIterator:
     """
     Stream a DeepSeek response token by token.
     Yields text chunks as they arrive.
@@ -47,11 +49,12 @@ async def stream_response(
         "stream":     True,
         "max_tokens": advanced("ai.max_tokens"),
         "temperature": advanced("ai.temperature"),
-        "messages": [
-            {"role": "system", "content": system_prompt or SYSTEM_PROMPT},
-            {"role": "user",   "content": full_user_message},
-        ],
+        "messages": turns.openai_messages(
+            system_prompt or SYSTEM_PROMPT, history, full_user_message),
+        # The final chunk then carries the token counts (#416).
+        "stream_options": {"include_usage": True},
     }
+    usage: dict = {}
 
     async with httpx.AsyncClient(timeout=advanced("ai.request_timeout")) as client:
         async with client.stream(
@@ -71,12 +74,23 @@ async def stream_response(
                     break
                 try:
                     event = json.loads(data)
-                    chunk = (
-                        event.get("choices", [{}])[0]
-                        .get("delta", {})
-                        .get("content", "")
-                    )
+                    if event.get("usage"):
+                        u = event["usage"]
+                        details = u.get("prompt_tokens_details") or {}
+                        usage.update({
+                            "input":      u.get("prompt_tokens", 0),
+                            "output":     u.get("completion_tokens", 0),
+                            # OpenAI reports cached prompt tokens in a
+                            # sub-object; DeepSeek at the top level.
+                            "cache_read": details.get("cached_tokens",
+                                                      u.get("prompt_cache_hit_tokens", 0)),
+                        })
+                    choices = event.get("choices") or [{}]
+                    chunk = (choices[0].get("delta") or {}).get("content", "")
                     if chunk:
                         yield chunk
                 except json.JSONDecodeError:
                     continue
+    if usage:
+        usage["provider"] = "deepseek"
+        yield {"usage": usage}

@@ -565,6 +565,20 @@ SETTINGS: tuple[Setting, ...] = (
             "that is usually background. Raise it when the comparison *is* "
             "the question (#431).",
             minimum=0, maximum=5000, unit="lines"),
+    Setting("ai.history_turns", "Earlier turns the assistant remembers", 8, "int",
+            "How many question-and-answer exchanges travel with each request.",
+            "Every request used to carry one message, so a follow-up such as "
+            "\"and the other interface?\" started from nothing (#402). Each "
+            "remembered turn costs its tokens again on a metered provider — "
+            "unless the provider caches the prefix, which Claude does. Zero "
+            "means no memory at all.",
+            minimum=0, maximum=50, unit="turns"),
+    Setting("ai.prompt_caching", "Cache the conversation prefix (Claude)", True, "bool",
+            "Marks the system prompt and the earlier turns as cacheable.",
+            "Anthropic re-reads a cached prefix at a fraction of the price "
+            "and faster; only the fresh terminal context and the new question "
+            "are charged in full (#416). Nothing to switch off unless the "
+            "account's pricing says otherwise. Ignored by other providers."),
     Setting("ai.context_commands", "Commands of history sent", 30, "int",
             "How many recent commands are listed alongside the output.",
             "", minimum=0, maximum=500),

@@ -57,10 +57,13 @@ async def stream_chat(
     context_session_ids: list[str] | None = None,  # the tab picker's selection
     model: str | None = None,             # optional model override
     mode: str | None = None,              # "learn" | "tshoot"
-) -> AsyncIterator[str]:
+    history: list[dict] | None = None,    # earlier turns, [{role, text}]
+) -> AsyncIterator:
     """
     Build context from session buffers, then stream an AI response.
-    Yields text chunks.
+
+    Yields text chunks, and — as the last item, when the provider reports
+    it — a ``{"usage": {...}}`` dict with the token counts (#416).
     """
     # Filter to sessions the browser currently has open (prevents stale sessions
     # from previous page loads appearing as phantom tabs in the AI context).
@@ -87,10 +90,12 @@ async def stream_chat(
     active_label = "No active session"
     active_buffer = "(No terminal session is currently active.)"
     command_history: list[str] = []
+    device_context: dict | None = None
 
     if active_session_id:
         session = session_manager.get_session(active_session_id)
         if session:
+            device_context = _device_facts(session)
             active_label = (
                 session.get("display_label") or
                 session.get("hostname", active_session_id[:8])
@@ -161,6 +166,7 @@ async def stream_chat(
         command_history,
         extra_contexts or None,
         design_context=design_context,
+        device_context=device_context,
     )
 
     # Pick persona from explicit mode arg, falling back to stored preference
@@ -181,5 +187,54 @@ async def stream_chat(
 
     async for chunk in stream_response(
         message, context_block, model=model, system_prompt=system_prompt,
+        history=history,
     ):
         yield chunk
+
+
+def _device_facts(session: dict) -> dict:
+    """
+    What ShellMate has already established about a session's device (#401).
+
+    Read, never fetched: the fingerprint the session carries, the alert
+    tracker's pending action, and the archive's record of the last capture.
+    Nothing here touches the device, so it is safe on every message.
+    Every part is optional and a failure in one leaves the others.
+    """
+    facts: dict = {"connection_type": session.get("connection_type", "")}
+
+    fp = session.get("fingerprint")
+    if fp is not None:
+        facts.update({
+            "platform":   getattr(fp, "platform", ""),
+            "name":       getattr(fp, "name", ""),
+            "version":    getattr(fp, "version", ""),
+            "model":      getattr(fp, "model", ""),
+            "confidence": getattr(fp, "confidence", 0.0),
+            "source":     getattr(fp, "source", ""),
+        })
+
+    tracker = session.get("alerts")
+    try:
+        pending = tracker.payload().get("pending") if tracker else None
+    except Exception:                       # a tracker mid-update
+        pending = None
+    if pending:
+        facts["pending"] = pending
+
+    hostname = session.get("hostname") or ""
+    if hostname:
+        try:
+            from backend import config_archive, store
+            facts["capture_enabled"] = config_archive.capture_enabled()
+            latest = store.store.latest_snapshot(hostname) if hasattr(store, "store") else None
+            if latest and latest.get("captured_at"):
+                from datetime import datetime
+                stamp = latest["captured_at"]
+                facts["last_capture"] = (
+                    datetime.fromtimestamp(stamp).strftime("%Y-%m-%d %H:%M")
+                    if isinstance(stamp, (int, float)) else str(stamp))
+                facts["baseline"] = bool(store.store.get_baseline(hostname))
+        except Exception:                   # history is never allowed to break chat
+            pass
+    return facts
