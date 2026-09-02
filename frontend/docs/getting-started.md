@@ -111,6 +111,16 @@ works even from the dashboard, where it still describes the last session
 shown. It clears when no sessions remain, rather than describing a device
 that is no longer connected to anything.
 
+Beside the **Buffer** count is a small **copy** icon: it puts the most recent
+output of the active terminal on the clipboard — two hundred lines by
+default, set under Stockton → Terminal Behaviour. The tab menu's *Copy all
+scrollback* is there for everything.
+
+**Context** is the assistant's meter. It is an estimate until the provider
+has answered once, and the provider's own count of the last request after
+that; the tooltip shows tokens in and out for the last reply and for the
+whole conversation. The [AI assistant](#assistant) page explains it.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -144,6 +154,20 @@ tab**. The name survives the device announcing its hostname, and clearing it
 brings the detected name back.
 
 Selecting text with the mouse — dragging or double-clicking — copies it.
+
+### The tab strip by keyboard
+
+Tabs are a tablist: Tab reaches the active one, the arrow keys move along
+the strip and switch as they go, Enter or Space selects, and Delete closes.
+Every right-click menu takes the arrow keys, Home and End, Enter and Escape,
+and puts focus back where it was when it closes. `Ctrl+P` finds a tab by
+name when the strip has overflowed. `Ctrl+/` lists every shortcut.
+
+### Renaming a tab
+
+Two consoles on the same stack print the same prompt. **Rename tab** in the
+tab menu gives one a name of your own, which survives the device announcing
+its hostname; clear the name to get the detected one back.
 
 ## Seeing several devices at once
 

@@ -167,6 +167,21 @@ wins, so be specific.
 Add an entry to `platforms.json` with an `id`, a `name`, and at minimum a
 `signatures` list so it can be recognised. Everything else is optional.
 
+### The configuration commands
+
+Three fields say how *Apply configuration* talks to a platform:
+`config_enter` (what opens configuration mode), `config_exit` (what leaves
+it, committing where the platform commits on exit) and `save_command` (what
+makes the change survive a reload). The built-ins carry them for IOS, NX-OS,
+ASA, Junos, PAN-OS and EOS. A `platforms.json` written by an earlier version
+lacks the fields; a blank one falls back to the built-in value, so an
+existing installation pushes to the platforms it already knew without an
+edit. A platform with no enter command is never pushed to.
+
+The assistant also uses the platform id to parse show output into rows: the
+built-in ids map to ntc-templates' names, and a platform you add yourself is
+sent as raw text until its id is one ntc-templates knows.
+
 ### Aliases and upgrades
 
 Aliases **merge** with the built-in set rather than replacing it. If your file

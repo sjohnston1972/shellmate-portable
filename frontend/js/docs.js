@@ -11,6 +11,7 @@
   /** Order matters: this is the order someone should read them in. */
   const PAGES = [
     { file: 'getting-started.md',   title: 'Getting started',      icon: 'terminal' },
+    { file: 'whats-new.md',         title: "What's new",          icon: 'bolt' },
     { file: 'connecting.md',        title: 'Connecting',           icon: 'add_circle' },
     { file: 'device-awareness.md',  title: 'Device awareness',     icon: 'smart_toy' },
     { file: 'history-and-drift.md', title: 'History and drift',    icon: 'search' },

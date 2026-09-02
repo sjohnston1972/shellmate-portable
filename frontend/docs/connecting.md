@@ -43,6 +43,23 @@ the device asked, and sends your answer with the next attempt. The password
 still answers the password prompt; only the extra question reaches you. A
 one-time code is used by the attempt that carries it and never stored.
 
+What you see: the connect pauses, and a small form appears with the device's
+own prompts as its labels — *Verification code*, say — masked where the
+device said the answer should be hidden. Type the code, press **Send**, and
+the connection completes. The device's title and instructions, where it sent
+any, are shown above the fields.
+
+Three things worth knowing:
+
+- The first attempt is counted by the device as a failed login, because the
+  only way to learn what it will ask is to be asked. A TACACS policy that
+  locks an account after one failure will notice; ask for the policy to
+  allow two.
+- A wrong code comes back as a plain refusal, not the form again — a
+  one-time code cannot be retried, so the next attempt needs the next code.
+- A device that wants *only* a password over keyboard-interactive is
+  answered from the password field without asking you anything.
+
 The same happens on a reconnect, and when a connection is opened straight
 from a tile.
 
@@ -144,10 +161,13 @@ Right-click any tab for everything you can do to that session:
 |---|---|
 | **Reconnect** | Bring a dropped session back — shown only when it is down |
 | **Clear console** | Empty the visible buffer |
-| **Copy history** | The session's output, onto the clipboard |
+| **Copy all scrollback** / **Copy visible screen** | The session's output, onto the clipboard |
 | **Copy address** | The address you dialled — for a ticket or a firewall rule, exactly when the tab has started showing the device's name instead |
 | **Save this connection** | Keep an ad-hoc connection without retyping it |
 | **Duplicate session** | A second tab to the same device |
+| **Rename tab** | A name of your own that survives hostname detection |
+| **Port forwards** | Tunnel a port through this session — see below |
+| **Apply configuration** | Push a block of config with a preview first — see below |
 | **Colour scheme** | Per-tab colours — production red, lab grey |
 | **Keep this tab alive** / **all tabs** | Nudge the session so `exec-timeout` never fires |
 | **Disconnect session** / **all sessions** | Hang up but keep the tab and its buffer |
@@ -225,40 +245,135 @@ rather than a password.
 
 ## Port forwards
 
-A tab's right-click menu has **Port forwards**. Three kinds, the same three
-OpenSSH offers: a **local** forward makes a port on this machine reach a host
-as the device sees it — the web page of a switch on the management network,
-say; a **dynamic** forward is a SOCKS5 proxy on this machine, so a browser
-pointed at it reaches anything the device can; a **remote** forward makes a
-port on the device reach a host here. Listeners bind to this machine only,
-there is a per-session limit in Stockton, and every forward stops when the
-session ends. Tick *start with every session* and the forward is kept on the
-saved connection.
+A tab's right-click menu has **Port forwards**: tunnels through the SSH
+session that is already open, so a host that only the device can reach
+becomes reachable from this machine without another login. Three kinds, the
+same three OpenSSH offers.
+
+**Local** — a port on this machine that reaches a host *as the device sees
+it*. The everyday case is a web page on the management network:
+
+1. Open the session to the device that can reach it — a core switch, a
+   bastion, a jump box.
+2. **Port forwards → Add**: kind *Local*, listening port `8443`,
+   destination host `10.0.0.5`, port `443`.
+3. Open `https://localhost:8443` in a browser. The certificate warning is the
+   device's own certificate, presented for a name it was not issued for.
+
+**Dynamic** — a SOCKS5 proxy on this machine. Point a browser (or `curl
+--socks5 localhost:1080`) at it and every address resolves and connects from
+the device's side of the network, each connection its own channel. No
+destination is given; the client names one per connection.
+
+**Remote** — the reverse: a port *on the device* that reaches a host here.
+Useful for handing a file server or a syslog collector on your laptop to a
+device that cannot otherwise reach it. The device has to allow it
+(`GatewayPorts`-style policy on Linux; most network kit refuses, and says so).
+
+Rules that keep this safe:
+
+- **Listeners bind to this machine only.** Nothing off it can use a forward,
+  for the same reason nothing off it can use ShellMate's API.
+- **Bounded.** Up to eight per session, adjustable under Stockton → SSH.
+  A port already in use on this machine is refused with a reason rather than
+  silently taking another.
+- **They die with the session.** Disconnect or close the tab and every
+  listener closes.
+- **Nothing is silent.** The dialog lists every forward with how many
+  connections it has carried, and each one is logged.
+
+Tick **start this forward with every session from the saved connection** and
+the forward is kept on the profile; the next session from that tile starts it
+automatically, and stopping one asks whether to forget it as well.
 
 ## Applying configuration
 
-**Apply configuration** in a tab's menu takes a block of lines, shows each
-one marked against the running configuration — new, already present, or a
-removal — and sends nothing until you have read that and pressed Apply. The
-lines then go into your own session, wrapped in the platform's enter and
-exit commands, paced, and echoed on screen like anything typed; a line on
-the platform's dangerous list refuses the push unless you confirm it. The
-configuration is captured before and after, so the change is a diff in the
-archive, and the diff panel offers to **propose the way back**: a best-effort
-inverse of what changed, opened as a new preview for you to read and edit —
-never applied on its own. Which platforms can be pushed to, and with what
-commands, is under Settings → Platform Definitions.
+**Apply configuration** in a tab's menu takes a block of configuration and
+puts it on the device — with a preview first, through your own session, and
+with the change recorded as a diff. Nothing is sent until you have read the
+preview and pressed Apply.
+
+### The steps
+
+1. **Write or paste the lines**, one command per line exactly as you would
+   type them in configuration mode, indentation included. Tick *capture the
+   running configuration first* if the last capture is old; otherwise the
+   preview compares against the latest stored one.
+2. **Read the preview.** Every line is marked:
+   - `+` **new** — not in the running configuration
+   - `=` **already in place** — present verbatim; sending it changes nothing
+   - `−` **removal** — a `no …` (or `delete …`, `undo …`) whose target exists
+
+   The summary names what it compared against. A device with no capture at
+   all is said so plainly, and every line reads as new.
+3. **Apply.** The lines go into the live session wrapped in the platform's
+   enter and exit commands — `configure terminal` … `end` on IOS — paced by
+   the delay under Stockton → Capture, and echoed on your screen like
+   anything typed. Tick *save afterwards* to add the platform's save command
+   (`write memory`, `copy running-config startup-config`, `commit`).
+4. **See what changed.** The configuration is captured before and after,
+   both go into the archive, and the diff opens in the configuration panel.
+
+### The guardrail
+
+A line on the platform's dangerous list — `reload`, `shutdown`, `write
+erase` — refuses the whole push. The preview names the lines; Apply then
+asks once more, listing them, and sends them only on that confirmation.
+The list is per platform under Settings → Platform Definitions.
+
+### Proposing the way back
+
+The diff panel after an apply offers **Propose the way back**. It compares
+the running configuration now with the capture from before the push and
+writes a change that would take the device back: what was added becomes
+`no …`, what was removed is put back, with its section header for context.
+
+It is a *proposal*, opened in the editor for you to read and edit, never
+applied on its own. Platforms differ in what a bare `no` undoes — a removed
+`interface` block on IOS is `no interface`, a changed default is not always
+its own inverse — so read every line. The same button works for any earlier
+capture from the configuration history, which makes it a general way of
+rolling a device back to a known state, one reviewed step at a time.
+
+### Which platforms
+
+| Platform | Enter | Exit | Save |
+|---|---|---|---|
+| Cisco IOS / IOS-XE | `configure terminal` | `end` | `write memory` |
+| Cisco NX-OS | `configure terminal` | `end` | `copy running-config startup-config` |
+| Cisco ASA | `configure terminal` | `end` | `write memory` |
+| Junos | `configure` | `commit and-quit` | — (the exit commits) |
+| PAN-OS | `configure` | `commit` | `exit` |
+| Arista EOS | `configure terminal` | `end` | `write memory` |
+| Linux | — | — | not pushed to |
+
+The commands live in each platform's definition under Settings → Platform
+Definitions, as `config_enter`, `config_exit` and `save_command`. A platform
+with no enter command is refused rather than guessed at, and a device that
+has not been identified confidently is treated the same way — identify it
+from the Device chip first.
 
 ## Files
 
 The **Files** panel in the sidebar browses the device over the same SSH
-session, without a second login. Files download and upload singly; a folder
-downloads as a zip and uploads file by file with its structure recreated.
-Every entry can be renamed or moved, have its permissions set as an octal
-mode, or deleted — a folder together with everything in it. The folder
-operations count what they would touch before touching anything and refuse
-above the limit under Stockton → SSH & Serial, so a slip does not become a
-wiped flash. Deleting the root is refused outright.
+session, without a second login. The toolbar has the path, *up*, *go*,
+**upload a file**, **upload a folder** and **new folder**; each row has
+**download**, **rename**, **permissions** and **delete**.
+
+- A file downloads and uploads singly. A **folder downloads as a zip** with
+  its tree inside, and **uploads file by file**, each subfolder created as it
+  is first needed — one at a time on purpose, because an SFTP channel is one
+  channel and forty parallel opens against a switch is a good way to lose it.
+- **Rename** takes a new name, or a full path to move the entry elsewhere.
+- **Permissions** takes an octal mode such as `644` or `0755`; anything else
+  is refused before it reaches the device.
+- **Delete** on a folder removes everything beneath it, after naming the path
+  and saying there is no recycle bin on a switch.
+
+The folder operations count what they would touch before touching anything
+and refuse above the limit under Stockton → Files and panels, so a slip does
+not become a wiped flash. Deleting the root is refused outright, whatever the
+limit.
 
 ## Finding devices
 

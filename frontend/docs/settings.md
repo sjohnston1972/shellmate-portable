@@ -143,6 +143,28 @@ because that is what it means. Unticking it clears what was stored, so the
 next launch opens at the default size rather than silently restoring a stale
 one.
 
+## Settings added in 1.0
+
+All in Stockton unless said otherwise, each bounded and explained on its row.
+
+| Setting | Where | What it governs |
+|---|---|---|
+| Earlier turns the assistant remembers | AI Assistant | How many exchanges travel with each request; zero is no memory |
+| Cache the conversation prefix | AI Assistant | Claude's prompt caching on the stable part of the request |
+| Lines sent for each extra session | AI Assistant | Output from the other tabs in `/context all` or the picker |
+| Parse show output into tables | AI Assistant | Rows beside the raw text where a template exists |
+| Investigation step budget | AI Assistant | Approved commands before Investigate mode has to conclude |
+| Ollama context window / Keep the local model loaded | AI Assistant | The two knobs a local model has that a cloud one does not |
+| Lines the Copy output button takes | Terminal Behaviour | The status-bar copy button |
+| Port forwards per session | SSH | The ceiling on tunnels through one session |
+| Delay between pushed config lines | Capture | Pacing when applying configuration |
+| Most entries a folder transfer may touch | Files and panels | The ceiling on a folder download or delete |
+| Check for a newer release at startup | Diagnostics | Off by default; the button under Diagnostics does the same on demand |
+
+The tab menu's toggles under ShellMate Interface gained **Rename tab**,
+**Port forwards** and **Apply configuration**, so any of them can be hidden
+from the menu on a machine where it should not be offered.
+
 ## Diagnostics
 
 **Version** names the release, the commit it was built from and when — the

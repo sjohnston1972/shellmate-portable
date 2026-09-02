@@ -51,6 +51,65 @@ needs both fields filled in.
 Each message a refused key can produce, and what to check on the device for
 it, is listed under *Troubleshooting* on the [SSH keys](#ssh-keys) page.
 
+### The device asked for a code and the login failed
+
+A device behind two-factor asks for the code through the connection itself.
+The first attempt cannot know the answer, so it is refused, the form
+appears, and the *second* attempt carries the code. Two things go wrong:
+
+- **The code was used up.** A one-time code is consumed by the attempt that
+  carries it. A wrong or stale code is a plain refusal; wait for the next
+  code and connect again.
+- **The account locked after the first attempt.** Some TACACS policies lock
+  after one failure. The first, exploratory attempt is that failure; the
+  policy needs to allow two, or the device needs to ask for the code in the
+  password prompt so that no exploratory attempt is needed.
+
+### A port forward will not start
+
+*Could not listen on localhost:PORT* means something on this machine already
+has the port — another forward, another tool, or a previous session that has
+not finished closing. Pick another port. *The device refused* on a remote
+forward means the device's SSH policy does not allow it; most network kit
+does not. A local forward that starts but carries nothing means the device
+could not reach the destination you gave: the host and port are as the
+*device* sees them, not as this machine does.
+
+### Apply configuration was refused
+
+*No configuration commands for platform* — the device is unidentified, or
+identified as something ShellMate does not push to (Linux, a platform you
+added without `config_enter`). Identify it from the Device chip, or add the
+commands under Platform Definitions. *The change contains a command the
+guardrail holds* — a line is on the platform's dangerous list; the preview
+names it, and Apply asks for a confirmation that sends it anyway. *The
+session is no longer connected* — the push needs the live SSH session; a
+serial or telnet tab cannot be pushed to.
+
+### A scheduled backup skipped a device
+
+The result on the group says why, per device: *no saved credentials* (a
+scheduled job cannot ask — save a password or point the connection at a
+shared credential), *not an SSH connection* (serial and telnet cannot be
+captured), or a failure message from the login or the capture itself. A
+device that was skipped because its open session refused a second channel
+is captured next time the session is closed.
+
+### The update check says GitHub could not be reached
+
+That is the whole message on a machine with no route to the internet, and it
+is not a fault. The check sends the version number and nothing else, and a
+copy that cannot ask simply does not know whether a newer release exists.
+The release page is at the repository on GitHub if another machine can look.
+
+### "Nothing was copied" or "Nothing was pasted"
+
+The browser refused clipboard access. In the desktop window this is usually
+a click in the terminal being needed first; in a browser it is the site's
+clipboard permission. The warning appears at most once every thirty seconds
+so that copy-on-select cannot flood the screen while the clipboard is
+blocked.
+
 ### The serial port will not open
 
 **Already in use** — PuTTY, another terminal, or a session that did not close

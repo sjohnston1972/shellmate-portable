@@ -4,20 +4,52 @@ Every session is recorded, automatically, with nothing to switch on.
 
 ## Scheduled backups
 
-A group's menu has **Schedule backups**: every device in it has its
-configuration captured every hour, day or week at a time you choose. A
-device with an open session is captured through that session's second
-channel; one without is logged into for as long as the capture takes, using
-its saved credentials, and skipped if it has none. Devices are taken one at
-a time. The group's menu shows the last run's result, and **Back up
-configurations now** runs it on demand.
+A group's right-click menu has **Schedule backups**. Switched on, every
+device in the group — subgroups included — has its configuration captured on
+the schedule, exactly as it is captured on connect, and the captures go to
+the same history and the same archive folder.
+
+**The schedule** is every hour, every day at a time, or every week on a day
+at a time. It is armed at the next slot after you save it: a nightly backup
+switched on at three in the afternoon first runs at two the next morning, not
+at three. A slot that was missed because ShellMate was not running is still
+owed, and runs at the next check after it starts.
+
+**How a device is reached:**
+
+- A device with an **open session** is captured through that session's
+  second channel, the way drift detection is, and is skipped if the device
+  refuses one. Nothing is typed into the session you are using.
+- A device **without** one is logged into for as long as the capture takes,
+  with its saved credentials or its shared credential, and disconnected. It
+  is skipped, and the skip is reported, if it has no credentials saved —
+  a scheduled job cannot ask.
+- Serial and telnet connections are skipped; capture needs SSH.
+- Devices are taken **one at a time**. Forty simultaneous logins from one
+  laptop is how an authentication server rate-limits you.
+
+**The result** is kept on the group and shown in the schedule dialog: when
+it ran, how long it took, which devices were captured, which failed and why,
+which were skipped and why. **Back up configurations now**, in the same
+menu, runs the whole thing on demand and reports the same way.
+
+Scheduled runs happen only while ShellMate is running. It is a portable tool
+on a laptop, not a service; for a backup that must happen whether or not
+your laptop is open, run it on a machine that is.
 
 ## Playing a session back
 
-The replay panel's **Play** button runs the recorded session into a terminal
-with its original timing — the pauses between commands and the time each
-took — at 1×, 4×, 16× or instantly. Nothing extra is recorded for this; it
-is the same command history, played rather than listed.
+Open any recorded session from History and press **Play**. The commands run
+into a terminal in the panel with their original timing — the pause between
+one command and the next, and the time each one's output took to arrive —
+so a change window reads back the way it happened. **Speed** is 1×, 4×,
+16× or instant; **Stop** ends it. The listing beneath is unchanged and
+still there to copy from.
+
+Nothing extra is recorded for this. It is the same command history, played
+rather than listed, which also means it shows what the transcript captured:
+commands and their replies, not every keystroke or every redraw of the
+screen.
 
 ## What gets recorded
 

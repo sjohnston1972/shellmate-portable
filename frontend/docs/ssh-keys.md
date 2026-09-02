@@ -335,6 +335,14 @@ password you also gave is never tried. ShellMate detects that case and says
 so. The behaviour is **Try keys in ~/.ssh** in Stockton, the advanced
 settings, and is off for any connection that has a password but no key.
 
+## Keys and a second factor
+
+A bastion that takes a key *and* a code asks for the code through the
+connection itself, after the key is accepted. ShellMate shows the prompt and
+sends your answer with the next attempt; see *When the device asks a
+question* on the [Connecting](#connecting) page. The key does not change any
+of that — it answers the key exchange, and the code answers the device.
+
 ## Troubleshooting
 
 ShellMate reports what actually happened rather than listing what might have.

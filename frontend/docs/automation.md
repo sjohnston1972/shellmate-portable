@@ -257,6 +257,11 @@ On the device, over SFTP:
 | `GET` | `/api/sftp/{id}/download?path=` | Download a file |
 | `POST` | `/api/sftp/{id}/upload?path=` | Upload one |
 | `DELETE` | `/api/sftp/{id}/file?path=` | Delete one |
+| `POST` | `/api/sftp/{id}/rename` | `{path, new_path}` — rename or move |
+| `POST` | `/api/sftp/{id}/mkdir` | `{path}` — create a directory |
+| `POST` | `/api/sftp/{id}/chmod` | `{path, mode}` — octal mode such as `644` |
+| `DELETE` | `/api/sftp/{id}/directory?path=` | Delete a directory and everything beneath it |
+| `GET` | `/api/sftp/{id}/download-directory?path=` | A directory as a zip |
 
 On this machine, for the fields that need a local path — a private key, or
 where captured configurations are filed:
@@ -296,11 +301,34 @@ and these exist only to get one back.
 | `POST` | `/api/support/preview` | Gather sections without writing anything |
 | `POST` | `/api/support/bundle` | Write the chosen sections as one zip |
 | `GET` | `/api/prompts` | The assistant's prompts, with their defaults |
-| `PUT` | `/api/prompts/{mode}` | Replace one (`tshoot` or `learn`) |
-| `POST` | `/api/prompts/reset` | Restore one, or both with no `mode` |
+| `PUT` | `/api/prompts/{mode}` | Replace one (`tshoot`, `learn` or `investigate`) |
+| `POST` | `/api/prompts/reset` | Restore one, or all three with no `mode` |
 | `GET` | `/api/serial/ports` | Serial ports on this machine |
 | `GET` | `/api/restart` | Whether ShellMate can relaunch itself, and what is still connected |
 | `POST` | `/api/restart` | Start a fresh copy and stop this one |
+
+### Tunnels, pushes and backups
+
+Added in 1.0, all against a live session or a group:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/sessions/{id}/forwards` | The port forwards a session holds, and the limit |
+| `POST` | `/api/sessions/{id}/forwards` | `{kind, listen_port, host, port, remember}` — start one |
+| `DELETE` | `/api/sessions/{id}/forwards/{fid}?forget=` | Stop one; `forget=true` also drops it from the profile |
+| `PUT` | `/api/profiles/{id}/forwards` | Replace the forwards a saved connection starts with |
+| `POST` | `/api/configs/{id}/preview` | `{text, fresh}` — what applying the lines would change; sends nothing |
+| `POST` | `/api/configs/{id}/apply` | `{text, save, force}` — send them, capture before and after, return the diff |
+| `GET` | `/api/configs/{id}/restore/{snapshot}` | A proposed change back to an earlier capture, as text |
+| `PUT` | `/api/groups/{key}` with `backup` | `{enabled, every, at, day}` — the group's backup schedule |
+| `POST` | `/api/groups/{key}/backup/run` | Back the group up now; returns what happened per device |
+| `GET` | `/api/system/update` | Compare this build with the latest GitHub release |
+
+`POST /api/sessions` answers **409** with `{"detail": {"interactive": …}}`
+when the device asks a keyboard-interactive question the password cannot
+answer; post again with `interactive_answers` in prompt order. The chat
+WebSocket accepts `history` (earlier turns) and `investigate_step`, and
+sends a `usage` message with the provider's token counts after each reply.
 
 ### AI providers and Jira
 

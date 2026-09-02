@@ -57,6 +57,15 @@ at it with the Ollama host setting if it is not on the default port.
 Worth considering if the devices you work on are sensitive enough that their
 configuration should not go to a third party.
 
+A local model has two more settings than a cloud one, under Stockton → AI
+Assistant: **Ollama context window** (`num_ctx`), which defaults to 8192
+because Ollama's own default of 2048 is overrun by a two-hundred-line buffer
+without a word of warning — the model simply never sees the start — and
+**Keep the local model loaded**, how long Ollama keeps the model in memory
+after a reply so the next question does not pay the load again. Temperature
+and the reply ceiling apply to Ollama exactly as they do to the cloud
+providers.
+
 ## What it can see
 
 By default, the tab you are looking at: the recent output, the commands you
@@ -105,6 +114,23 @@ approved commands by default, under Stockton → AI Assistant — which the
 assistant is told about and plans within; once it is spent, results are no
 longer fed back and you ask for a conclusion or clear the chat.
 
+A run looks like this. You type `/investigate users on the third floor say
+the network is slow`. The assistant replies with a hypothesis — *an access
+uplink is saturated or erroring* — and a plan card:
+
+1. ☐ `show interfaces status` — which uplinks are up and at what speed
+2. ☐ `show interfaces | include line protocol|input errors|CRC` — errors
+3. ☐ `show interfaces counters` — utilisation
+
+and one command block, the first step. You send it; the output comes back to
+the assistant on its own, as it does after any approved command; the reply
+says what it showed — *Gi1/0/48 is up at 100 Mb/s, the rest at 1 Gb/s* —
+ticks step one, and proposes step two. When the cause is established it
+finishes with **Conclusion**: what is wrong, the evidence, and what to do,
+with any configuration change flagged as a recommendation rather than a
+step. Switching mode, or clearing the chat, ends the run and resets the
+step count.
+
 ## Structured output
 
 Where ntc-templates has a template for a show command — most of what anyone
@@ -113,6 +139,13 @@ recent commands also reaches the assistant as rows, parsed locally. A
 48-port interface table as columns is how a model gets a port wrong; as rows
 it does not. The raw text still goes too, because a template can lag a
 release. **Parse show output into tables** in Stockton switches it off.
+
+The rows come from the three most recent commands that have a template, and
+from the output of an approved command when it is fed back. A command with
+no template is simply not parsed — there is no error and nothing changes. A
+long table is cut at sixty rows with a note; the raw output carries the rest.
+Parsing runs on the redacted text, so nothing masked from the raw output
+reappears in the rows.
 
 ## Suggested commands
 
