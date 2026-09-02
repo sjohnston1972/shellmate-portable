@@ -78,15 +78,41 @@ will use — green under a quarter, red when it is worth trimming.
 
 ## Modes
 
-The **Tshoot / Learn** toggle in the chat header switches the assistant's
-manner:
+The mode button in the chat header cycles through three ways of working:
 
 - **Troubleshoot** — terse, fix-it-now. Assumes you know what you are doing
   and are in the middle of something.
 - **Learn** — explains the why, not just the what.
+- **Investigate** — runs a problem down to a plan, one approved step at a
+  time. See below.
 
 Whichever you last chose is remembered, so somebody who always wants Learn
 says so once.
+
+### Investigate
+
+Describe the problem — or type `/investigate` followed by it — and the
+assistant states a hypothesis, lays out a short plan of read-only steps as a
+checklist, and proposes only the first as a command. You approve it, as with
+any suggestion; the output comes back to the assistant, which says what it
+learned, ticks or drops steps, and proposes the next. It finishes with a
+**Conclusion** that names the cause and the evidence, and puts any
+configuration change there, flagged, never as a step.
+
+Nothing runs without your click. The plan is on screen throughout, so you
+can see where it is going and stop it. There is a **step budget** — eight
+approved commands by default, under Stockton → AI Assistant — which the
+assistant is told about and plans within; once it is spent, results are no
+longer fed back and you ask for a conclusion or clear the chat.
+
+## Structured output
+
+Where ntc-templates has a template for a show command — most of what anyone
+types on IOS, NX-OS, ASA, Junos, PAN-OS, EOS and Linux — the output of your
+recent commands also reaches the assistant as rows, parsed locally. A
+48-port interface table as columns is how a model gets a port wrong; as rows
+it does not. The raw text still goes too, because a template can lag a
+release. **Parse show output into tables** in Stockton switches it off.
 
 ## Suggested commands
 

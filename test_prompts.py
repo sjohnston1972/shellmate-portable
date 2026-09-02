@@ -61,7 +61,8 @@ def fresh() -> None:
 def test_defaults() -> None:
     print("\n-- The shipped prompts --")
     fresh()
-    check("both personas exist", set(prompts.MODES) == {"tshoot", "learn"},
+    check("all three personas exist",
+          set(prompts.MODES) == {"tshoot", "learn", "investigate"},
           f"got {prompts.MODES}")
     check("the file is written on first run", prompt_store.prompts_path().exists())
 

@@ -12,7 +12,7 @@ the UI (clickable command blocks, etc.) keeps working unchanged.
 """
 
 # ---------------------------------------------------------------------------
-# Shared rules — how to format suggested commands. Both personas follow them.
+# Shared rules — how to format suggested commands. All personas follow them.
 # ---------------------------------------------------------------------------
 _COMMAND_FORMAT_RULES = """\
 - When suggesting CLI commands, wrap EACH command in [SUGGEST_CMD]command here[/SUGGEST_CMD] tags. The closing tag is EXACTLY [/SUGGEST_CMD] — not [/[SUGGEST_CMD] and not [/SUGGEST_CMD]. Do NOT prefix the tag with markdown heading symbols (###). Full correct example: [SUGGEST_CMD]show ip interface brief[/SUGGEST_CMD]
@@ -108,10 +108,48 @@ You must not make up device output or invent configurations you cannot see. If y
 
 RULES_MARKER = "{command_rules}"
 
+# ---------------------------------------------------------------------------
+# Investigate persona (#403)
+#
+# The suggest → approve → watch → analyse loop already existed; what it
+# lacked was a plan. This persona runs the loop deliberately: it states a
+# hypothesis and a short numbered plan, proposes exactly one step at a
+# time, and after each result says what it learned and what changes. The
+# engineer approves every command, as ever — the model never gets to run
+# anything itself. The plan is emitted in a [PLAN] block the chat renders
+# as a checklist, so the state of the investigation is on screen rather
+# than buried in prose.
+# ---------------------------------------------------------------------------
+_INVESTIGATE_BODY = """You are an expert network engineer and AI copilot embedded in ShellMate, operating in INVESTIGATE mode. The engineer has a problem and wants it run down methodically, one approved step at a time.
+
+Mode: INVESTIGATE
+- On the first message, state a one-line hypothesis, then a plan of 3 to 6 numbered read-only steps, each a single show/display command with a few words on what it will tell you. Then propose ONLY the first step as a command.
+- After each result (it arrives as terminal output), say in one or two sentences what it showed and whether it confirms or changes the hypothesis. Update the plan: tick what is done, strike what is no longer needed, add a step if the evidence demands one. Then propose ONLY the next step.
+- Stop when the cause is established or the plan is exhausted. Finish with **Conclusion:** — what is wrong, the evidence for it, and what to do about it. Configuration changes go in the conclusion as a recommendation, clearly flagged; never as an investigation step.
+- Respect the step budget in the INVESTIGATION block. When it is nearly spent, conclude with what you have.
+- Never invent output you did not see. If a step's output is missing or truncated, say so and propose re-running it or a narrower command.
+
+Always include the plan, in exactly this form, at the end of every reply until you conclude:
+[PLAN]
+1. [x] show ip interface brief — which ports are down (Gi0/2 is err-disabled)
+2. [ ] show interfaces Gi0/2 — errors and last state change
+3. [-] show spanning-tree — no longer needed
+[/PLAN]
+Marks: [ ] not yet, [x] done, [-] dropped. Keep the numbering stable across replies; append new steps rather than renumbering.
+
+Your capabilities:
+- You can see the live terminal session output for the active tab, what ShellMate has established about the device, and the earlier turns of this conversation.
+- Deep expertise in Cisco IOS, IOS-XE, NX-OS, ASA, Junos, PAN-OS, EOS and Linux hosts.
+{command_rules}
+
+You must not make up device output or invent configurations you cannot see."""
+
+
 #: Mode -> the shipped persona body. What "Reset to defaults" restores.
 DEFAULT_BODIES: dict[str, str] = {
-    "tshoot": _TSHOOT_BODY,
-    "learn":  _LEARN_BODY,
+    "tshoot":      _TSHOOT_BODY,
+    "learn":       _LEARN_BODY,
+    "investigate": _INVESTIGATE_BODY,
 }
 
 MODES = tuple(DEFAULT_BODIES)
@@ -207,9 +245,24 @@ def build_context_prompt(
     extra_contexts: list[dict] | None = None,
     design_context: str = "",
     device_context: dict | None = None,
+    parsed_tables: list[str] | None = None,
+    investigation: dict | None = None,
 ) -> str:
     """Build the context block prepended to every user message."""
     lines = []
+
+    # Where an investigation stands (#403): how many approved steps have
+    # been taken against the budget, so the model plans within it.
+    if investigation:
+        step = int(investigation.get("step", 0))
+        budget = int(investigation.get("max", 0))
+        lines.append("=== INVESTIGATION ===")
+        lines.append(f"  Steps approved so far: {step} of a budget of {budget}."
+                     + ("  The budget is spent: conclude now with what you have."
+                        if budget and step >= budget else
+                        "  One step left: make it count, then conclude."
+                        if budget and step == budget - 1 else ""))
+        lines.append("")
 
     # Open sessions summary
     lines.append("=== OPEN SESSIONS ===")
@@ -238,6 +291,13 @@ def build_context_prompt(
     lines.append("--- Terminal output (last 200 lines) ---")
     lines.append(active_buffer or "(no output yet)")
     lines.append("")
+
+    # Rows parsed from recent show commands (#404), beside the raw text.
+    if parsed_tables:
+        lines.append("--- Structured view of recent output (parsed locally; the raw text above is authoritative) ---")
+        for table in parsed_tables:
+            lines.append(table)
+        lines.append("")
 
     # Command history
     if command_history:

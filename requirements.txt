@@ -5,6 +5,9 @@ paramiko>=3.3.1
 # with paramiko anyway, but an undeclared import is one paramiko release
 # away from an ImportError at startup.
 cryptography>=42.0
+# TextFSM templates for show output (#404). Optional at runtime — without
+# it the assistant sees raw text only — but bundled into the build.
+ntc-templates>=7.0
 pyserial>=3.5
 httpx>=0.25.0
 python-dotenv>=1.0.0

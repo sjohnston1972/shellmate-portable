@@ -317,7 +317,7 @@
             <!-- Moved here from the tab bar: it controls the assistant, so it
                  belongs beside the assistant's other controls. -->
             <button id="mode-toggle-btn" class="mode-toggle-btn" data-mode="tshoot"
-                    aria-label="Toggle assistant mode" title="Click to switch between Troubleshoot and Learn">
+                    aria-label="Toggle assistant mode" title="Click to switch between Troubleshoot, Learn and Investigate">
               <span id="mode-toggle-text">Tshoot</span>
             </button>
 
@@ -1693,10 +1693,11 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div class="setting-row">
             <label class="setting-label" for="prompt-mode-select"
-                   data-tip="Which of the two personas you are editing. Troubleshoot is terse and assumes you know the platform; Learn explains the reasoning behind each step.||Editing one never touches the other. This picker does not change which persona the assistant is currently using either — that is the mode button in the chat header.">Editing</label>
+                   data-tip="Which of the three personas you are editing. Troubleshoot is terse and assumes you know the platform; Learn explains the reasoning behind each step; Investigate plans a run of read-only steps and takes them one approved command at a time.||Editing one never touches the others. This picker does not change which persona the assistant is currently using either — that is the mode button in the chat header.">Editing</label>
             <select id="prompt-mode-select" class="setting-input">
               <option value="tshoot">Troubleshoot — terse, fix it now</option>
               <option value="learn">Learn — explains the why</option>
+              <option value="investigate">Investigate — a plan, one approved step at a time</option>
             </select>
             <span id="prompt-modified" class="setting-value"></span>
           </div>

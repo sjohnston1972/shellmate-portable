@@ -4479,6 +4479,35 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   background: var(--secondary);
   color: #1C1B22;
 }
+/* And a third for Investigate (#403). */
+.mode-toggle-btn[data-mode="investigate"] {
+  background: var(--tertiary, #f9a8d4);
+  color: #1C1B22;
+}
+
+/* The investigation plan (#403): a checklist card inside the reply. */
+.plan-card {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--outline);
+  border-left: 3px solid var(--tertiary, #f9a8d4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-high);
+}
+.plan-card-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--on-surface-muted);
+  margin-bottom: 4px;
+}
+.plan-card-title .material-symbols-outlined { font-size: var(--icon-sm); }
+.plan-list { margin: 0; padding-left: 0; list-style: none; }
+.plan-step { display: flex; align-items: flex-start; gap: 6px; padding: 2px 0; font-size: 13px; }
+.plan-step .plan-mark { font-size: var(--icon-md); color: var(--on-surface-muted); }
+.plan-step.done .plan-mark { color: var(--tab-connected, #4ade80); }
+.plan-step.done .plan-text { color: var(--on-surface-muted); }
+.plan-step.dropped .plan-text { text-decoration: line-through; color: var(--on-surface-muted); }
+.plan-step.note { color: var(--on-surface-muted); font-style: italic; }
 
 [data-theme="light"] .mode-toggle-label                 { color: rgba(28,27,34,0.5); }
 [data-theme="light"] .mode-toggle-btn                   { color: #fff; }

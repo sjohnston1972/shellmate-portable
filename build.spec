@@ -15,7 +15,7 @@
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 # ---------------------------------------------------------------------------
 # Build shape
@@ -89,6 +89,9 @@ print(f"build.spec: ShellMate {APP_VERSION} ({COMMIT or 'no git'})")
 datas = [
     ("frontend", "frontend"),
     (str(BUILD_INFO), "."),
+    # The TextFSM templates and their index (#404). Without these the parser
+    # imports fine and finds no template for anything, silently.
+    *collect_data_files("ntc_templates"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -102,6 +105,10 @@ datas = [
 
 hiddenimports = [
     *collect_submodules("uvicorn"),
+    # TextFSM parsing of show output (#404); the templates are data, below.
+    "textfsm",
+    "ntc_templates",
+    "ntc_templates.parse",
     "uvicorn.logging",
     "uvicorn.loops.auto",
     "uvicorn.protocols.http.auto",

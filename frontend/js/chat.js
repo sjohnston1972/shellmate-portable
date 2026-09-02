@@ -242,14 +242,27 @@
       return;
     }
 
+    // "/investigate <problem>" switches to Investigate mode and asks (#403).
+    let text2 = text;
+    const inv = text.match(/^\/investigate\b\s*/i);
+    if (inv) {
+      if (typeof window.setShellmateMode === 'function') window.setShellmateMode('investigate');
+      text2 = text.slice(inv[0].length).trim();
+      if (!text2) {
+        inputEl.value = '';
+        appendErrorBubble('Investigate mode is on. Describe the problem and the assistant will plan the steps.');
+        return;
+      }
+    }
+
     // Parse context commands
-    let message = text;
+    let message = text2;
     let mode = contextMode;
 
-    const ctxMatch = text.match(/^\/context\s+(all|\d+)\s*/i);
+    const ctxMatch = text2.match(/^\/context\s+(all|\d+)\s*/i);
     if (ctxMatch) {
       mode = ctxMatch[1].toLowerCase();
-      message = text.slice(ctxMatch[0].length).trim();
+      message = text2.slice(ctxMatch[0].length).trim();
       if (!message) {
         // No message body — just set the context mode for future messages
         inputEl.value = '';
@@ -296,6 +309,7 @@
       chatWs.send(JSON.stringify({
         message,
         history,
+        investigate_step:  _investigation.steps,
         session_id:        sessionId,
         // Always the real tab order. The selection used to be sent *as* this
         // list, which renumbered the AI's session summary over the subset —
@@ -415,6 +429,7 @@
     chatWs.send(JSON.stringify({
       message:       message || '',
       history:       _recentHistory(),
+      investigate_step: _investigation.steps,
       // The command and the device's reply as data. The server composes the
       // prompt from them, which is what lets it mask the output — composed
       // here it arrived as an ordinary user message with the configuration
@@ -468,16 +483,19 @@
     // Split on [SUGGEST_CMD]...[/SUGGEST_CMD] or [SUGGEST_CMD:N]...[/SUGGEST_CMD] blocks
     // One tag only. An ADD_CMD variant was accepted here for years without
     // ever being taught to the model, so no reply carried it (#430).
-    const parts = raw.split(/(\[SUGGEST_CMD(?::\d+)?\][\s\S]*?\[\/SUGGEST_CMD\])/g);
+    const parts = raw.split(/(\[SUGGEST_CMD(?::\d+)?\][\s\S]*?\[\/SUGGEST_CMD\]|\[PLAN\][\s\S]*?\[\/PLAN\])/g);
     bubble.innerHTML = '';
 
     parts.forEach(part => {
       // Group 1 = optional tab number, group 2 = command text
       const cmdMatch = part.match(/^\[SUGGEST_CMD(?::(\d+))?\]([\s\S]*?)\[\/SUGGEST_CMD\]$/);
+      const planMatch = part.match(/^\[PLAN\]([\s\S]*?)\[\/PLAN\]$/);
       if (cmdMatch) {
         const tabNum = cmdMatch[1] ? parseInt(cmdMatch[1], 10) : null;
         bubble.appendChild(buildCommandBlock(cmdMatch[2].trim(), tabNum,
                                              bubble.dataset.contextSession || ''));
+      } else if (planMatch) {
+        bubble.appendChild(buildPlanCard(planMatch[1]));
       } else if (part) {
         const textNode = document.createElement('div');
         textNode.className = 'chat-text';
@@ -497,6 +515,53 @@
       .replace(/`([^`]+)`/g, '<code class="chat-inline-code">$1</code>')
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/\n/g, '<br>');
+  }
+
+  /**
+   * The investigation plan as a checklist (#403). One line per step:
+   * "1. [x] show ip interface brief — which ports are down". Marks: [ ]
+   * pending, [x] done, [-] dropped. Anything else is shown as plain text so
+   * a model that drifts from the format still gets its plan on screen.
+   */
+  function buildPlanCard(body) {
+    const card = document.createElement('div');
+    card.className = 'plan-card';
+    const title = document.createElement('div');
+    title.className = 'plan-card-title';
+    title.innerHTML = '<span class="material-symbols-outlined">list_alt</span> Plan';
+    card.appendChild(title);
+    const list = document.createElement('ol');
+    list.className = 'plan-list';
+    body.trim().split('\n').forEach(line => {
+      const m = line.match(/^\s*(\d+)[.)]\s*\[([ xX-])\]\s*(.*)$/);
+      const li = document.createElement('li');
+      if (m) {
+        const mark = m[2].toLowerCase();
+        li.className = 'plan-step ' + (mark === 'x' ? 'done' : mark === '-' ? 'dropped' : 'todo');
+        li.value = Number(m[1]);
+        const box = document.createElement('span');
+        box.className = 'material-symbols-outlined plan-mark';
+        // Only glyphs the shipped font subset carries (test_icons.py).
+        box.textContent = mark === 'x' ? 'check_circle' : mark === '-' ? 'cancel' : 'pending';
+        const text = document.createElement('span');
+        text.className = 'plan-text';
+        const [cmd, ...rest] = m[3].split(/\s+[—–-]\s+/);
+        const code = document.createElement('code');
+        code.className = 'chat-inline-code';
+        code.textContent = cmd.trim();
+        text.appendChild(code);
+        if (rest.length) text.appendChild(document.createTextNode(' — ' + rest.join(' — ')));
+        li.append(box, text);
+      } else if (line.trim()) {
+        li.className = 'plan-step note';
+        li.textContent = line.trim();
+      } else {
+        return;
+      }
+      list.appendChild(li);
+    });
+    card.appendChild(list);
+    return card;
   }
 
   function buildCommandBlock(cmd, targetTabNum = null, contextSession = '') {
@@ -599,8 +664,28 @@
     ws.send(JSON.stringify({ type: 'input', data: clean + '\r' }));
 
     const baselineLines = tab.getBufferLines ? tab.getBufferLines() : 0;
+
+    // An approved command is one investigation step (#403). Past the
+    // budget the result is not fed back: the model was told to conclude,
+    // and a loop that keeps feeding it is how "one more step" never ends.
+    const aiMode = typeof window.getShellmateMode === 'function' ? window.getShellmateMode() : 'tshoot';
+    if (aiMode === 'investigate') {
+      _investigation.steps += 1;
+      const budget = Number(A('ai.investigate_max_steps', 8)) || 8;
+      if (_investigation.steps > budget) {
+        appendErrorBubble(`The investigation's budget of ${budget} steps is spent. `
+          + 'Ask for a conclusion, or clear the chat to start another.');
+        return;
+      }
+    }
     startOutputWatcher(clean, baselineLines, tab.sessionId);
   }
+
+  /** Where an Investigate-mode run stands: approved commands so far. */
+  const _investigation = { steps: 0 };
+  const A = (key, fallback) =>
+    (window.shellmateAdvanced ? window.shellmateAdvanced(key, fallback) : fallback);
+  window.addEventListener('shellmate:mode-changed', () => { _investigation.steps = 0; });
 
   // -----------------------------------------------------------------------
   // Output watcher — feeds command output back to the AI automatically
@@ -1133,6 +1218,7 @@
     isStreaming          = false;
     sendBtn.disabled     = false;
     _resetUsage();
+    _investigation.steps = 0;
     // Reset Jira chat history so context estimate resets too
     if (typeof window._clearJiraChatHistory === 'function') window._clearJiraChatHistory();
     updateContextIndicator();

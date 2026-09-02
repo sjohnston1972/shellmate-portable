@@ -17,7 +17,8 @@
 (function () {
   'use strict';
 
-  const VALID_MODES = ['tshoot', 'learn'];
+  // Three now (#403): Investigate runs the suggest/approve loop to a plan.
+  const VALID_MODES = ['tshoot', 'learn', 'investigate'];
 
   let _currentMode = 'tshoot';
 
@@ -49,7 +50,9 @@
     window.dispatchEvent(new CustomEvent('shellmate:mode-changed', { detail: { mode } }));
   }
 
-  const LABELS = { tshoot: 'Tshoot', learn: 'Learn' };
+  const LABELS = { tshoot: 'Tshoot', learn: 'Learn', investigate: 'Investigate' };
+  const NEXT = { tshoot: 'learn', learn: 'investigate', investigate: 'tshoot' };
+  const FULL = { tshoot: 'Troubleshoot', learn: 'Learn', investigate: 'Investigate' };
 
   function _refreshUI() {
     const btn  = document.getElementById('mode-toggle-btn');
@@ -57,8 +60,8 @@
     if (btn)  btn.dataset.mode = _currentMode;
     if (text) text.textContent = LABELS[_currentMode] || LABELS.tshoot;
     if (btn) {
-      const next = _currentMode === 'tshoot' ? 'Learn' : 'Troubleshoot';
-      btn.title = `Active mode: ${LABELS[_currentMode]}. Click to switch to ${next}.`;
+      const next = FULL[NEXT[_currentMode] || 'tshoot'];
+      btn.title = `Active mode: ${FULL[_currentMode] || 'Troubleshoot'}. Click to switch to ${next}.`;
     }
   }
 
@@ -67,7 +70,7 @@
     if (btn) {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        setMode(_currentMode === 'tshoot' ? 'learn' : 'tshoot');
+        setMode(NEXT[_currentMode] || 'tshoot');
       });
     }
 

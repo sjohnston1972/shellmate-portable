@@ -58,6 +58,7 @@ async def stream_chat(
     model: str | None = None,             # optional model override
     mode: str | None = None,              # "learn" | "tshoot"
     history: list[dict] | None = None,    # earlier turns, [{role, text}]
+    investigate_step: int | None = None,  # approved steps so far, in Investigate mode
 ) -> AsyncIterator:
     """
     Build context from session buffers, then stream an AI response.
@@ -91,11 +92,13 @@ async def stream_chat(
     active_buffer = "(No terminal session is currently active.)"
     command_history: list[str] = []
     device_context: dict | None = None
+    parsed_tables: list[str] = []
 
     if active_session_id:
         session = session_manager.get_session(active_session_id)
         if session:
             device_context = _device_facts(session)
+            parsed_tables = _parsed_tables(session)
             active_label = (
                 session.get("display_label") or
                 session.get("hostname", active_session_id[:8])
@@ -159,6 +162,12 @@ async def stream_chat(
         snippets = await chroma_client.query_design_guidelines(message)
         design_context = chroma_client.format_for_prompt(snippets)
 
+    effective_mode = (mode or get_settings().get("ai", {}).get("mode") or "tshoot")
+    investigation = None
+    if effective_mode == "investigate":
+        investigation = {"step": int(investigate_step or 0),
+                         "max": int(advanced("ai.investigate_max_steps"))}
+
     context_block = build_context_prompt(
         sessions_summary,
         active_buffer,
@@ -167,6 +176,8 @@ async def stream_chat(
         extra_contexts or None,
         design_context=design_context,
         device_context=device_context,
+        parsed_tables=parsed_tables or None,
+        investigation=investigation,
     )
 
     # Pick persona from explicit mode arg, falling back to stored preference
@@ -192,6 +203,28 @@ async def stream_chat(
         yield chunk
 
 
+def _parsed_tables(session: dict) -> list[str]:
+    """
+    Recent show output as rows (#404), for the sessions that keep records.
+
+    The terminal loop appends each finished CommandRecord to the session's
+    ``recent_records``; parsing happens here, at question time, so a
+    session nobody asks about costs nothing.
+    """
+    if not advanced("ai.parse_output"):
+        return []
+    records = session.get("recent_records")
+    if not records:
+        return []
+    try:
+        from backend.configs import session_platform
+        from backend.session import parsed
+        return parsed.tables_for(session_platform(session), records)
+    except Exception as exc:                  # parsing must never break chat
+        logger.debug("Parsed tables unavailable: %s", exc)
+        return []
+
+
 def _device_facts(session: dict) -> dict:
     """
     What ShellMate has already established about a session's device (#401).
@@ -203,15 +236,19 @@ def _device_facts(session: dict) -> dict:
     """
     facts: dict = {"connection_type": session.get("connection_type", "")}
 
+    # The session holds onboard.summarise()'s dict (fingerprint.as_dict()
+    # plus the onboarding verdict); a bare Fingerprint is accepted too.
     fp = session.get("fingerprint")
     if fp is not None:
+        take = (fp.get if isinstance(fp, dict)
+                else lambda key, default="": getattr(fp, key, default))
         facts.update({
-            "platform":   getattr(fp, "platform", ""),
-            "name":       getattr(fp, "name", ""),
-            "version":    getattr(fp, "version", ""),
-            "model":      getattr(fp, "model", ""),
-            "confidence": getattr(fp, "confidence", 0.0),
-            "source":     getattr(fp, "source", ""),
+            "platform":   take("platform", ""),
+            "name":       take("name", ""),
+            "version":    take("version", ""),
+            "model":      take("model", ""),
+            "confidence": take("confidence", 0.0),
+            "source":     take("source", ""),
         })
 
     tracker = session.get("alerts")

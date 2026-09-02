@@ -23,6 +23,7 @@ import datetime
 import json
 import logging
 import re
+from collections import deque
 
 import httpx
 import sys
@@ -3887,6 +3888,12 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 try:
                     for record in session["transcript"].feed(text):
                         store.add_command(session_id, record)
+                        # The last few, kept on the session for the
+                        # assistant's structured view (#404). Bounded.
+                        recent = session.get("recent_records")
+                        if recent is None:
+                            recent = session["recent_records"] = deque(maxlen=12)
+                        recent.append(record)
                 except Exception as exc:
                     logger.warning("Transcript error on session %s: %s", session_id, exc)
 
@@ -4019,7 +4026,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
 # WebSocket — AI chat
 # ---------------------------------------------------------------------------
 
-def _auto_analysis_prompt(auto: dict) -> str:
+def _auto_analysis_prompt(auto: dict, platform_id: str = "") -> str:
     """
     Compose the prompt for output that appeared after an approved command.
 
@@ -4046,9 +4053,21 @@ def _auto_analysis_prompt(auto: dict) -> str:
     if dropped > 0:
         body = f"[{dropped} earlier lines not sent]\n{body}"
 
+    # The same output as rows, when a template covers the command (#404).
+    # Parsed from the redacted text, so nothing masked above reappears.
+    table = ""
+    if platform_id and advanced_setting("ai.parse_output"):
+        try:
+            from backend.session import parsed
+            rows = parsed.parse(platform_id, command, body)
+            if rows is not None:
+                table = "\n\n" + parsed.render(command, rows)
+        except Exception:
+            table = ""
+
     return (
         f"The user just ran `{command}` in the terminal and this output "
-        f"appeared:\n```\n{body}\n```\nAnalyse it naturally, as if you are "
+        f"appeared:\n```\n{body}\n```{table}\nAnalyse it naturally, as if you are "
         f"watching the terminal in real time. Do not say \"you ran\" or "
         f"reference receiving a message — just respond as an engineer who can "
         f"see the screen."
@@ -4114,7 +4133,19 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     # Enforced here rather than in the browser. The browser
                     # check is a convenience; this is the guarantee.
                     continue
-                user_message = _auto_analysis_prompt(auto)
+                platform_id = ""
+                sess = session_manager.get_session(session_id) if session_id else None
+                if sess:
+                    try:
+                        from backend.configs import session_platform
+                        platform_id = session_platform(sess)
+                    except Exception:
+                        platform_id = ""
+                user_message = _auto_analysis_prompt(auto, platform_id)
+
+            # Investigate mode (#403): how many steps have been approved.
+            step = msg.get("investigate_step")
+            investigate_step = int(step) if isinstance(step, (int, float)) else None
 
             if not user_message:
                 continue
@@ -4131,6 +4162,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     model=model,
                     mode=mode,
                     history=history,
+                    investigate_step=investigate_step,
                 ):
                     if isinstance(chunk, dict) and "usage" in chunk:
                         # Real counts from the provider (#416), so the meter

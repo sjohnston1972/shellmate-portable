@@ -579,6 +579,21 @@ SETTINGS: tuple[Setting, ...] = (
             "and faster; only the fresh terminal context and the new question "
             "are charged in full (#416). Nothing to switch off unless the "
             "account's pricing says otherwise. Ignored by other providers."),
+    Setting("ai.parse_output", "Parse show output into tables for the assistant", True, "bool",
+            "Where ntc-templates has a template for a command, its rows go "
+            "to the model alongside the raw text.",
+            "A 48-port `show ip interface brief` as columns the model has to "
+            "re-read on every question is how it gets a port wrong (#404). "
+            "Parsing is local and instant; the raw output still goes too, "
+            "because a template can be stale for a release. Off, only the "
+            "raw text is sent."),
+    Setting("ai.investigate_max_steps", "Investigation step budget", 8, "int",
+            "How many approved commands an Investigate-mode run may take "
+            "before the assistant has to conclude.",
+            "Each step is one command you approve. The budget is told to the "
+            "model, which plans within it and stops on its own; the chat "
+            "also stops feeding results back once it is spent (#403).",
+            minimum=2, maximum=30, unit="steps"),
     Setting("ai.context_commands", "Commands of history sent", 30, "int",
             "How many recent commands are listed alongside the output.",
             "", minimum=0, maximum=500),
