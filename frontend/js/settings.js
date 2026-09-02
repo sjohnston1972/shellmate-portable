@@ -775,6 +775,10 @@
     _checked('setting-alert-flash',  al.flash_tab     !== false);
     _checked('setting-alert-sound',  al.sound         !== false);
     _checked('setting-alert-popup',  al.popup         !== false);
+    _checked('setting-toasts-all',     al.toasts_all     !== false);
+    _checked('setting-toast-info',     al.toast_info     !== false);
+    _checked('setting-toast-warning',  al.toast_warning  !== false);
+    _checked('setting-toast-critical', al.toast_critical !== false);
     _checked('setting-reduce-motion', !!al.reduce_motion);
     _populateToastAccents(al);
 
@@ -786,6 +790,7 @@
     _checked('setting-connection-dot',    ui.show_connection_dot !== false);
     _checked('setting-sidebar-labels',    ui.sidebar_labels === true);
     _checked('setting-colourful-groups',  ui.colourful_groups !== false);
+    _checked('setting-tab-fill',          ui.tab_fill === true);
     _renderSpecialRows(ui.special_commands);
     _val('setting-font-scale',            ui.font_scale || 1);
     _val('setting-toast-position',        ui.toast_position || 'bottom-right');
@@ -918,6 +923,10 @@
         accent_info:     _accentValue('setting-toast-accent-info'),
         accent_warning:  _accentValue('setting-toast-accent-warning'),
         accent_critical: _accentValue('setting-toast-accent-critical'),
+        toasts_all:      _gchecked('setting-toasts-all'),
+        toast_info:      _gchecked('setting-toast-info'),
+        toast_warning:   _gchecked('setting-toast-warning'),
+        toast_critical:  _gchecked('setting-toast-critical'),
       },
       interface: {
         theme:               _gval('setting-theme') || 'dark',
@@ -927,6 +936,7 @@
         show_connection_dot: _gchecked('setting-connection-dot'),
         sidebar_labels:      _gchecked('setting-sidebar-labels'),
         colourful_groups:    _gchecked('setting-colourful-groups'),
+        tab_fill:            _gchecked('setting-tab-fill'),
         special_commands:    _collectSpecialCommands(),
         font_scale:          parseFloat(_gval('setting-font-scale')) || 1,
         toast_position:      _gval('setting-toast-position'),

@@ -1420,6 +1420,10 @@
   async function _paintGroups() {
     const show = _groupStripe();
     const colours = show ? await _loadGroupColours() : {};
+    // Whole-tab colour (#434) is a class on the strip, so the CSS decides
+    // and the per-tab painting below stays exactly as it was.
+    const fill = show && ((window.shellmateSettings || {}).interface || {}).tab_fill === true;
+    if (tabList) tabList.classList.toggle('tab-fill', fill);
 
     tabs.forEach((tab, index) => {
       const el = tab.tabEl;
@@ -2981,6 +2985,28 @@
     return idx === -1 ? Promise.resolve() : closeTab(idx, options);
   };
   window.getActiveTab     = getActiveTab;
+  /** Everything the hover card (#435) can say about a tab. */
+  window.tabTooltipInfo = (sessionId) => {
+    const tab = tabs.find(t => t.sessionId === sessionId);
+    if (!tab) return null;
+    return {
+      sessionId,
+      label:        tab.label,
+      autoLabel:    tab.autoLabel || '',
+      customLabel:  !!tab.customLabel,
+      address:      _addressOf(tab),
+      port:         tab.port || 0,
+      connectionType: tab.connectionType || 'ssh',
+      username:     tab.username || '',
+      isConnected:  !!tab.isConnected,
+      group:        _tagCache.get(sessionId) || '',
+      keepAlive:    !!(tab.keepAlive || tab.keep_alive),
+      logging:      !!(tab.logging || tab.logEnabled),
+      profileId:    tab.profileId || '',
+      uptime:       (window.shellmateUptime && typeof window.shellmateUptime.label === 'function')
+                      ? window.shellmateUptime.label(sessionId) : '',
+    };
+  };
   /** What the tab palette (#410) searches: one plain object per tab. */
   window.listTabs = () => tabs.map((t, index) => ({
     sessionId:   t.sessionId,

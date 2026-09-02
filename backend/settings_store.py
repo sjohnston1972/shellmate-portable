@@ -135,6 +135,13 @@ DEFAULT_SETTINGS: dict = {
         # because the colour is what makes a strip of a dozen tabs readable
         # at a glance; off for anyone who wants the chrome to sit still.
         "colourful_groups": True,
+        # Fill the whole tab with its group colour rather than the ribbon
+        # (#434). Off: the ribbon is the quieter default.
+        "tab_fill": False,
+        # The release last announced by the what's-new toast (#441). Blank on
+        # a fresh install; LEGACY_DEFAULTS gives an upgraded installation a
+        # value that reads as older, so the first run of a new version says so.
+        "last_seen_version": "",
         # Control sequences a keyboard cannot send, offered on the tab menu
         # (#299). Data rather than code, and editable, because which ones
         # matter depends on the estate: a break drops a booting Cisco into
@@ -265,6 +272,13 @@ DEFAULT_SETTINGS: dict = {
         "sound": True,
         # A toast, which is what reaches someone looking at another tab.
         "popup": True,
+        # Every toast at all (#440), then one switch per kind. A kind that is
+        # off is still logged and still counted in the status bar; only the
+        # pop-up is suppressed. Device alerts stay on the `popup` switch above.
+        "toasts_all": True,
+        "toast_info": True,
+        "toast_warning": True,
+        "toast_critical": True,
         # Honours prefers-reduced-motion as well; this forces it on.
         "reduce_motion": False,
         # Custom toast accent colours (#254). Blank means the theme's own,
@@ -329,6 +343,9 @@ DEFAULT_SETTINGS: dict = {
 # explicitly, and only a genuinely first run sees the new one.
 LEGACY_DEFAULTS: dict[tuple[str, str], object] = {
     ("ai", "panel_enabled"): True,
+    # A settings file from before versions existed belongs to an upgrade,
+    # not a fresh install, so the what's-new toast fires once (#441).
+    ("interface", "last_seen_version"): "0.0.0",
 }
 
 # Which env-var name backs each provider field, for the "preconfigured by env"
