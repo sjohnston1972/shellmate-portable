@@ -4,6 +4,21 @@ One section per release, newest first. The first run of a new version
 offers this page; **Updates** in the sidebar asks GitHub whether a newer one
 exists.
 
+## 1.0.1
+
+The first release published on GitHub, so the update check has something to
+find. Small fixes from the first day of 1.0:
+
+- Every Claude model was being reported as retired; the cause was the
+  Claude 5 family refusing the `temperature` parameter, and the fix sends it
+  only to models that accept it.
+- Enter in the Apply configuration editor adds a line; the checkbox sits
+  beside its label; long context menus scroll instead of being cut off.
+- Whole-tab group colour as an option, a hover card on every tab, search
+  that highlights its matches, per-kind toast switches, and Check for
+  updates in the sidebar and tray — with the answer shown even over the
+  home screen.
+
 ## 1.0.0
 
 The first numbered release. Everything below arrived since the last build
