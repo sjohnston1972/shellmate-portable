@@ -203,6 +203,15 @@
     terminal.loadAddon(webLinksAddon);
     terminal.loadAddon(searchAddon);
 
+    // The addon reports "3 of 17" through an event rather than a return
+    // value (#412). Only the active session's count is shown — a background
+    // tab's decorations are not what the bar is describing.
+    searchAddon.onDidChangeResults((results) => {
+      const tab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+      if (!tab || tab.sessionId !== sessionId) return;
+      _showSearchCount(results);
+    });
+
     // ------------------------------------------------------------------
     // 3. Create the container div and mount xterm.js
     // ------------------------------------------------------------------
@@ -217,7 +226,7 @@
 
     // Fit after a brief paint delay so the container has real dimensions
     requestAnimationFrame(() => {
-      try { fitAddon.fit(); } catch (_) {}
+      try { fitAddon.fit(); } catch (err) { _fitFailed(err); }
     });
 
     // ------------------------------------------------------------------
@@ -345,7 +354,7 @@
       navigator.clipboard.writeText(sel).then(() => {
         terminal.clearSelection();
         window._showCopyToast && window._showCopyToast(sel);
-      }).catch(() => {});
+      }).catch(err => _clipboardFailed('copy', err));
       return true;
     }
 
@@ -402,7 +411,7 @@
           return;
         }
         window._showPasteModal && window._showPasteModal(text, send);
-      }).catch(() => {});
+      }).catch(err => _clipboardFailed('paste', err));
     }
 
     // Keyboard shortcuts — intercept before xterm.js handles them.
@@ -440,6 +449,14 @@
         return false;
       }
 
+      // Application shortcuts (#413). xterm would otherwise consume these
+      // and stop them reaching the document-level handler in tabs.js;
+      // returning false hands them back without sending anything to the
+      // device.
+      if (typeof window.isAppShortcut === 'function' && window.isAppShortcut(e)) {
+        return false;
+      }
+
       return true;
     });
 
@@ -469,17 +486,43 @@
         if (!sel) return;
         navigator.clipboard.writeText(sel)
           .then(() => { window._showCopyToast && window._showCopyToast(sel); })
-          .catch(() => {});
+          .catch(err => _clipboardFailed('copy', err));
       }, 0);
     });
 
-    // Right-click: paste from clipboard
+    // Right-click. Paste, the way PuTTY does, while the setting is on — and
+    // the terminal's own menu (#411) on Shift+right-click, or on a plain
+    // right-click when paste-on-right-click is off. Before this the "off"
+    // case surrendered the click to the browser's menu, which offers
+    // nothing useful over a terminal.
     container.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       const settings = window.shellmateSettings || {};
-      if (settings.terminal && settings.terminal.right_click_paste === false) return;
-      _pasteFromClipboard();
+      const pasteOnRight = !(settings.terminal && settings.terminal.right_click_paste === false);
+      if (pasteOnRight && !e.shiftKey) { _pasteFromClipboard(); return; }
+      _terminalMenu(e);
     });
+
+    /** The terminal's context menu: what the mouse is over, and nothing else. */
+    function _terminalMenu(e) {
+      if (!window.shellmateMenu) return;
+      const hasSelection = terminal.hasSelection();
+      window.shellmateMenu.open(e, [
+        { icon: 'content_copy', label: 'Copy', disabled: !hasSelection,
+          title: hasSelection ? '' : 'Nothing is selected.',
+          onClick: () => _copySelection() },
+        { icon: 'content_paste', label: 'Paste', onClick: () => _pasteFromClipboard() },
+        { icon: 'select_all', label: 'Select all', onClick: () => terminal.selectAll() },
+        'sep',
+        { icon: 'search', label: 'Find…', value: 'Ctrl+F', onClick: () => openSearch() },
+        { icon: 'content_copy', label: 'Copy visible screen',
+          onClick: () => copyOutput(sessionId, { visibleOnly: true }) },
+        { icon: 'content_copy', label: 'Copy all scrollback',
+          onClick: () => copyOutput(sessionId, {}) },
+        'sep',
+        { icon: 'backspace', label: 'Clear screen', onClick: () => terminal.clear() },
+      ]);
+    }
 
     // ------------------------------------------------------------------
     // 8. Handle window resize — refit the active terminal
@@ -500,7 +543,7 @@
               rows: terminal.rows,
             }));
           }
-        } catch (_) {}
+        } catch (err) { _fitFailed(err); }
       }
     };
     window.addEventListener('resize', onWindowResize);
@@ -592,7 +635,7 @@
         terminal.options.drawBoldTextInBrightColors = s.draw_bold_in_bright !== false;
         terminal.options.screenReaderMode = !!s.screen_reader_mode;
         if (s.cursor_width) terminal.options.cursorWidth = s.cursor_width;
-        try { fitAddon.fit(); } catch (_) {}
+        try { fitAddon.fit(); } catch (err) { _fitFailed(err); }
       } catch (err) {
         console.info('Dropping a terminal that no longer accepts settings', err);
         forgetTerminal(sessionId);
@@ -686,6 +729,102 @@
     return entry ? entry.searchAddon : null;
   }
 
+  // -------------------------------------------------------------------------
+  // Saying so when something fails (#426)
+  // -------------------------------------------------------------------------
+
+  let _lastClipboardWarning = 0;
+
+  /**
+   * A clipboard call that failed used to be swallowed, so a paste that never
+   * left the browser — permission refused in the desktop window, a page not
+   * focused, an insecure context — looked exactly like one the device
+   * ignored. Rate-limited: copy-on-select would otherwise raise one per
+   * drag while the clipboard is blocked.
+   */
+  function _clipboardFailed(what, err) {
+    console.warn(`Clipboard ${what} failed`, err);
+    const now = Date.now();
+    if (now - _lastClipboardWarning < 30000) return;
+    _lastClipboardWarning = now;
+    const why = err && err.name === 'NotAllowedError'
+      ? 'The browser refused clipboard access. Click in the terminal first, or check the site permission.'
+      : (err && err.message) || 'The browser did not say why.';
+    if (window.shellmateAlerts) {
+      window.shellmateAlerts.notify({
+        severity: 'warning', icon: 'error',
+        title: what === 'copy' ? 'Nothing was copied' : 'Nothing was pasted',
+        body: why,
+      });
+    }
+  }
+
+  /** A fit that throws is a layout bug worth a line in the console. */
+  function _fitFailed(err) {
+    console.warn('Terminal fit failed', err);
+  }
+
+  // -------------------------------------------------------------------------
+  // Copying output (#414)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Copy lines from a session's buffer to the clipboard.
+   *
+   * @param {string} sessionId
+   * @param {object} opts
+   * @param {boolean} [opts.visibleOnly]  Just the rows on screen.
+   * @param {number}  [opts.lastLines]    Only the most recent N lines.
+   */
+  function copyOutput(sessionId, opts) {
+    const entry = _instances[sessionId];
+    if (!entry) return false;
+    const term = entry.terminal;
+    const buf  = term.buffer.active;
+    let first = 0;
+    let last  = buf.length;
+    if (opts && opts.visibleOnly) {
+      first = buf.viewportY;
+      last  = Math.min(buf.length, buf.viewportY + term.rows);
+    } else if (opts && opts.lastLines > 0) {
+      first = Math.max(0, buf.length - opts.lastLines);
+    }
+    const lines = [];
+    for (let i = first; i < last; i++) {
+      const line = buf.getLine(i);
+      if (line) lines.push(line.translateToString(true));
+    }
+    // Trailing blank rows are the unused part of the screen, not output.
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    const text = lines.join('\n');
+    if (!text) {
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({ severity: 'info', icon: 'content_copy',
+          title: 'Nothing to copy', body: 'This terminal has no output yet.' });
+      }
+      return false;
+    }
+    navigator.clipboard.writeText(text)
+      .then(() => { window._showCopyToast && window._showCopyToast(text); })
+      .catch(err => _clipboardFailed('copy', err));
+    return true;
+  }
+
+  /** The status-bar button: the last N lines of the active terminal. */
+  function copyRecentOutput() {
+    const tab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+    if (!tab) return;
+    const n = Number(A('terminal.copy_output_lines', 200)) || 200;
+    copyOutput(tab.sessionId, { lastLines: n });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const button = document.getElementById('status-copy-output');
+    if (button) button.addEventListener('click', copyRecentOutput);
+  });
+
+  window.copyTerminalOutput = copyOutput;
+
   function initSearchBar() {
     _searchBar   = document.getElementById('term-search');
     _searchInput = document.getElementById('term-search-input');
@@ -708,9 +847,9 @@
       const options = { decorations, incremental: false };
       const found = forward ? addon.findNext(term, options)
                             : addon.findPrevious(term, options);
-      // xterm's addon reports found/not-found rather than a count, so say
-      // that rather than inventing a number it has not given us.
-      _searchCount.textContent = found ? '' : 'no matches';
+      // The count arrives through onDidChangeResults; this is only the
+      // fallback for an addon that never fires it.
+      if (!found) _searchCount.textContent = 'no matches';
     };
 
     _searchInput.addEventListener('input', () => find(true));
@@ -735,6 +874,19 @@
         openSearch();
       }
     });
+  }
+
+  /**
+   * "3 of 17", "no matches", or "over 1000" — the addon stops counting past
+   * a thousand and reports -1, which must not be shown as "-1 of -1".
+   */
+  function _showSearchCount(results) {
+    if (!_searchCount) return;
+    const { resultIndex, resultCount } = results || {};
+    if (!_searchInput || !_searchInput.value) { _searchCount.textContent = ''; return; }
+    if (resultCount === 0) _searchCount.textContent = 'no matches';
+    else if (resultCount < 0) _searchCount.textContent = 'over 1000 matches';
+    else _searchCount.textContent = `${resultIndex + 1} of ${resultCount}`;
   }
 
   function openSearch() {

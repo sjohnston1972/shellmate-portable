@@ -353,6 +353,12 @@ SETTINGS: tuple[Setting, ...] = (
             "Every multi-line paste asks today. Somebody pasting short "
             "configuration blocks all day may want 5.",
             minimum=1, maximum=1000, unit="lines"),
+    Setting("terminal.copy_output_lines", "Lines the Copy output button takes", 200, "int",
+            "How much of the active terminal the status-bar copy button puts "
+            "on the clipboard.",
+            "Counted back from the bottom of the scrollback. The tab menu's "
+            "\"Copy all scrollback\" is there for everything.",
+            minimum=1, maximum=100000, unit="lines"),
     Setting("terminal.paste_chunk_bytes", "Paste chunk size", 0, "int",
             "Break a large paste into pieces. Zero sends it in one go.",
             "Some devices drop characters when a paste arrives faster than "

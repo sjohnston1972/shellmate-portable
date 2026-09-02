@@ -124,6 +124,24 @@ that is no longer connected to anything.
 | `Ctrl+Shift+C` | Copy the selection |
 | `Ctrl+Shift+V` | Paste |
 | `Ctrl+C` | Copy if text is selected, otherwise send an interrupt |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab (`Ctrl+PageDown` / `Ctrl+PageUp` in a browser) |
+| `Ctrl+P` | Find a tab by name, hostname or group |
+| `` Ctrl+` `` | Focus the terminal |
+| `Ctrl+Shift+A` | Focus the assistant's input |
+| `Ctrl+,` | Settings |
+| `Ctrl+H` | Session history |
+| `F1` | This manual |
+| `Ctrl+/` | The list of shortcuts |
+
+**Shift+right-click** in a terminal opens its menu — copy, paste, select all,
+find, copy the screen or the scrollback, clear. A plain right-click pastes,
+unless *Right-click Paste* is off in Settings, in which case it opens the menu.
+The **copy** icon in the status bar copies the most recent output of the
+active terminal; how many lines is in Stockton under Terminal Behaviour.
+
+A tab can be given a name of your own from its right-click menu: **Rename
+tab**. The name survives the device announcing its hostname, and clearing it
+brings the detected name back.
 
 Selecting text with the mouse — dragging or double-clicking — copies it.
 

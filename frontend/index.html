@@ -378,6 +378,12 @@
       <span id="status-device" title="Detected device platform">Device: —</span>
       <span class="status-sep">|</span>
       <span id="status-buffer">Buffer: 0L</span>
+      <!-- The last N lines of the active terminal, to the clipboard (#414). -->
+      <button type="button" id="status-copy-output" class="status-btn"
+              title="Copy the most recent output of this terminal (the count is in Settings → Terminal Behaviour)"
+              aria-label="Copy recent output">
+        <span class="material-symbols-outlined">content_copy</span>
+      </button>
       <span class="status-sep">|</span>
       <span id="status-tabs">Tabs: 0</span>
       <span class="status-sep">|</span>
@@ -1164,7 +1170,7 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
           <div class="setting-row">
             <label class="setting-label" for="setting-right-click-paste"
-                   data-tip="Right-clicking pastes the clipboard straight into the session, the way PuTTY does. A paste of several lines still raises the confirmation first.||Off, right-click opens the browser's own menu instead.">Right-click Paste</label>
+                   data-tip="Right-clicking pastes the clipboard straight into the session, the way PuTTY does. A paste of several lines still raises the confirmation first.||Shift+right-click opens the terminal's own menu — copy, paste, select all, find, clear. Off, a plain right-click opens that menu instead of pasting.">Right-click Paste</label>
             <label class="toggle">
               <input type="checkbox" id="setting-right-click-paste" />
               <span class="toggle-track"></span>
@@ -2630,6 +2636,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/uptime.js"></script>
   <script src="/static/js/usage.js"></script>
   <script src="/static/js/tabs.js"></script>
+  <script src="/static/js/palette.js"></script>
   <script src="/static/js/layout.js"></script>
   <script src="/static/js/alerts.js"></script>
   <script src="/static/js/terminal.js"></script>

@@ -172,6 +172,10 @@ def used_icon_names(available: set[str] | None = None) -> set[str]:
     """
     names: set[str] = set()
     markup = re.compile(r"material-symbols-outlined[^>]*>\s*([a-z0-9_]+)\s*<")
+    # Menus and alerts name their icon as a property — `icon: 'edit'` — and
+    # the markup scan cannot see those. Without this, a menu entry whose icon
+    # was not in the subset rendered its name as text (#426, content_paste_off).
+    literal = re.compile(r"\bicon:\s*'([a-z][a-z0-9_]{2,30})'")
     token = re.compile(r"\b([a-z][a-z0-9_]{2,30})\b")
 
     for source in _frontend_sources():
@@ -179,6 +183,7 @@ def used_icon_names(available: set[str] | None = None) -> set[str]:
             continue
         text = source.read_text(encoding="utf-8")
         names.update(markup.findall(text))
+        names.update(literal.findall(text))
         if available:
             names.update(t for t in token.findall(text) if t in available)
 
