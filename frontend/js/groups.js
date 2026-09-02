@@ -1009,7 +1009,7 @@
     leaf.className = 'tree-leaf';
     leaf.style.setProperty('--depth', String(node.depth + 1));
     leaf.title = (profile.hostname ? profile.hostname + '\n' : '')
-      + 'Ctrl+click to select several; a drag then moves them together.';
+      + 'Ctrl+click to select several; a drag or a right-click then acts on all of them.';
 
     // Whether this device is open right now (#166). The same test the group
     // counts use, so a member's light and its group's live badge cannot
@@ -1160,6 +1160,15 @@
   function _memberMenu(event, profile, node) {
     event.preventDefault();
     event.stopPropagation();
+    // A menu opened on one of several selected connections speaks for all
+    // of them (#399), the way the group chips' menu does for a selection of
+    // groups. Membership is tested against the group it was picked under,
+    // because the same device selected in another branch is a different row.
+    const fromKey = node.group ? node.key : '';
+    if (leafSelection.size > 1 && leafSelection.get(profile.id) === fromKey) {
+      _leafBulkMenu(event);
+      return;
+    }
     document.querySelectorAll('.group-menu').forEach(el => el.remove());
 
     const menu = document.createElement('div');
@@ -1258,6 +1267,176 @@
     } catch (e) {
       _warn('Could not delete it', e.message);
     }
+  }
+
+  /**
+   * The menu a multi-selection of connections gets (#399): the same four
+   * things the single-leaf menu offers, each acting on every selected row,
+   * and a way to let the selection go.
+   *
+   * Edit is not here. Five connections cannot share one dialog, and a menu
+   * entry that edited only the row under the pointer would be exactly the
+   * confusion this menu exists to remove.
+   */
+  function _leafBulkMenu(event) {
+    document.querySelectorAll('.group-menu').forEach(el => el.remove());
+
+    const menu = document.createElement('div');
+    menu.className = 'tab-context-menu group-menu';
+    const n = leafSelection.size;
+
+    const item = (icon, text, onClick, danger) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      if (danger) button.className = 'ctx-danger';
+      button.innerHTML = `<span class="material-symbols-outlined">${icon}</span>`;
+      button.appendChild(document.createTextNode(text));
+      button.addEventListener('click', () => { menu.remove(); onClick(); });
+      return button;
+    };
+
+    menu.appendChild(item('content_copy', `Copy ${n} to group…`,
+                          () => _bulkMoveLeaves(false)));
+    menu.appendChild(item('tab_duplicate', `Move ${n} to group…`,
+                          () => _bulkMoveLeaves(true)));
+
+    const sep = document.createElement('div');
+    sep.className = 'ctx-sep';
+    menu.appendChild(sep);
+
+    // Only for rows that are in a group. A selection made under "Ungrouped"
+    // has nothing to be removed from, and an entry that did nothing would
+    // read as a bug.
+    const sources = _leafSources();
+    if (sources.size && !sources.has('')) {
+      const from = sources.size === 1
+        ? '"' + _groupLabel([...sources][0]) + '"' : 'their groups';
+      menu.appendChild(item('backspace', `Remove ${n} from ${from}`,
+                            _bulkRemoveLeaves));
+    }
+    menu.appendChild(item('delete_forever', `Delete ${n} connections…`,
+                          _bulkDeleteLeaves, true));
+    menu.appendChild(item('close', 'Clear selection', () => {
+      _clearLeafSelection();
+    }));
+
+    document.body.appendChild(menu);
+    menu.style.left = `${Math.max(8, Math.min(event.clientX,
+      window.innerWidth - menu.offsetWidth - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(event.clientY,
+      window.innerHeight - menu.offsetHeight - 8))}px`;
+    setTimeout(() => {
+      document.addEventListener('click', () => menu.remove(), { once: true });
+    }, 0);
+  }
+
+  /** The distinct group keys the selected leaves were picked under. */
+  function _leafSources() {
+    return new Set(leafSelection.values());
+  }
+
+  /** A group's display name from its key, for menu text and dialogs. */
+  function _groupLabel(key) {
+    const group = groupCache.find(g => g.key === key);
+    return group ? group.name.split(SEPARATOR).pop() : key;
+  }
+
+  /** The selected connections, in selection order, with names to show. */
+  function _selectedLeaves() {
+    return [...leafSelection.entries()].map(([id, from]) => {
+      const profile = profileCache.find(p => p.id === id);
+      return { id, from, name: profile ? (profile.name || profile.hostname || id) : id };
+    });
+  }
+
+  /**
+   * Copy or move every selected connection into one group.
+   *
+   * A move takes each one out of the group *it* was picked from — they need
+   * not all share one — through the same membership call a single move and
+   * a multi-leaf drop use, then one refresh at the end.
+   */
+  async function _bulkMoveLeaves(removeFromCurrent) {
+    const leaves = _selectedLeaves();
+    if (!leaves.length) return;
+
+    // A group every selected row already sits in is not somewhere to go.
+    const sources = _leafSources();
+    const choices = groupCache
+      .filter(g => !(sources.size === 1 && sources.has(g.key)))
+      .map(g => ({ value: g.key, label: g.name }));
+    if (!choices.length) {
+      _warn('No other group to use', 'Make another group first.');
+      return;
+    }
+
+    const n = leaves.length;
+    const answer = await window.shellmateDialog.form({
+      title: (removeFromCurrent ? 'Move ' : 'Copy ') + n + ' connections',
+      body:  removeFromCurrent
+        ? 'Each one leaves the group it was selected in and joins the group '
+          + 'you pick.'
+        : 'Each one joins the group you pick and stays where it is - a '
+          + 'connection belongs to as many groups as you like.',
+      list:  leaves.map(l => ({ text: l.name })),
+      confirmLabel: removeFromCurrent ? 'Move them' : 'Copy them',
+      fields: [{ name: 'group', label: 'Group', type: 'select', options: choices }],
+    });
+    if (!answer) return;
+
+    for (const { id, from } of leaves) {
+      await _setMembership(id, answer.group, true);
+      if (removeFromCurrent && from && from !== answer.group) {
+        await _setMembership(id, from, false);
+      }
+    }
+    _clearLeafSelection();
+    _refresh();
+  }
+
+  /** Take every selected connection out of the group it was picked from. */
+  async function _bulkRemoveLeaves() {
+    const leaves = _selectedLeaves().filter(l => l.from);
+    if (!leaves.length) return;
+    for (const { id, from } of leaves) await _setMembership(id, from, false);
+    _clearLeafSelection();
+    _refresh();
+  }
+
+  /**
+   * Delete every selected saved connection. One confirmation, named in
+   * full, with the same warning the single delete carries — this is the
+   * one thing in the menu that cannot be undone.
+   */
+  async function _bulkDeleteLeaves() {
+    const leaves = _selectedLeaves();
+    if (!leaves.length) return;
+
+    const ok = await window.shellmateDialog.confirm({
+      title: `Delete ${leaves.length} connections?`,
+      body:  'This deletes the saved connections themselves, not just their '
+             + 'place in a group. Any credentials saved against them go too, '
+             + 'and it cannot be undone.',
+      list:  leaves.map(l => ({ text: l.name })),
+      confirmLabel: 'Delete them',
+      danger: true,
+    });
+    if (!ok) return;
+
+    const failed = [];
+    for (const { id, name } of leaves) {
+      try {
+        const res = await fetch('/api/profiles/' + id, { method: 'DELETE' });
+        if (!res.ok) failed.push(name);
+      } catch (_) {
+        failed.push(name);
+      }
+    }
+    if (failed.length) {
+      _warn('Some connections were not deleted', failed.join(', '));
+    }
+    _clearLeafSelection();
+    _refresh();
   }
 
   async function _setMembership(profileId, key, member) {
