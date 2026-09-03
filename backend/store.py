@@ -20,6 +20,7 @@ and a single connection keeps WAL mode and the FTS index consistent.
 """
 
 import logging
+import queue
 import sqlite3
 import threading
 import time
@@ -101,6 +102,17 @@ class SessionStore:
         # hold both and makes the pair atomic.
         self._lock = threading.RLock()
         self._fts_enabled = False
+        # One writer thread, fed by a queue (#459). The terminal read loop
+        # used to call add_command() inline: a SELECT, an INSERT and a
+        # commit (an fsync) on the event loop for every command on any tab,
+        # and under the same lock a history search can hold for most of a
+        # second. Now the loop hands the record over and carries on.
+        self._queue: queue.Queue = queue.Queue()
+        self._writer: threading.Thread | None = None
+        self._writer_lock = threading.Lock()
+        # The next sequence number per session, so a write does not begin
+        # with a SELECT MAX() over the session's rows.
+        self._sequences: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Connection and schema
@@ -419,6 +431,46 @@ class SessionStore:
                 "SELECT snapshot_id FROM config_baselines").fetchall()
         return {int(r[0]) for r in rows}
 
+    # ------------------------------------------------------------------
+    # The writer thread
+    # ------------------------------------------------------------------
+
+    def submit(self, fn, *args) -> None:
+        """
+        Run one store write on the writer thread, in order, off the loop.
+
+        Fire and forget: the caller is a terminal read loop that must not
+        wait on disk. Failures are logged inside the write itself.
+        """
+        self._ensure_writer()
+        self._queue.put((fn, args))
+
+    def flush(self, timeout: float = 2.0) -> bool:
+        """Wait for queued writes to land. True if they all did in time."""
+        deadline = time.monotonic() + timeout
+        while not self._queue.empty() or self._queue.unfinished_tasks:
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.01)
+        return True
+
+    def _ensure_writer(self) -> None:
+        with self._writer_lock:
+            if self._writer is not None and self._writer.is_alive():
+                return
+            self._writer = threading.Thread(target=self._drain, daemon=True, name="history-writer")
+            self._writer.start()
+
+    def _drain(self) -> None:
+        while True:
+            fn, args = self._queue.get()
+            try:
+                fn(*args)
+            except Exception as exc:                   # never let the thread die
+                logger.warning("History write failed: %s", exc)
+            finally:
+                self._queue.task_done()
+
     def add_command(self, session_id: str, record: Any) -> int:
         """
         Store one command and its output.
@@ -459,11 +511,14 @@ class SessionStore:
         try:
             with self._lock:
                 connection = self.connect()
-                cursor = connection.execute(
-                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM commands WHERE session_id = ?",
-                    (session_id,),
-                )
-                sequence = cursor.fetchone()[0]
+                sequence = self._sequences.get(session_id)
+                if sequence is None:
+                    cursor = connection.execute(
+                        "SELECT COALESCE(MAX(sequence), 0) + 1 FROM commands WHERE session_id = ?",
+                        (session_id,),
+                    )
+                    sequence = cursor.fetchone()[0]
+                self._sequences[session_id] = sequence + 1
 
                 cursor = connection.execute(
                     """
@@ -571,6 +626,13 @@ class SessionStore:
             # tokeniser split differently. A substring pass costs one more
             # query on the miss path only, and it is the answer people
             # expect from a search box.
+            #
+            # Over the command column only (#459). Scanning `output` as well
+            # meant every search-as-you-type miss walked the whole table's
+            # output — 700 ms measured over 20,000 × 30 KB — while holding
+            # the lock the terminals' own writes wait on. FTS already
+            # covers output for the tokenised case; the substring pass is
+            # for the mistyped or unbroken command.
             if query and self._fts_enabled and not rows:
                 like_sql = """
                     SELECT c.id, c.session_id, c.command, c.ran_at,
@@ -578,9 +640,9 @@ class SessionStore:
                            substr(c.output, 1, 200) AS snippet
                     FROM commands c
                     JOIN sessions s ON s.id = c.session_id
-                    WHERE (c.command LIKE ? OR c.output LIKE ?)
+                    WHERE c.command LIKE ?
                 """
-                like_params: list[Any] = [f"%{query}%", f"%{query}%"]
+                like_params: list[Any] = [f"%{query}%"]
                 if hostname:
                     like_sql += " AND s.hostname = ?"
                     like_params.append(hostname)
@@ -703,6 +765,7 @@ class SessionStore:
             removed_commands = 0
             if session_ids:
                 marks = ",".join("?" for _ in session_ids)
+                self._sequences.clear()
                 command_sql = f"DELETE FROM commands WHERE session_id IN ({marks})"
                 command_params = list(session_ids)
                 if before is not None:
@@ -770,6 +833,7 @@ class SessionStore:
         with self._lock:
             connection = self.connect()
             connection.execute("DELETE FROM commands WHERE session_id = ?", (session_id,))
+            self._sequences.pop(session_id, None)
             cursor = connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             connection.commit()
             return cursor.rowcount > 0

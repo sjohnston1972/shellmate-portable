@@ -2451,6 +2451,7 @@ async def system_quit() -> dict:
 
     def go() -> None:
         time.sleep(0.4)                      # let the answer leave first
+        store.flush(timeout=2.0)             # queued history lands before the exit
         hook = _quit_hook
         if hook is not None:
             try:
@@ -4240,7 +4241,9 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 # never worth interrupting a live session for.
                 try:
                     for record in session["transcript"].feed(text):
-                        store.add_command(session_id, record)
+                        # Off the loop: the store's writer thread commits
+                        # it while output keeps flowing (#459).
+                        store.submit(store.add_command, session_id, record)
                         # The last few, kept on the session for the
                         # assistant's structured view (#404). Bounded.
                         recent = session.get("recent_records")
@@ -4315,7 +4318,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         hostname_sent = True
                         # Connections are often opened by IP, so recording the
                         # real name is what makes searching by device work.
-                        store.update_session_hostname(session_id, detected)
+                        store.submit(store.update_session_hostname, session_id, detected)
                         # Update the live session too, not just the database.
                         # Config snapshots are keyed by hostname, and keying
                         # them by IP would file the same device under two
