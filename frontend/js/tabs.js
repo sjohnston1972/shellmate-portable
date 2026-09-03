@@ -320,6 +320,10 @@
     // different one — most likely under any ordering but 'opened'.
     const index = tabs.findIndex(t => t.sessionId === session_id);
     switchToTab(index === -1 ? newIndex : index);
+
+    // The caller may want to write to the terminal it just opened (#486) —
+    // the reconnect note depends on it, and returned nothing until now.
+    return tabObj;
   }
 
   /**
@@ -2407,8 +2411,8 @@
           // you unsure whether the scrollback above the line is from the same
           // boot of the device — which matters a great deal when you are
           // about to reason about what changed.
-          if (options.silent && fresh && fresh.terminal) {
-            fresh.terminal.write(RECONNECTED_NOTE);
+          if (options.silent && fresh && fresh.terminalInstance) {
+            fresh.terminalInstance.write(RECONNECTED_NOTE);
           }
           return true;
         }
