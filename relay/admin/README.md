@@ -17,6 +17,9 @@ renewed and revoked, people are recorded, and reports are read.
 - **Records** live in D1 (`schema.sql`, `schema-v2.sql`, `schema-v3.sql`,
   `schema-v4.sql`, applied in that order): people, licences, an event log,
   the portal's settings, and installations.
+- **The event log** keeps a licence's history for good. Two kinds are
+  noise after a season — `login` and `refreshed` — and a weekly cron
+  (`[triggers]` in `wrangler.toml`) deletes those older than 90 days.
 - **Installations**: a copy of ShellMate reports the machine it is on (name,
   user, platform, version, and a stable hash as id) when a key is entered,
   when it is removed, and at every refresh. The portal shows them on the

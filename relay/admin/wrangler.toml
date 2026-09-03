@@ -35,6 +35,11 @@ name = "APP_LIMITER"
 namespace_id = "1003"
 simple = { limit = 300, period = 60 }
 
+# Weekly, Monday 04:17 UTC: prune login and refreshed events older than 90
+# days (worker.js scheduled()). Nothing else ever deletes an event.
+[triggers]
+crons = ["17 4 * * 1"]
+
 [vars]
 PUBLIC_KEY_B64 = "5LJXi4D4Lil3nYxIkY+otMGD2O05SrIWJypmQ4Qhqn8="
 PORTAL_TITLE = "ShellMate Admin"

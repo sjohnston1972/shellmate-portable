@@ -34,6 +34,7 @@
 
 const SESSION_COOKIE = 'sma_session';
 const SESSION_HOURS = 12;
+const EVENT_KEEP_DAYS = 90;   // how long login and refreshed events are kept
 const MAX = { name: 120, email: 200, org: 120, notes: 2000, reason: 300, seats: 100000, text: 4000 };
 const SETTING_KEYS = ['requests_enabled', 'request_days', 'request_kind', 'mail_from', 'mail_subject', 'mail_intro', 'portal_notice'];
 
@@ -60,6 +61,16 @@ export default {
       console.error(err && err.stack || err);
       return json(500, { detail: 'The service hit an error. It has been logged.' });
     }
+  },
+
+  // On the cron in wrangler.toml. Every login and every refresh appends an
+  // event and nothing else ever removed one (#511). The kinds that are
+  // noise after a season are pruned; issued, renewed, revoked, activated
+  // and the rest are the licence's history and stay.
+  async scheduled(event, env) {
+    const r = await env.DB.prepare("DELETE FROM events WHERE kind IN ('login', 'refreshed') AND at < ?1")
+      .bind(Date.now() - EVENT_KEEP_DAYS * 86400000).run();
+    console.log(`events: pruned ${r.meta.changes} login/refreshed rows older than ${EVENT_KEEP_DAYS} days`);
   },
 };
 
@@ -486,7 +497,10 @@ async function adminApi(request, env, path) {
       env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE removed_at IS NULL').first(),
       env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE removed_at IS NULL AND last_seen >= ?1').bind(Date.now() - 7 * 86400000).first(),
     ]);
-    const recent = await env.DB.prepare('SELECT e.*, l.licensee FROM events e LEFT JOIN licences l ON l.id = e.licence_id ORDER BY e.at DESC LIMIT 15').all();
+    // By id, not by at: ids are AUTOINCREMENT and so in the same order as
+    // at, and the rowid is the table's own index, where ordering by at
+    // meant sorting the whole log on every visit (#511).
+    const recent = await env.DB.prepare('SELECT e.*, l.licensee FROM events e LEFT JOIN licences l ON l.id = e.licence_id ORDER BY e.id DESC LIMIT 15').all();
     return json(200, { licences: total.n, active: active.n, expiring: expiring.n, expired: expired.n, revoked: revoked.n,
                        users: users.n, issued_30d: month.n, events: recent.results,
                        activated: activated.n, unactivated: active.n - activated.n, installations: installs.n, seen_7d: seen7.n,
