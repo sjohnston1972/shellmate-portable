@@ -657,9 +657,28 @@ class SSHHandler(ConnectionHandler):
     # ------------------------------------------------------------------
 
     def send(self, data: bytes) -> None:
-        """Write bytes to the remote shell."""
-        if self._channel and not self._channel.closed:
-            self._channel.send(data)
+        """
+        Write bytes to the remote shell — all of them.
+
+        `Channel.send` is a partial write: it stops at the remote window or
+        the packet size and returns how much went, and the rest was silently
+        lost (#470) — a pasted block, a config push, a broadcast, each
+        losing its tail with no error on a tool whose rule is never to
+        send silently. `sendall` loops until it is all through. A device
+        that has stopped reading — sitting at --More--, mid-reload — makes
+        it time out instead; that is raised with a plain message, and the
+        caller decides what to do with one keystroke that did not go.
+        """
+        if not self._channel or self._channel.closed:
+            return
+        try:
+            self._channel.sendall(data)
+        except _socket.timeout as exc:
+            logger.warning("%s is not accepting input; %d byte(s) were not sent",
+                           self.params.target() if self.params else "the device", len(data))
+            raise ConnectionError_(
+                "The device is not accepting input right now (its window is full — "
+                "is it waiting at --More-- or mid-reload?)") from exc
 
     def recv(self, size: int = 4096) -> bytes | None:
         """Read from the remote shell. See ConnectionHandler.recv for semantics."""

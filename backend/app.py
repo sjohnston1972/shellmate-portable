@@ -3823,6 +3823,32 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
             while True:
                 raw = await websocket.receive_text()
                 try:
+                    await handle_client_message(raw)
+                except WebSocketDisconnect:
+                    raise
+                except Exception as exc:
+                    # One message that could not be delivered — a send that
+                    # timed out because the device stopped reading, a
+                    # resize with a bad number — used to end this loop,
+                    # which closed the bridge and greyed out the tab (#470).
+                    # Say so and carry on; the session is still up.
+                    logger.warning("Could not handle a message for session %s: %s", session_id, exc)
+                    try:
+                        await websocket.send_text(json.dumps({
+                            "type": "output",
+                            "data": f"\r\n\x1b[33m[ShellMate: {exc}]\x1b[0m\r\n"}))
+                    except Exception:
+                        pass
+        except WebSocketDisconnect:
+            logger.info("Browser closed the terminal socket for session %s", session_id)
+        except Exception as exc:
+            logger.warning("read_from_client error (session %s): %s", session_id, exc)
+
+    async def handle_client_message(raw: str) -> None:
+        """One message from the browser: input, a resize, or a guardrail answer."""
+        if True:
+            if True:
+                try:
                     msg = json.loads(raw)
                 except json.JSONDecodeError:
                     # If someone sends plain text, treat it as input
@@ -3971,10 +3997,7 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     if hasattr(handler, "send_break"):
                         await asyncio.to_thread(handler.send_break)
 
-        except WebSocketDisconnect:
-            pass
-        except Exception as exc:
-            logger.warning("read_from_client error (session %s): %s", session_id, exc)
+        return
 
     async def note_pending(changes) -> None:
         """
