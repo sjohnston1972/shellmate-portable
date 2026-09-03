@@ -102,6 +102,18 @@ async function rateLimited(env, request, bucket) {
   return !success;
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// A request body as an object, {} for no body at all, or null when it is not
+// JSON or not an object. A malformed body used to be read as {} and acted
+// on: `renew` with no expiry signed a perpetual key and un-revoked it, and a
+// PUT blanked every field it did not find (#507). Missing means missing.
+async function readBody(request) {
+  const text = await request.text().catch(() => '');
+  if (!text.trim()) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) { return null; }
+}
 
 // ------------------------------------------------------------------ signing
 let signingKey = null;
@@ -419,7 +431,11 @@ async function publicRequest(request, env) {
 async function adminApi(request, env, path) {
   const url = new URL(request.url);
   const method = request.method;
-  const body = method === 'POST' || method === 'PUT' ? await request.json().catch(() => ({})) : {};
+  let body = {};
+  if (method === 'POST' || method === 'PUT') {
+    body = await readBody(request);
+    if (body === null) return json(400, { detail: 'The body must be a JSON object.' });
+  }
   const settings = await getSettings(env);
 
   if (path === '/admin/api/stats') {
@@ -547,8 +563,11 @@ async function adminApi(request, env, path) {
       return json(200, { deleted: true });
     }
     if (!action && method === 'PUT') {
+      // Only the fields that were sent change; a body without `notes` is
+      // not a request to empty them.
       await env.DB.prepare('UPDATE licences SET notes = ?1, email = ?2 WHERE id = ?3')
-        .bind(clean(body.notes, MAX.notes), 'email' in body ? clean(body.email, MAX.email) : row.email, id).run();
+        .bind('notes' in body ? clean(body.notes, MAX.notes) : row.notes,
+              'email' in body ? clean(body.email, MAX.email) : row.email, id).run();
       return json(200, { licence: publicRow(await getLicence(env, id)) });
     }
     if (action === 'revoke' && method === 'POST') {
@@ -563,14 +582,19 @@ async function adminApi(request, env, path) {
       return json(200, { licence: publicRow(await getLicence(env, id)) });
     }
     if (action === 'renew' && method === 'POST') {
+      // The expiry must be stated, blank meaning perpetual on purpose; a
+      // body that simply lacks it is refused rather than read as "never".
+      // Revocation is lifted only when asked: renewing is not restoring.
+      if (!('expires' in body)) return json(400, { detail: 'expires is needed: a date, or blank for a perpetual key.' });
       let expires;
       try { expires = isoDate(body.expires); } catch (err) { return json(400, { detail: err.message }); }
       const seats = body.seats ? Math.min(MAX.seats, Math.max(1, parseInt(body.seats, 10) || row.seats)) : row.seats;
+      const restore = !!row.revoked && body.restore === true;
       const updated = { ...row, expires, seats, issued: today() };
       const token = await signToken(env, payloadFor(updated));
-      await env.DB.prepare("UPDATE licences SET expires = ?1, seats = ?2, issued = ?3, token = ?4, revoked = 0, revoked_reason = '' WHERE id = ?5")
+      await env.DB.prepare(`UPDATE licences SET expires = ?1, seats = ?2, issued = ?3, token = ?4${restore ? ", revoked = 0, revoked_reason = ''" : ''} WHERE id = ?5`)
         .bind(expires, seats, updated.issued, token, id).run();
-      await logEvent(env, id, 'renewed', `expires ${expires || 'never'} · ${seats} seat(s)`);
+      await logEvent(env, id, 'renewed', `expires ${expires || 'never'} · ${seats} seat(s)${restore ? ' · restored' : ''}`);
       let mailed = false, mail_error = '';
       const fresh = await getLicence(env, id);
       if (body.send !== false && fresh.email && mailConfigured(env)) {
@@ -611,8 +635,9 @@ async function adminApi(request, env, path) {
       return json(200, { user: row, licences: licences.results.map(publicRow) });
     }
     if (method === 'PUT') {
+      const field = (key, max) => (key in body ? clean(body[key], max) : row[key]);
       await env.DB.prepare('UPDATE users SET name = ?1, email = ?2, org = ?3, notes = ?4 WHERE id = ?5')
-        .bind(clean(body.name, MAX.name) || row.name, clean(body.email, MAX.email), clean(body.org, MAX.org), clean(body.notes, MAX.notes), id).run();
+        .bind(field('name', MAX.name) || row.name, field('email', MAX.email), field('org', MAX.org), field('notes', MAX.notes), id).run();
       return json(200, { user: await env.DB.prepare('SELECT * FROM users WHERE id = ?1').bind(id).first() });
     }
     if (method === 'DELETE') {
@@ -786,7 +811,7 @@ async function detail(id) {
    + '<div class="panel"><div class="bar"><h2>Licence key</h2><span class="hint">what the licensee pastes into ShellMate</span></div><div class="body"><div class="key">'+esc(l.token)+'</div><div class="row" style="margin-top:8px"><button class="btn sm" id="copy">Copy key</button><button class="btn sm" id="dl">Download .key file</button></div></div></div>'
    + '<div class="panel"><div class="bar"><h2>Installations</h2><span class="hint">'+(l.installs||0)+' of '+l.seats+' seat(s) in use</span></div>'+(d.activations.length ? '<table><thead><tr><th>Machine</th><th>User</th><th>Platform</th><th>Version</th><th>First seen</th><th>Last seen</th><th></th></tr></thead><tbody>'+d.activations.map(a => '<tr'+(a.removed_at?' style="opacity:.55"':'')+'><td><b>'+esc(a.hostname||a.machine_id)+'</b>'+(a.removed_at?' <span class="pill grey">removed '+esc(when(a.removed_at))+'</span>':'')+'</td><td>'+esc(a.user||'—')+'</td><td class="hint">'+esc(a.platform||'—')+'</td><td class="mono">'+esc(a.version||'?')+'</td><td class="hint">'+esc(when(a.first_seen))+'</td><td class="hint">'+esc(when(a.last_seen))+' ('+a.seen_count+')</td><td><button class="btn sm forget" data-m="'+esc(a.machine_id)+'" title="Free the seat; the copy re-registers at its next refresh if it is still there">Forget</button></td></tr>').join('')+'</tbody></table>' : '<div class="body hint">No copy of ShellMate has reported this key yet. It is recorded the moment the key is entered, and again at every refresh.</div>')+'</div>'
    + '<div class="panel"><div class="bar"><h2>Notes</h2></div><div class="body"><textarea id="notes" rows="3">'+esc(l.notes||'')+'</textarea><div class="row" style="margin-top:8px"><button class="btn sm" id="savenotes">Save notes</button></div></div></div></div>'
-   + '<div><div class="panel"><div class="bar"><h2>Renew</h2></div><div class="body"><div class="row"><input type="date" id="renew" value="'+esc(l.expires||'')+'" style="max-width:180px"><input type="number" id="seats" min="1" value="'+l.seats+'" style="max-width:100px" title="Seats"><label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="renewsend" checked> email the new key</label></div><div class="row" style="margin-top:10px"><button class="btn sm primary" id="dorenew">Renew and re-sign</button></div><p class="hint">Keeps the id and signs a new key with the new expiry. A copy of ShellMate holding the old key picks the new one up at its next refresh — no re-entry needed.</p></div></div>'
+   + '<div><div class="panel"><div class="bar"><h2>Renew</h2></div><div class="body"><div class="row"><input type="date" id="renew" value="'+esc(l.expires||'')+'" style="max-width:180px"><input type="number" id="seats" min="1" value="'+l.seats+'" style="max-width:100px" title="Seats"><label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="renewsend" checked> email the new key</label>'+(l.revoked?'<label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="renewrestore"> restore it too</label>':'')+'</div><div class="row" style="margin-top:10px"><button class="btn sm primary" id="dorenew">Renew and re-sign</button></div><p class="hint">Keeps the id and signs a new key with the new expiry; a blank date makes it perpetual. A copy of ShellMate holding the old key picks the new one up at its next refresh — no re-entry needed.'+(l.revoked?' This licence is revoked and stays revoked unless <i>restore it too</i> is ticked.':'')+'</p></div></div>'
    + '<div class="panel"><div class="bar"><h2>'+(l.revoked?'Restore':'Revoke')+'</h2></div><div class="body"><div class="row">'+(l.revoked?'<button class="btn sm" id="restore">Restore this licence</button>':'<input id="reason" placeholder="Reason (shown to the licensee)" style="max-width:320px"><button class="btn sm danger" id="revoke">Revoke</button>')+'</div></div></div>'
    + '<div class="panel"><div class="bar"><h2>History</h2></div><ul class="events" style="padding:6px 16px">'+(d.events.map(e => '<li><time>'+esc(when(e.at))+'</time><b>'+esc(e.kind)+'</b> <span style="color:var(--ink-3)">'+esc(e.detail)+'</span></li>').join('')||'<li class="hint">Nothing yet.</li>')+'</ul></div>'
    + '<button class="btn sm danger" id="del">Delete this licence record</button></div></div>';
@@ -796,7 +821,7 @@ async function detail(id) {
   $('#savenotes').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id), {method:'PUT', body:{notes: $('#notes').value}}); toast('Notes saved'); };
   $('#saveemail').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id), {method:'PUT', body:{notes: $('#notes').value, email: $('#email').value}}); toast('Email saved'); };
   $('#send').onclick = async () => { $('#send').disabled = true; try { await api('/admin/api/licences/'+encodeURIComponent(id)+'/send', {method:'POST'}); toast('Key emailed to '+l.email); route(); } catch (e) { toast(e.message); $('#send').disabled = false; } };
-  $('#dorenew').onclick = async () => { try { const r = await api('/admin/api/licences/'+encodeURIComponent(id)+'/renew', {method:'POST', body:{expires: $('#renew').value, seats: $('#seats').value, send: $('#renewsend').checked}}); toast('Renewed'+(r.mailed?' and emailed':r.mail_error?' — email failed: '+r.mail_error:'')); route(); } catch (e) { toast(e.message); } };
+  $('#dorenew').onclick = async () => { try { const r = await api('/admin/api/licences/'+encodeURIComponent(id)+'/renew', {method:'POST', body:{expires: $('#renew').value, seats: $('#seats').value, send: $('#renewsend').checked, restore: !!($('#renewrestore') && $('#renewrestore').checked)}}); toast('Renewed'+(r.mailed?' and emailed':r.mail_error?' — email failed: '+r.mail_error:'')); route(); } catch (e) { toast(e.message); } };
   if ($('#revoke')) $('#revoke').onclick = async () => { if (!confirm('Revoke this licence? Its copy of ShellMate stops updating at its next refresh.')) return; await api('/admin/api/licences/'+encodeURIComponent(id)+'/revoke', {method:'POST', body:{reason: $('#reason').value}}); toast('Revoked'); route(); };
   if ($('#restore')) $('#restore').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id)+'/restore', {method:'POST'}); toast('Restored'); route(); };
   $('#del').onclick = async () => { if (!confirm('Delete the record entirely? The key stops verifying with the service and cannot be restored.')) return; await api('/admin/api/licences/'+encodeURIComponent(id), {method:'DELETE'}); toast('Deleted'); location.hash = '#/licences'; };
