@@ -20,6 +20,7 @@ import ipaddress
 import json
 import threading
 import uuid
+from pathlib import Path
 
 from backend import jsonfile, paths
 from backend.vault import VaultError, vault
@@ -38,12 +39,51 @@ def _synchronised(fn):
     return inner
 
 
+# The parsed profile list, kept until the file changes (#465). Every drag,
+# tag change and dashboard refresh parsed the whole file — 8 ms at 5,000
+# connections, several times per operation — and the scheduler did it once
+# a minute forever. Callers get their own shallow copy (fresh dicts, fresh
+# lists) because they add keys and replace tags on what they are handed.
+_cache: dict = {"key": None, "profiles": None}
+
+
+def _file_key(path: Path):
+    try:
+        st = path.stat()
+    except OSError:
+        return ("absent", str(path))
+    return (str(path), st.st_mtime_ns, st.st_size)
+
+
+def _copy(profiles: list[dict]) -> list[dict]:
+    return [{k: (list(v) if isinstance(v, list) else v) for k, v in p.items()} for p in profiles]
+
+
 def _load() -> list[dict]:
-    return jsonfile.read(paths.profiles_file(), [], expect=list)
+    path = paths.profiles_file()
+    key = _file_key(path)
+    with _lock:
+        if _cache["key"] == key and _cache["profiles"] is not None:
+            return _copy(_cache["profiles"])
+        profiles = jsonfile.read(path, [], expect=list)
+        _cache["key"] = _file_key(path)
+        _cache["profiles"] = _copy(profiles)
+        return profiles
 
 
 def _save(profiles: list[dict]) -> None:
-    jsonfile.write(paths.profiles_file(), profiles)
+    path = paths.profiles_file()
+    with _lock:
+        # Compact on disk: indent=2 was most of the 26 ms write and a third
+        # of the file. Nobody edits five thousand connections by hand.
+        jsonfile.write(path, profiles, indent=None)
+        _cache["key"] = _file_key(path)
+        _cache["profiles"] = _copy(profiles)
+
+
+def find_profile(profile_id: str) -> dict | None:
+    """One saved connection by id, from the cached list. None if unknown."""
+    return next((p for p in _load() if p.get("id") == profile_id), None)
 
 
 # Credential fields that may be remembered for a profile. Mirrors

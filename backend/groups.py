@@ -447,8 +447,9 @@ def set_membership(profile_id: str, key: str, member: bool) -> list[str]:
     if not key:
         return []
 
-    profile = next((p for p in profiles_module.get_profiles()
-                    if p.get("id") == profile_id), None)
+    # By id from the cached list (#465): get_profiles() decorated every one
+    # of five thousand connections with its credential state to find one.
+    profile = profiles_module.find_profile(profile_id)
     if profile is None:
         raise ValueError("No such connection.")
 
