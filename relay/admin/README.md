@@ -117,6 +117,26 @@ print("PUBLIC_KEY_B64 =", base64.b64encode(priv.public_key().public_bytes(
 Rotating the key invalidates every issued licence, so it is a once-only
 decision unless every licensee is re-issued.
 
+## Tests
+
+`node relay/admin/test_worker.mjs` (Node 20 or later; CI runs it) imports
+both Workers the way the runtime does and drives their helpers and their
+`fetch` handlers with a fake D1 that records every statement. It proves the
+refusals — missing secrets, malformed bodies, wrong password, a
+prototype-named report type — which limiter each endpoint uses, that the
+mail test records nothing, and which SQL a request causes.
+
+It does not run that SQL. The step after this one is a
+[`@cloudflare/vitest-pool-workers`](https://developers.cloudflare.com/workers/testing/vitest-integration/)
+suite, which would need: a `vitest.config` pointing `wrangler.toml` at a
+local D1 binding; a setup that applies `schema.sql`, `schema-v2.sql`,
+`schema-v3.sql` and `schema-v4.sql` in that order (which also proves the
+migrations apply cleanly); a throwaway Ed25519 key as
+`SIGNING_KEY_PKCS8_B64` with `ADMIN_PASSWORD` and `SESSION_SECRET` set; and
+`fetch` mocked for Resend. The SQL in this Worker was checked against the
+four schema files in plain SQLite when it was written, so the suite's job
+is to keep it that way.
+
 ## Endpoints
 
 | Path | Who | What |

@@ -69,6 +69,9 @@ jobs:
         env:
           PYTHONUTF8: "1"
 
+      - name: Test the Workers
+        run: node relay/admin/test_worker.mjs
+
       - name: Build the portable executable
         run: pyinstaller build.spec --noconfirm
 

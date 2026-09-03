@@ -15,6 +15,10 @@ failures rather than scrolling past them.
 
 `SHELLMATE_SKIP_TESTS` does the same as --skip, for a CI job on a machine
 without the Playwright browsers.
+
+Each file gets `SHELLMATE_TEST_TIMEOUT` seconds (600 by default). One that
+overruns is killed and named, so a hung test costs ten minutes and a line
+saying which file, not the whole CI job and no line at all (#517).
 """
 
 import os
@@ -24,6 +28,16 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+#: The exit code recorded for a file that had to be killed.
+TIMED_OUT = -9
+
+
+def _timeout() -> float:
+    try:
+        return max(1.0, float(os.environ.get("SHELLMATE_TEST_TIMEOUT", "600")))
+    except ValueError:
+        return 600.0
 
 
 def main(argv: list[str]) -> int:
@@ -56,18 +70,23 @@ def main(argv: list[str]) -> int:
         # output so a check that prints an arrow or an em-dash cannot itself
         # crash the run on a cp1252 console.
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
-        code = subprocess.call([sys.executable, str(path)], cwd=str(ROOT), env=env)
+        limit = _timeout()
+        try:
+            code = subprocess.call([sys.executable, str(path)], cwd=str(ROOT), env=env, timeout=limit)
+        except subprocess.TimeoutExpired:
+            print(f"\n!!! {path.name} did not finish within {limit:.0f}s and was killed", flush=True)
+            code = TIMED_OUT
         results.append((path.name, code, time.monotonic() - started))
 
     failed = [(n, c) for n, c, _ in results if c != 0]
     print("\n" + "=" * 60)
     for name, code, seconds in results:
-        mark = "ok  " if code == 0 else f"FAIL"
+        mark = "ok  " if code == 0 else ("HUNG" if code == TIMED_OUT else "FAIL")
         print(f"  {mark}  {name:32s} {seconds:6.1f}s")
     print("=" * 60)
     print(f"  {len(results) - len(failed)} of {len(results)} test files passed")
     if failed:
-        print("  failed: " + ", ".join(n for n, _ in failed))
+        print("  failed: " + ", ".join(n + (" (killed)" if c == TIMED_OUT else "") for n, c in failed))
     return 1 if failed else 0
 
 

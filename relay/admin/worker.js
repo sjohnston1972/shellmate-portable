@@ -42,15 +42,19 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
+    // `return await`, not `return`: a promise handed back from inside a
+    // try block is not awaited by it, so a handler that threw skipped the
+    // catch below and surfaced as an unhandled rejection — Cloudflare's
+    // error page rather than the JSON 500 this was written to give.
     try {
       if (path === '/health') return json(200, { ok: true, service: 'shellmate-admin' });
-      if (path.startsWith('/licence/')) return application(request, env, path);
-      if (path === '/request') return publicRequest(request, env);
-      if (path === '/admin/login' && request.method === 'POST') return login(request, env);
+      if (path.startsWith('/licence/')) return await application(request, env, path);
+      if (path === '/request') return await publicRequest(request, env);
+      if (path === '/admin/login' && request.method === 'POST') return await login(request, env);
       if (path === '/admin/logout') return logout();
       if (path.startsWith('/admin/api/')) {
         if (!(await authed(request, env))) return json(401, { detail: 'Sign in first.' });
-        return adminApi(request, env, path);
+        return await adminApi(request, env, path);
       }
       if (path === '/' || path === '/admin') {
         const who = await accessIdentity(request, env);
@@ -1022,3 +1026,6 @@ async function settings() {
 }
 route();
 `;
+
+// For relay/admin/test_worker.mjs. The runtime reads only the default export.
+export { clean, isoDate, isEmail, csvCell, parseCursor, machineOf, readBody, makeSession, timingSafeEqual };
