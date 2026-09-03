@@ -49,6 +49,28 @@ wrangler deploy
 The custom domain needs `foundry-ns.com` to be a zone on the same Cloudflare
 account; `wrangler deploy` creates the DNS record.
 
+### Cloudflare Access in front of the portal
+
+The portal sits behind Cloudflare Access (team `clydeford`), so reaching it
+means signing in with the allowed Google account first. Four Access
+applications cover the hostname:
+
+| Application | Path | Policy |
+|---|---|---|
+| ShellMate Admin | everything | `finance-stevie-only` (Google login, one address) |
+| ShellMate licence API (public) | `/licence` | bypass — the app's refresh and check calls |
+| ShellMate request page (public) | `/request` | bypass |
+| ShellMate health (public) | `/health` | bypass |
+
+The Worker trusts the identity Access attaches: it verifies the
+`Cf-Access-Jwt-Assertion` header against the team's published keys and the
+application's audience tag (`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` in
+`wrangler.toml`), and a valid one is a sign-in — the password page is never
+shown. The password remains as a fallback, and is the only way in if Access
+is removed. The sidebar names the signed-in address and *Sign out* ends the
+Access session. Changing the Access application means updating `ACCESS_AUD`
+to its new audience tag and redeploying.
+
 ### Email through Resend
 
 1. Create an account at resend.com and add `foundry-ns.com` as a domain;

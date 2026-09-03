@@ -48,7 +48,8 @@ export default {
         return adminApi(request, env, path);
       }
       if (path === '/' || path === '/admin') {
-        return html(await authed(request, env) ? portalPage(env) : loginPage(env));
+        const who = await accessIdentity(request, env);
+        return html((who || await authed(request, env)) ? portalPage(env, who) : loginPage(env));
       }
       return json(404, { detail: 'Not found.' });
     } catch (err) {
@@ -133,7 +134,41 @@ async function makeSession(env) {
   const body = `${Date.now() + SESSION_HOURS * 3600 * 1000}.${b64url(nonce)}`;
   return `${body}.${await hmac(env, body)}`;
 }
+// ---- Cloudflare Access: a valid identity from the team's Google login is a
+// sign-in, so the password page is never seen behind Access. The JWT that
+// Access attaches is verified against the team's published keys and the
+// application's audience tag; a missing or bad one falls through to the
+// password cookie, which remains as the fallback.
+let accessCerts = { at: 0, keys: [] };
+async function accessIdentity(request, env) {
+  const jwt = request.headers.get('cf-access-jwt-assertion');
+  if (!jwt || !env.ACCESS_TEAM_DOMAIN || !env.ACCESS_AUD) return null;
+  const parts = jwt.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const header = JSON.parse(new TextDecoder().decode(fromB64(parts[0])));
+    const payload = JSON.parse(new TextDecoder().decode(fromB64(parts[1])));
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp < now || payload.iss !== `https://${env.ACCESS_TEAM_DOMAIN}`) return null;
+    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!aud.includes(env.ACCESS_AUD)) return null;
+    if (Date.now() - accessCerts.at > 3600 * 1000) {
+      const resp = await fetch(`https://${env.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`);
+      if (!resp.ok) return null;
+      accessCerts = { at: Date.now(), keys: (await resp.json()).keys || [] };
+    }
+    const jwk = accessCerts.keys.find(k => k.kid === header.kid);
+    if (!jwk) return null;
+    const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    const ok = await crypto.subtle.verify({ name: 'RSASSA-PKCS1-v1_5' }, key, fromB64(parts[2]), enc.encode(`${parts[0]}.${parts[1]}`));
+    return ok ? { email: payload.email || '', sub: payload.sub || '' } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function authed(request, env) {
+  if (await accessIdentity(request, env)) return true;
   const cookie = request.headers.get('cookie') || '';
   const match = cookie.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
   if (!match) return false;
@@ -575,7 +610,7 @@ function requestPage(env, settings, enabled) {
 </div></div></body></html>`;
 }
 
-function portalPage(env) {
+function portalPage(env, who) {
   const nav = [
     ['overview', 'Overview', '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'],
     ['licences', 'Licences', '<path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7 7 5 5 0 0 1 7-7zm0 0L19 3.5M15 5l2 2"/>'],
@@ -586,7 +621,7 @@ function portalPage(env) {
   ].map(([v, t, p]) => `<a class="nav" data-view="${v}" href="#/${v}"><svg viewBox="0 0 24 24">${p}</svg>${t}</a>`).join('');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(env.PORTAL_TITLE || 'ShellMate Admin')}</title>${FONTS}<style>${STYLE}</style></head>
 <body><div class="app"><aside class="side"><div class="brand"><span class="dot">S</span> ${esc(env.PORTAL_TITLE || 'ShellMate Admin')}</div>${nav}
-<div class="foot"><a href="/request" target="_blank">Public request page</a><br><a href="/admin/logout">Sign out</a></div></aside>
+<div class="foot">${who && who.email ? esc(who.email) + '<br>via Cloudflare Access<br>' : ''}<a href="/request" target="_blank">Public request page</a><br><a href="${who ? '/cdn-cgi/access/logout' : '/admin/logout'}">Sign out</a></div></aside>
 <main class="main" id="main"></main></div><script>${PORTAL_JS}</script></body></html>`;
 }
 

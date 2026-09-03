@@ -29,3 +29,7 @@ simple = { limit = 20, period = 60 }
 [vars]
 PUBLIC_KEY_B64 = "5LJXi4D4Lil3nYxIkY+otMGD2O05SrIWJypmQ4Qhqn8="
 PORTAL_TITLE = "ShellMate Admin"
+# Cloudflare Access in front of the portal: the team domain and the application's
+# audience tag. A valid Access identity signs in without the password.
+ACCESS_TEAM_DOMAIN = "clydeford.cloudflareaccess.com"
+ACCESS_AUD = "b9ebc6a5a5c64e5e7698027eb993afd16d93bdd544076639023aa91e654a5b0a"
