@@ -3787,6 +3787,58 @@ def _close_session_log(session: dict) -> None:
     _discard_if_empty(path)
 
 
+
+def _ensure_reader_thread(session: dict, handler, bank_lock: threading.Lock) -> None:
+    """
+    Start the session's reader thread if it is not running (#471).
+
+    Reads only while a browser is attached (``_recv_notify`` set), banks
+    bytes under ``bank_lock``, wakes the attached consumer on the loop, and
+    ends when the far end closes. Never raises into anything.
+    """
+    existing = session.get("_reader")
+    if existing is not None and existing.is_alive():
+        return
+
+    def run() -> None:
+        session_id = session.get("session_id", "?")
+        try:
+            while True:
+                notify = session.get("_recv_notify")
+                if notify is None:
+                    if not handler.is_connected:
+                        break
+                    time.sleep(0.2)
+                    continue
+                try:
+                    data = handler.recv(4096)
+                except Exception as exc:
+                    logger.info("Reader for %s stopped: %s", session_id, exc)
+                    data = b""
+                if data is None:
+                    continue
+                if data == b"":
+                    session["_reader_closed"] = True
+                    loop, wake = notify
+                    try:
+                        loop.call_soon_threadsafe(wake.set)
+                    except RuntimeError:
+                        pass
+                    break
+                with bank_lock:
+                    session["_recv_pending"] = session.get("_recv_pending", b"") + data
+                loop, wake = notify
+                try:
+                    loop.call_soon_threadsafe(wake.set)
+                except RuntimeError:
+                    pass                          # the loop is gone; the bank keeps the bytes
+        finally:
+            session["_reader"] = None
+
+    thread = threading.Thread(target=run, daemon=True, name=f"reader-{session.get('session_id', '')[:8]}")
+    session["_reader"] = thread
+    thread.start()
+
 @app.websocket("/ws/terminal/{session_id}")
 async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
     """
@@ -4183,38 +4235,48 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
 
     async def read_from_channel() -> None:
         """Forward device output to the browser and the session buffer."""
-        def _recv_and_bank() -> bytes | None:
-            """
-            recv() whose bytes survive the awaiting task being cancelled.
+        # One reader thread per session (#471), started on the first attach
+        # and living as long as the connection. It used to be a to_thread()
+        # per recv: every open tab permanently held one slot of the loop's
+        # default pool (12 on an 8-core laptop), and every other to_thread
+        # in the application — each keystroke's send, session creation,
+        # every store query, SFTP — queued behind them. With more tabs
+        # than slots, sessions starved each other for input and output.
+        #
+        # The thread banks bytes into the session under a lock and wakes
+        # whichever browser is attached; nothing is consumed off the channel
+        # by a task that then gets cancelled (#344), and the read-modify-
+        # write on the bank is no longer a race between two threads. While
+        # no browser is attached it does not read at all, so output waits
+        # in the channel as it always did rather than piling up in memory.
+        loop = asyncio.get_running_loop()
+        wake = asyncio.Event()
+        bank_lock = session.setdefault("_recv_lock", threading.Lock())
+        session["_recv_notify"] = (loop, wake)
+        _ensure_reader_thread(session, handler, bank_lock)
 
-            On teardown this task is cancelled mid-await, but the worker
-            thread still completes the recv — and the returned bytes used to
-            be consumed off the channel and thrown away (#344): a refresh
-            mid-`show run` left a hole in the buffer, the transcript and the
-            log. Banking on the worker thread itself means cancellation can
-            discard only the *return value*; the bytes wait in the session
-            and the next attach (or the next loop turn) claims them.
-            """
-            data = handler.recv(4096)
-            if data:
-                session["_recv_pending"] = session.get("_recv_pending", b"") + data
-            return data
+        def take_banked() -> bytes:
+            with bank_lock:
+                return session.pop("_recv_pending", b"")
 
         try:
             while True:
-                # Banked output first — bytes recv'd by a cancelled
-                # predecessor of this loop (#344).
-                data_bytes = session.pop("_recv_pending", b"")
+                # Banked output first — bytes the reader put by while this
+                # task was being (re)created (#344).
+                data_bytes = take_banked()
                 if not data_bytes:
-                    # See ConnectionHandler.recv: None means idle (keep
-                    # waiting), b"" means the far end closed.
-                    result = await asyncio.to_thread(_recv_and_bank)
-                    if result:
-                        # Claim what the thread banked — it may include more
-                        # than this recv if a cancelled one banked first.
-                        data_bytes = session.pop("_recv_pending", b"")
+                    if session.get("_reader_closed"):
+                        data_bytes = b""              # the far end closed
                     else:
-                        data_bytes = result   # None (idle) or b"" (closed)
+                        # See ConnectionHandler.recv: None means idle. The
+                        # half-second tick is what the idle work below —
+                        # onboarding, live capture, keep-alive — runs on.
+                        try:
+                            await asyncio.wait_for(wake.wait(), timeout=0.5)
+                            wake.clear()
+                            continue
+                        except asyncio.TimeoutError:
+                            data_bytes = None
 
                 if data_bytes is None:
                     # Idle, but onboarding may still be due — see maybe_onboard.
@@ -4407,6 +4469,9 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
 
     for task in pending:
         task.cancel()
+    # The reader thread keeps running for the next attach; it just has
+    # nobody to wake until then (#471).
+    session["_recv_notify"] = None
 
     # No `is_connected = False` here (#331). The bridge ending says the
     # *browser* went away — a refresh, a hidden window — not that the device
