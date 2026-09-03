@@ -1033,19 +1033,33 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   text-overflow: ellipsis;
 }
 
-.cmd-block-actions .btn-primary {
+/* Send and Edit share one height and sit on one baseline (#455). Send has
+   an icon and a word, Edit an icon alone, and left to their own padding and
+   line-height the two came out different heights. */
+.cmd-block-actions .btn-primary,
+.cmd-block-actions .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 26px;
+  line-height: 1;
   font-size: 11px;
-  padding: 4px 10px;
+}
+
+.cmd-block-actions .btn-primary {
+  padding: 0 10px;
   gap: 4px;
 }
 
-.cmd-block-actions .btn-primary .material-symbols-outlined {
+.cmd-block-actions .btn-primary .material-symbols-outlined,
+.cmd-block-actions .btn-secondary .material-symbols-outlined {
   font-size: var(--icon-sm);
+  line-height: 1;
 }
 
 .cmd-block-actions .btn-secondary {
-  font-size: 11px;
-  padding: 4px 8px;
+  padding: 0 8px;
 }
 
 /* Quick chat buttons */
@@ -4936,9 +4950,12 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 
 #chat-tabs-picker-wrap { position: relative; }
 
+/* The chosen state keeps the pill's own white-on-indigo text (#456). It
+   used --on-surface, which is near-black in the light theme, on the same
+   indigo the pill always has — unreadable exactly when it mattered. */
 .chat-pill-active {
   border-color: var(--primary-container) !important;
-  color: var(--on-surface) !important;
+  color: #fff !important;
 }
 
 #chat-tabs-menu {
