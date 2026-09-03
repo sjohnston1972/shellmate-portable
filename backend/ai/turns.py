@@ -39,9 +39,17 @@ def normalise(history: list | None, max_turns: int | None = None) -> list[dict]:
       refuses two assistant turns in a row.
     - A leading assistant turn is dropped, so the conversation starts with
       the user as the APIs require.
-    - Only the last ``max_turns`` exchanges are kept (a turn is a user
-      message and the reply to it). Defaults to the ``ai.history_turns``
-      setting; zero means no memory at all.
+    - At most ``max_turns`` exchanges are kept (a turn is a user message
+      and the reply to it). Defaults to the ``ai.history_turns`` setting;
+      zero means no memory at all.
+    - Trimming is done in blocks, not one turn at a time (#498). A cached
+      prefix is only worth having if it is the same on the next request,
+      and dropping the oldest turn on every request changed it on every
+      request: each one paid the cache-write premium on the history and
+      read nothing back. So once the conversation is over the limit it is
+      cut back to ``max_turns - 4`` and allowed to grow again, which keeps
+      the prefix stable for four requests at a time. Below eight turns
+      the block is half the limit; at one, there is nothing to trade.
     """
     if max_turns is None:
         max_turns = int(advanced("ai.history_turns"))
@@ -69,13 +77,19 @@ def normalise(history: list | None, max_turns: int | None = None) -> list[dict]:
     if merged and merged[-1]["role"] == "user":
         merged.pop()
 
-    # Keep whole turns from the end.
-    limit = max_turns * 2
-    if len(merged) > limit:
-        merged = merged[-limit:]
+    # Keep whole turns from the end — and when over the limit, fewer than
+    # the limit, so the next few requests share a prefix.
+    if len(merged) > max_turns * 2:
+        keep = max_turns - trim_block(max_turns)
+        merged = merged[-(keep * 2):]
         while merged and merged[0]["role"] != "user":
             merged.pop(0)
     return merged
+
+
+def trim_block(max_turns: int) -> int:
+    """How many turns beyond the limit to drop at once: four, or fewer for a small limit."""
+    return min(4, max_turns // 2)
 
 
 def openai_messages(system: str, history: list | None, user: str) -> list[dict]:
@@ -93,6 +107,13 @@ def anthropic_request(system: str, history: list | None, user: str) -> tuple[lis
     breakpoint and so does the last earlier turn: everything up to and
     including it is the stable prefix, and the fresh context block after it
     is what changes each time.
+
+    Two things make the prefix worth caching (#498). The system text is the
+    persona plus the steady part of the context (the router appends
+    :func:`prompts.build_system_preamble`), which takes it past the
+    provider's minimum cacheable length; and the history is trimmed in
+    blocks by :func:`normalise`, so the breakpoint on the last earlier turn
+    sits in the same place for several requests running.
     """
     caching = bool(advanced("ai.prompt_caching"))
     marker = {"type": "ephemeral"}

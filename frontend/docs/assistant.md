@@ -280,6 +280,16 @@ price only for the fresh terminal context and the new question. **Cache the
 conversation prefix** in Stockton is the switch, on by default; other
 providers ignore it.
 
+Two details make that prefix worth caching. The tab list and what ShellMate
+has established about the device travel with the system prompt rather than
+with each question, because they are the same from one question to the next
+and the persona alone is shorter than the provider's minimum for a cached
+prefix. And once a conversation is over the remembered-turns limit, the
+oldest turns are dropped four at a time rather than one per request, so the
+cached part stays the same for several questions running — a prefix that
+changed on every request was written to the cache each time and never read
+back. The memory therefore sits between the limit and four turns below it.
+
 ## The context meter
 
 The status bar's **Context** figure is an estimate until the provider has

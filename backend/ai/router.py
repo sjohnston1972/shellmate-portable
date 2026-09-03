@@ -7,7 +7,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 
-from backend.ai.prompts import build_context_prompt, get_system_prompt
+from backend.ai.prompts import build_context_prompt, build_system_preamble, get_system_prompt
 from backend.ai import chroma_client
 from backend.connections.manager import SessionManager
 from backend.settings_store import get_settings
@@ -183,11 +183,17 @@ async def stream_chat(
         device_context=device_context,
         parsed_tables=parsed_tables or None,
         investigation=investigation,
+        stable_in_system=True,
     )
 
-    # Pick persona from explicit mode arg, falling back to stored preference
-    effective_mode = (mode or get_settings().get("ai", {}).get("mode") or "tshoot")
+    # The persona, then the part of the context that holds still between
+    # questions — the tab list and the steady device facts — so the cached
+    # prefix is long enough to be cached at all (#498). Only what changes
+    # travels in the context block above.
     system_prompt = get_system_prompt(effective_mode)
+    preamble = build_system_preamble(sessions_summary, active_label, device_context)
+    if preamble:
+        system_prompt = f"{system_prompt}\n\n{preamble}"
 
     # Route to the correct backend, passing optional model override + system prompt
     if backend == "claude":
