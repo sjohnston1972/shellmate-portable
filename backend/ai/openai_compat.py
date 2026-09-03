@@ -113,6 +113,28 @@ def learn_from_refusal(provider: Provider, payload: dict, body: bytes) -> bool:
     return False
 
 
+def normalise_usage(u: dict) -> dict:
+    """
+    The usage object in ShellMate's one shape: ``input`` is the uncached
+    prompt, ``cache_read`` what was served from cache, ``output`` the reply.
+
+    OpenAI-shaped providers count the cached portion *inside*
+    ``prompt_tokens``, where Anthropic's ``input_tokens`` excludes it. The
+    meter adds ``input`` and ``cache_read`` back together, so reporting
+    ``prompt_tokens`` as the input counted the cached part twice and
+    overstated the context by up to the whole prompt (#499). OpenAI
+    reports cached tokens in a sub-object; DeepSeek at the top level.
+    """
+    details = u.get("prompt_tokens_details") or {}
+    prompt = int(u.get("prompt_tokens") or 0)
+    cached = int(details.get("cached_tokens", u.get("prompt_cache_hit_tokens", 0)) or 0)
+    return {
+        "input":      max(0, prompt - cached),
+        "output":     int(u.get("completion_tokens") or 0),
+        "cache_read": cached,
+    }
+
+
 async def stream(
     provider: Provider,
     api_key: str,
@@ -166,16 +188,7 @@ async def stream(
                     except json.JSONDecodeError:
                         continue
                     if event.get("usage"):
-                        u = event["usage"]
-                        details = u.get("prompt_tokens_details") or {}
-                        usage.update({
-                            "input":      u.get("prompt_tokens", 0),
-                            "output":     u.get("completion_tokens", 0),
-                            # OpenAI reports cached prompt tokens in a
-                            # sub-object; DeepSeek at the top level.
-                            "cache_read": details.get("cached_tokens",
-                                                      u.get("prompt_cache_hit_tokens", 0)),
-                        })
+                        usage.update(normalise_usage(event["usage"]))
                     choices = event.get("choices") or [{}]
                     chunk = (choices[0].get("delta") or {}).get("content", "")
                     if chunk:

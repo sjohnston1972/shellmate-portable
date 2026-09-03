@@ -196,6 +196,24 @@ def test_other_providers_retry_too() -> None:
     forget()
 
 
+def test_usage_is_normalised() -> None:
+    """`input` means the uncached prompt on every provider (#499)."""
+    print("\n-- Usage --")
+    forget()
+    _, out = _drive(openai_client, "gpt-4o", lambda body: _answer("ok"))
+    usage = next(c["usage"] for c in out if isinstance(c, dict))
+    check("OpenAI: the cached portion is taken out of the input",
+          usage["input"] == 20 and usage["cache_read"] == 10 and usage["output"] == 1, str(usage))
+    deepseek = openai_compat.normalise_usage(
+        {"prompt_tokens": 100, "completion_tokens": 5, "prompt_cache_hit_tokens": 64})
+    check("DeepSeek: its top-level cache count is read the same way",
+          deepseek == {"input": 36, "output": 5, "cache_read": 64}, str(deepseek))
+    bare = openai_compat.normalise_usage({"prompt_tokens": 7, "completion_tokens": 2})
+    check("no cache figures at all is not an error",
+          bare == {"input": 7, "output": 2, "cache_read": 0}, str(bare))
+    forget()
+
+
 def test_a_real_error_still_surfaces() -> None:
     print("\n-- A refusal that is not about a parameter is reported --")
     forget()
@@ -227,7 +245,8 @@ def main() -> int:
     print("  OpenAI-shaped clients")
     print("=" * 52)
     for test in (test_parameter_gate, test_learns_both_parameters, test_known_family_first_time,
-                 test_other_providers_retry_too, test_a_real_error_still_surfaces):
+                 test_other_providers_retry_too, test_usage_is_normalised,
+                 test_a_real_error_still_surfaces):
         try:
             test()
         except Exception as exc:

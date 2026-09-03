@@ -1090,7 +1090,9 @@
       cache_write: Number(msg.cache_write) || 0,
       provider:   msg.provider || currentBackend,
     };
-    totalUsage.input      += lastUsage.input + lastUsage.cache_read;
+    // `input` is the uncached prompt on every provider (#499); what the
+    // request contained is that plus what the cache served or stored.
+    totalUsage.input      += lastUsage.input + lastUsage.cache_read + lastUsage.cache_write;
     totalUsage.output     += lastUsage.output;
     totalUsage.cache_read += lastUsage.cache_read;
     totalUsage.replies    += 1;
@@ -1184,7 +1186,7 @@
     // The provider's own count of the last request beats the chars/4 guess
     // whenever there has been one (#416); cache reads are still context.
     const measured = lastUsage && lastUsage.provider === currentBackend
-      ? lastUsage.input + lastUsage.cache_read : 0;
+      ? lastUsage.input + lastUsage.cache_read + lastUsage.cache_write : 0;
     const tokens = measured || _estimateTokens();
     const pct    = Math.min(100, Math.round((tokens / limit) * 100));
     const kTok   = tokens >= 1_000 ? `${(tokens / 1_000).toFixed(tokens < 10_000 ? 1 : 0)}k` : `${tokens}`;
