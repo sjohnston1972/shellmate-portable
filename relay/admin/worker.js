@@ -290,15 +290,7 @@ async function issue(env, spec) {
   const features = Array.isArray(spec.features) && spec.features.length ? spec.features.map(f => clean(f, 40)) : ['updates'];
   const email = clean(spec.email, MAX.email);
   let userId = clean(spec.user_id, 64) || null;
-  if (!userId && email) {
-    const existing = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = lower(?1)').bind(email).first();
-    if (existing) userId = existing.id;
-    else if (spec.create_user !== false) {
-      userId = newId('usr');
-      await env.DB.prepare('INSERT INTO users (id, name, email, org, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-        .bind(userId, licensee, email, kind === 'org' ? licensee : clean(spec.org, MAX.org), '', Date.now()).run();
-    }
-  }
+  if (!userId && email) userId = await personFor(env, email, licensee, kind === 'org' ? licensee : clean(spec.org, MAX.org), spec.create_user !== false);
   const id = newId(kind === 'org' ? 'org' : 'lic');
   const row = { id, kind, licensee, email, seats, issued, expires, grace_days: grace, features: JSON.stringify(features) };
   const token = await signToken(env, payloadFor(row));
@@ -308,6 +300,23 @@ async function issue(env, spec) {
   await logEvent(env, id, 'issued', `${kind} · ${seats} seat(s) · expires ${expires || 'never'} · ${spec.source || 'admin'}`);
   return getLicence(env, id);
 }
+
+// The person for an address, created if there is none. One address is one
+// person: users(lower(email)) is unique (schema-v4.sql), so when two
+// requests for the same address arrive together the second INSERT is
+// ignored rather than failing, and both end up on the row that won.
+async function personFor(env, email, name, org, create) {
+  const found = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = lower(?1)').bind(email).first();
+  if (found) return found.id;
+  if (!create) return null;
+  const id = newId('usr');
+  const r = await env.DB.prepare('INSERT OR IGNORE INTO users (id, name, email, org, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
+    .bind(id, name, email, org, '', Date.now()).run();
+  if (r.meta.changes) return id;
+  const other = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = lower(?1)').bind(email).first();
+  return other ? other.id : null;
+}
+function isUniqueViolation(err) { return /UNIQUE constraint/i.test(err && err.message || ''); }
 
 // ------------------------------------------------------------------ email
 function mailConfigured(env) { return !!env.RESEND_API_KEY; }
@@ -651,8 +660,13 @@ async function adminApi(request, env, path) {
     const name = clean(body.name, MAX.name);
     if (!name) return json(400, { detail: 'A name is needed.' });
     const id = newId('usr');
-    await env.DB.prepare('INSERT INTO users (id, name, email, org, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-      .bind(id, name, clean(body.email, MAX.email), clean(body.org, MAX.org), clean(body.notes, MAX.notes), Date.now()).run();
+    try {
+      await env.DB.prepare('INSERT INTO users (id, name, email, org, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
+        .bind(id, name, clean(body.email, MAX.email), clean(body.org, MAX.org), clean(body.notes, MAX.notes), Date.now()).run();
+    } catch (err) {
+      if (isUniqueViolation(err)) return json(409, { detail: 'A person with that email address already exists.' });
+      throw err;
+    }
     return json(201, { user: await env.DB.prepare('SELECT * FROM users WHERE id = ?1').bind(id).first() });
   }
   const u = path.match(/^\/admin\/api\/users\/([^/]+)$/);
@@ -666,8 +680,13 @@ async function adminApi(request, env, path) {
     }
     if (method === 'PUT') {
       const field = (key, max) => (key in body ? clean(body[key], max) : row[key]);
-      await env.DB.prepare('UPDATE users SET name = ?1, email = ?2, org = ?3, notes = ?4 WHERE id = ?5')
-        .bind(field('name', MAX.name) || row.name, field('email', MAX.email), field('org', MAX.org), field('notes', MAX.notes), id).run();
+      try {
+        await env.DB.prepare('UPDATE users SET name = ?1, email = ?2, org = ?3, notes = ?4 WHERE id = ?5')
+          .bind(field('name', MAX.name) || row.name, field('email', MAX.email), field('org', MAX.org), field('notes', MAX.notes), id).run();
+      } catch (err) {
+        if (isUniqueViolation(err)) return json(409, { detail: 'Another person already has that email address.' });
+        throw err;
+      }
       return json(200, { user: await env.DB.prepare('SELECT * FROM users WHERE id = ?1').bind(id).first() });
     }
     if (method === 'DELETE') {
