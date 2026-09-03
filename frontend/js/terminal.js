@@ -31,8 +31,18 @@
     (window.shellmateAdvanced ? window.shellmateAdvanced(key, fallback) : fallback);
 
   // Track all live terminal instances so we can update them when settings change
-  // { sessionId: { terminal, fitAddon, websocket, containerId } }
+  // { sessionId: { terminal, fitAddon, websocket, containerId, link } }
   const _instances = {};
+
+  // Reattaching a dropped terminal socket (#481): the first retry after a
+  // second, doubling to a ceiling, and a bound on how long the server can
+  // stay unreachable before the tab is called disconnected — eight tries is
+  // about two minutes. Not Stockton settings: the worst outcome of any value
+  // here is a tab that says "disconnected" a minute early, and nothing about
+  // the device changes with them.
+  const RELINK_BASE_MS  = 1000;
+  const RELINK_MAX_MS   = 30000;
+  const RELINK_ATTEMPTS = 8;
 
   // -------------------------------------------------------------------------
   // Helpers
@@ -230,16 +240,25 @@
     });
 
     // ------------------------------------------------------------------
-    // 4. Open WebSocket to the backend
+    // 4. The WebSocket to the backend
     // ------------------------------------------------------------------
+    // `let`, not `const`, because the socket is replaced when it drops
+    // (#481). Everything below reads the variable at call time rather than
+    // capturing the first socket, so a reattached one is used by the next
+    // keystroke, paste and resize without any of them knowing.
     const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl    = `${wsProto}//${window.location.host}/ws/terminal/${sessionId}`;
-    const websocket = new WebSocket(wsUrl);
+    let websocket  = null;
+
+    // Where the reattach stands: attempts since the socket last opened, and
+    // the timer for the next try. Kept on the instance so forgetTerminal()
+    // can cancel a pending try when the tab closes mid-backoff.
+    const link = { attempt: 0, timer: null, lost: false };
 
     // ------------------------------------------------------------------
     // 5. Wire WebSocket → terminal (incoming data from device)
     // ------------------------------------------------------------------
-    websocket.addEventListener('message', (event) => {
+    function handleMessage(event) {
       let msg;
       try {
         msg = JSON.parse(event.data);
@@ -323,17 +342,109 @@
         default:
           break;
       }
-    });
+    }
 
-    websocket.addEventListener('close', () => {
+    // ------------------------------------------------------------------
+    // 5a. Reattaching a dropped socket (#481)
+    //
+    // The bridge ending means the *browser* went away, not the device. The
+    // backend keeps the session and banks whatever the device says while
+    // nobody is attached, so the right answer to a dropped socket — laptop
+    // sleep, the hidden desktop window suspended, a proxy idle timeout — is
+    // to open it again. Before this, every close was read as the device
+    // hanging up: the tab went red, and with auto-reconnect on, a live
+    // session was torn down and replaced with a fresh login.
+    //
+    // The tab is marked disconnected only when the server says the session
+    // is gone or the device has closed, when the handshake is refused, or
+    // after RELINK_ATTEMPTS failures to reach the server at all. That last
+    // case is the one where the device may still be up but we cannot tell,
+    // and after a couple of minutes "disconnected" is the honest label.
+    // ------------------------------------------------------------------
+
+    function handleClose(event) {
+      const entry = _instances[sessionId];
+      // closeTab() forgets the instance before it closes the socket, so a
+      // close with no entry — or for a socket this instance has already
+      // replaced — is deliberate and wants nothing done about it.
+      if (!entry) return;
+      if (event && event.target && event.target !== websocket) return;
+
+      // 1008: the server refused the handshake (an origin or auth check).
+      // Another attempt would be refused the same way.
+      if (event && event.code === 1008) { _linkLost(); return; }
+
+      _afterDrop();
+    }
+
+    function handleError(err) {
+      console.error(`WebSocket error for session ${sessionId}:`, err);
+    }
+
+    /**
+     * Ask the server whether the session is still there before deciding
+     * what the close meant.
+     *
+     * Alive and connected: reattach. Absent, or connected=false: the device
+     * side ended, which is the genuine disconnect the tab should show — and
+     * the path tabs.js's own auto-reconnect is for. Server unreachable:
+     * back off and try again, up to a bound.
+     */
+    async function _afterDrop() {
+      let sessions = null;
+      try {
+        const res = await fetch('/api/sessions', { cache: 'no-store' });
+        if (res.ok) sessions = await res.json();
+      } catch (_) { /* the server could not be asked — treat as a link problem */ }
+
+      // Closed while the question was in flight.
+      if (!_instances[sessionId]) return;
+
+      if (Array.isArray(sessions)) {
+        const mine = sessions.find(s => s.session_id === sessionId);
+        if (!mine || !mine.is_connected) { _linkLost(); return; }
+      }
+
+      link.attempt += 1;
+      if (link.attempt > RELINK_ATTEMPTS) { _linkLost(); return; }
+
+      const wait = Math.min(RELINK_BASE_MS * Math.pow(2, link.attempt - 1), RELINK_MAX_MS);
+      link.lost = true;
+      _linkState('reattaching', link.attempt);
+      link.timer = setTimeout(() => {
+        link.timer = null;
+        if (_instances[sessionId]) connect();
+      }, wait);
+    }
+
+    /** The session really is down: hand over to the tab's disconnected state. */
+    function _linkLost() {
+      link.attempt = 0;
+      link.lost = false;
+      _linkState('lost', 0);
       if (typeof window.updateTabStatus === 'function') {
         window.updateTabStatus(sessionId, false);
       }
-    });
+    }
 
-    websocket.addEventListener('error', (err) => {
-      console.error(`WebSocket error for session ${sessionId}:`, err);
-    });
+    /** Tell the tab strip what the link is doing, so the label can say. */
+    function _linkState(state, attempt) {
+      window.dispatchEvent(new CustomEvent('shellmate:terminal-link', {
+        detail: { sessionId, state, attempt, attempts: RELINK_ATTEMPTS },
+      }));
+    }
+
+    /** Open (or reopen) the socket and bind every handler to it. */
+    function connect() {
+      const ws = new WebSocket(wsUrl);
+      websocket = ws;
+      const entry = _instances[sessionId];
+      if (entry) entry.websocket = ws;
+      ws.addEventListener('message', handleMessage);
+      ws.addEventListener('close', handleClose);
+      ws.addEventListener('error', handleError);
+      ws.addEventListener('open', handleOpen);
+    }
 
     // ------------------------------------------------------------------
     // 6. Wire terminal → WebSocket (outgoing keystrokes to device)
@@ -548,8 +659,9 @@
     };
     window.addEventListener('resize', onWindowResize);
 
-    // Send initial resize once the socket is open
-    websocket.addEventListener('open', () => {
+    // Send the size once the socket is open — the first time and after every
+    // reattach, since the server sizes the pty per bridge.
+    function handleOpen() {
       try {
         fitAddon.fit();
         websocket.send(JSON.stringify({
@@ -558,13 +670,23 @@
           rows: terminal.rows,
         }));
       } catch (_) {}
-    });
+      // Back. The count restarts so a later drop gets its full allowance,
+      // and the tab stops saying "reattaching".
+      link.attempt = 0;
+      if (link.lost) {
+        link.lost = false;
+        _linkState('attached', 0);
+      }
+    }
 
     // ------------------------------------------------------------------
-    // 9. Register instance so settings changes can be applied live
+    // 9. Register instance so settings changes can be applied live, then
+    //    open the socket — registered first, because connect() records the
+    //    socket on the entry and handleClose() reads it back from there.
     // ------------------------------------------------------------------
     _instances[sessionId] = { terminal, fitAddon, searchAddon, websocket,
-                              containerId, onWindowResize };
+                              containerId, onWindowResize, link };
+    connect();
 
     // Returns the character count of the last `n` lines — matches what the
     // backend sends to the AI via buf.get_text(n), so the context estimate is accurate.
@@ -579,7 +701,15 @@
       return chars;
     }
 
-    return { terminal, fitAddon, websocket, containerId, getBufferLines: () => _bufferLines, getContextChars };
+    // `websocket` is a getter, not a value: the socket is replaced on a
+    // reattach (#481), and a caller holding the first one would be sending
+    // keystrokes into a closed socket for the rest of the session.
+    return {
+      terminal, fitAddon, containerId,
+      get websocket() { return websocket; },
+      getBufferLines: () => _bufferLines,
+      getContextChars,
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -665,6 +795,12 @@
     if (!entry) return false;
     if (entry.onWindowResize) {
       window.removeEventListener('resize', entry.onWindowResize);
+    }
+    // A reattach counting down for a tab that is closing must not fire and
+    // open a socket to a session that is being deleted.
+    if (entry.link && entry.link.timer) {
+      clearTimeout(entry.link.timer);
+      entry.link.timer = null;
     }
     delete _instances[sessionId];
     return true;

@@ -233,7 +233,10 @@
       username:         sessionData.username || '',
       terminalInstance: termData.terminal,
       fitAddon:         termData.fitAddon,
-      websocket:        termData.websocket,
+      // Read through to terminal.js each time rather than copied once: the
+      // socket is replaced when it drops and is reopened (#481), and a copy
+      // taken here would be the dead one for the rest of the session.
+      get websocket()   { return termData.websocket; },
       getBufferLines:   termData.getBufferLines,
       getContextChars:  termData.getContextChars,
       isConnected:      true,
@@ -3036,6 +3039,25 @@
     const kind = (detail.pending && detail.pending.kind) || '';
     // alerts.py uses RELOAD / COMMIT_CONFIRM.
     if (kind) tab.hadPendingReload = kind.toUpperCase().includes('RELOAD');
+  });
+
+  // The socket between this window and ShellMate dropped and is being
+  // reopened (#481). Not a disconnect — the session is still up on the
+  // server — so the tab says what is happening rather than going red.
+  window.addEventListener('shellmate:terminal-link', (e) => {
+    const detail = e.detail || {};
+    const tab = tabs.find(t => t.sessionId === detail.sessionId);
+    if (!tab || !tab.labelEl) return;
+    if (detail.state === 'reattaching') {
+      tab.labelEl.textContent = `${tab.label} (reattaching ${detail.attempt}/${detail.attempts})`;
+      tab.labelEl.title = 'The link between this window and ShellMate dropped. '
+        + 'The session itself is still up; the socket is being reopened.';
+    } else if (detail.state === 'attached') {
+      tab.labelEl.textContent = tab.label;
+      tab.labelEl.title = '';
+      updateStatusBar();
+    }
+    // 'lost' is followed by updateTabStatus(false), which labels the tab.
   });
 
   window.updateTabStatus  = updateTabStatus;
