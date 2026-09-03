@@ -43,9 +43,11 @@
     });
 
     // A closed tab must not linger in the selection, or the assistant would
-    // be asked about a session that no longer exists.
+    // be asked about a session that no longer exists. The sweep pauses while
+    // the window is hidden (#491); it runs once on return.
     window.addEventListener('mate:tab-switched', prune);
-    setInterval(prune, 4000);
+    if (window.shellmateVisibility) window.shellmateVisibility.every(prune, 4000);
+    else setInterval(prune, 4000);
   });
 
   function openTabs() {
