@@ -498,8 +498,21 @@
    */
   async function closeTab(index, options) {
     if (index < 0 || index >= tabs.length) return;
+    return _closeTabObject(tabs[index], options);
+  }
 
-    const tab = tabs[index];
+  /**
+   * Close a tab held by identity rather than by position (#482).
+   *
+   * An index is only good until the array changes, and everything in here
+   * awaits. Callers that hold a tab across an await — a reconnect, "close
+   * all", a group disconnect — go through this so that a tab spliced out
+   * meanwhile shifts nothing: the one that closes is the one that was asked
+   * for, or nothing at all if it has already gone.
+   */
+  async function _closeTabObject(tab, options) {
+    if (!tab || !tabs.includes(tab)) return;
+
     // Whatever happens next, this drop is ours. Set before the confirmation
     // rather than after: the socket can close while the dialog is open.
     tab.closingDeliberately = true;
@@ -521,12 +534,12 @@
       if (!ok) return;
     }
 
-    // Re-found by sessionId, not trusted by position (#313): the confirm
-    // above is an await, and the array can mutate under it — auto-reconnect
-    // replaces tabs, sortTabs() reorders them. Splicing the captured index
-    // then removed the wrong tab: a live entry vanished from the array while
-    // the closed one lingered, pointing at a disposed terminal.
-    index = tabs.findIndex(t => t === tab);
+    // Found by identity, and only now (#313): the confirm above is an await,
+    // and the array can mutate under it — auto-reconnect replaces tabs,
+    // sortTabs() reorders them. Splicing a captured index removed the wrong
+    // tab: a live entry vanished from the array while the closed one
+    // lingered, pointing at a disposed terminal.
+    const index = tabs.indexOf(tab);
     if (index === -1) return;   // something else already closed it
 
     const { sessionId, websocket, terminalInstance, containerId, tabEl } = tab;
@@ -2334,7 +2347,6 @@
    */
   async function _reconnectSession(tab, opts) {
     const options = opts || {};
-    const index = tabs.findIndex(t => t.sessionId === tab.sessionId);
 
     let profile = options.profile || null;
     if (!profile) {
@@ -2362,7 +2374,14 @@
           // reconnect. It would not be asked about today — a disconnected tab
           // closes without a word — but saying so keeps this correct if that
           // ever changes, now that closing is asynchronous.
-          if (index !== -1) await closeTab(index, { force: true });
+          //
+          // By identity, not by an index taken at entry (#482). Several of
+          // these run at once — "Reconnect all", the per-tab retry timers —
+          // and each awaits twice before closing. The first to finish is
+          // spliced out, and an index captured before that pointed at
+          // whichever live tab had shifted into its place, which was then
+          // force-closed and deleted on the server while the dead tab stayed.
+          await _closeTabObject(tab, { force: true });
           const fresh = createTab(data);
           // Say so in the terminal. A session that silently reappears leaves
           // you unsure whether the scrollback above the line is from the same
@@ -2984,8 +3003,8 @@
    * one onwards. The session id does not move (#181).
    */
   window.closeTabBySessionId = (sessionId, options) => {
-    const idx = tabs.findIndex(t => t.sessionId === sessionId);
-    return idx === -1 ? Promise.resolve() : closeTab(idx, options);
+    const tab = tabs.find(t => t.sessionId === sessionId);
+    return tab ? _closeTabObject(tab, options) : Promise.resolve();
   };
   window.getActiveTab     = getActiveTab;
   /** Everything the hover card (#435) can say about a tab. */
