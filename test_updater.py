@@ -150,7 +150,7 @@ def test_helper_and_apply() -> None:
     check("  retries the move instead of trying once", ":aside" in script and "tries%% lss 30" in script.replace("%", "%%"))
     check("  and writes a verdict the next start can read", 'echo OK:' in script and 'echo FAILED:' in script)
     both = updater.helper_script(Path(r"C:\x\ShellMate-Portable.exe"), Path(r"C:\x\new.exe"), 8765, 4242, 4200)
-    check("  waits for the bootloader parent too when given one", 'PID eq 4200' in both and 'PID eq 4242' in both)
+    check("  waits for the bootloader parent too when given one", 'PID eq 4200' in both and 'set PID=4242' in both)
 
     class Manager:
         def __init__(self, pending): self.pending = pending
