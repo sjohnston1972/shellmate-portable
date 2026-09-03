@@ -309,12 +309,47 @@ def all_builtins() -> list["Snippet"]:
     The hand-written ones win on an id clash, since they exist precisely
     because the generated form was not good enough.
     """
+    global _builtins_cache
+    if _builtins_cache is not None:
+        return list(_builtins_cache)
     seen = {s.id for s in BUILTIN}
-    return list(BUILTIN) + [s for s in generated_snippets() if s.id not in seen]
+    _builtins_cache = list(BUILTIN) + [s for s in generated_snippets() if s.id not in seen]
+    return list(_builtins_cache)
 
 
 def snippets_path():
     return paths.data_dir() / "snippets.json"
+
+
+# The parsed file, kept until it changes (#467). Every tab right-click
+# re-read the 52 KB file and rebuilt ~150 dataclasses from the alias
+# tables; save_snippet() parsed it twice more.
+_doc_cache: dict = {"key": None, "document": None}
+_builtins_cache: list | None = None
+
+
+def _file_key(path):
+    try:
+        st = path.stat()
+    except OSError:
+        return ("absent", str(path))
+    return (str(path), st.st_mtime_ns, st.st_size)
+
+
+def _document():
+    """The parsed snippets.json: a dict, a legacy list, or None when absent or unreadable."""
+    path = snippets_path()
+    key = _file_key(path)
+    if _doc_cache["key"] == key:
+        return _doc_cache["document"]
+    document = jsonfile.read(path, None) if path.exists() else None
+    _doc_cache["key"] = _file_key(path)
+    _doc_cache["document"] = document
+    return document
+
+
+def _forget_document() -> None:
+    _doc_cache["key"] = None
 
 
 def _known_ids() -> set[str]:
@@ -327,8 +362,7 @@ def _known_ids() -> set[str]:
     second and not the first. Conflating them is what makes a deletion
     reappear on the next launch.
     """
-    path = snippets_path()
-    document = jsonfile.read(path, None)
+    document = _document()
     if document is None:
         return set()
     if isinstance(document, dict):
@@ -367,6 +401,7 @@ def _write_all(snippets: list[Snippet], known: set[str] | None = None) -> None:
         "snippets": [s.as_dict() for s in snippets],
     }
     jsonfile.write(path, document)
+    _forget_document()
 
 
 def load_snippets() -> list[Snippet]:
@@ -385,7 +420,7 @@ def load_snippets() -> list[Snippet]:
         _write_all(builtins)
         return builtins
 
-    document = jsonfile.read(path, None)
+    document = _document()
     if document is None:
         logger.warning("snippets.json is unreadable; using the built-ins")
         return builtins
