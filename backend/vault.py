@@ -90,8 +90,6 @@ def _locked(method):
 
 class VaultError(Exception):
     """Raised for vault failures, with a message suitable for the user."""
-    _io_lock = threading.RLock()
-
 
 
 class VaultLocked(VaultError):
@@ -235,6 +233,9 @@ class Vault:
     are cached in memory once decrypted so that a master-password vault is
     unlocked once per launch rather than per read.
     """
+
+    # One lock for every read-modify-write (#462); see _locked.
+    _io_lock = threading.RLock()
 
     def __init__(self) -> None:
         self._entries: dict[str, str] | None = None
