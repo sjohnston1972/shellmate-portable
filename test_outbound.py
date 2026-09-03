@@ -179,6 +179,63 @@ def test_the_switch() -> None:
     check("and back on again", outbound.redaction_enabled())
 
 
+# Credential forms a device will print, each with the secret that must go
+# and a neighbouring token that must stay so the line still reads as
+# configuration (#495). The wrong-token cases are the ones that matter most:
+# a pattern that masks the key *number* and leaves the hash looks like it
+# worked.
+CREDENTIAL_FORMS: list[tuple[str, str, str]] = [
+    # (line, the secret, what must survive)
+    ("crypto isakmp key MyS3cret address 10.1.1.1",              "MyS3cret",     "address 10.1.1.1"),
+    ("crypto isakmp key 6 ENCRYPTEDBLOB address 10.1.1.1",       "ENCRYPTEDBLOB", "key 6 "),
+    (" key MyTacacsSecret",                                      "MyTacacsSecret", " key "),
+    (" key 7 0822455D0A16",                                      "0822455D0A16", "key 7 "),
+    ("ntp authentication-key 1 md5 0822455D0A16 7",              "0822455D0A16", "authentication-key 1 md5"),
+    ("ip ospf authentication-key 7 HASHHASH",                    "HASHHASH",     "authentication-key 7 "),
+    ("ip ospf message-digest-key 1 md5 7 HASHHASH",              "HASHHASH",     "message-digest-key 1 md5 7 "),
+    (' pre-shared-key ascii-text "$9$abcdef";',                   "$9$abcdef",    "ascii-text"),
+    (" pre-shared-key address 10.1.1.1 key MyPSK",               "MyPSK",        "address 10.1.1.1 key"),
+    ("snmp-server user bob grp v3 auth sha AuthPass priv aes 128 PrivPass", "AuthPass", "auth sha"),
+    ("snmp-server user bob grp v3 auth sha AuthPass priv aes 128 PrivPass", "PrivPass", "priv aes 128"),
+    ("snmp-server user admin auth md5 0xabc123 priv 0xdef456 localizedkey", "0xdef456", "localizedkey"),
+    ("Community name: public",                                   "public",       "Community name:"),
+    ("Community SecurityName: public",                           "public",       "SecurityName:"),
+    ("snmp-server host 10.1.1.1 version 2c trapcomm",            "trapcomm",     "version 2c"),
+    ("radius-server host 10.1.1.2 auth-port 1812 acct-port 1813 key 7 ABC123", "ABC123", "acct-port 1813 key 7"),
+    (' secret "$9$abcdef";',                                      "$9$abcdef",    "secret"),
+    (' authentication-key 1 type md5 value "$9$abcdef";',         "$9$abcdef",    "1 type md5 value"),
+]
+
+# Ordinary lines with a credential keyword in them. Masking a word out of
+# these damages evidence for nothing.
+ORDINARY_LINES = [
+    " description key uplink to core",
+    "key chain BGP-KEYS",
+    " key 1",
+    "ip access-list extended KEY-SERVERS",
+    " set community 65000:100 additive",
+    " match community CL1",
+    " neighbor 10.1.1.1 send-community both",
+    "snmp-server group NETOPS v3 priv read RO-VIEW",
+    "snmp-server group NETOPS v3 auth",
+    "username bob privilege 15",
+    "service password-encryption",
+    " authentication key-chain BGP-KEYS",
+    "Community Index: cisco0",
+]
+
+
+def test_credential_forms() -> None:
+    print("\n-- The forms a device prints --")
+    from backend.session.redact import redact
+    for line, secret, keep in CREDENTIAL_FORMS:
+        out = redact(line)
+        check(f"{line.strip()[:48]!r}: masks the secret", secret not in out, out)
+        check(f"  and keeps {keep.strip()!r}", keep in out, out)
+    for line in ORDINARY_LINES:
+        check(f"{line.strip()!r} is left alone", redact(line) == line, redact(line))
+
+
 def test_no_path_bypasses_the_helper() -> None:
     """
     The regression guard.
@@ -217,6 +274,7 @@ def main() -> int:
         test_session_summary,
         test_jira_export,
         test_the_switch,
+        test_credential_forms,
         test_no_path_bypasses_the_helper,
     ):
         try:
