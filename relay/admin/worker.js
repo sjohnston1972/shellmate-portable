@@ -191,6 +191,22 @@ async function makeSession(env) {
 // application's audience tag; a missing or bad one falls through to the
 // password cookie, which remains as the fallback.
 let accessCerts = { at: 0, keys: [] };
+// The team's signing keys: refreshed hourly, and at once for a kid not in
+// hand, which is what a Cloudflare key rotation looks like — waiting the
+// hour out meant the portal fell back to the password page meanwhile. A
+// fetch for an unknown kid is allowed once a minute, so a made-up kid in a
+// forged header cannot have the Worker hammering the certs endpoint.
+async function accessKeys(env, kid) {
+  const age = Date.now() - accessCerts.at;
+  const stale = age > 3600 * 1000;
+  const unknown = !accessCerts.keys.some(k => k.kid === kid);
+  if (stale || (unknown && age > 60 * 1000)) {
+    const resp = await fetch(`https://${env.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`);
+    if (resp.ok) accessCerts = { at: Date.now(), keys: (await resp.json()).keys || [] };
+    else if (stale) return [];
+  }
+  return accessCerts.keys;
+}
 async function accessIdentity(request, env) {
   const jwt = request.headers.get('cf-access-jwt-assertion');
   if (!jwt || !env.ACCESS_TEAM_DOMAIN || !env.ACCESS_AUD) return null;
@@ -203,12 +219,7 @@ async function accessIdentity(request, env) {
     if (payload.exp < now || payload.iss !== `https://${env.ACCESS_TEAM_DOMAIN}`) return null;
     const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
     if (!aud.includes(env.ACCESS_AUD)) return null;
-    if (Date.now() - accessCerts.at > 3600 * 1000) {
-      const resp = await fetch(`https://${env.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`);
-      if (!resp.ok) return null;
-      accessCerts = { at: Date.now(), keys: (await resp.json()).keys || [] };
-    }
-    const jwk = accessCerts.keys.find(k => k.kid === header.kid);
+    const jwk = (await accessKeys(env, header.kid)).find(k => k.kid === header.kid);
     if (!jwk) return null;
     const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
     const ok = await crypto.subtle.verify({ name: 'RSASSA-PKCS1-v1_5' }, key, fromB64(parts[2]), enc.encode(`${parts[0]}.${parts[1]}`));
@@ -352,7 +363,11 @@ function isUniqueViolation(err) { return /UNIQUE constraint/i.test(err && err.me
 // ------------------------------------------------------------------ email
 function mailConfigured(env) { return !!env.RESEND_API_KEY; }
 
-async function sendKey(env, row, settings, kind = 'issued') {
+// `record` is false for the Settings page's test message: there is no
+// licence row to update, and an UPDATE matching nothing does not throw, so
+// the old "let it fail" approach logged an 'emailed' event for a licence
+// called test that the overview then linked to a page that 404s (#514).
+async function sendKey(env, row, settings, kind = 'issued', record = true) {
   if (!mailConfigured(env)) throw new Error('Email is not configured: set the RESEND_API_KEY secret and verify the sender domain at resend.com.');
   if (!row.email || !isEmail(row.email)) throw new Error('This licence has no email address to send to.');
   const from = settings.mail_from || 'ShellMate <licences@foundry-ns.com>';
@@ -378,6 +393,7 @@ async function sendKey(env, row, settings, kind = 'issued') {
     const detail = await resp.text().catch(() => '');
     throw new Error(`The mail service answered ${resp.status}: ${detail.slice(0, 200)}`);
   }
+  if (!record) return;
   await env.DB.prepare('UPDATE licences SET last_sent = ?1, sent_count = sent_count + 1 WHERE id = ?2').bind(Date.now(), row.id).run();
   await logEvent(env, row.id, 'emailed', `${kind} key to ${row.email}`);
 }
@@ -512,7 +528,10 @@ async function publicRequest(request, env) {
     await sendKey(env, row, settings, 'issued');
     return json(201, { ok: true, detail: `Your key has been sent to ${email}. It is valid for ${days} days.` });
   } catch (err) {
-    return json(502, { detail: err.message });
+    // The message stays in the log. Verbatim it would hand an anonymous
+    // caller the mail provider's own response body.
+    console.error('request:', err && err.stack || err);
+    return json(502, { detail: 'The key could not be sent just now. Try again in a few minutes, or write to support@foundry-ns.com.' });
   }
 }
 
@@ -591,8 +610,7 @@ async function adminApi(request, env, path) {
     const to = clean(body.to, MAX.email);
     if (!isEmail(to)) return json(400, { detail: 'A valid address is needed.' });
     try {
-      await sendKey(env, { id: 'test', licensee: 'Test', email: to, kind: 'person', seats: 1, issued: today(), expires: '', token: 'SM1.test.test' }, settings, 'issued')
-        .catch(err => { if (!/UPDATE|no such/i.test(err.message)) throw err; });
+      await sendKey(env, { id: 'test', licensee: 'Test', email: to, kind: 'person', seats: 1, issued: today(), expires: '', token: 'SM1.test.test' }, settings, 'issued', false);
       return json(200, { ok: true });
     } catch (err) { return json(502, { detail: err.message }); }
   }

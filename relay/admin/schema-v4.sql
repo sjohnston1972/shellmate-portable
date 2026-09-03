@@ -20,3 +20,8 @@ CREATE INDEX IF NOT EXISTS idx_licences_created ON licences(created_at DESC, id 
 CREATE INDEX IF NOT EXISTS idx_licences_email_lc ON licences(lower(email));
 CREATE INDEX IF NOT EXISTS idx_users_email_lc ON users(lower(email));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique ON users(lower(email)) WHERE email != '';
+
+-- #514: the Settings page's mail test used to log an 'emailed' event for a
+-- licence called test, which the overview linked to a page that 404s. The
+-- Worker no longer records the test; this removes what earlier tests left.
+DELETE FROM events WHERE licence_id = 'test';
