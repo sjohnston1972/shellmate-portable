@@ -272,10 +272,9 @@ class SessionStore:
         if not _recording_enabled():
             return
 
-        # Once per session is the right cadence: often enough that a long-lived
-        # installation stays bounded, rare enough that it never competes with a
-        # live session for the lock.
-        self.prune()
+        # Pruning is the scheduler's job now (#464): once a day, off the
+        # connect path, so the first sweep of a large database after a
+        # retention is set never lands on someone opening a session.
         with self._lock:
             connection = self.connect()
             connection.execute(
@@ -297,13 +296,46 @@ class SessionStore:
             connection.commit()
 
     def end_session(self, session_id: str) -> None:
-        """Mark a session finished."""
+        """
+        Mark a session finished — or forget it, if it recorded nothing.
+
+        A session that never completed a command has nothing to search,
+        replay or compare; keeping its row meant the table grew by one per
+        connection forever (740 rows for 44 commands on one machine, #464)
+        and every hostname list and session list scanned them all.
+        """
         with self._lock:
             connection = self.connect()
-            connection.execute(
-                "UPDATE sessions SET ended_at = ? WHERE id = ?", (time.time(), session_id),
-            )
+            count = connection.execute(
+                "SELECT COUNT(*) FROM commands WHERE session_id = ?", (session_id,)).fetchone()[0]
+            if count:
+                connection.execute(
+                    "UPDATE sessions SET ended_at = ? WHERE id = ?", (time.time(), session_id),
+                )
+            else:
+                connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            self._sequences.pop(session_id, None)
             connection.commit()
+
+    def close_abandoned(self) -> int:
+        """
+        At startup: sessions the last process left open. Ones with commands
+        get an end time so they read as finished; empty ones go. Returns
+        how many rows were touched.
+        """
+        with self._lock:
+            connection = self.connect()
+            gone = connection.execute(
+                """
+                DELETE FROM sessions WHERE ended_at IS NULL
+                  AND id NOT IN (SELECT DISTINCT session_id FROM commands)
+                """).rowcount
+            closed = connection.execute(
+                "UPDATE sessions SET ended_at = started_at WHERE ended_at IS NULL").rowcount
+            connection.commit()
+        if gone or closed:
+            logger.info("History: removed %d empty sessions and closed %d left open", gone, closed)
+        return gone + closed
 
     def update_session_hostname(self, session_id: str, hostname: str) -> None:
         """

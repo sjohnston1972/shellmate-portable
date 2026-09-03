@@ -1686,6 +1686,12 @@ async def send_feedback(request: FeedbackRequest) -> dict:
 async def _start_backup_scheduler() -> None:
     """The once-a-minute check for scheduled backups (#408)."""
     scheduler.start()
+    # Sessions the last process left open (#464): close the ones with
+    # commands, drop the empty ones. Never worth failing startup over.
+    try:
+        await asyncio.to_thread(store.close_abandoned)
+    except Exception as exc:
+        logger.warning("History housekeeping at startup: %s", exc)
 
 
 @app.on_event("startup")

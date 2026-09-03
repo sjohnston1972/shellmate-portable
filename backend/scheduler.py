@@ -168,6 +168,26 @@ def stop() -> None:
     _stop.set()
 
 
+_last_prune = 0.0
+PRUNE_EVERY = 24 * 3600
+
+
+def _housekeeping(now: float) -> None:
+    """
+    History pruning, once a day (#464). It used to run on every connect,
+    under the store lock, so the first sweep after a retention was set on
+    a large database landed on somebody opening a session.
+    """
+    global _last_prune
+    if now - _last_prune < PRUNE_EVERY:
+        return
+    _last_prune = now
+    from backend.store import store
+    removed = store.prune()
+    if removed:
+        logger.info("History: pruned %d rows past the retention", removed)
+
+
 def _loop() -> None:
     # A moment for the server to finish starting before the first check.
     _stop.wait(20)
@@ -176,6 +196,10 @@ def _loop() -> None:
             tick(time.time())
         except Exception as exc:                     # never let the thread die
             logger.warning("Backup scheduler: %s", exc)
+        try:
+            _housekeeping(time.time())
+        except Exception as exc:
+            logger.warning("History housekeeping: %s", exc)
         _stop.wait(60)
 
 
