@@ -182,6 +182,7 @@ def credential_sets() -> list[dict]:
     connections are relying on.
     """
     profiles = _load()
+    plaintext = _load_plaintext()          # once, not twice per set (#469)
     out = []
     for entry in _load_sets():
         owner = set_owner(entry.get("id", ""))
@@ -189,8 +190,8 @@ def credential_sets() -> list[dict]:
             "id":       entry.get("id", ""),
             "name":     entry.get("name", ""),
             "username": entry.get("username", ""),
-            "storage":  credential_storage(owner),
-            "has_credentials": has_credentials(owner),
+            "storage":  credential_storage(owner, profiles, plaintext),
+            "has_credentials": has_credentials(owner, profiles, plaintext),
             "in_use":   sum(1 for p in profiles
                             if p.get("credential_ref") == entry.get("id")),
         })
@@ -405,12 +406,13 @@ def _has_directly(owner: str, plaintext: dict | None = None) -> bool:
     return bool((plaintext if plaintext is not None else _load_plaintext()).get(owner))
 
 
-def credential_storage(owner: str) -> str:
+def credential_storage(owner: str, profiles: list[dict] | None = None,
+                       plaintext: dict | None = None) -> str:
     """Where the credentials are kept: "vault", "plaintext" or ""."""
-    resolved = owner if owner.startswith("set:") else _resolve_owner(owner)
+    resolved = owner if owner.startswith("set:") else _resolve_owner(owner, profiles, plaintext)
     if any(vault.has(_credential_key(resolved, f)) for f in CREDENTIAL_FIELDS):
         return "vault"
-    if _load_plaintext().get(resolved):
+    if (plaintext if plaintext is not None else _load_plaintext()).get(resolved):
         return "plaintext"
     return ""
 
@@ -782,6 +784,7 @@ def dedupe_existing() -> int:
     Returns the number of profiles removed.
     """
     profiles = _load()
+    plaintext = _load_plaintext()
     if len(profiles) < 2:
         return 0
 
@@ -800,7 +803,8 @@ def dedupe_existing() -> int:
             kept_ids.add(group[0].get("id", ""))
             continue
 
-        with_credentials = [p for p in group if has_credentials(p.get("id", ""))]
+        # The record is in hand: no per-profile scan of the whole list (#469).
+        with_credentials = [p for p in group if _has_for_profile(p, plaintext)]
         keeper = (with_credentials or group)[0]
 
         for other in group:
