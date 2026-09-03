@@ -174,9 +174,16 @@ class SerialHandler(ConnectionHandler):
         try:
             # Read whatever has arrived; block up to the timeout for the first
             # byte so we are not busy-waiting.
-            waiting = self._serial.in_waiting
-            data = self._serial.read(max(1, min(size, waiting or 1)))
-            return data if data else None
+            # Block for the first byte, then take whatever arrived behind
+            # it (#476). Reading `max(1, waiting)` when the port was idle
+            # returned one character and left the rest for the next pass,
+            # so every burst became two messages, two transcript feeds and
+            # two log appends, the first carrying a single character.
+            first = self._serial.read(1)
+            if not first:
+                return None
+            rest = min(size - 1, self._serial.in_waiting)
+            return first + (self._serial.read(rest) if rest > 0 else b"")
         except serial.SerialException as exc:
             # Adapter unplugged mid-session.
             logger.info("Serial port %s disappeared: %s", self.params.serial_port, exc)
