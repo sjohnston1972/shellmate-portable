@@ -321,3 +321,42 @@ def refresh(timeout: float = 8.0) -> dict:
         except LicenceError as exc:
             logger.warning("The service sent a key that does not verify: %s", exc)
     return {**status(licence), "refresh": "current"}
+
+
+# ---------------------------------------------------------------- background refresh
+REFRESH_EVERY_DAYS = 3
+
+
+def maybe_refresh(min_age_days: float = REFRESH_EVERY_DAYS) -> dict | None:
+    """
+    Refresh the installed key if it has not been refreshed lately.
+
+    Called from a background thread at startup so a renewal made in the
+    portal reaches the copy without anyone pressing Refresh, and a
+    revocation is learned within days rather than never. Nothing happens
+    without an installed key, and an unreachable service is not an error.
+    """
+    licence = load()
+    if licence is None:
+        return None
+    last = float(_state().get("refreshed_at") or 0)
+    if time.time() - last < min_age_days * 86400:
+        return None
+    return refresh()
+
+
+def start_background_refresh(delay_seconds: float = 20.0) -> None:
+    """A daemon thread: one refresh shortly after start, then every few days."""
+    import threading
+
+    def loop() -> None:
+        time.sleep(delay_seconds)
+        while True:
+            try:
+                maybe_refresh()
+            except Exception as exc:                  # never let the thread die
+                logger.debug("Licence refresh: %s", exc)
+            time.sleep(6 * 3600)
+
+    threading.Thread(target=loop, daemon=True, name="licence-refresh").start()
+

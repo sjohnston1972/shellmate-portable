@@ -4,6 +4,15 @@ One section per release, newest first. The first run of a new version
 offers this page; **Updates** in the sidebar asks GitHub whether a newer one
 exists.
 
+## 1.1.2
+
+- An installed licence key now refreshes itself: once shortly after
+  start and every few days after that, so a renewal made in the portal
+  reaches your copy without pressing Refresh, and a revocation is learned
+  within days. Nothing happens without a key, and no internet is not an
+  error.
+- A second small release, so that a copy on 1.1.1 has an update to apply.
+
 ## 1.1.1
 
 - A small release published so that a 1.1.0 copy has something to update

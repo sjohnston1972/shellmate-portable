@@ -32,7 +32,7 @@ from backend import paths
 
 #: The release. Bump this, tag ``v<VERSION>``, and the CI workflow publishes
 #: the executable under that tag.
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 #: Where the GitHub release page lives; the update check asks its API.
 RELEASES_REPO = "sjohnston1972/shellmate-portable"

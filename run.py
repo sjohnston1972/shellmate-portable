@@ -150,6 +150,11 @@ def main() -> int:
     if removed:
         logger.info("Update complete; removed %s", removed)
 
+    # A renewal made in the portal reaches this copy on its own (#446).
+    from backend import licence as licence_module  # noqa: E402
+
+    licence_module.start_background_refresh()
+
     logger.info("Data directory: %s", paths.data_dir())
     if paths.data_dir_is_fallback():
         logger.warning(
