@@ -129,43 +129,9 @@ def _check_host_key(transport, hostname: str, port: int) -> None:
     except Exception:
         key = None
     if key is None or not hasattr(key, "get_name"):
-        return                                   # a transport with no key to check (tests)
+        return                                   # a transport with no key to check
     client = paramiko.SSHClient()
-    try:
-        client.load_system_host_keys()
-    except Exception:
-        pass
-    name = hostname if port == 22 else f"[{hostname}]:{port}"
-    known = client.get_host_keys().lookup(name)
-    if known is not None and known.get(key.get_name()) is not None:
-        if known[key.get_name()] != key:
-            raise ConnectionError_(
-                f"The host key for {hostname} has changed since it was last seen. "
-                "If the device was replaced or re-imaged, update its entry in known_hosts.")
-        return
-    try:
-        _host_key_policy().missing_host_key(client, name, key)
-    except paramiko.SSHException as exc:
-        raise ConnectionError_(
-            f"{hostname} presented a host key that is not in known_hosts, and the "
-            "host-key policy is set to reject unknown keys.") from exc
-
-
-def _check_host_key(transport, hostname: str, port: int) -> None:
-    """
-    Apply the host-key policy to a transport we drove ourselves (#472).
-
-    `SSHClient.connect()` is the only place paramiko compares the server's
-    key with known_hosts and consults the policy. The no-credential and
-    keyboard-interactive paths build a Transport by hand and never call
-    connect(), so `ssh.host_key_policy = reject` protected the password
-    path and silently not these two. Same comparison, same policy, before
-    any authentication.
-    """
-    import paramiko
-
-    key = transport.get_remote_server_key()
-    client = paramiko.SSHClient()
+    client._transport = transport                # the policies log through it
     try:
         client.load_system_host_keys()
     except Exception:
@@ -571,7 +537,14 @@ class SSHHandler(ConnectionHandler):
             # than through paramiko's password-first sequence, which would
             # burn the one-time code on a prompt it answers with the password.
             if params.interactive_answers:
-                self._interactive_login(params, username, sock, disabled)
+                try:
+                    self._interactive_login(params, username, sock, disabled)
+                except BaseException:
+                    # InteractiveRequired is not a ConnectionError_, so the
+                    # cleanup below never saw it and the bastion session
+                    # opened for this attempt stayed open (#473).
+                    self.disconnect()
+                    raise
                 return
 
             self._client.connect(
@@ -628,7 +601,14 @@ class SSHHandler(ConnectionHandler):
             # as InteractiveRequired for the interface to put to the user.
             if "keyboard-interactive" in allowed:
                 sock2 = self._open_jump_channel() if params.jump_host else None
-                self._interactive_login(params, username, sock2, disabled)
+                try:
+                    self._interactive_login(params, username, sock2, disabled)
+                except BaseException:
+                    # Raised inside an except clause, so the sibling
+                    # `except ConnectionError_` does not run; close the
+                    # bastion session ourselves (#473, the #341 lockout).
+                    self.disconnect()
+                    raise
                 return
             raise ConnectionError_(
                 _explain_auth_failure(exc, params, username,
