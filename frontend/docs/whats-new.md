@@ -4,6 +4,15 @@ One section per release, newest first. The first run of a new version
 offers this page; **Updates** in the sidebar asks GitHub whether a newer one
 exists.
 
+## 1.1.3
+
+- A licence key now tells the licence service where it is installed: the
+  machine name, your user name, the operating system and the ShellMate
+  version, when the key is entered, removed, and at each refresh. The
+  holder of an organisation licence can see which seats are in use and
+  which copies are behind. Nothing about your devices goes with it; the
+  Licence section under Settings says exactly what is sent.
+
 ## 1.1.2
 
 - An installed licence key now refreshes itself: once shortly after

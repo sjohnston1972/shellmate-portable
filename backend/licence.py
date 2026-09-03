@@ -191,6 +191,70 @@ def load() -> Licence | None:
         return None
 
 
+# ---------------------------------------------------------------- this installation
+def machine_info() -> dict:
+    """
+    What identifies this copy to the licence service: the machine name, the
+    user, the platform and the ShellMate version. The id is a hash of the
+    stable parts so the same machine is counted once however often the key
+    is re-entered. Nothing about the devices ShellMate connects to is here.
+    """
+    import getpass
+    import hashlib
+    import platform as platform_module
+    import socket
+    from backend import version as app_version
+    hostname = socket.gethostname() or "unknown"
+    try:
+        user = getpass.getuser()
+    except Exception:                                 # no login name in some services
+        user = ""
+    system = f"{platform_module.system()} {platform_module.release()}".strip()
+    raw = f"{hostname}|{user}|{platform_module.machine()}".encode("utf-8")
+    return {"id": hashlib.sha256(raw).hexdigest()[:16], "hostname": hostname,
+            "user": user, "platform": system, "version": app_version.VERSION}
+
+
+def _post(path: str, body: dict, timeout: float):
+    """One call to the service. None when it cannot be reached."""
+    try:
+        import httpx
+        return httpx.post(f"{SERVICE_URL}{path}", json=body, timeout=timeout,
+                          headers={"User-Agent": "ShellMate-licence"})
+    except Exception as exc:
+        logger.info("Licence service unreachable for %s (%s)", path, exc.__class__.__name__)
+        return None
+
+
+def announce(what: str = "activate", licence_id: str | None = None, timeout: float = 8.0) -> dict:
+    """
+    Tell the service this copy installed (or removed) a key, so the holder
+    of an organisation licence can see where the seats are in use. Best
+    effort: an unreachable service is noted and the next refresh carries
+    the same information anyway.
+    """
+    if licence_id is None:
+        licence = load()
+        if licence is None:
+            return {"announced": False, "reason": "no key"}
+        licence_id = licence.id
+    resp = _post(f"/licence/{what}", {"id": licence_id, "machine": machine_info()}, timeout)
+    if resp is None:
+        return {"announced": False, "reason": "unreachable"}
+    if what == "activate" and resp.status_code == 200:
+        state = _state()
+        state["announced_at"] = time.time()
+        _write_state(state)
+    return {"announced": resp.status_code == 200, "status": resp.status_code}
+
+
+def announce_async(what: str = "activate", licence_id: str | None = None) -> None:
+    """The same, on a daemon thread, for the API routes that must not wait."""
+    import threading
+    threading.Thread(target=announce, args=(what, licence_id), daemon=True,
+                     name=f"licence-{what}").start()
+
+
 def install(token: str) -> Licence:
     """Verify and keep a key. The old key, if any, is replaced."""
     licence = parse(token)
@@ -282,7 +346,8 @@ def refresh(timeout: float = 8.0) -> dict:
     """
     Ask the service about the installed key: renewed expiry, revocation.
 
-    Only the key's id travels. A renewed key comes back as a fresh token and
+    The key's id travels, with this machine's name, user and version so the
+    installation is on record. A renewed key comes back as a fresh token and
     replaces the installed one. Unreachable is not an error — the status
     simply stays what the local key says.
     """
@@ -292,7 +357,7 @@ def refresh(timeout: float = 8.0) -> dict:
     try:
         import httpx
         resp = httpx.post(f"{SERVICE_URL}/licence/refresh",
-                          json={"id": licence.id}, timeout=timeout,
+                          json={"id": licence.id, "machine": machine_info()}, timeout=timeout,
                           headers={"User-Agent": "ShellMate-licence"})
     except Exception as exc:
         logger.info("Licence refresh: service unreachable (%s)", exc.__class__.__name__)

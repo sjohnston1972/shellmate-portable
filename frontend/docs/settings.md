@@ -185,9 +185,15 @@ The section shows who the key is for, whether it is a personal or an
 organisation key and with how many seats, when it expires, and what it
 covers. **Refresh now** asks the licence service about the key — a renewal
 arrives as a fresh key with no re-entry, and a revocation is learned the
-same way; only the key's id is sent. A key past its expiry is still honoured
-for its **grace period** while a renewal is confirmed, and the status says
-so.
+same way. A key past its expiry is still honoured for its **grace period**
+while a renewal is confirmed, and the status says so.
+
+What the service is told is the key's id and where the key is installed:
+this machine's name, your user name, the operating system and the ShellMate
+version, so whoever holds an organisation licence can see which of its
+seats are in use and which copies are behind. That is sent when the key is
+entered, when it is removed, and at each refresh. Nothing about the devices
+you connect to, your sessions or your settings ever goes with it.
 
 ## Updates
 

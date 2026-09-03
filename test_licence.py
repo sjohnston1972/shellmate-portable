@@ -119,6 +119,18 @@ def test_storage_and_features() -> None:
         check("installing a key again clears the revocation", licence.install(make()) and licence.status()["state"] == "active")
         check("removal empties the slot", licence.remove() and licence.load() is None)
         check("removing twice is not an error", licence.remove() is False)
+        m = licence.machine_info()
+        check("the machine record has a stable 16-char id and the version",
+              len(m["id"]) == 16 and m["id"] == licence.machine_info()["id"] and m["version"] and m["hostname"], str(m))
+        check("  and says nothing about any device", set(m) == {"id", "hostname", "user", "platform", "version"})
+        licence.install(make())
+        url, licence.SERVICE_URL = licence.SERVICE_URL, "http://127.0.0.1:9"
+        try:
+            a = licence.announce("activate", timeout=1.0)
+            check("announcing to an unreachable service is not an error", a == {"announced": False, "reason": "unreachable"}, str(a))
+        finally:
+            licence.SERVICE_URL = url
+        licence.remove()
     finally:
         licence.PUBLIC_KEY_B64 = saved
 

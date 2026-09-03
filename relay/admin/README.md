@@ -14,8 +14,15 @@ renewed and revoked, people are recorded, and reports are read.
 - **Refresh**: ShellMate posts its key id to `/licence/refresh` now and then.
   The answer is the current token (a renewal arrives this way with no
   re-entry) or `revoked: true` with the reason.
-- **Records** live in D1 (`schema.sql`, then `schema-v2.sql`): people,
-  licences, an event log, and the portal's settings.
+- **Records** live in D1 (`schema.sql`, `schema-v2.sql`, `schema-v3.sql`):
+  people, licences, an event log, the portal's settings, and installations.
+- **Installations**: a copy of ShellMate reports the machine it is on (name,
+  user, platform, version, and a stable hash as id) when a key is entered,
+  when it is removed, and at every refresh. The portal shows them on the
+  licence page with a *Forget* to free a seat, counts them in the list and
+  on the overview, and reports versions in use, keys never activated, and
+  licences with more installations than seats. The event log records
+  activated, updated, deactivated, over-seats and forgotten.
 - **Email** goes through [Resend](https://resend.com) when the
   `RESEND_API_KEY` secret is set and the sender domain is verified there.
   Keys are emailed on issue and on renewal, with the `.key` file attached,
@@ -39,6 +46,7 @@ cd relay/admin
 wrangler d1 create shellmate-licences            # paste the id into wrangler.toml
 wrangler d1 execute shellmate-licences --remote --file=schema.sql
 wrangler d1 execute shellmate-licences --remote --file=schema-v2.sql
+wrangler d1 execute shellmate-licences --remote --file=schema-v3.sql
 wrangler secret put SIGNING_KEY_PKCS8_B64        # Ed25519 private key, PKCS#8 DER, base64
 wrangler secret put ADMIN_PASSWORD               # the portal password
 wrangler secret put SESSION_SECRET               # any long random string
@@ -103,12 +111,14 @@ decision unless every licensee is re-issued.
 
 | Path | Who | What |
 |---|---|---|
-| `POST /licence/refresh` `{id}` | the app | current token, or revoked + reason |
+| `POST /licence/refresh` `{id, machine}` | the app | current token, or revoked + reason; records the installation |
+| `POST /licence/activate` `{id, machine}` | the app | records the installation; answers seats and count |
+| `POST /licence/deactivate` `{id, machine}` | the app | marks the installation removed |
 | `GET /licence/check?id=` | the app, support | kind, expiry, revoked |
 | `GET` / `POST /request` | the public | the request page; issues and emails a key when open |
 | `GET /health` | anyone | liveness |
 | `POST /admin/login` | the portal | password → session cookie |
-| `/admin/api/licences` … | the portal (cookie) | list with filters, issue (emails), detail, renew (emails), revoke, restore, send, delete, notes and email |
+| `/admin/api/licences` … | the portal (cookie) | list with filters, issue (emails), detail with installations, renew (emails), revoke, restore, send, delete, notes and email; `DELETE …/activations/:machine` forgets one |
 | `/admin/api/users` … | the portal (cookie) | list, add, detail, edit, delete |
 | `/admin/api/reports` | the portal (cookie) | issued per month, by kind and source, renewals due, seats in force |
 | `/admin/api/settings` | the portal (cookie) | email wording, the request page, the overview notice |

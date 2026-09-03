@@ -211,8 +211,13 @@ async function logEvent(env, licenceId, kind, detail) {
   await env.DB.prepare('INSERT INTO events (licence_id, at, kind, detail) VALUES (?1, ?2, ?3, ?4)')
     .bind(licenceId, Date.now(), kind, clean(detail, 500)).run();
 }
+// The licence row plus what the installations say about it.
+const LICENCE_COLS = `licences.*,
+  (SELECT COUNT(*) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) AS installs,
+  (SELECT MIN(first_seen) FROM activations a WHERE a.licence_id = licences.id) AS first_activated,
+  (SELECT MAX(last_seen) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) AS last_seen`;
 async function getLicence(env, id) {
-  return env.DB.prepare('SELECT * FROM licences WHERE id = ?1').bind(id).first();
+  return env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences WHERE id = ?1`).bind(id).first();
 }
 function publicRow(row) {
   if (!row) return null;
@@ -293,6 +298,37 @@ async function sendKey(env, row, settings, kind = 'issued') {
   await logEvent(env, row.id, 'emailed', `${kind} key to ${row.email}`);
 }
 
+// ------------------------------------------------------------------ installations
+// Each copy of ShellMate that installs a key reports the machine it landed on
+// and repeats itself at every refresh. One row per (licence, machine).
+function machineOf(body) {
+  const m = body && typeof body.machine === 'object' && body.machine ? body.machine : null;
+  const id = m ? clean(m.id, 32) : '';
+  if (!/^[0-9a-f]{8,32}$/.test(id)) return null;
+  return { id, hostname: clean(m.hostname, 80), user: clean(m.user, 80), platform: clean(m.platform, 80), version: clean(m.version, 24) };
+}
+function describeMachine(m) {
+  return `${m.hostname || m.id}${m.user ? ' (' + m.user + ')' : ''}${m.version ? ' · ShellMate ' + m.version : ''}`;
+}
+async function recordInstallation(env, row, machine, ip) {
+  if (!machine) return;
+  const now = Date.now();
+  const existing = await env.DB.prepare('SELECT * FROM activations WHERE licence_id = ?1 AND machine_id = ?2').bind(row.id, machine.id).first();
+  if (!existing) {
+    await env.DB.prepare('INSERT INTO activations (licence_id, machine_id, hostname, user, platform, version, first_seen, last_seen, seen_count, last_ip) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 1, ?8)')
+      .bind(row.id, machine.id, machine.hostname, machine.user, machine.platform, machine.version, now, ip).run();
+    await logEvent(env, row.id, 'activated', describeMachine(machine));
+  } else {
+    await env.DB.prepare('UPDATE activations SET hostname = ?1, user = ?2, platform = ?3, version = ?4, last_seen = ?5, seen_count = seen_count + 1, last_ip = ?6, removed_at = NULL WHERE licence_id = ?7 AND machine_id = ?8')
+      .bind(machine.hostname, machine.user, machine.platform, machine.version, now, ip, row.id, machine.id).run();
+    if (existing.removed_at) await logEvent(env, row.id, 'activated', describeMachine(machine) + ' — back after removal');
+    else if (existing.version !== machine.version && machine.version) await logEvent(env, row.id, 'updated', `${machine.hostname || machine.id} now on ShellMate ${machine.version}`);
+  }
+  const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE licence_id = ?1 AND removed_at IS NULL').bind(row.id).first()).n;
+  if (!existing && n > (Number(row.seats) || 1)) await logEvent(env, row.id, 'over-seats', `${n} installations on ${row.seats} seat(s)`);
+  return n;
+}
+
 // ------------------------------------------------------------------ the application's endpoints
 async function application(request, env, path) {
   if (await rateLimited(env, request, 'app')) return json(429, { detail: 'Too many requests.' });
@@ -306,8 +342,26 @@ async function application(request, env, path) {
     const ip = request.headers.get('CF-Connecting-IP') || '';
     await env.DB.prepare('UPDATE licences SET last_refresh = ?1, refresh_count = refresh_count + 1, last_ip = ?2 WHERE id = ?3')
       .bind(Date.now(), ip, id).run();
+    await recordInstallation(env, row, machineOf(body), ip);
     if (row.revoked) return json(200, { id, revoked: true, reason: row.revoked_reason || '' });
     return json(200, { id, revoked: false, token: row.token, expires: row.expires || '' });
+  }
+  if ((path === '/licence/activate' || path === '/licence/deactivate') && request.method === 'POST') {
+    let body = {};
+    try { body = await request.json(); } catch (_) { return json(400, { detail: 'JSON expected.' }); }
+    const id = clean(body.id, 64);
+    const machine = machineOf(body);
+    if (!id || !machine) return json(400, { detail: 'id and machine are needed.' });
+    const row = await getLicence(env, id);
+    if (!row) return json(404, { detail: 'No such licence.' });
+    const ip = request.headers.get('CF-Connecting-IP') || '';
+    if (path === '/licence/deactivate') {
+      const r = await env.DB.prepare('UPDATE activations SET removed_at = ?1, last_ip = ?2 WHERE licence_id = ?3 AND machine_id = ?4 AND removed_at IS NULL').bind(Date.now(), ip, id, machine.id).run();
+      if (r.meta.changes) await logEvent(env, id, 'deactivated', describeMachine(machine));
+      return json(200, { id, removed: !!r.meta.changes });
+    }
+    const n = await recordInstallation(env, row, machine, ip);
+    return json(200, { id, revoked: !!row.revoked, expires: row.expires || '', installations: n, seats: Number(row.seats) || 1 });
   }
   if (path === '/licence/check' && request.method === 'GET') {
     const id = clean(new URL(request.url).searchParams.get('id'), 64);
@@ -369,9 +423,16 @@ async function adminApi(request, env, path) {
       env.DB.prepare('SELECT COUNT(*) AS n FROM users').first(),
       env.DB.prepare("SELECT COUNT(*) AS n FROM licences WHERE created_at >= ?1").bind(Date.now() - 30 * 86400000).first(),
     ]);
+    const inForce = "revoked = 0 AND (expires = '' OR expires >= ?1)";
+    const [activated, installs, seen7] = await Promise.all([
+      env.DB.prepare(`SELECT COUNT(*) AS n FROM licences WHERE ${inForce} AND EXISTS (SELECT 1 FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL)`).bind(t).first(),
+      env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE removed_at IS NULL').first(),
+      env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE removed_at IS NULL AND last_seen >= ?1').bind(Date.now() - 7 * 86400000).first(),
+    ]);
     const recent = await env.DB.prepare('SELECT e.*, l.licensee FROM events e LEFT JOIN licences l ON l.id = e.licence_id ORDER BY e.at DESC LIMIT 15').all();
     return json(200, { licences: total.n, active: active.n, expiring: expiring.n, expired: expired.n, revoked: revoked.n,
                        users: users.n, issued_30d: month.n, events: recent.results,
+                       activated: activated.n, unactivated: active.n - activated.n, installations: installs.n, seen_7d: seen7.n,
                        mail: mailConfigured(env), requests: settings.requests_enabled === '1', notice: settings.portal_notice || '' });
   }
 
@@ -384,12 +445,18 @@ async function adminApi(request, env, path) {
       env.DB.prepare("SELECT * FROM licences WHERE revoked = 0 AND expires != '' AND expires >= ?1 AND expires <= ?2 ORDER BY expires").bind(t, addDays(90)).all(),
       env.DB.prepare("SELECT SUM(seats) AS n FROM licences WHERE revoked = 0 AND (expires = '' OR expires >= ?1)").bind(t).first(),
     ]);
+    const [versions, unactivated, overSeats] = await Promise.all([
+      env.DB.prepare("SELECT version, COUNT(*) AS n FROM activations WHERE removed_at IS NULL GROUP BY version ORDER BY version DESC").all(),
+      env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences WHERE revoked = 0 AND (expires = '' OR expires >= ?1) AND created_at <= ?2 AND NOT EXISTS (SELECT 1 FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) ORDER BY created_at`).bind(t, Date.now() - 7 * 86400000).all(),
+      env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences WHERE revoked = 0 AND seats < (SELECT COUNT(*) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) ORDER BY installs DESC`).all(),
+    ]);
     const buckets = { d30: 0, d60: 0, d90: 0 };
     for (const l of expiring.results) {
       if (l.expires <= addDays(30)) buckets.d30 += 1; else if (l.expires <= addDays(60)) buckets.d60 += 1; else buckets.d90 += 1;
     }
     return json(200, { by_month: byMonth.results.reverse(), by_kind: byKind.results, by_source: bySource.results,
-                       expiring: expiring.results.map(publicRow), buckets, seats_in_force: seats.n || 0 });
+                       expiring: expiring.results.map(publicRow), buckets, seats_in_force: seats.n || 0,
+                       versions: versions.results, unactivated: unactivated.results.map(publicRow), over_seats: overSeats.results.map(publicRow) });
   }
 
   if (path === '/admin/api/settings' && method === 'GET') {
@@ -424,7 +491,10 @@ async function adminApi(request, env, path) {
     else if (status === 'expiring') { where.push("revoked = 0 AND expires != '' AND expires >= ? AND expires <= ?"); args.push(t, addDays(30)); }
     else if (status === 'expired') { where.push("revoked = 0 AND expires != '' AND expires < ?"); args.push(t); }
     else if (status === 'revoked') { where.push('revoked = 1'); }
-    const sql = 'SELECT * FROM licences' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY created_at DESC LIMIT 1000';
+    else if (status === 'activated') { where.push("revoked = 0 AND (expires = '' OR expires >= ?) AND EXISTS (SELECT 1 FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL)"); args.push(t); }
+    else if (status === 'unactivated') { where.push("revoked = 0 AND (expires = '' OR expires >= ?) AND NOT EXISTS (SELECT 1 FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL)"); args.push(t); }
+    else if (status === 'overseats') { where.push('revoked = 0 AND seats < (SELECT COUNT(*) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL)'); }
+    const sql = `SELECT ${LICENCE_COLS} FROM licences` + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY created_at DESC LIMIT 1000';
     const rows = await env.DB.prepare(sql).bind(...args).all();
     return json(200, { licences: rows.results.map(publicRow) });
   }
@@ -440,7 +510,7 @@ async function adminApi(request, env, path) {
     } catch (err) { return json(400, { detail: err.message }); }
   }
 
-  const m = path.match(/^\/admin\/api\/licences\/([^/]+)(?:\/(revoke|restore|renew|send))?$/);
+  const m = path.match(/^\/admin\/api\/licences\/([^/]+)(?:\/(revoke|restore|renew|send|activations)(?:\/([^/]+))?)?$/);
   if (m) {
     const id = decodeURIComponent(m[1]);
     const row = await getLicence(env, id);
@@ -449,7 +519,17 @@ async function adminApi(request, env, path) {
     if (!action && method === 'GET') {
       const events = await env.DB.prepare('SELECT * FROM events WHERE licence_id = ?1 ORDER BY at DESC LIMIT 100').bind(id).all();
       const user = row.user_id ? await env.DB.prepare('SELECT * FROM users WHERE id = ?1').bind(row.user_id).first() : null;
-      return json(200, { licence: publicRow(row), events: events.results, user });
+      const activations = await env.DB.prepare('SELECT * FROM activations WHERE licence_id = ?1 ORDER BY (removed_at IS NOT NULL), last_seen DESC').bind(id).all();
+      return json(200, { licence: publicRow(row), events: events.results, user, activations: activations.results });
+    }
+    if (action === 'activations' && method === 'DELETE' && m[3]) {
+      // Forget an installation: frees the seat. The copy re-registers at its next refresh if it is still there.
+      const machine = clean(decodeURIComponent(m[3]), 32);
+      const a = await env.DB.prepare('SELECT * FROM activations WHERE licence_id = ?1 AND machine_id = ?2').bind(id, machine).first();
+      if (!a) return json(404, { detail: 'No such installation.' });
+      await env.DB.prepare('DELETE FROM activations WHERE licence_id = ?1 AND machine_id = ?2').bind(id, machine).run();
+      await logEvent(env, id, 'forgotten', describeMachine({ id: machine, hostname: a.hostname, user: a.user, version: a.version }));
+      return json(200, { deleted: true });
     }
     if (!action && method === 'DELETE') {
       await env.DB.prepare('DELETE FROM licences WHERE id = ?1').bind(id).run();
@@ -633,6 +713,7 @@ const toast = m => { const t = document.createElement('div'); t.className='toast
 const when = ts => ts ? new Date(ts).toLocaleString() : '—';
 const today = () => new Date().toISOString().slice(0,10);
 const addDays = n => { const d=new Date(); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+const installed = l => !l.installs ? '<span class="pill grey">not yet</span>' : '<span class="pill '+(l.installs > l.seats ? 'warn' : 'ok')+'">'+l.installs+' of '+l.seats+'</span>'+(l.last_seen ? ' <span class="hint">seen '+esc(when(l.last_seen))+'</span>' : '');
 const status = l => l.revoked ? ['bad','revoked'] : !l.expires ? ['ok','perpetual'] : (l.expires < today() ? ['bad','expired'] : (l.expires <= addDays(30) ? ['warn','expiring'] : ['ok','active']));
 const main = $('#main');
 function debounce(f, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; }
@@ -657,7 +738,7 @@ async function overview() {
   main.innerHTML = '<div class="top"><div><h1>Overview</h1><div class="sub">Licences issued, who holds them, and what happened lately.</div></div><a class="btn primary" href="#/issue">Issue a licence</a></div><div id="notice"></div><div class="cards" id="cards"></div><div class="two"><div class="panel"><div class="bar"><h2>Recent activity</h2></div><ul class="events" id="ev" style="padding:6px 16px"></ul></div><div class="panel"><div class="bar"><h2>Service</h2></div><div class="body kv" id="svc"></div></div></div>';
   const s = await api('/admin/api/stats');
   if (s.notice) $('#notice').innerHTML = '<div class="notice">'+esc(s.notice)+'</div>';
-  $('#cards').innerHTML = [['Active licences', s.active, 'licences?status=active'],['Expiring in 30 days', s.expiring, 'licences?status=expiring'],['Expired', s.expired, 'licences?status=expired'],['Revoked', s.revoked, 'licences?status=revoked'],['Issued in 30 days', s.issued_30d, 'reports'],['All licences', s.licences, 'licences'],['People', s.users, 'people'],['Email', s.mail ? 'configured' : 'not set up', 'settings']]
+  $('#cards').innerHTML = [['Active licences', s.active, 'licences?status=active'],['Activated', s.activated, 'licences?status=activated'],['Never activated', s.unactivated, 'licences?status=unactivated'],['Installations', s.installations, 'reports'],['Seen this week', s.seen_7d, 'reports'],['Expiring in 30 days', s.expiring, 'licences?status=expiring'],['Expired', s.expired, 'licences?status=expired'],['Revoked', s.revoked, 'licences?status=revoked'],['Issued in 30 days', s.issued_30d, 'reports'],['All licences', s.licences, 'licences'],['People', s.users, 'people'],['Email', s.mail ? 'configured' : 'not set up', 'settings']]
     .map(([k,v,h]) => '<div class="card click" onclick="location.hash=\'#/'+h+'\'"><div class="k">'+k+'</div><div class="v">'+esc(v)+'</div></div>').join('');
   $('#ev').innerHTML = s.events.length ? s.events.map(e => '<li><time>'+esc(when(e.at))+'</time><b>'+esc(e.kind)+'</b> '+(e.licence_id?'<a href="#/licence/'+encodeURIComponent(e.licence_id)+'">'+esc(e.licensee||e.licence_id)+'</a>':'')+' <span style="color:var(--ink-3)">'+esc(e.detail)+'</span></li>').join('') : '<li class="empty">Nothing yet.</li>';
   $('#svc').innerHTML = '<span class="k">Email</span><span>'+(s.mail?'<span class="pill ok">configured</span>':'<span class="pill warn">not configured</span> <a href="#/settings">set up</a>')+'</span><span class="k">Public requests</span><span>'+(s.requests?'<span class="pill ok">open</span>':'<span class="pill grey">closed</span>')+' <a href="/request" target="_blank">page</a></span>';
@@ -667,8 +748,8 @@ let sortState = { col: 'created_at', dir: -1 };
 async function licences(params) {
   const q = params.q || '', st = params.status || '', kind = params.kind || '';
   main.innerHTML = crumbs(['Licences','licences']) + '<div class="top"><div><h1>Licences</h1><div class="sub">Every key issued. Click one for its details, key text and history.</div></div><div class="row"><button class="btn" id="csv">Export CSV</button><a class="btn primary" href="#/issue">Issue a licence</a></div></div>'
-   + '<div class="panel"><div class="bar"><input type="search" id="q" placeholder="Search by name, email, id or notes…" value="'+esc(q)+'"><select id="status"><option value="">Any status</option><option value="active">Active</option><option value="expiring">Expiring in 30 days</option><option value="expired">Expired</option><option value="revoked">Revoked</option></select><select id="kind"><option value="">Any kind</option><option value="person">Person</option><option value="org">Organisation</option></select><span id="count" class="hint"></span></div><table><thead><tr>'
-   + [['licensee','Licensee'],['kind','Kind'],['seats','Seats'],['issued','Issued'],['expires','Expires'],['status','Status'],['last_refresh','Last refresh'],['last_sent','Emailed']].map(([c,t]) => '<th class="sort" data-col="'+c+'">'+t+'<span class="dir"></span></th>').join('') + '</tr></thead><tbody id="rows"></tbody></table></div>';
+   + '<div class="panel"><div class="bar"><input type="search" id="q" placeholder="Search by name, email, id or notes…" value="'+esc(q)+'"><select id="status"><option value="">Any status</option><option value="active">Active</option><option value="expiring">Expiring in 30 days</option><option value="activated">Activated</option><option value="unactivated">Never activated</option><option value="overseats">Over seats</option><option value="expired">Expired</option><option value="revoked">Revoked</option></select><select id="kind"><option value="">Any kind</option><option value="person">Person</option><option value="org">Organisation</option></select><span id="count" class="hint"></span></div><table><thead><tr>'
+   + [['licensee','Licensee'],['kind','Kind'],['seats','Seats'],['issued','Issued'],['expires','Expires'],['status','Status'],['installs','Installed'],['last_refresh','Last refresh'],['last_sent','Emailed']].map(([c,t]) => '<th class="sort" data-col="'+c+'">'+t+'<span class="dir"></span></th>').join('') + '</tr></thead><tbody id="rows"></tbody></table></div>';
   $('#status').value = st; $('#kind').value = kind;
   let rows = [];
   const render = () => {
@@ -677,13 +758,13 @@ async function licences(params) {
     const sorted = rows.slice().sort((a,b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : 0) * dir; });
     document.querySelectorAll('th.sort').forEach(th => th.querySelector('.dir').textContent = th.dataset.col === col ? (dir > 0 ? '▲' : '▼') : '');
     $('#count').textContent = rows.length + ' shown';
-    $('#rows').innerHTML = sorted.length ? sorted.map(l => { const [c,t]=status(l); return '<tr class="click" data-id="'+esc(l.id)+'"><td><b>'+esc(l.licensee)+'</b><br><span class="hint">'+esc(l.email)+' · <span class="mono">'+esc(l.id)+'</span>'+(l.source==='request'?' · <span class="pill blue">self-service</span>':'')+'</span></td><td>'+esc(l.kind)+'</td><td>'+l.seats+'</td><td>'+esc(l.issued)+'</td><td>'+esc(l.expires||'never')+'</td><td><span class="pill '+c+'">'+t+'</span></td><td class="hint">'+esc(l.last_refresh?when(l.last_refresh)+' ('+l.refresh_count+')':'never')+'</td><td class="hint">'+esc(l.last_sent?when(l.last_sent):'—')+'</td></tr>'; }).join('') : '<tr><td colspan="8" class="empty">No licences match.</td></tr>';
+    $('#rows').innerHTML = sorted.length ? sorted.map(l => { const [c,t]=status(l); return '<tr class="click" data-id="'+esc(l.id)+'"><td><b>'+esc(l.licensee)+'</b><br><span class="hint">'+esc(l.email)+' · <span class="mono">'+esc(l.id)+'</span>'+(l.source==='request'?' · <span class="pill blue">self-service</span>':'')+'</span></td><td>'+esc(l.kind)+'</td><td>'+l.seats+'</td><td>'+esc(l.issued)+'</td><td>'+esc(l.expires||'never')+'</td><td><span class="pill '+c+'">'+t+'</span></td><td>'+installed(l)+'</td><td class="hint">'+esc(l.last_refresh?when(l.last_refresh)+' ('+l.refresh_count+')':'never')+'</td><td class="hint">'+esc(l.last_sent?when(l.last_sent):'—')+'</td></tr>'; }).join('') : '<tr><td colspan="9" class="empty">No licences match.</td></tr>';
     document.querySelectorAll('tr.click').forEach(r => r.onclick = () => location.hash = '#/licence/'+encodeURIComponent(r.dataset.id));
   };
   const load = async () => { const p = new URLSearchParams({q: $('#q').value, status: $('#status').value, kind: $('#kind').value}); history.replaceState(null, '', '#/licences?'+p); rows = (await api('/admin/api/licences?'+p)).licences; render(); };
   $('#q').oninput = debounce(load, 250); $('#status').onchange = load; $('#kind').onchange = load;
   document.querySelectorAll('th.sort').forEach(th => th.onclick = () => { if (sortState.col === th.dataset.col) sortState.dir *= -1; else sortState = {col: th.dataset.col, dir: 1}; render(); });
-  $('#csv').onclick = () => csv(rows.map(l => ({...l, status: status(l)[1], features: l.features.join(' ')})), ['id','licensee','email','kind','seats','issued','expires','status','grace_days','features','source','refresh_count','last_refresh','sent_count','last_sent','notes'], 'shellmate-licences.csv');
+  $('#csv').onclick = () => csv(rows.map(l => ({...l, status: status(l)[1], features: l.features.join(' ')})), ['id','licensee','email','kind','seats','issued','expires','status','installs','first_activated','last_seen','grace_days','features','source','refresh_count','last_refresh','sent_count','last_sent','notes'], 'shellmate-licences.csv');
   await load();
 }
 
@@ -693,12 +774,14 @@ async function detail(id) {
    + '<div class="two"><div><div class="panel"><div class="bar"><h2>Details</h2></div><div class="body kv">'
    + '<span class="k">Id</span><span class="mono">'+esc(l.id)+'</span><span class="k">Kind</span><span>'+esc(l.kind)+'</span><span class="k">Email</span><span><span class="row"><input id="email" value="'+esc(l.email||'')+'" style="max-width:280px"><button class="btn sm" id="saveemail">Save</button></span></span><span class="k">Seats</span><span>'+l.seats+'</span><span class="k">Issued</span><span>'+esc(l.issued)+'</span><span class="k">Expires</span><span>'+esc(l.expires||'never')+' <span class="hint">('+l.grace_days+' day grace)</span></span><span class="k">Features</span><span>'+esc(l.features.join(', '))+'</span><span class="k">Source</span><span>'+esc(l.source||'admin')+'</span><span class="k">Refreshes</span><span>'+l.refresh_count+' · last '+esc(when(l.last_refresh))+(l.last_ip?' from '+esc(l.last_ip):'')+'</span><span class="k">Emailed</span><span>'+(l.sent_count||0)+' time(s) · last '+esc(when(l.last_sent))+'</span>'+(l.revoked?'<span class="k">Revoked</span><span style="color:var(--danger)">'+esc(l.revoked_reason||'no reason given')+'</span>':'')+'</div></div>'
    + '<div class="panel"><div class="bar"><h2>Licence key</h2><span class="hint">what the licensee pastes into ShellMate</span></div><div class="body"><div class="key">'+esc(l.token)+'</div><div class="row" style="margin-top:8px"><button class="btn sm" id="copy">Copy key</button><button class="btn sm" id="dl">Download .key file</button></div></div></div>'
+   + '<div class="panel"><div class="bar"><h2>Installations</h2><span class="hint">'+(l.installs||0)+' of '+l.seats+' seat(s) in use</span></div>'+(d.activations.length ? '<table><thead><tr><th>Machine</th><th>User</th><th>Platform</th><th>Version</th><th>First seen</th><th>Last seen</th><th></th></tr></thead><tbody>'+d.activations.map(a => '<tr'+(a.removed_at?' style="opacity:.55"':'')+'><td><b>'+esc(a.hostname||a.machine_id)+'</b>'+(a.removed_at?' <span class="pill grey">removed '+esc(when(a.removed_at))+'</span>':'')+'</td><td>'+esc(a.user||'—')+'</td><td class="hint">'+esc(a.platform||'—')+'</td><td class="mono">'+esc(a.version||'?')+'</td><td class="hint">'+esc(when(a.first_seen))+'</td><td class="hint">'+esc(when(a.last_seen))+' ('+a.seen_count+')</td><td><button class="btn sm forget" data-m="'+esc(a.machine_id)+'" title="Free the seat; the copy re-registers at its next refresh if it is still there">Forget</button></td></tr>').join('')+'</tbody></table>' : '<div class="body hint">No copy of ShellMate has reported this key yet. It is recorded the moment the key is entered, and again at every refresh.</div>')+'</div>'
    + '<div class="panel"><div class="bar"><h2>Notes</h2></div><div class="body"><textarea id="notes" rows="3">'+esc(l.notes||'')+'</textarea><div class="row" style="margin-top:8px"><button class="btn sm" id="savenotes">Save notes</button></div></div></div></div>'
    + '<div><div class="panel"><div class="bar"><h2>Renew</h2></div><div class="body"><div class="row"><input type="date" id="renew" value="'+esc(l.expires||'')+'" style="max-width:180px"><input type="number" id="seats" min="1" value="'+l.seats+'" style="max-width:100px" title="Seats"><label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="renewsend" checked> email the new key</label></div><div class="row" style="margin-top:10px"><button class="btn sm primary" id="dorenew">Renew and re-sign</button></div><p class="hint">Keeps the id and signs a new key with the new expiry. A copy of ShellMate holding the old key picks the new one up at its next refresh — no re-entry needed.</p></div></div>'
    + '<div class="panel"><div class="bar"><h2>'+(l.revoked?'Restore':'Revoke')+'</h2></div><div class="body"><div class="row">'+(l.revoked?'<button class="btn sm" id="restore">Restore this licence</button>':'<input id="reason" placeholder="Reason (shown to the licensee)" style="max-width:320px"><button class="btn sm danger" id="revoke">Revoke</button>')+'</div></div></div>'
    + '<div class="panel"><div class="bar"><h2>History</h2></div><ul class="events" style="padding:6px 16px">'+(d.events.map(e => '<li><time>'+esc(when(e.at))+'</time><b>'+esc(e.kind)+'</b> <span style="color:var(--ink-3)">'+esc(e.detail)+'</span></li>').join('')||'<li class="hint">Nothing yet.</li>')+'</ul></div>'
    + '<button class="btn sm danger" id="del">Delete this licence record</button></div></div>';
   $('#copy').onclick = () => navigator.clipboard.writeText(l.token).then(() => toast('Key copied'));
+  document.querySelectorAll('.forget').forEach(b => b.onclick = async () => { if (!confirm('Forget this installation? Its seat is freed; the copy re-registers itself at its next refresh if it still has the key.')) return; await api('/admin/api/licences/'+encodeURIComponent(id)+'/activations/'+encodeURIComponent(b.dataset.m), {method:'DELETE'}); toast('Forgotten'); route(); });
   $('#dl').onclick = () => { const a = document.createElement('a'); a.href = 'data:text/plain,'+encodeURIComponent(l.token+'\n'); a.download = 'shellmate-'+l.id+'.key'; a.click(); };
   $('#savenotes').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id), {method:'PUT', body:{notes: $('#notes').value}}); toast('Notes saved'); };
   $('#saveemail').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id), {method:'PUT', body:{notes: $('#notes').value, email: $('#email').value}}); toast('Email saved'); };
@@ -749,6 +832,9 @@ async function reports() {
    + '<div class="two"><div class="panel"><div class="bar"><h2>Issued per month</h2></div><div class="body"><div class="bars" style="margin-bottom:22px">'+(r.by_month.map(m => '<div class="b" style="height:'+Math.round(100*m.n/max)+'%"><span>'+m.n+'</span><i>'+esc(m.month.slice(2))+'</i></div>').join('')||'<div class="empty">Nothing issued yet.</div>')+'</div></div></div>'
    + '<div class="panel"><div class="bar"><h2>In force, by kind</h2></div><table><thead><tr><th>Kind</th><th>Licences</th><th>Seats</th></tr></thead><tbody>'+(r.by_kind.map(k => '<tr><td>'+esc(k.kind)+'</td><td>'+k.n+'</td><td>'+k.seats+'</td></tr>').join('')||'<tr><td colspan="3" class="empty">None.</td></tr>')+'</tbody></table><div class="bar"><h2>By source</h2></div><table><tbody>'+(r.by_source.map(k => '<tr><td>'+esc(k.source)+'</td><td>'+k.n+'</td></tr>').join('')||'<tr><td class="empty">None.</td></tr>')+'</tbody></table></div></div>'
    + '<div class="panel"><div class="bar"><h2>Renewals due in the next 90 days</h2><span class="hint">'+r.expiring.length+'</span></div><table><thead><tr><th>Licensee</th><th>Email</th><th>Kind</th><th>Seats</th><th>Expires</th><th>Last refresh</th></tr></thead><tbody>'+(r.expiring.map(l => '<tr class="click" data-id="'+esc(l.id)+'"><td><b>'+esc(l.licensee)+'</b></td><td>'+esc(l.email)+'</td><td>'+esc(l.kind)+'</td><td>'+l.seats+'</td><td>'+esc(l.expires)+'</td><td class="hint">'+esc(l.last_refresh?when(l.last_refresh):'never')+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">Nothing due.</td></tr>')+'</tbody></table></div>';
+  main.insertAdjacentHTML('beforeend', '<div class="two"><div class="panel"><div class="bar"><h2>Versions in use</h2><span class="hint">installations that have reported</span></div><table><thead><tr><th>ShellMate</th><th>Installations</th></tr></thead><tbody>'+(r.versions.map(v => '<tr><td class="mono">'+esc(v.version||'?')+'</td><td>'+v.n+'</td></tr>').join('')||'<tr><td colspan="2" class="empty">Nothing has reported yet.</td></tr>')+'</tbody></table></div>'
+   + '<div class="panel"><div class="bar"><h2>More installations than seats</h2><span class="hint">'+r.over_seats.length+'</span></div><table><thead><tr><th>Licensee</th><th>Seats</th><th>Installed</th></tr></thead><tbody>'+(r.over_seats.map(l => '<tr class="click" data-id="'+esc(l.id)+'"><td><b>'+esc(l.licensee)+'</b><br><span class="hint">'+esc(l.email)+'</span></td><td>'+l.seats+'</td><td>'+installed(l)+'</td></tr>').join('')||'<tr><td colspan="3" class="empty">None.</td></tr>')+'</tbody></table></div></div>'
+   + '<div class="panel"><div class="bar"><h2>Issued over a week ago, never activated</h2><span class="hint">'+r.unactivated.length+'</span></div><table><thead><tr><th>Licensee</th><th>Email</th><th>Kind</th><th>Issued</th><th>Emailed</th></tr></thead><tbody>'+(r.unactivated.map(l => '<tr class="click" data-id="'+esc(l.id)+'"><td><b>'+esc(l.licensee)+'</b></td><td>'+esc(l.email)+'</td><td>'+esc(l.kind)+'</td><td>'+esc(l.issued)+'</td><td class="hint">'+esc(l.last_sent?when(l.last_sent):'never')+'</td></tr>').join('')||'<tr><td colspan="5" class="empty">Everyone has installed their key.</td></tr>')+'</tbody></table></div>');
   document.querySelectorAll('tr.click').forEach(t => t.onclick = () => location.hash = '#/licence/'+encodeURIComponent(t.dataset.id));
   $('#csv').onclick = () => csv(r.expiring, ['id','licensee','email','kind','seats','issued','expires','refresh_count','last_refresh'], 'shellmate-renewals-90d.csv');
 }

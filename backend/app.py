@@ -2468,12 +2468,15 @@ async def licence_install(request: LicenceKeyRequest) -> dict:
         licence_module.install(request.key)
     except licence_module.LicenceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    licence_module.announce_async("activate")       # the service learns where the key went
     return licence_module.status()
 
 
 @app.delete("/api/licence")
 async def licence_remove() -> dict:
-    licence_module.remove()
+    current = licence_module.load()
+    if licence_module.remove() and current is not None:
+        licence_module.announce_async("deactivate", current.id)
     return licence_module.status()
 
 
