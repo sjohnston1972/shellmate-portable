@@ -47,9 +47,16 @@ SUFFIX = ".cfg"
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
-def enabled() -> bool:
+def _logging_settings(settings: dict | None = None) -> dict:
+    """The logging section, read once and passed down (#468)."""
+    if settings is not None:
+        return settings
+    return get_settings().get("logging", {}) or {}
+
+
+def enabled(settings: dict | None = None) -> bool:
     """Whether captures should also be written out as files."""
-    settings = get_settings().get("logging", {}) or {}
+    settings = _logging_settings(settings)
     return bool(settings.get("capture_configs", True)
                 and settings.get("save_config_files", False))
 
@@ -90,7 +97,8 @@ def archive(hostname: str, config: str, changed: bool = True,
         "bytes": int, "redacted": bool, "reason": str}``. ``reason`` explains
         a ``written`` of false, and is empty otherwise.
     """
-    if not enabled():
+    settings = _logging_settings()
+    if not enabled(settings):
         return _skip("Saving captures as files is switched off.")
     if not (config or "").strip():
         return _skip("The device returned no configuration to save.")
@@ -101,7 +109,8 @@ def archive(hostname: str, config: str, changed: bool = True,
 
     device = safe_name(hostname)
     stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(captured_at or time.time()))
-    folder = config_directory() / device
+    root = config_directory()
+    folder = root / device
 
     if not changed and _captures_in(folder):
         return _skip("Unchanged since the last capture, so nothing new was saved.")
@@ -135,7 +144,7 @@ def archive(hostname: str, config: str, changed: bool = True,
     # Pruning after the write, not before: the copy that was just taken is the
     # one worth having, and a sweep that failed must not stop it being kept.
     try:
-        result["removed"] = prune()
+        result["removed"] = prune(settings, device=device, root=root)
     except Exception as exc:                                # pragma: no cover
         logger.warning("Configuration archive sweep failed: %s", exc)
         result["removed"] = 0
@@ -143,9 +152,19 @@ def archive(hostname: str, config: str, changed: bool = True,
     return result
 
 
-def prune() -> int:
+_last_sweep = 0.0
+SWEEP_EVERY = 24 * 3600
+
+
+def prune(settings: dict | None = None, device: str | None = None, root: Path | None = None) -> int:
     """
-    Apply the retention limits to the whole archive.
+    Apply the retention limits.
+
+    With ``device`` given, only that device's per-device limit is applied —
+    the cheap pass, run on every capture. The whole-archive sweep by age
+    and total size, which stats every file (4,000 of them at 200 devices
+    with 20 kept, possibly across a share), runs at most once a day
+    (#468); the first capture after that interval pays for it.
 
     Three limits rather than one because they answer different worries: "I do
     not want fifty copies of the same switch" is not the same worry as "this
@@ -155,23 +174,31 @@ def prune() -> int:
     Returns:
         How many files were removed.
     """
-    settings = get_settings().get("logging", {}) or {}
+    global _last_sweep
+    settings = _logging_settings(settings)
     keep_each = max(0, int(settings.get("config_keep_per_device", 20) or 0))
     max_age_days = max(0, int(settings.get("config_max_age_days", 365) or 0))
     max_total_mb = max(0, int(settings.get("config_max_total_mb", 200) or 0))
 
-    root = config_directory()
+    root = root if root is not None else config_directory()
     if not root.exists():
         return 0
 
     removed = 0
 
     # Per device, newest first.
-    for folder in sorted(p for p in root.iterdir() if p.is_dir()):
+    folders = [root / device] if device else sorted(p for p in root.iterdir() if p.is_dir())
+    for folder in folders:
+        if not folder.is_dir():
+            continue
         captures = _captures_in(folder)
         if keep_each and len(captures) > keep_each:
             for path, _mtime, _size in captures[keep_each:]:
                 removed += _remove(path)
+
+    if device and time.time() - _last_sweep < SWEEP_EVERY:
+        return removed
+    _last_sweep = time.time()
 
     # By age, then by total size — both across every device, since a limit on
     # the archive is a limit on the archive.
