@@ -3076,7 +3076,10 @@
     hostname:    t.hostname || '',
     address:     _addressOf(t),
     isConnected: !!t.isConnected,
-    groups:      Array.isArray(t.groupNames) ? t.groupNames : [],
+    // The learned group lives in _tagCache (#490). This read `t.groupNames`,
+    // which nothing ever assigned, so typing a site name into Ctrl+P
+    // matched no tab.
+    groups:      [_tagCache.get(t.sessionId)].filter(Boolean),
   }));
   window.updateTabLabel   = updateTabLabel;
   window.setTabOrder      = setTabOrder;
