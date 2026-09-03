@@ -158,9 +158,7 @@ async def stream(
     than 200, after at most two retries that each drop a parameter the
     model refused.
     """
-    full_user_message = (
-        f"{context_block}\n\n=== ENGINEER'S QUESTION ===\n{user_message}"
-    )
+    full_user_message = turns.user_content(context_block, user_message)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type":  "application/json",

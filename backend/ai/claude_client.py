@@ -122,9 +122,7 @@ async def stream_response(
     if not api_key:
         raise ValueError("Anthropic API key is not set. Configure it in Settings or .env.")
 
-    full_user_message = (
-        f"{context_block}\n\n=== ENGINEER'S QUESTION ===\n{user_message}"
-    )
+    full_user_message = turns.user_content(context_block, user_message)
 
     headers = {
         "x-api-key": api_key,
