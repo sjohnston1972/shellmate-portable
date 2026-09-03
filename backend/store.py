@@ -38,6 +38,26 @@ SCHEMA_VERSION = 1
 MAX_OUTPUT_CHARS = 256 * 1024
 
 
+
+def _redacted(text: str) -> str:
+    """
+    Command output and configuration snapshots go into the database
+    redacted whenever `logging.redact_secrets` is on (#463). The setting is
+    described as one switch covering session logs and archived
+    configurations; the history file sits on the same stick as the vault
+    and used to hold every `show run` with its secrets intact.
+    """
+    if not text:
+        return text
+    try:
+        from backend.settings_store import peek
+        if not peek("logging", "redact_secrets", True):
+            return text
+        from backend.session.redact import redact
+        return redact(text)
+    except Exception:
+        return text
+
 def _recording_enabled() -> bool:
     """Whether to record at all. Off means no search, replay or drift check."""
     try:
@@ -499,7 +519,7 @@ class SessionStore:
         except Exception:
             keep_output = True
 
-        output = (record.output or "") if keep_output else ""
+        output = _redacted(record.output or "") if keep_output else ""
         cap = _max_output_chars()
         if len(output) > cap:
             kept = cap
@@ -871,6 +891,7 @@ class SessionStore:
         """
         import hashlib
 
+        content = _redacted(content)
         digest = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
 
         # The whole check-and-insert under one lock. Read outside it, two

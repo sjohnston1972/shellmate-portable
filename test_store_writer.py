@@ -75,6 +75,20 @@ def main() -> int:
     hits = store.search("ip ar", limit=10)
     check("a substring of a command is found", any("show ip arp" in (h.get("command") or "") for h in hits), str(hits[:1]))
 
+
+    print("
+-- Stored output is redacted like the logs are --")
+    store.add_command("s1", record("show run", "enable secret 5 $1$abcd$efghijklmnopqrstuvwxy
+snmp-server community s3cr3t RO"))
+    store.flush(timeout=5.0)
+    row = store.connect().execute("SELECT output FROM commands WHERE command = 'show run'").fetchone()[0]
+    check("the enable secret is not in the database", "$1$abcd" not in row, row)
+    check("  nor the community", "s3cr3t" not in row, row)
+    snap = store.add_snapshot("sw", "hostname sw
+enable secret 5 $1$abcd$efghijklmnopqrstuvwxy
+")
+    stored = store.connect().execute("SELECT content FROM config_snapshots WHERE hostname = 'sw'").fetchone()[0]
+    check("a configuration snapshot is stored redacted", "$1$abcd" not in stored, stored)
     store.close() if hasattr(store, "close") else None
     print("\n" + "=" * 52)
     print(f"  {passed} passed  |  {len(failed)} failed")
