@@ -73,16 +73,25 @@ jobs:
           & $signtool verify /pa dist\ShellMate-Portable.exe
           Remove-Item $pfx
 
+      - name: Checksum and release notes
+        run: python tools/release_notes.py --version "${{ github.ref_name }}" --exe dist/ShellMate-Portable.exe
+
       - name: Keep the executable
         uses: actions/upload-artifact@v4
         with:
           name: ShellMate-Portable-${{ github.sha }}
-          path: dist/ShellMate-Portable.exe
+          path: |
+            dist/ShellMate-Portable.exe
+            dist/ShellMate-Portable.exe.sha256
           if-no-files-found: error
 
+      # The in-app updater (#443) verifies the download against the
+      # .sha256 and shows the notes from the What's new page (#445).
       - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ShellMate-Portable.exe
-          generate_release_notes: true
+          files: |
+            dist/ShellMate-Portable.exe
+            dist/ShellMate-Portable.exe.sha256
+          body_path: dist/release-notes.md

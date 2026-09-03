@@ -4,6 +4,19 @@ One section per release, newest first. The first run of a new version
 offers this page; **Updates** in the sidebar asks GitHub whether a newer one
 exists.
 
+## 1.1.0
+
+- **Updates from inside ShellMate.** A newer release opens ShellMate's own
+  window with the notes, downloads with a progress bar, is verified against
+  the release's checksum, and swaps itself in on restart — with the previous
+  copy put back if the new one does not start. The check runs at startup by
+  default and stays harmless offline.
+- **Licences.** A key under Settings → Licence, verified on this machine,
+  is what lets ShellMate update itself; everything else works without one.
+  Renewals arrive on refresh; revocations are learned the same way.
+- The first launch of a new version opens a what's-new window instead of a
+  toast.
+
 ## 1.0.1
 
 The first release published on GitHub, so the update check has something to

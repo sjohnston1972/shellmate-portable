@@ -74,6 +74,7 @@ shellmate/
 ├── tools/
 │   ├── claude_tree.py           # The project tree in CLAUDE.md, generated rather than typed
 │   ├── collect_licences.py      # Gather the licence texts ShellMate has to redistribute
+│   ├── release_notes.py         # The release body and checksum for a tagged build
 │   ├── run_tests.py             # Run every test_*.py and say, once, whether they all passed
 │   ├── seed_estate.py           # Fill a data folder with an estate, for scale testing
 │   ├── vendor_assets.py         # Download ShellMate's third-party frontend assets locally
@@ -87,6 +88,7 @@ shellmate/
 │   ├── certs.py                 # Read an OpenSSH certificate and say what it actually permits
 │   ├── config.py                # Configuration loader for ShellMate
 │   ├── config_archive.py        # Keeping the captured configurations as files
+│   ├── config_push.py           # Apply configuration with a preview first, and a way back (#407)
 │   ├── configs.py               # Configuration capture, storage and drift reporting
 │   ├── desktop.py               # Present ShellMate as a desktop application rather than a browser…
 │   ├── discovery.py             # Finding out what is on the wire
@@ -95,17 +97,20 @@ shellmate/
 │   ├── groups.py                # Groups on the dashboard
 │   ├── jira_client.py           # Jira Cloud REST API client for ShellMate session reporting
 │   ├── keys.py                  # Making SSH keys, not just using them
+│   ├── licence.py               # Licence keys, verified without a network (#446)
 │   ├── onboard.py               # What happens in the first few seconds of a session
 │   ├── paths.py                 # Single source of truth for every filesystem location ShellMate…
 │   ├── pipeline.py              # The chokepoint every keystroke passes through on its way out
 │   ├── platforms.py             # What ShellMate knows about each kind of device
 │   ├── profiles.py              # Connection profile persistence
+│   ├── scheduler.py             # Configuration backups on a timer, per group (#408)
 │   ├── schemes.py               # Terminal colour schemes as data
 │   ├── server.py                # Startup orchestration for ShellMate: port selection and
 │   ├── settings_store.py        # Application settings persistence for ShellMate
 │   ├── snippets.py              # The saved command library
 │   ├── store.py                 # Persistent session history in SQLite
 │   ├── support.py               # Building a diagnostic bundle worth reading
+│   ├── updater.py               # Download a release and swap the executable (#443, #444, #448)
 │   ├── vault.py                 # Encrypted storage for API keys and device credentials
 │   ├── version.py               # What this copy of ShellMate is
 │   ├── ai/
@@ -119,9 +124,11 @@ shellmate/
 │   │   ├── providers.py         # Model discovery per provider, cached to models.json
 │   │   ├── router.py            # Routes AI chat requests to the correct backend (Claude / xAI /…
 │   │   ├── summarize.py         # One-shot AI summary of a terminal session for the
+│   │   ├── turns.py             # A conversation, shaped for each provider
 │   │   ├── xai_client.py        # Streaming xAI (Grok) client for ShellMate
 │   ├── connections/
 │   │   ├── base.py              # ConnectionHandler contract and ConnectionParams
+│   │   ├── forwards.py          # Port forwarding over an existing SSH session (#405)
 │   │   ├── manager.py           # Session lifecycle and the transport registry
 │   │   ├── serial_handler.py    # Serial console via pyserial
 │   │   ├── sftp.py              # File transfer over an existing SSH transport
@@ -131,6 +138,7 @@ shellmate/
 │   │   ├── ansi.py              # Undo escape sequences, backspace and bare CR
 │   │   ├── buffer.py            # Rolling per-session screen buffer
 │   │   ├── outbound.py          # The one door out: redaction before any AI call
+│   │   ├── parsed.py            # Show output as rows, when a template exists for it (#404)
 │   │   ├── redact.py            # Secret-pattern redaction for logs and prompts
 │   │   ├── transcript.py        # Prompt detection and command segmentation
 ├── frontend/
@@ -144,6 +152,7 @@ shellmate/
 │       ├── broadcast.js         # Send commands to several devices at once
 │       ├── chat.js              # AI chat panel for ShellMate
 │       ├── chat_context.js      # Choose which sessions the assistant can see
+│       ├── config_push.js       # Apply configuration with a preview first (#407)
 │       ├── connections.js       # Connection dialog and profile management
 │       ├── credentials.js       # Managing the passwords ShellMate has been asked to remember
 │       ├── device.js            # Report what ShellMate has worked out about each device
@@ -153,6 +162,7 @@ shellmate/
 │       ├── drift.js             # "This device has changed since you were last here. Want to see?"
 │       ├── feedback.js          # The bug / feature-request reporter (#370)
 │       ├── filepicker.js        # Choosing a file on this machine
+│       ├── forwards.js          # Port forwards on a session (#405)
 │       ├── groups.js            # Groups on the dashboard
 │       ├── highlight.js         # Colour terminal output by regex rule
 │       ├── highlight_settings.js # Editor for the output colour rules
@@ -160,6 +170,7 @@ shellmate/
 │       ├── jira.js              # Conclude Session / Jira integration for ShellMate
 │       ├── keys.js              # Making an SSH key without leaving the application
 │       ├── layout.js            # Tiling. Show several sessions at once instead of one at a time
+│       ├── licence.js           # The Licence section in Settings (#446, #448)
 │       ├── logs.js              # Logs panel for ShellMate
 │       ├── markdown.js          # A small Markdown renderer for the built-in documentation
 │       ├── menu.js              # The one context menu
@@ -176,9 +187,10 @@ shellmate/
 │       ├── stockton.js          # The advanced settings, rendered from the registry
 │       ├── support.js           # Assembling a support request worth answering
 │       ├── tabs.js              # Tab bar management for ShellMate
+│       ├── tabtip.js            # The hover card on a tab (#435)
 │       ├── terminal.js          # xterm.js terminal initialisation for ShellMate
 │       ├── tooltips.js          # The explanation that does not fit on the label
-│       ├── update.js            # The startup release check (#420), when it is switched on
+│       ├── update.js            # Updates, from the user's side (#420, #441, #442–#445, #448)
 │       ├── uptime.js            # How long each session has been up
 │       ├── usage.js             # ShellMate's own footprint, in the status bar (#266)
 │       ├── vault.js             # Unlock prompt and vault settings

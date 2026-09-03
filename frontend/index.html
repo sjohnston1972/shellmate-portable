@@ -1843,6 +1843,50 @@ GigEth0/2     unassigned    YES unset  down     down
         </section>
         <div class="settings-slot" data-category="discovery"></div>
 
+        <!-- ===== Licence (#446) ===== -->
+        <section class="settings-section" id="licence-section">
+          <h3 class="settings-section-title">Licence</h3>
+          <p class="settings-section-hint">ShellMate works without a licence. A licence lets it update itself from inside the application. Keys are verified on this machine; nothing about your devices is sent anywhere.</p>
+
+          <div class="setting-row">
+            <label class="setting-label"
+                   data-tip="Whether a licence key is installed and what it means today: active, in its grace period after expiry, expired, or revoked by the licence service.||Verified against the public key inside the executable, so an air-gapped installation is licensed exactly like a connected one.">Status
+              <span class="setting-hint" id="licence-detail"></span>
+            </label>
+            <span class="setting-value"><span id="licence-status" class="licence-pill licence-grey">…</span></span>
+          </div>
+
+          <div id="licence-have" class="hidden">
+            <div class="licence-grid" id="licence-grid"></div>
+            <div class="setting-row">
+              <label class="setting-label"
+                     data-tip="Asks the licence service about this key: a renewal arrives as a fresh key with no re-entry, and a revocation is learned here.||Only the key's id is sent. An unreachable service leaves the key exactly as it is.">Refresh
+                <span class="setting-hint">Pick up a renewal, or learn of a revocation.</span>
+              </label>
+              <span class="setting-value">
+                <button type="button" id="licence-refresh" class="btn-tertiary">Refresh now</button>
+                <button type="button" id="licence-remove" class="btn-tertiary">Remove key</button>
+              </span>
+            </div>
+          </div>
+
+          <div id="licence-none">
+            <div class="setting-row setting-row-stacked">
+              <label class="setting-label" for="licence-key-input"
+                     data-tip="The key your licence came with — a line starting SM1. Paste it whole, or import the .key file it was sent as.||It is verified on this machine and kept in licence.key in the data folder, never in settings.json.">Licence key
+                <span class="setting-hint">Paste the key, or import the file it came as.</span>
+              </label>
+              <textarea id="licence-key-input" class="setting-input licence-input" rows="3" spellcheck="false" placeholder="SM1.…"></textarea>
+              <div class="licence-actions">
+                <button type="button" id="licence-install" class="btn-primary">Install key</button>
+                <button type="button" id="licence-import" class="btn-secondary">Import .key file</button>
+                <input type="file" id="licence-file-input" class="hidden" accept=".key,.txt" />
+              </div>
+            </div>
+          </div>
+          <p class="setting-hint" id="licence-note"></p>
+        </section>
+
         <!-- ===== Diagnostics ===== -->
         <section class="settings-section">
           <h3 class="settings-section-title">Diagnostics</h3>
@@ -2385,6 +2429,11 @@ GigEth0/2     unassigned    YES unset  down     down
   <!-- ================================================================
        DOCUMENTATION
   ================================================================ -->
+  <!-- The update and what's-new modal (#442, #445): ShellMate's own, not a redirect. -->
+  <div id="update-overlay" class="panel-overlay hidden">
+    <div id="update-box" class="update-box" role="dialog" aria-modal="true" aria-label="Update"></div>
+  </div>
+
   <div id="docs-overlay" class="panel-overlay hidden">
     <div id="docs-panel">
       <div class="panel-header">
@@ -2729,6 +2778,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/chat.js"></script>
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/update.js"></script>
+  <script src="/static/js/licence.js"></script>
   <script src="/static/js/credentials.js"></script>
   <script src="/static/js/discovery.js"></script>
   <script src="/static/js/panel_resize.js"></script>

@@ -165,6 +165,50 @@ The tab menu's toggles under ShellMate Interface gained **Rename tab**,
 **Port forwards** and **Apply configuration**, so any of them can be hidden
 from the menu on a machine where it should not be offered.
 
+## Licence
+
+ShellMate works without a licence. What a licence buys is **updating from
+inside the application**: with a key installed, a newer release can be
+downloaded, verified and swapped in from the update window; without one, the
+window still shows what the new version contains and where to fetch it by
+hand.
+
+A key is a line beginning `SM1.` — paste it into **Settings → Licence**, or
+import the `.key` file it was sent as. It is verified on this machine against
+a public key built into ShellMate, so an air-gapped installation is licensed
+exactly like a connected one; nothing about your devices is sent anywhere,
+and the key lives in `licence.key` in the data folder, never in
+`settings.json`.
+
+The section shows who the key is for, whether it is a personal or an
+organisation key and with how many seats, when it expires, and what it
+covers. **Refresh now** asks the licence service about the key — a renewal
+arrives as a fresh key with no re-entry, and a revocation is learned the
+same way; only the key's id is sent. A key past its expiry is still honoured
+for its **grace period** while a renewal is confirmed, and the status says
+so.
+
+## Updates
+
+ShellMate checks for a newer release shortly after it starts — one request
+carrying the version number, silent when nothing is new, and harmless with
+no internet. The check can be switched off under Stockton → Diagnostics for
+an air-gapped site; **Updates** in the sidebar, **Check for updates** in the
+tray menu and the button under Diagnostics run it on demand.
+
+A newer version opens ShellMate's own window: the version, when it was
+published, its size, the release notes, and **Update now**, **Later** (asks
+again tomorrow) or **Skip this version**. Update now downloads the
+executable into `ShellMate-Data/updates/` with a progress bar and verifies
+it against the checksum published with the release; nothing is executed
+until that matches. **Restart into the new version** then closes ShellMate,
+swaps the file, and starts the new copy — and puts the old one back if the
+new one does not come up. Live sessions are closed by the swap, and it is
+refused while a device has a reload or a commit-confirm pending.
+
+The first launch of a new version opens a **what's new** window with that
+version's notes; the same text is on the What's new page of this manual.
+
 ## Diagnostics
 
 **Version** names the release, the commit it was built from and when — the

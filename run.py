@@ -143,6 +143,13 @@ def main() -> int:
 
     logger.info("%s", app_version.describe())
 
+    # A `.old.exe` beside us means the last update worked (#444).
+    from backend import updater as updater_module  # noqa: E402
+
+    removed = updater_module.tidy_after_launch()
+    if removed:
+        logger.info("Update complete; removed %s", removed)
+
     logger.info("Data directory: %s", paths.data_dir())
     if paths.data_dir_is_fallback():
         logger.warning(

@@ -1675,6 +1675,54 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 .tab-tip-state-up { color: var(--tab-connected, #4ade80); }
 .tab-tip-state-down { color: var(--error, #f38ba8); }
 
+/* The update / what's-new modal (#442, #445). */
+#update-overlay { z-index: 9300; display: flex; align-items: center; justify-content: center; }
+.update-box {
+  width: min(620px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--surface-highest);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.55);
+  padding: 22px 24px;
+}
+.update-head { display: flex; align-items: center; gap: 10px; }
+.update-icon { font-size: 28px; color: var(--primary); }
+.update-title { margin: 0; font-size: 18px; }
+.update-meta { color: var(--on-surface-muted); font-size: 12px; margin: 4px 0 14px 38px; }
+.update-notes {
+  max-height: 38vh; overflow: auto; padding: 10px 14px; margin-bottom: 12px;
+  background: var(--surface-high); border: 1px solid var(--outline); border-radius: var(--radius-sm);
+  font-size: 13px; line-height: 1.5;
+}
+.update-notes h1, .update-notes h2 { font-size: 14px; margin: 8px 0 4px; }
+.update-notes ul { padding-left: 18px; margin: 4px 0; }
+.update-licence { font-size: 12px; padding: 6px 10px; border-radius: var(--radius-sm); margin-bottom: 10px; }
+.update-licence.ok { background: color-mix(in srgb, var(--tab-connected, #4ade80) 18%, transparent); }
+.update-licence.no { background: color-mix(in srgb, var(--error, #f38ba8) 18%, transparent); }
+.update-how { font-size: 12px; color: var(--on-surface-muted); margin: 0 0 12px; }
+.update-progress { margin: 6px 0 12px; }
+.update-bar { height: 8px; background: var(--surface-high); border-radius: 4px; overflow: hidden; }
+.update-bar-fill { height: 100%; width: 0; background: var(--primary); transition: width 0.3s; }
+.update-progress-label { font-size: 12px; color: var(--on-surface-muted); margin-top: 6px; }
+.update-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.update-page-link { margin-left: auto; font-size: 12px; color: var(--on-surface-muted); }
+
+/* The Licence section in Settings (#446). */
+.licence-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.licence-ok { background: color-mix(in srgb, var(--tab-connected, #4ade80) 22%, transparent); }
+.licence-warn { background: color-mix(in srgb, #f9a825 28%, transparent); }
+.licence-bad { background: color-mix(in srgb, var(--error, #f38ba8) 22%, transparent); }
+.licence-grey { background: var(--surface-high); color: var(--on-surface-muted); }
+.licence-grid { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; font-size: 13px; padding: 6px 0 10px; }
+.licence-k { color: var(--on-surface-muted); }
+.licence-v { font-family: 'JetBrains Mono', monospace; font-size: 12px; word-break: break-all; }
+.licence-input { width: 100%; box-sizing: border-box; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+.licence-actions { display: flex; gap: 8px; margin-top: 8px; }
+.setting-row-stacked { flex-direction: column; align-items: stretch; }
+.licence-note-bad { color: var(--error, #f38ba8); }
+
 /* Port forwards dialog (#405) */
 .forwards-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
 .forwards-row { display: flex; align-items: center; justify-content: space-between; gap: 8px;

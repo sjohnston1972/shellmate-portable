@@ -744,15 +744,14 @@ SETTINGS: tuple[Setting, ...] = (
             "`DEBUG` is what support will ask for. It is noisy and the log is "
             "rewritten each launch, so it costs nothing to leave on for one "
             "run.", choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")),
-    Setting("diag.update_check", "Check for a newer release at startup", False, "bool",
+    Setting("diag.update_check", "Check for a newer release at startup", True, "bool",
             "Asks GitHub once, shortly after launch, whether a later version "
             "has been published.",
-            "Off by default because ShellMate is meant to work with no "
-            "internet at all, and a check nobody asked for is a request "
-            "nobody accounted for. It sends the version number and nothing "
-            "else, never downloads anything, and a machine that cannot reach "
-            "GitHub simply logs that and carries on. The button under "
-            "Diagnostics does the same thing on demand (#420)."),
+            "On by default (#442): one request carrying the version number "
+            "and nothing else, silent when nothing is new, and a machine "
+            "that cannot reach GitHub simply logs that and carries on. Switch "
+            "it off on an air-gapped site to save the attempt. Nothing is "
+            "downloaded without pressing Update now."),
     Setting("diag.http_access_log", "Log every HTTP request", False, "bool",
             "Records each call the interface makes to its own API.",
             "Useful when something in the interface is not reaching the "

@@ -60,6 +60,11 @@
    */
   const EXTRAS = [
     {
+      key:   'licence',
+      label: 'Licence key and status',
+      terms: ['licence', 'license', 'key', 'update', 'updates', 'subscription', 'seat', 'seats', 'expiry'],
+    },
+    {
       key:   'ai.prompts',
       label: 'The system prompts',
       terms: ['prompt', 'prompts', 'system prompt', 'persona', 'tshoot', 'learn'],
@@ -327,7 +332,7 @@
       go.className = 'btn-tertiary';
       go.textContent = 'Show me';
       go.addEventListener('click', () => {
-        const target = document.getElementById('prompt-editor-block');
+        const target = document.getElementById(extra.key === 'licence' ? 'licence-section' : 'prompt-editor-block');
         if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
 

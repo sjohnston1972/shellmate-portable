@@ -77,6 +77,8 @@ from backend.ai import chroma_client, providers
 from backend.config import DEFAULT_AI_BACKEND, JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
 from backend import version as app_version
 from backend import config_push, scheduler
+from backend import licence as licence_module
+from backend import updater
 from backend.connections import forwards as forwards_module
 from backend.config import HOST as BIND_HOST
 
@@ -2397,13 +2399,88 @@ async def update_check() -> dict:
         return {"current": current, "error": f"GitHub answered {resp.status_code}."}
     data = resp.json()
     latest = str(data.get("tag_name") or data.get("name") or "")
+    assets = {a.get("name"): a for a in data.get("assets") or []}
+    exe = assets.get(updater.ASSET_NAME) or {}
+    lic = licence_module.status()
     return {
         "current":   current,
         "latest":    latest.lstrip("vV"),
         "newer":     app_version.is_newer(latest, current),
         "url":       data.get("html_url", ""),
         "published": data.get("published_at", ""),
+        # For the in-app modal (#442): the notes, the size, and whether the
+        # download may be started from here (#448).
+        "notes":     data.get("body") or "",
+        "size":      int(exe.get("size") or 0),
+        "has_checksum": updater.CHECKSUM_NAME in assets,
+        "licence":   {"valid": lic["valid"], "state": lic["state"], "detail": lic["detail"]},
     }
+
+
+@app.get("/api/system/update/status")
+async def update_status() -> dict:
+    """Where a download stands (#443)."""
+    return updater.state()
+
+
+@app.post("/api/system/update/download")
+async def update_download() -> dict:
+    """Fetch the latest release into the data folder and verify it (#443)."""
+    try:
+        return await asyncio.to_thread(updater.start_download, app_version.RELEASES_REPO)
+    except PermissionError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/system/update/cancel")
+async def update_cancel() -> dict:
+    return updater.cancel_download()
+
+
+@app.post("/api/system/update/apply")
+async def update_apply(request: Request) -> dict:
+    """Swap the executable and relaunch (#444). Returns only on refusal."""
+    port = request.url.port or 8765
+    try:
+        return await asyncio.to_thread(updater.apply, session_manager, port)
+    except PermissionError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class LicenceKeyRequest(BaseModel):
+    key: str
+
+
+@app.get("/api/licence")
+async def licence_status() -> dict:
+    """What the installed licence means today (#446)."""
+    return licence_module.status()
+
+
+@app.post("/api/licence")
+async def licence_install(request: LicenceKeyRequest) -> dict:
+    """Verify and keep a key."""
+    try:
+        licence_module.install(request.key)
+    except licence_module.LicenceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return licence_module.status()
+
+
+@app.delete("/api/licence")
+async def licence_remove() -> dict:
+    licence_module.remove()
+    return licence_module.status()
+
+
+@app.post("/api/licence/refresh")
+async def licence_refresh() -> dict:
+    """Ask the licence service about the installed key: renewal, revocation."""
+    return await asyncio.to_thread(licence_module.refresh)
 
 
 #: Last CPU sample, for the utilisation delta below. Module state rather than
