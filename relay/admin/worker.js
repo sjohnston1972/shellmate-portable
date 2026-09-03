@@ -121,6 +121,17 @@ async function rateLimited(env, request, bucket) {
   return !success;
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// A spreadsheet cell that cannot become a formula. Excel and LibreOffice
+// evaluate a cell that starts with = + - or @, or with a tab or carriage
+// return before one of them, when a CSV is opened; the name and
+// organisation on the public request page are typed by strangers and land
+// in the portal's exports, which the admin opens (#513). A leading
+// apostrophe makes the cell text. Defined here and embedded in the portal
+// script below so the page and the tests share the one definition.
+function csvCell(value) {
+  const text = String(value == null ? '' : value);
+  return '"' + (/^[=+\-@\t\r]/.test(text) ? "'" + text : text).replace(/"/g, '""') + '"';
+}
 // A request body as an object, {} for no body at all, or null when it is not
 // JSON or not an object. A malformed body used to be read as {} and acted
 // on: `renew` with no expiry signed a perpetual key and un-revoked it, and a
@@ -853,7 +864,8 @@ const main = $('#main');
 function debounce(f, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; }
 function crumbs(...parts) { return '<div class="crumbs">' + parts.map((p, i) => i < parts.length - 1 ? '<a href="#/'+p[1]+'">'+esc(p[0])+'</a> › ' : esc(p[0])).join('') + '</div>'; }
 function back(hash, label) { return '<a class="btn sm" href="#/'+hash+'">← '+esc(label)+'</a>'; }
-function csv(rows, columns, name) { const lines = [columns.join(',')].concat(rows.map(r => columns.map(c => '"'+String(r[c]==null?'':r[c]).replace(/"/g,'""')+'"').join(','))); const a = document.createElement('a'); a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(lines.join('\n')); a.download = name; a.click(); }
+${csvCell}
+function csv(rows, columns, name) { const lines = [columns.join(',')].concat(rows.map(r => columns.map(c => csvCell(r[c])).join(','))); const a = document.createElement('a'); a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(lines.join('\n')); a.download = name; a.click(); }
 
 // ---- router: #/view, #/view/id, #/view?q=
 function route() {
