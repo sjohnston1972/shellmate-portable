@@ -654,14 +654,20 @@
       }
     }
 
-    const ws = tab.websocket;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      appendErrorBubble(`"${tab.label || 'The target session'}" is not connected.`);
+    // Through the terminal's own socket, looked up by session id at send
+    // time (#453). The tab list handed out by tabs.js is a projection with
+    // no socket on it, so `tab.websocket` was always undefined and every
+    // targeted send answered "is not connected" while the tab sat there
+    // connected. The active-tab path only worked because it read a
+    // different object.
+    const clean = cmd.replace(/^[`'"]+|[`'"]+$/g, '').trim();
+    const sent = typeof window.sendCommandToSession === 'function'
+      && window.sendCommandToSession(tab.sessionId, clean);
+    if (!sent) {
+      appendErrorBubble(`"${tab.label || 'The target session'}" is not connected.`
+        + (tab.isConnected ? ' Its terminal has no open socket; try reconnecting the tab.' : ''));
       return;
     }
-
-    const clean = cmd.replace(/^[`'"]+|[`'"]+$/g, '').trim();
-    ws.send(JSON.stringify({ type: 'input', data: clean + '\r' }));
 
     const baselineLines = tab.getBufferLines ? tab.getBufferLines() : 0;
 
