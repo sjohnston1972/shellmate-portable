@@ -11,7 +11,7 @@ import logging
 import threading
 from pathlib import Path
 
-from backend import config as env_config
+from backend import config as env_config, jsonfile
 from backend import paths
 from backend.vault import VaultError, vault
 
@@ -491,9 +491,7 @@ def update_settings(partial: dict) -> dict:
             if field in merged.get("providers", {}):
                 merged["providers"][field] = ""
 
-        settings_file = paths.settings_file()
-        settings_file.parent.mkdir(parents=True, exist_ok=True)
-        settings_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+        jsonfile.write(paths.settings_file(), merged)
     return get_settings_for_ui()
 
 

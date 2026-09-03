@@ -25,13 +25,28 @@ Stored in ``groups.json`` beside the other data files rather than inside
 ``profiles.json``, which is a bare JSON array and stays one.
 """
 
+import functools
 import json
 import logging
 import re
+import threading
 import uuid
 from typing import Any
 
-from backend import paths, profiles as profiles_module
+from backend import jsonfile, paths, profiles as profiles_module
+
+# Every change to a data file is a load → change → save cycle, and two of
+# them at once lose an edit or the whole file (#457). One re-entrant lock
+# per module around each public mutator; jsonfile adds the atomic write.
+_lock = threading.RLock()
+
+
+def _synchronised(fn):
+    @functools.wraps(fn)
+    def inner(*args, **kwargs):
+        with _lock:
+            return fn(*args, **kwargs)
+    return inner
 
 logger = logging.getLogger(__name__)
 
@@ -121,21 +136,15 @@ def _load() -> list[dict]:
     path = _file()
     if not path.exists():
         return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except Exception:
-        # A corrupt groups file must not take the dashboard down with it.
-        # Presentation is the only thing lost; every group still exists,
-        # because the membership lives on the connections.
-        logger.warning("groups.json could not be read; falling back to defaults")
-        return []
+    # A corrupt groups file must not take the dashboard down with it.
+    # Presentation is the only thing lost; every group still exists, because
+    # the membership lives on the connections. jsonfile sets the bad file
+    # aside rather than letting the next save overwrite it.
+    return jsonfile.read(path, [], expect=list)
 
 
 def _save(groups: list[dict]) -> None:
-    path = _file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(groups, indent=2), encoding="utf-8")
+    jsonfile.write(_file(), groups)
 
 
 def _key(name: str) -> str:
@@ -195,6 +204,7 @@ def get_group(key: str) -> dict | None:
     return next((g for g in list_groups() if g["key"] == key), None)
 
 
+@_synchronised
 def create_group(name: str, colour: str = DEFAULT_COLOUR,
                  icon: str = "") -> dict:
     """
@@ -237,6 +247,7 @@ def create_group(name: str, colour: str = DEFAULT_COLOUR,
     return get_group(key)
 
 
+@_synchronised
 def update_group(key: str, changes: dict) -> dict:
     """
     Rename, recolour, favourite or reposition a group.
@@ -341,6 +352,7 @@ def update_group(key: str, changes: dict) -> dict:
     return get_group(entry["key"])
 
 
+@_synchronised
 def delete_group(key: str, delete_connections: bool = False) -> dict:
     """
     Remove a group and everything nested beneath it. **By default the
@@ -398,6 +410,7 @@ def delete_group(key: str, delete_connections: bool = False) -> dict:
             "subgroups": len(doomed) - 1}
 
 
+@_synchronised
 def set_order(keys: list[str]) -> list[dict]:
     """Store a hand-arranged order, front to back."""
     groups = _load()

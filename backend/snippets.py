@@ -27,7 +27,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field, asdict
 
-from backend import paths
+from backend import jsonfile, paths
 
 logger = logging.getLogger(__name__)
 
@@ -328,11 +328,8 @@ def _known_ids() -> set[str]:
     reappear on the next launch.
     """
     path = snippets_path()
-    if not path.exists():
-        return set()
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    document = jsonfile.read(path, None)
+    if document is None:
         return set()
     if isinstance(document, dict):
         return set(document.get("known_builtins") or [])
@@ -369,7 +366,7 @@ def _write_all(snippets: list[Snippet], known: set[str] | None = None) -> None:
         "known_builtins": sorted(known),
         "snippets": [s.as_dict() for s in snippets],
     }
-    path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    jsonfile.write(path, document)
 
 
 def load_snippets() -> list[Snippet]:
@@ -388,10 +385,9 @@ def load_snippets() -> list[Snippet]:
         _write_all(builtins)
         return builtins
 
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.warning("snippets.json is unreadable (%s); using the built-ins", exc)
+    document = jsonfile.read(path, None)
+    if document is None:
+        logger.warning("snippets.json is unreadable; using the built-ins")
         return builtins
 
     # The file was a bare list before it carried "known_builtins". An older

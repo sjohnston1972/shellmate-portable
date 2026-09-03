@@ -15,28 +15,35 @@ profile id and the backend fills the credentials in server-side, so a
 remembered password exists only on disk (encrypted) and in memory during the
 handshake.
 """
+import functools
 import ipaddress
 import json
+import threading
 import uuid
 
-from backend import paths
+from backend import jsonfile, paths
 from backend.vault import VaultError, vault
+
+# Every change to a data file is a load → change → save cycle, and two of
+# them at once lose an edit or the whole file (#457). One re-entrant lock
+# per module around each public mutator; jsonfile adds the atomic write.
+_lock = threading.RLock()
+
+
+def _synchronised(fn):
+    @functools.wraps(fn)
+    def inner(*args, **kwargs):
+        with _lock:
+            return fn(*args, **kwargs)
+    return inner
 
 
 def _load() -> list[dict]:
-    profiles_file = paths.profiles_file()
-    if not profiles_file.exists():
-        return []
-    try:
-        return json.loads(profiles_file.read_text(encoding="utf-8"))
-    except Exception:
-        return []
+    return jsonfile.read(paths.profiles_file(), [], expect=list)
 
 
 def _save(profiles: list[dict]) -> None:
-    profiles_file = paths.profiles_file()
-    profiles_file.parent.mkdir(parents=True, exist_ok=True)
-    profiles_file.write_text(json.dumps(profiles, indent=2), encoding="utf-8")
+    jsonfile.write(paths.profiles_file(), profiles)
 
 
 # Credential fields that may be remembered for a profile. Mirrors
@@ -86,20 +93,11 @@ def _sets_file():
 
 
 def _load_sets() -> list[dict]:
-    path = _sets_file()
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except (OSError, json.JSONDecodeError):
-        return []
+    return jsonfile.read(_sets_file(), [], expect=list)
 
 
 def _save_sets(sets: list[dict]) -> None:
-    path = _sets_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(sets, indent=2), encoding="utf-8")
+    jsonfile.write(_sets_file(), sets)
 
 
 def set_owner(set_id: str) -> str:
@@ -159,6 +157,7 @@ def credential_sets() -> list[dict]:
     return out
 
 
+@_synchronised
 def save_credential_set(name: str, username: str, password: str,
                         storage: str = "vault", set_id: str = "") -> dict:
     """
@@ -191,6 +190,7 @@ def save_credential_set(name: str, username: str, password: str,
     return {**entry, "storage": credential_storage(set_owner(entry["id"]))}
 
 
+@_synchronised
 def delete_credential_set(set_id: str) -> int:
     """
     Forget a named credential, and detach it from anything using it.
@@ -214,6 +214,7 @@ def delete_credential_set(set_id: str) -> int:
     return detached
 
 
+@_synchronised
 def attach_credential_set(profile_id: str, set_id: str) -> bool:
     """Point a profile at a named credential, or at nothing when set_id is ""."""
     profiles = _load()
@@ -403,28 +404,16 @@ def _plaintext_file():
 
 
 def _load_plaintext() -> dict:
-    path = _plaintext_file()
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    return jsonfile.read(_plaintext_file(), {}, expect=dict)
 
 
 def _write_plaintext(data: dict) -> None:
-    path = _plaintext_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    try:
-        # Best effort: no-op on Windows, where the ACL inherited from the
-        # user's own data directory is what actually protects it.
-        path.chmod(0o600)
-    except OSError:
-        pass
+    # 0o600 is best effort: a no-op on Windows, where the ACL inherited from
+    # the user's own data directory is what actually protects it.
+    jsonfile.write(_plaintext_file(), data, mode=0o600)
 
 
+@_synchronised
 def save_plaintext_credentials(profile_id: str, values: dict) -> bool:
     """
     Write a profile's credentials to disk unencrypted, at the user's request.
@@ -445,6 +434,7 @@ def save_plaintext_credentials(profile_id: str, values: dict) -> bool:
     return True
 
 
+@_synchronised
 def _forget_plaintext(profile_id: str) -> None:
     data = _load_plaintext()
     if data.pop(profile_id, None) is not None:
@@ -517,6 +507,7 @@ def read_plaintext_credential(profile_id: str, field: str) -> str:
     return _load_plaintext().get(profile_id, {}).get(field, "")
 
 
+@_synchronised
 def set_credential(profile_id: str, field: str, value: str, storage: str) -> str:
     """
     Save or change one credential, in the store named.
@@ -557,6 +548,7 @@ def set_credential(profile_id: str, field: str, value: str, storage: str) -> str
     return "vault"
 
 
+@_synchronised
 def forget_credential(profile_id: str, field: str) -> bool:
     """Remove one credential from wherever it is. True if anything went."""
     if field not in CREDENTIAL_FIELDS:
@@ -586,6 +578,7 @@ def _clear_vault_credential(profile_id: str, field: str) -> bool:
         return False
 
 
+@_synchronised
 def move_to_vault(profile_id: str) -> list[str]:
     """
     Encrypt every plaintext credential belonging to a profile.
@@ -619,6 +612,7 @@ def move_to_vault(profile_id: str) -> list[str]:
     return [f for f in stored if f in CREDENTIAL_FIELDS and stored[f]]
 
 
+@_synchronised
 def forget_all_plaintext() -> int:
     """Empty the plaintext store. Returns how many profiles it held."""
     data = _load_plaintext()
@@ -707,6 +701,7 @@ def _absorb(kept: dict, duplicate: dict, overwrite: bool = False) -> None:
             kept[key] = value
 
 
+@_synchronised
 def dedupe_existing() -> int:
     """
     Merge duplicates already sitting in profiles.json.
@@ -819,6 +814,7 @@ def all_tags() -> list[dict]:
             for tag, count in sorted(counts.items())]
 
 
+@_synchronised
 def set_tags(profile_id: str, tags) -> list[str]:
     """Replace a connection's tags. Returns what was stored."""
     cleaned = normalise_tags(tags)
@@ -835,6 +831,7 @@ def set_tags(profile_id: str, tags) -> list[str]:
     return []
 
 
+@_synchronised
 def retag_many(renames: dict[str, str]) -> int:
     """
     Rewrite several tags across every connection in one pass (#327).
@@ -888,6 +885,7 @@ def _clean_forward(spec: dict) -> dict | None:
             "host": str(spec.get("host", "")), "port": port}
 
 
+@_synchronised
 def set_forwards(profile_id: str, spec: dict, present: bool) -> list[dict]:
     """Add or drop one forward on a profile (#405)."""
     cleaned = _clean_forward(spec)
@@ -904,6 +902,7 @@ def set_forwards(profile_id: str, spec: dict, present: bool) -> list[dict]:
     return current
 
 
+@_synchronised
 def replace_forwards(profile_id: str, forwards: list) -> dict:
     """Replace a profile's forwards outright."""
     profiles = _load()
@@ -988,6 +987,7 @@ SECRET_FIELDS = {
 }
 
 
+@_synchronised
 def save_profile(fields: dict) -> dict:
     """
     Save a connection profile.
@@ -1037,6 +1037,7 @@ def _looks_like_an_address(name: str) -> bool:
         return False
 
 
+@_synchronised
 def record_detected_hostname(target: str, port: int, username: str, detected: str) -> bool:
     """
     Note the device's real name against the profile used to reach it.
@@ -1098,6 +1099,7 @@ def record_detected_hostname(target: str, port: int, username: str, detected: st
 
 
 
+@_synchronised
 def remember_platform(target: str, port: int, username: str, platform: str) -> bool:
     """
     Note what the user said a device is, against the profile used to reach it.
@@ -1147,6 +1149,7 @@ def remember_platform(target: str, port: int, username: str, platform: str) -> b
     return changed
 
 
+@_synchronised
 def remembered_platform(hostname: str, port: int, username: str) -> str:
     """
     What the user last said this device is, or "".
@@ -1205,6 +1208,7 @@ def delete_untagged() -> int:
     return _delete_where(lambda p: not normalise_tags(p.get("tags")))
 
 
+@_synchronised
 def _delete_where(predicate) -> int:
     """
     Remove every profile the predicate matches, and its credentials.

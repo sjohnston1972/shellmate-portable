@@ -29,7 +29,7 @@ import json
 import logging
 from dataclasses import dataclass, field, asdict
 
-from backend import paths
+from backend import jsonfile, paths
 
 logger = logging.getLogger(__name__)
 
@@ -545,7 +545,7 @@ def load_profiles(refresh: bool = False) -> dict[str, PlatformProfile]:
         _write_defaults(path)
     else:
         try:
-            stored = json.loads(path.read_text(encoding="utf-8"))
+            stored = jsonfile.read(path, {}, expect=dict)
             for key, values in (stored.get("platforms") or {}).items():
                 if not isinstance(values, dict):
                     continue
@@ -609,8 +609,7 @@ def _write_defaults(path) -> None:
         "platforms": {key: profile.as_dict() for key, profile in BUILTIN.items()},
     }
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        jsonfile.write(path, document)
         logger.info("Wrote default platform definitions to %s", path)
     except OSError as exc:
         logger.warning("Could not write platform definitions: %s", exc)
@@ -704,8 +703,7 @@ def _write_all(profiles: dict[str, PlatformProfile]) -> None:
     }
     path = profiles_path()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        jsonfile.write(path, document)
     except OSError as exc:
         raise ValueError(f"Could not write {path.name}: {exc}") from exc
 
