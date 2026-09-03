@@ -241,13 +241,27 @@ async function logEvent(env, licenceId, kind, detail) {
   await env.DB.prepare('INSERT INTO events (licence_id, at, kind, detail) VALUES (?1, ?2, ?3, ?4)')
     .bind(licenceId, Date.now(), kind, clean(detail, 500)).run();
 }
-// The licence row plus what the installations say about it.
-const LICENCE_COLS = `licences.*,
-  (SELECT COUNT(*) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) AS installs,
-  (SELECT MIN(first_seen) FROM activations a WHERE a.licence_id = licences.id) AS first_activated,
-  (SELECT MAX(last_seen) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) AS last_seen`;
+// The licence row plus what the installations say about it. The
+// installation figures come from one grouped pass over activations joined
+// on, not three correlated subqueries per row: D1 bills rows read, and the
+// old shape was up to four probes per licence on every list (#509). The
+// join is scoped to one licence when only one is wanted, so a single lookup
+// does not aggregate the whole table.
+function installsJoin(scoped = false) {
+  return `LEFT JOIN (SELECT licence_id, SUM(removed_at IS NULL) AS installs, MIN(first_seen) AS first_activated,
+                            MAX(CASE WHEN removed_at IS NULL THEN last_seen END) AS last_seen
+                     FROM activations${scoped ? ' WHERE licence_id = ?1' : ''} GROUP BY licence_id) i ON i.licence_id = licences.id`;
+}
+const LICENCE_COLS = 'licences.*, COALESCE(i.installs, 0) AS installs, i.first_activated, i.last_seen';
 async function getLicence(env, id) {
-  return env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences WHERE id = ?1`).bind(id).first();
+  return env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences ${installsJoin(true)} WHERE licences.id = ?1`).bind(id).first();
+}
+// Paging on the licence list: newest first, the cursor naming the last row
+// seen as created_at:id so a page boundary between two rows created in the
+// same millisecond is still exact. Anything unparseable is no cursor.
+function parseCursor(text) {
+  const m = /^(\d{1,16}):([\w-]{1,64})$/.exec(clean(text, 100));
+  return m ? { at: Number(m[1]), id: m[2] } : null;
 }
 function publicRow(row) {
   if (!row) return null;
@@ -481,8 +495,8 @@ async function adminApi(request, env, path) {
     ]);
     const [versions, unactivated, overSeats] = await Promise.all([
       env.DB.prepare("SELECT version, COUNT(*) AS n FROM activations WHERE removed_at IS NULL GROUP BY version ORDER BY version DESC").all(),
-      env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences WHERE revoked = 0 AND (expires = '' OR expires >= ?1) AND created_at <= ?2 AND NOT EXISTS (SELECT 1 FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) ORDER BY created_at`).bind(t, Date.now() - 7 * 86400000).all(),
-      env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences WHERE revoked = 0 AND seats < (SELECT COUNT(*) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) ORDER BY installs DESC`).all(),
+      env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences ${installsJoin()} WHERE revoked = 0 AND (expires = '' OR expires >= ?1) AND created_at <= ?2 AND COALESCE(i.installs, 0) = 0 ORDER BY created_at LIMIT 500`).bind(t, Date.now() - 7 * 86400000).all(),
+      env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences ${installsJoin()} WHERE revoked = 0 AND seats < COALESCE(i.installs, 0) ORDER BY installs DESC LIMIT 500`).all(),
     ]);
     const buckets = { d30: 0, d60: 0, d90: 0 };
     for (const l of expiring.results) {
@@ -525,12 +539,20 @@ async function adminApi(request, env, path) {
     else if (status === 'expiring') { where.push("revoked = 0 AND expires != '' AND expires >= ? AND expires <= ?"); args.push(t, addDays(30)); }
     else if (status === 'expired') { where.push("revoked = 0 AND expires != '' AND expires < ?"); args.push(t); }
     else if (status === 'revoked') { where.push('revoked = 1'); }
-    else if (status === 'activated') { where.push("revoked = 0 AND (expires = '' OR expires >= ?) AND EXISTS (SELECT 1 FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL)"); args.push(t); }
-    else if (status === 'unactivated') { where.push("revoked = 0 AND (expires = '' OR expires >= ?) AND NOT EXISTS (SELECT 1 FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL)"); args.push(t); }
-    else if (status === 'overseats') { where.push('revoked = 0 AND seats < (SELECT COUNT(*) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL)'); }
-    const sql = `SELECT ${LICENCE_COLS} FROM licences` + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY created_at DESC LIMIT 1000';
-    const rows = await env.DB.prepare(sql).bind(...args).all();
-    return json(200, { licences: rows.results.map(publicRow) });
+    else if (status === 'activated') { where.push("revoked = 0 AND (expires = '' OR expires >= ?) AND COALESCE(i.installs, 0) > 0"); args.push(t); }
+    else if (status === 'unactivated') { where.push("revoked = 0 AND (expires = '' OR expires >= ?) AND COALESCE(i.installs, 0) = 0"); args.push(t); }
+    else if (status === 'overseats') { where.push('revoked = 0 AND seats < COALESCE(i.installs, 0)'); }
+    const cursor = parseCursor(url.searchParams.get('cursor'));
+    if (cursor) { where.push('(created_at < ? OR (created_at = ? AND licences.id < ?))'); args.push(cursor.at, cursor.at, cursor.id); }
+    const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit'), 10) || 200));
+    // One more than asked for says whether there is a next page without a
+    // second COUNT query; it is not returned.
+    const sql = `SELECT ${LICENCE_COLS} FROM licences ${installsJoin()}` + (where.length ? ' WHERE ' + where.join(' AND ') : '')
+              + ` ORDER BY created_at DESC, licences.id DESC LIMIT ${limit + 1}`;
+    const rows = (await env.DB.prepare(sql).bind(...args).all()).results;
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    return json(200, { licences: page.map(publicRow), next_cursor: rows.length > limit ? `${last.created_at}:${last.id}` : '' });
   }
 
   if (path === '/admin/api/licences' && method === 'POST') {
@@ -794,20 +816,27 @@ async function licences(params) {
    + '<div class="panel"><div class="bar"><input type="search" id="q" placeholder="Search by name, email, id or notes…" value="'+esc(q)+'"><select id="status"><option value="">Any status</option><option value="active">Active</option><option value="expiring">Expiring in 30 days</option><option value="activated">Activated</option><option value="unactivated">Never activated</option><option value="overseats">Over seats</option><option value="expired">Expired</option><option value="revoked">Revoked</option></select><select id="kind"><option value="">Any kind</option><option value="person">Person</option><option value="org">Organisation</option></select><span id="count" class="hint"></span></div><table><thead><tr>'
    + [['licensee','Licensee'],['kind','Kind'],['seats','Seats'],['issued','Issued'],['expires','Expires'],['status','Status'],['installs','Installed'],['last_refresh','Last refresh'],['last_sent','Emailed']].map(([c,t]) => '<th class="sort" data-col="'+c+'">'+t+'<span class="dir"></span></th>').join('') + '</tr></thead><tbody id="rows"></tbody></table></div>';
   $('#status').value = st; $('#kind').value = kind;
-  let rows = [];
+  let rows = [], next = '', seq = 0, lastKey = null;
+  const query = () => new URLSearchParams({q: $('#q').value, status: $('#status').value, kind: $('#kind').value});
+  const page = cursor => api('/admin/api/licences?' + query() + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
   const render = () => {
     const col = sortState.col, dir = sortState.dir;
     const val = l => col === 'status' ? status(l)[1] : (l[col] == null ? '' : l[col]);
     const sorted = rows.slice().sort((a,b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : 0) * dir; });
     document.querySelectorAll('th.sort').forEach(th => th.querySelector('.dir').textContent = th.dataset.col === col ? (dir > 0 ? '▲' : '▼') : '');
-    $('#count').textContent = rows.length + ' shown';
+    $('#count').innerHTML = rows.length + ' shown' + (next ? ' <button class="btn sm" id="more">Load more</button>' : '');
+    if ($('#more')) $('#more').onclick = async () => { $('#more').disabled = true; const d = await page(next); rows = rows.concat(d.licences); next = d.next_cursor || ''; render(); };
     $('#rows').innerHTML = sorted.length ? sorted.map(l => { const [c,t]=status(l); return '<tr class="click" data-id="'+esc(l.id)+'"><td><b>'+esc(l.licensee)+'</b><br><span class="hint">'+esc(l.email)+' · <span class="mono">'+esc(l.id)+'</span>'+(l.source==='request'?' · <span class="pill blue">self-service</span>':'')+'</span></td><td>'+esc(l.kind)+'</td><td>'+l.seats+'</td><td>'+esc(l.issued)+'</td><td>'+esc(l.expires||'never')+'</td><td><span class="pill '+c+'">'+t+'</span></td><td>'+installed(l)+'</td><td class="hint">'+esc(l.last_refresh?when(l.last_refresh)+' ('+l.refresh_count+')':'never')+'</td><td class="hint">'+esc(l.last_sent?when(l.last_sent):'—')+'</td></tr>'; }).join('') : '<tr><td colspan="9" class="empty">No licences match.</td></tr>';
     document.querySelectorAll('tr.click').forEach(r => r.onclick = () => location.hash = '#/licence/'+encodeURIComponent(r.dataset.id));
   };
-  const load = async () => { const p = new URLSearchParams({q: $('#q').value, status: $('#status').value, kind: $('#kind').value}); history.replaceState(null, '', '#/licences?'+p); rows = (await api('/admin/api/licences?'+p)).licences; render(); };
-  $('#q').oninput = debounce(load, 250); $('#status').onchange = load; $('#kind').onchange = load;
+  // The first page only, and not again for the same filters; a slower
+  // earlier answer arriving after a newer one is dropped.
+  const load = async () => { const p = query(); const key = String(p); if (key === lastKey) return; lastKey = key; history.replaceState(null, '', '#/licences?'+p); const mine = ++seq; const d = await page(''); if (mine !== seq) return; rows = d.licences; next = d.next_cursor || ''; render(); };
+  const everything = async () => { let out = rows.slice(), c = next; while (c) { const d = await page(c); out = out.concat(d.licences); c = d.next_cursor || ''; } return out; };
+  $('#q').oninput = debounce(load, 300); $('#status').onchange = load; $('#kind').onchange = load;
   document.querySelectorAll('th.sort').forEach(th => th.onclick = () => { if (sortState.col === th.dataset.col) sortState.dir *= -1; else sortState = {col: th.dataset.col, dir: 1}; render(); });
-  $('#csv').onclick = () => csv(rows.map(l => ({...l, status: status(l)[1], features: l.features.join(' ')})), ['id','licensee','email','kind','seats','issued','expires','status','installs','first_activated','last_seen','grace_days','features','source','refresh_count','last_refresh','sent_count','last_sent','notes'], 'shellmate-licences.csv');
+  // The export is every matching row, following the pages, not just what is on screen.
+  $('#csv').onclick = async () => { $('#csv').disabled = true; try { csv((await everything()).map(l => ({...l, status: status(l)[1], features: l.features.join(' ')})), ['id','licensee','email','kind','seats','issued','expires','status','installs','first_activated','last_seen','grace_days','features','source','refresh_count','last_refresh','sent_count','last_sent','notes'], 'shellmate-licences.csv'); } finally { $('#csv').disabled = false; } };
   await load();
 }
 

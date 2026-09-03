@@ -14,8 +14,9 @@ renewed and revoked, people are recorded, and reports are read.
 - **Refresh**: ShellMate posts its key id to `/licence/refresh` now and then.
   The answer is the current token (a renewal arrives this way with no
   re-entry) or `revoked: true` with the reason.
-- **Records** live in D1 (`schema.sql`, `schema-v2.sql`, `schema-v3.sql`):
-  people, licences, an event log, the portal's settings, and installations.
+- **Records** live in D1 (`schema.sql`, `schema-v2.sql`, `schema-v3.sql`,
+  `schema-v4.sql`, applied in that order): people, licences, an event log,
+  the portal's settings, and installations.
 - **Installations**: a copy of ShellMate reports the machine it is on (name,
   user, platform, version, and a stable hash as id) when a key is entered,
   when it is removed, and at every refresh. The portal shows them on the
@@ -47,6 +48,7 @@ wrangler d1 create shellmate-licences            # paste the id into wrangler.to
 wrangler d1 execute shellmate-licences --remote --file=schema.sql
 wrangler d1 execute shellmate-licences --remote --file=schema-v2.sql
 wrangler d1 execute shellmate-licences --remote --file=schema-v3.sql
+wrangler d1 execute shellmate-licences --remote --file=schema-v4.sql
 wrangler secret put SIGNING_KEY_PKCS8_B64        # Ed25519 private key, PKCS#8 DER, base64
 wrangler secret put ADMIN_PASSWORD               # the portal password
 wrangler secret put SESSION_SECRET               # any long random string
@@ -123,7 +125,7 @@ decision unless every licensee is re-issued.
 | `GET` / `POST /request` | the public | the request page; issues and emails a key when open |
 | `GET /health` | anyone | liveness |
 | `POST /admin/login` | the portal | password → session cookie |
-| `/admin/api/licences` … | the portal (cookie) | list with filters, issue (emails), detail with installations, renew (emails), revoke, restore, send, delete, notes and email; `DELETE …/activations/:machine` forgets one |
+| `/admin/api/licences` … | the portal (cookie) | list with filters, paged (`?limit=`, up to 500, and `?cursor=` from the previous answer's `next_cursor`), issue (emails), detail with installations, renew (emails; `restore: true` to lift a revocation), revoke, restore, send, delete, notes and email; `DELETE …/activations/:machine` forgets one |
 | `/admin/api/users` … | the portal (cookie) | list, add, detail, edit, delete |
 | `/admin/api/reports` | the portal (cookie) | issued per month, by kind and source, renewals due, seats in force |
 | `/admin/api/settings` | the portal (cookie) | email wording, the request page, the overview notice |
