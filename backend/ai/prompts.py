@@ -299,12 +299,14 @@ def build_context_prompt(
             lines.append(table)
         lines.append("")
 
-    # Command history
-    if command_history:
-        lines.append("--- Commands run this session ---")
-        from backend.advanced import get as advanced
+    # Command history. The limit is checked before slicing because
+    # ``history[-0:]`` is the whole list, not none of it (#494).
+    from backend.advanced import get as advanced
 
-        for cmd in command_history[-int(advanced("ai.context_commands")):]:
+    command_limit = int(advanced("ai.context_commands"))
+    if command_history and command_limit > 0:
+        lines.append("--- Commands run this session ---")
+        for cmd in command_history[-command_limit:]:
             lines.append(f"  {cmd}")
         lines.append("")
 

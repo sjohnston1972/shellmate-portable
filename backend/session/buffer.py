@@ -85,10 +85,17 @@ class SessionBuffer:
 
         Args:
             n: Number of lines to return.  Clamped to what is available.
+               Zero or less returns nothing.
 
         Returns:
             List of strings, oldest first.
         """
+        # Zero has to mean none, and slicing does not say so: ``lines[-0:]``
+        # is ``lines[0:]``, the whole buffer. ``ai.context_lines`` is
+        # documented as "zero sends none" and is the setting chosen precisely
+        # to keep device output away from a cloud provider (#494).
+        if n <= 0:
+            return []
         lines = list(self._lines)
         if self._pending:
             lines.append(self._pending)
