@@ -3,10 +3,11 @@ router.py — Routes AI chat requests to the correct backend (Claude / xAI / Ope
 Builds context from session buffers, optionally retrieves design-guideline snippets
 from a configured Chroma vector DB, and streams the response.
 """
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 
-from backend.ai.prompts import build_context_prompt, get_system_prompt
+from backend.ai.prompts import build_context_prompt, build_system_preamble, get_system_prompt
 from backend.ai import chroma_client
 from backend.connections.manager import SessionManager
 from backend.settings_store import get_settings
@@ -70,6 +71,14 @@ async def stream_chat(
     # from previous page loads appearing as phantom tabs in the AI context).
     # Crucially, reorder to match the frontend's visual tab order so that
     # tab numbers in the AI context always match what the user sees on screen.
+    # Optional Chroma-backed design-guideline snippets. Started first and
+    # collected last, so its round trips overlap the rest of the preamble —
+    # the history reads, the parsing — rather than adding to it (#501).
+    # Only queried when a URL is configured; failures are swallowed inside
+    # the client, so the task never raises.
+    design_task = (asyncio.create_task(chroma_client.query_design_guidelines(message))
+                   if chroma_client.is_configured() else None)
+
     all_sessions = session_manager.get_all_sessions()
     if open_session_ids:
         id_set = set(open_session_ids)
@@ -97,8 +106,12 @@ async def stream_chat(
     if active_session_id:
         session = session_manager.get_session(active_session_id)
         if session:
-            device_context = _device_facts(session)
-            parsed_tables = _parsed_tables(session)
+            # Both are synchronous work — two history-database reads and
+            # up to a dozen TextFSM parses — and this runs inside the chat
+            # socket's handler, so they go to a thread rather than holding
+            # every other socket while they finish (#496).
+            device_context = await asyncio.to_thread(_device_facts, session)
+            parsed_tables = await asyncio.to_thread(_parsed_tables, session)
             active_label = (
                 session.get("display_label") or
                 session.get("hostname", active_session_id[:8])
@@ -155,12 +168,9 @@ async def stream_chat(
                         "buffer": _session_text(sess, advanced("ai.extra_context_lines")),
                     })
 
-    # Optional Chroma-backed design-guideline snippets. Only queried when a URL
-    # is configured (settings or env). Failures are swallowed inside the client.
     design_context = ""
-    if chroma_client.is_configured():
-        snippets = await chroma_client.query_design_guidelines(message)
-        design_context = chroma_client.format_for_prompt(snippets)
+    if design_task is not None:
+        design_context = chroma_client.format_for_prompt(await design_task)
 
     effective_mode = (mode or get_settings().get("ai", {}).get("mode") or "tshoot")
     investigation = None
@@ -178,11 +188,17 @@ async def stream_chat(
         device_context=device_context,
         parsed_tables=parsed_tables or None,
         investigation=investigation,
+        stable_in_system=True,
     )
 
-    # Pick persona from explicit mode arg, falling back to stored preference
-    effective_mode = (mode or get_settings().get("ai", {}).get("mode") or "tshoot")
+    # The persona, then the part of the context that holds still between
+    # questions — the tab list and the steady device facts — so the cached
+    # prefix is long enough to be cached at all (#498). Only what changes
+    # travels in the context block above.
     system_prompt = get_system_prompt(effective_mode)
+    preamble = build_system_preamble(sessions_summary, active_label, device_context)
+    if preamble:
+        system_prompt = f"{system_prompt}\n\n{preamble}"
 
     # Route to the correct backend, passing optional model override + system prompt
     if backend == "claude":

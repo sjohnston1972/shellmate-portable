@@ -97,6 +97,39 @@ def render(command: str, rows: list[dict], max_rows: int = MAX_ROWS) -> str:
     return "\n".join(lines)
 
 
+def table_for(platform_id: str, record) -> str | None:
+    """
+    The rendered table for one record, or None when it has no template.
+
+    The output is parsed *after* redaction, through the same door as the
+    raw text (#496). A template whose fields carry a secret — `show snmp
+    community` has a column for the community string — would otherwise
+    hand the model in a clean table exactly what redaction had masked out
+    of the text beside it.
+
+    The result is kept on the record, keyed by the platform and the
+    redaction switch, because a chat message renders up to twelve records
+    whose output has not changed since the last question, and a TextFSM
+    parse is not free.
+    """
+    from backend.session import outbound
+
+    key = ((platform_id or "").lower(), outbound.redaction_enabled())
+    cached = getattr(record, "_parsed_table", None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+
+    command = getattr(record, "command", "") or ""
+    output = outbound.redact_text(getattr(record, "output", "") or "")
+    rows = parse(platform_id, command, output)
+    table = render(command, rows) if rows is not None else None
+    try:
+        record._parsed_table = (key, table)
+    except Exception:                       # a record type that refuses attributes
+        pass
+    return table
+
+
 def tables_for(platform_id: str, records, limit: int = 3) -> list[str]:
     """
     Rendered tables for the most recent records that parse, newest last.
@@ -109,11 +142,8 @@ def tables_for(platform_id: str, records, limit: int = 3) -> list[str]:
     for record in reversed(list(records or [])):
         if len(out) >= limit:
             break
-        command = getattr(record, "command", "") or ""
-        output = getattr(record, "output", "") or ""
-        rows = parse(platform_id, command, output)
-        if rows is None:
-            continue
-        out.append(render(command, rows))
+        table = table_for(platform_id, record)
+        if table is not None:
+            out.append(table)
     out.reverse()
     return out

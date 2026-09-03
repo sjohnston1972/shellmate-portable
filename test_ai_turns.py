@@ -19,6 +19,7 @@ nothing on screen would show:
 """
 
 import asyncio
+import json
 import shutil
 import sys
 import tempfile
@@ -30,7 +31,8 @@ _TEMP = Path(tempfile.mkdtemp(prefix="shellmate-turns-"))
 paths._data_dir_cache = _TEMP
 
 from backend.ai import turns                                    # noqa: E402
-from backend.ai.prompts import build_context_prompt, render_device_facts  # noqa: E402
+from backend.ai.prompts import (                                # noqa: E402
+    build_context_prompt, build_system_preamble, render_device_facts)
 
 passed = 0
 failed: list[str] = []
@@ -76,6 +78,64 @@ def test_history_is_shaped_for_the_apis() -> None:
     check("zero turns means no memory", turns.normalise(raw, max_turns=0) == [])
     check("garbage in the list is ignored",
           turns.normalise([None, 3, {"role": "x", "text": "y"}], max_turns=5) == [])
+
+
+def test_history_is_trimmed_in_blocks() -> None:
+    """A prefix that changes on every request is never read back (#498)."""
+    print("\n-- Trimming in blocks --")
+
+    def conversation(turns_count: int) -> list[dict]:
+        out = []
+        for i in range(1, turns_count + 1):
+            out += [{"role": "user", "text": f"q{i}"}, {"role": "ai", "text": f"a{i}"}]
+        return out
+
+    at_limit = turns.normalise(conversation(8), max_turns=8)
+    check("at the limit nothing is dropped", len(at_limit) == 16, str(len(at_limit)))
+    over = turns.normalise(conversation(9), max_turns=8)
+    check("one over the limit cuts back to four turns, not eight",
+          len(over) == 8 and over[0]["content"] == "q6", str([m["content"] for m in over]))
+    check("  and it stays cut for the next few requests",
+          turns.normalise(conversation(12), max_turns=8)[0]["content"] == "q9"
+          and len(turns.normalise(conversation(12), max_turns=8)) == 8)
+    check("  a whole turn is kept, user first",
+          over[0]["role"] == "user" and over[-1]["role"] == "assistant")
+    small = turns.normalise(conversation(3), max_turns=2)
+    check("a small limit trims by a smaller block",
+          len(small) == 2 and small[0]["content"] == "q3", str(small))
+    check("a limit of one is still one",
+          len(turns.normalise(conversation(5), max_turns=1)) == 2)
+    check("the block sizes", [turns.trim_block(n) for n in (1, 2, 4, 8, 50)] == [0, 1, 2, 4, 4])
+
+
+def test_stable_context_sits_in_the_system_block() -> None:
+    """The persona alone is under the cacheable minimum; the steady facts join it (#498)."""
+    print("\n-- The stable preamble --")
+    sessions = [{"tab_num": 1, "label": "sw1", "hostname": "10.0.0.1", "connection_type": "ssh"}]
+    facts = {"platform": "ios", "name": "Cisco IOS", "confidence": 0.95, "source": "banner",
+             "connection_type": "ssh", "last_capture": "2026-09-01 20:39",
+             "pending": {"kind": "reload", "seconds_left": 90, "cancel_command": "reload cancel"}}
+
+    preamble = build_system_preamble(sessions, "sw1", facts)
+    check("the preamble lists the open sessions",
+          "=== OPEN SESSIONS ===" in preamble and "Tab 1: sw1" in preamble, preamble)
+    check("  and the steady device facts",
+          "Platform: Cisco IOS" in preamble and "last captured" in preamble, preamble)
+    check("  but not the countdown, which changes every message",
+          "PENDING" not in preamble, preamble)
+
+    context = build_context_prompt(sessions, "out", "sw1", [], device_context=facts,
+                                   stable_in_system=True)
+    check("the context block then leaves those out",
+          "OPEN SESSIONS" not in context and "Platform:" not in context, context)
+    check("  and keeps the countdown", "PENDING on this device: reload" in context, context)
+    check("  and the terminal output", "=== ACTIVE SESSION: sw1 ===" in context)
+
+    plain = build_context_prompt(sessions, "out", "sw1", [], device_context=facts)
+    check("without the flag the context block is as it was",
+          "OPEN SESSIONS" in plain and "Platform:" in plain and "PENDING" in plain)
+    check("no sessions still says so, stably",
+          "(no active sessions)" in build_system_preamble([], "", None))
 
 
 def test_provider_shapes() -> None:
@@ -174,12 +234,50 @@ def test_usage_passes_through_the_router() -> None:
           isinstance(got[-1], dict) and got[-1]["usage"]["input"] == 12, str(got))
 
 
+def test_ollama_error_inside_the_stream() -> None:
+    """Ollama reports a mid-stream failure as an error line on a 200 (#500)."""
+    print("\n-- Ollama: an error line on a 200 --")
+    import httpx
+    from backend.ai import ollama_client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        lines = [{"message": {"role": "assistant", "content": "part"}, "done": False},
+                 {"error": "model runner has unexpectedly stopped"}]
+        body = "".join(json.dumps(line) + "\n" for line in lines)
+        return httpx.Response(200, content=body.encode(), headers={"content-type": "application/x-ndjson"})
+
+    real_client = httpx.AsyncClient
+
+    class Patched(real_client):
+        def __init__(self, *a, **kw):
+            kw["transport"] = httpx.MockTransport(handler)
+            super().__init__(*a, **kw)
+
+    ollama_client.httpx.AsyncClient = Patched
+    try:
+        async def go():
+            out = []
+            async for chunk in ollama_client.stream_response("hi", "", model="qwen"):
+                out.append(chunk)
+            return out
+        try:
+            asyncio.run(go())
+            check("the error line raises", False, "the stream ended quietly")
+        except ValueError as exc:
+            check("the error line raises with Ollama's message",
+                  "unexpectedly stopped" in str(exc), str(exc))
+    finally:
+        ollama_client.httpx.AsyncClient = real_client
+
+
 def main() -> int:
     print("=" * 52)
     print("  AI turns, device facts and usage")
     print("=" * 52)
-    for test in (test_history_is_shaped_for_the_apis, test_provider_shapes,
-                 test_device_facts_are_worded_honestly, test_usage_passes_through_the_router):
+    for test in (test_history_is_shaped_for_the_apis, test_history_is_trimmed_in_blocks,
+                 test_stable_context_sits_in_the_system_block, test_provider_shapes,
+                 test_device_facts_are_worded_honestly, test_usage_passes_through_the_router,
+                 test_ollama_error_inside_the_stream):
         try:
             test()
         except Exception as exc:

@@ -189,7 +189,7 @@ def get_system_prompt(mode: str | None) -> str:
     return prompt_store.rendered(mode)
 
 
-def render_device_facts(facts: dict) -> list[str]:
+def render_device_facts(facts: dict, stable: bool = True, volatile: bool = True) -> list[str]:
     """
     One line per thing established, worded for the model.
 
@@ -197,7 +197,22 @@ def render_device_facts(facts: dict) -> list[str]:
     platform/name/version/model/confidence/source from the fingerprint,
     ``pending`` from the alert tracker, ``last_capture`` and ``baseline``
     from the config archive, and the connection type.
+
+    The facts fall into two kinds. The platform, the connection and the
+    archive's record are the same from one question to the next; a pending
+    reload counts down between them. ``stable`` and ``volatile`` pick one
+    or both, so the steady part can sit in the cached system block and the
+    countdown in the fresh context (#498).
     """
+    out: list[str] = []
+    if stable:
+        out.extend(_stable_facts(facts))
+    if volatile:
+        out.extend(_volatile_facts(facts))
+    return out
+
+
+def _stable_facts(facts: dict) -> list[str]:
     out: list[str] = []
     name = facts.get("name") or ""
     platform = facts.get("platform") or ""
@@ -217,6 +232,17 @@ def render_device_facts(facts: dict) -> list[str]:
     if facts.get("connection_type"):
         out.append(f"Connected over {str(facts['connection_type']).upper()}.")
 
+    last = facts.get("last_capture")
+    if last:
+        out.append(f"Configuration last captured by ShellMate: {last}"
+                   + (" (a baseline is set for this device)." if facts.get("baseline") else "."))
+    elif facts.get("capture_enabled") is False:
+        out.append("Configuration capture is switched off; ShellMate holds no snapshot.")
+    return out
+
+
+def _volatile_facts(facts: dict) -> list[str]:
+    out: list[str] = []
     pending = facts.get("pending") or None
     if pending:
         kind = pending.get("kind", "action")
@@ -227,14 +253,47 @@ def render_device_facts(facts: dict) -> list[str]:
         out.append(f"PENDING on this device: {kind.replace('_', ' ')} {when}."
                    + (f" It is cancelled with: {cancel}" if cancel else "")
                    + " Mention this if it bears on the question.")
-
-    last = facts.get("last_capture")
-    if last:
-        out.append(f"Configuration last captured by ShellMate: {last}"
-                   + (" (a baseline is set for this device)." if facts.get("baseline") else "."))
-    elif facts.get("capture_enabled") is False:
-        out.append("Configuration capture is switched off; ShellMate holds no snapshot.")
     return out
+
+
+def _sessions_block(sessions_summary: list[dict]) -> list[str]:
+    lines = ["=== OPEN SESSIONS ==="]
+    if sessions_summary:
+        for s in sessions_summary:
+            lines.append(
+                f"  Tab {s.get('tab_num', '?')}: {s.get('label', 'unknown')} "
+                f"({s.get('hostname', '?')}) — {s.get('connection_type', 'ssh').upper()}"
+            )
+    else:
+        lines.append("  (no active sessions)")
+    return lines
+
+
+def build_system_preamble(
+    sessions_summary: list[dict],
+    active_label: str,
+    device_context: dict | None = None,
+) -> str:
+    """
+    The part of the context that holds still, for the system block (#498).
+
+    The persona prompt alone is about 750 tokens, under Claude's 1,024-token
+    minimum for a cacheable prefix, so the breakpoint on it wrote nothing.
+    The open-sessions list and the steady device facts change only when a
+    tab opens or a fingerprint is refined — the same from one question to
+    the next — so they belong with the persona rather than in the fresh
+    context, where they were re-sent and re-charged on every message.
+    OpenAI and DeepSeek cache a long stable prefix on their own, so the move
+    costs nothing there either.
+    """
+    lines = _sessions_block(sessions_summary)
+    if device_context:
+        facts = render_device_facts(device_context, volatile=False)
+        if facts:
+            lines.append("")
+            lines.append(f"=== DEVICE FACTS: {active_label} ===")
+            lines.extend(f"  {fact}" for fact in facts)
+    return "\n".join(lines)
 
 
 def build_context_prompt(
@@ -247,8 +306,16 @@ def build_context_prompt(
     device_context: dict | None = None,
     parsed_tables: list[str] | None = None,
     investigation: dict | None = None,
+    stable_in_system: bool = False,
 ) -> str:
-    """Build the context block prepended to every user message."""
+    """
+    Build the context block prepended to every user message.
+
+    With ``stable_in_system`` the open-sessions list and the steady device
+    facts are left out, because :func:`build_system_preamble` has put them
+    in the system block; only what changes between questions — the
+    terminal output, a pending countdown — is sent here (#498).
+    """
     lines = []
 
     # Where an investigation stands (#403): how many approved steps have
@@ -265,26 +332,20 @@ def build_context_prompt(
         lines.append("")
 
     # Open sessions summary
-    lines.append("=== OPEN SESSIONS ===")
-    if sessions_summary:
-        for s in sessions_summary:
-            lines.append(
-                f"  Tab {s.get('tab_num', '?')}: {s.get('label', 'unknown')} "
-                f"({s.get('hostname', '?')}) — {s.get('connection_type', 'ssh').upper()}"
-            )
-    else:
-        lines.append("  (no active sessions)")
-    lines.append("")
+    if not stable_in_system:
+        lines.extend(_sessions_block(sessions_summary))
+        lines.append("")
 
     # What ShellMate already knows about the active device (#401). The
     # fingerprint, the alert tracker and the config archive had all worked
     # this out and none of it reached the model, which guessed the vendor
     # from the prompt instead.
     if device_context:
-        lines.append(f"=== DEVICE FACTS: {active_label} ===")
-        for fact in render_device_facts(device_context):
-            lines.append(f"  {fact}")
-        lines.append("")
+        facts = render_device_facts(device_context, stable=not stable_in_system)
+        if facts:
+            lines.append(f"=== DEVICE FACTS: {active_label} ===")
+            lines.extend(f"  {fact}" for fact in facts)
+            lines.append("")
 
     # Active session terminal output
     lines.append(f"=== ACTIVE SESSION: {active_label} ===")
@@ -299,12 +360,14 @@ def build_context_prompt(
             lines.append(table)
         lines.append("")
 
-    # Command history
-    if command_history:
-        lines.append("--- Commands run this session ---")
-        from backend.advanced import get as advanced
+    # Command history. The limit is checked before slicing because
+    # ``history[-0:]`` is the whole list, not none of it (#494).
+    from backend.advanced import get as advanced
 
-        for cmd in command_history[-int(advanced("ai.context_commands")):]:
+    command_limit = int(advanced("ai.context_commands"))
+    if command_history and command_limit > 0:
+        lines.append("--- Commands run this session ---")
+        for cmd in command_history[-command_limit:]:
             lines.append(f"  {cmd}")
         lines.append("")
 

@@ -126,11 +126,49 @@ def test_retry_without_temperature() -> None:
     check("the model is remembered as refusing sampling", "claude-future-9" in claude_client._NO_SAMPLING)
 
 
+def test_error_event_inside_the_stream() -> None:
+    """An overloaded_error can arrive as an event on the 200 (#500)."""
+    print("\n-- An error event on a 200 --")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        events = [
+            {"type": "message_start", "message": {"usage": {"input_tokens": 10}}},
+            {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}},
+        ]
+        stream = "".join(f"data: {json.dumps(e)}\n" for e in events)
+        return httpx.Response(200, content=stream.encode(), headers={"content-type": "text/event-stream"})
+
+    real_client = httpx.AsyncClient
+
+    class Patched(real_client):
+        def __init__(self, *a, **kw):
+            kw["transport"] = httpx.MockTransport(handler)
+            super().__init__(*a, **kw)
+
+    claude_client.httpx.AsyncClient = Patched
+    from backend import settings_store
+    original = settings_store.get_effective
+    claude_client.get_effective = lambda key, fallback: "sk-test"
+    try:
+        async def go():
+            async for _ in claude_client.stream_response("hi", "", model="claude-sonnet-5"):
+                pass
+        try:
+            asyncio.run(go())
+            check("the error event raises", False, "the stream ended quietly")
+        except ValueError as exc:
+            check("the error event raises with Claude's message", "Overloaded" in str(exc), str(exc))
+    finally:
+        claude_client.httpx.AsyncClient = real_client
+        claude_client.get_effective = original
+
+
 def main() -> int:
     print("=" * 52)
     print("  Claude client")
     print("=" * 52)
-    for test in (test_sampling_gate, test_error_mapping, test_retry_without_temperature):
+    for test in (test_sampling_gate, test_error_mapping, test_retry_without_temperature,
+                 test_error_event_inside_the_stream):
         try:
             test()
         except Exception as exc:
