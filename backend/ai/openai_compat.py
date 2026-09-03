@@ -113,6 +113,13 @@ def learn_from_refusal(provider: Provider, payload: dict, body: bytes) -> bool:
     return False
 
 
+def _error_message(error) -> str:
+    """The message out of an error object, whichever shape it takes."""
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("type") or error)[:400]
+    return str(error)[:400]
+
+
 def normalise_usage(u: dict) -> dict:
     """
     The usage object in ShellMate's one shape: ``input`` is the uncached
@@ -187,6 +194,13 @@ async def stream(
                         event = json.loads(data)
                     except json.JSONDecodeError:
                         continue
+                    # A failure after the 200 — a rate limit hit mid-stream,
+                    # a model that fell over — arrives as an error event
+                    # with no choices. Read as text it was an empty reply
+                    # and a clean "done" (#500).
+                    if event.get("error"):
+                        raise ValueError(
+                            f"{provider.label} error: {_error_message(event['error'])}")
                     if event.get("usage"):
                         usage.update(normalise_usage(event["usage"]))
                     choices = event.get("choices") or [{}]

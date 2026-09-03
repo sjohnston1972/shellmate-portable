@@ -191,6 +191,12 @@ async def stream_response(
                             u = event.get("usage") or {}
                             if "output_tokens" in u:
                                 usage["output"] = u["output_tokens"]
+                        elif kind == "error":
+                            # An overloaded_error mid-stream arrives as an
+                            # event on the 200, not as a status (#500).
+                            err = event.get("error") or {}
+                            raise ValueError(
+                                f"Claude error: {err.get('message') or err.get('type') or 'unknown'}")
                     except json.JSONDecodeError:
                         continue
                 break

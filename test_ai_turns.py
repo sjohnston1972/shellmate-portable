@@ -19,6 +19,7 @@ nothing on screen would show:
 """
 
 import asyncio
+import json
 import shutil
 import sys
 import tempfile
@@ -233,13 +234,50 @@ def test_usage_passes_through_the_router() -> None:
           isinstance(got[-1], dict) and got[-1]["usage"]["input"] == 12, str(got))
 
 
+def test_ollama_error_inside_the_stream() -> None:
+    """Ollama reports a mid-stream failure as an error line on a 200 (#500)."""
+    print("\n-- Ollama: an error line on a 200 --")
+    import httpx
+    from backend.ai import ollama_client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        lines = [{"message": {"role": "assistant", "content": "part"}, "done": False},
+                 {"error": "model runner has unexpectedly stopped"}]
+        body = "".join(json.dumps(line) + "\n" for line in lines)
+        return httpx.Response(200, content=body.encode(), headers={"content-type": "application/x-ndjson"})
+
+    real_client = httpx.AsyncClient
+
+    class Patched(real_client):
+        def __init__(self, *a, **kw):
+            kw["transport"] = httpx.MockTransport(handler)
+            super().__init__(*a, **kw)
+
+    ollama_client.httpx.AsyncClient = Patched
+    try:
+        async def go():
+            out = []
+            async for chunk in ollama_client.stream_response("hi", "", model="qwen"):
+                out.append(chunk)
+            return out
+        try:
+            asyncio.run(go())
+            check("the error line raises", False, "the stream ended quietly")
+        except ValueError as exc:
+            check("the error line raises with Ollama's message",
+                  "unexpectedly stopped" in str(exc), str(exc))
+    finally:
+        ollama_client.httpx.AsyncClient = real_client
+
+
 def main() -> int:
     print("=" * 52)
     print("  AI turns, device facts and usage")
     print("=" * 52)
     for test in (test_history_is_shaped_for_the_apis, test_history_is_trimmed_in_blocks,
                  test_stable_context_sits_in_the_system_block, test_provider_shapes,
-                 test_device_facts_are_worded_honestly, test_usage_passes_through_the_router):
+                 test_device_facts_are_worded_honestly, test_usage_passes_through_the_router,
+                 test_ollama_error_inside_the_stream):
         try:
             test()
         except Exception as exc:

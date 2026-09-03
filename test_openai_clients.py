@@ -214,6 +214,28 @@ def test_usage_is_normalised() -> None:
     forget()
 
 
+def test_an_error_inside_the_stream_surfaces() -> None:
+    """A provider that fails after the 200 must not look like an empty answer (#500)."""
+    print("\n-- An error event on a 200 --")
+    forget()
+
+    def mid_stream(body: dict) -> httpx.Response:
+        events = [
+            {"choices": [{"delta": {"content": "part"}}]},
+            {"error": {"message": "Rate limit reached for gpt-4o", "type": "rate_limit_error"}},
+        ]
+        stream = "".join(f"data: {json.dumps(e)}\n" for e in events)
+        return httpx.Response(200, content=stream.encode(), headers={"content-type": "text/event-stream"})
+
+    try:
+        _drive(openai_client, "gpt-4o", mid_stream)
+        check("an error event raises", False, "the stream ended quietly")
+    except ValueError as exc:
+        check("an error event raises with the provider's message",
+              "Rate limit reached" in str(exc), str(exc))
+    forget()
+
+
 def test_a_real_error_still_surfaces() -> None:
     print("\n-- A refusal that is not about a parameter is reported --")
     forget()
@@ -246,7 +268,7 @@ def main() -> int:
     print("=" * 52)
     for test in (test_parameter_gate, test_learns_both_parameters, test_known_family_first_time,
                  test_other_providers_retry_too, test_usage_is_normalised,
-                 test_a_real_error_still_surfaces):
+                 test_an_error_inside_the_stream_surfaces, test_a_real_error_still_surfaces):
         try:
             test()
         except Exception as exc:

@@ -80,6 +80,12 @@ async def stream_response(
                     continue
                 try:
                     event = json.loads(line)
+                    # Ollama reports a failure after the 200 — the model
+                    # could not load, the runner died — as an error line
+                    # with no message and no done; read as text it was an
+                    # empty reply and a clean finish (#500).
+                    if event.get("error"):
+                        raise ValueError(f"Ollama error: {str(event['error'])[:400]}")
                     chunk = event.get("message", {}).get("content", "")
                     if chunk:
                         yield chunk
