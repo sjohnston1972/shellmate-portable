@@ -924,6 +924,10 @@
   function _rememberOpenTabs() {
     if (!window.shellmatePrefs) return;
     window.shellmatePrefs.set('open_tabs', tabs.map(t => ({
+      // The identity, where the tab has one (#487). Restore matches on it
+      // first and falls back to address, port and username only for a tab
+      // opened straight from the dialog.
+      profile_id:      t.profileId || '',
       label:           t.label,
       hostname:        t.hostname || '',
       port:            t.port || 0,
@@ -952,8 +956,15 @@
     const noPassword = [];
     let restored = 0;
 
+    // One download of the list for the whole loop (#487). Each entry used
+    // to fetch it afresh — at estate size 1.64 MB parsed once per tab, at
+    // the moment the backend is busiest opening sessions.
+    const profiles = await _profileList();
+
     for (const entry of remembered) {
-      const profile = await _exactProfileFor(entry);
+      // By identity when the tab recorded one, by resemblance otherwise.
+      const profile = (entry.profile_id && profiles.find(p => p.id === entry.profile_id))
+        || _exactProfileFor(entry, profiles);
 
       // Without saved credentials there is nothing to connect with, and
       // twelve password prompts on startup is not a feature. Named instead —
@@ -1045,6 +1056,7 @@
       const last = recorded[recorded.length - 1];
       if (last) {
         profile = await _profileForQuiet({
+          profileId:      last.profile_id || '',
           label:          last.label,
           hostname:       last.hostname,
           port:           last.port,
@@ -1080,16 +1092,7 @@
    * one was recorded. Anything less is reported as unrestorable, which is a
    * far better outcome than a confident connection to the wrong box.
    */
-  async function _exactProfileFor(entry) {
-    let profiles = [];
-    try {
-      const res = await fetch('/api/profiles');
-      profiles = res.ok ? await res.json() : [];
-    } catch (_) {
-      return null;
-    }
-    if (!Array.isArray(profiles)) profiles = profiles.profiles || [];
-
+  function _exactProfileFor(entry, profiles) {
     const type = entry.connection_type || 'ssh';
     return profiles.find(p =>
       (p.connection_type || 'ssh') === type
@@ -1100,17 +1103,26 @@
   }
 
   async function _profileById(id) {
+    const profiles = await _profileList();
+    return profiles.find(p => p.id === id) || null;
+  }
+
+  /**
+   * The profile list through the shared fetch (#215, #487), as an array.
+   *
+   * A bare array is what the API sends (#310) — `data.profiles` was once
+   * read here and was always undefined, so "New tab opens: chosen profile"
+   * never found its profile. Tolerated either way. A failed fetch is an
+   * empty list: every caller of this treats "no profiles" as the safe
+   * answer, and none of them is the group-tag path, which must not (#215).
+   */
+  async function _profileList() {
     try {
-      const res = await fetch('/api/profiles');
-      if (!res.ok) return null;
-      // A bare array (#310) — `data.profiles` was always undefined here, so
-      // "New tab opens: chosen profile" never found its profile and every
-      // New Tab click silently fell through to an empty dialog.
-      let profiles = await res.json();
-      if (!Array.isArray(profiles)) profiles = profiles.profiles || [];
-      return profiles.find(p => p.id === id) || null;
+      const data = await _allProfiles();
+      if (Array.isArray(data)) return data;
+      return (data && Array.isArray(data.profiles)) ? data.profiles : [];
     } catch (_) {
-      return null;
+      return [];
     }
   }
 
@@ -2123,11 +2135,9 @@
     e.preventDefault();
     _hideTabContextMenu();
 
-    let profiles = [];
-    try {
-      const res = await fetch('/api/profiles');
-      if (res.ok) profiles = await res.json();
-    } catch (_) { /* the New session option still works */ }
+    // Through the shared cache (#487); a failure leaves the list empty and
+    // the New session option still works.
+    const profiles = await _profileList();
 
     const items = [
       { icon: 'add_circle', label: 'New session', onClick: () => {
