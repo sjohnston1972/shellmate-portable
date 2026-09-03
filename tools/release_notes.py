@@ -54,6 +54,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--version", required=True)
     parser.add_argument("--exe", required=True)
     parser.add_argument("--out", default="")
+    parser.add_argument("--unsigned", action="store_true",
+                        help="say in the notes that the build carries no signature (#518)")
     args = parser.parse_args(argv)
 
     exe = Path(args.exe)
@@ -70,6 +72,9 @@ def main(argv: list[str]) -> int:
     if not body:
         body = f"ShellMate {args.version.lstrip('vV')}. See the What's new page in the bundled manual."
     notes = f"{body}\n\n---\n`{exe.name}` SHA-256: `{digest}`\n"
+    if args.unsigned:
+        notes += ("\nThis build is not code-signed (#518). Windows will show an unknown "
+                  "publisher; check the SHA-256 above against the file you downloaded.\n")
     (out_dir / "release-notes.md").write_text(notes, encoding="utf-8")
     print(f"sha256 {digest}")
     print(f"notes  {len(body)} chars")
