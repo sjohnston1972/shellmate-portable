@@ -71,6 +71,14 @@ async def stream_chat(
     # from previous page loads appearing as phantom tabs in the AI context).
     # Crucially, reorder to match the frontend's visual tab order so that
     # tab numbers in the AI context always match what the user sees on screen.
+    # Optional Chroma-backed design-guideline snippets. Started first and
+    # collected last, so its round trips overlap the rest of the preamble —
+    # the history reads, the parsing — rather than adding to it (#501).
+    # Only queried when a URL is configured; failures are swallowed inside
+    # the client, so the task never raises.
+    design_task = (asyncio.create_task(chroma_client.query_design_guidelines(message))
+                   if chroma_client.is_configured() else None)
+
     all_sessions = session_manager.get_all_sessions()
     if open_session_ids:
         id_set = set(open_session_ids)
@@ -160,12 +168,9 @@ async def stream_chat(
                         "buffer": _session_text(sess, advanced("ai.extra_context_lines")),
                     })
 
-    # Optional Chroma-backed design-guideline snippets. Only queried when a URL
-    # is configured (settings or env). Failures are swallowed inside the client.
     design_context = ""
-    if chroma_client.is_configured():
-        snippets = await chroma_client.query_design_guidelines(message)
-        design_context = chroma_client.format_for_prompt(snippets)
+    if design_task is not None:
+        design_context = chroma_client.format_for_prompt(await design_task)
 
     effective_mode = (mode or get_settings().get("ai", {}).get("mode") or "tshoot")
     investigation = None

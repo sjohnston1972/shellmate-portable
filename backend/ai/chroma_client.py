@@ -21,6 +21,7 @@ Implementation notes:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Optional
@@ -32,9 +33,23 @@ from backend.settings_store import get_effective
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT_SECS = 4.0
+_TIMEOUT_SECS = 4.0    # one request, for the health check
 _MAX_RESULTS  = 4
 _MAX_CHARS    = 1500   # cap injected context per snippet
+
+#: The whole lookup, on the path of every chat message (#501). Two round
+#: trips at four seconds each meant a configured host that dropped packets
+#: rather than refusing delayed every answer by eight seconds; a snippet
+#: that cannot be had in two is not worth the wait, and the answer goes
+#: without it.
+_BUDGET_SECS = 2.0
+
+#: Collection ids by (base url, collection name). Chroma's query endpoint
+#: wants the id, and listing every collection to find it was one of the
+#: two round trips on every message (#501). An entry is dropped when a
+#: query answers 404, which is how a collection recreated under the same
+#: name shows up.
+_COLLECTION_IDS: dict[tuple[str, str], str] = {}
 
 
 def get_chroma_url() -> str:
@@ -91,22 +106,42 @@ async def query_design_guidelines(
     base = url.rstrip("/")
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECS) as client:
-            # Resolve the collection ID (Chroma's query endpoints want UUIDs)
-            collection_id = await _resolve_collection_id(client, base, collection_name)
-            if not collection_id:
-                logger.info("Chroma collection %r not found at %s", collection_name, base)
-                return None
-
-            results = await _query_collection(client, base, collection_id, query_text, n_results)
-            return _format_results(results)
-
+        return await asyncio.wait_for(
+            _lookup(base, collection_name, query_text, n_results), timeout=_BUDGET_SECS)
+    except asyncio.TimeoutError:
+        logger.warning("Chroma at %s did not answer within %.1fs; answering without it",
+                       base, _BUDGET_SECS)
+        return None
     except httpx.HTTPError as e:
         logger.warning("Chroma query failed (%s): %s", base, e)
         return None
     except Exception as e:
         logger.warning("Chroma client error: %s", e)
         return None
+
+
+async def _lookup(base: str, collection_name: str, query_text: str, n_results: int) -> Optional[list[dict]]:
+    """Resolve the collection (from cache when possible), then query it."""
+    key = (base, collection_name)
+    async with httpx.AsyncClient(timeout=_TIMEOUT_SECS) as client:
+        collection_id = _COLLECTION_IDS.get(key)
+        if not collection_id:
+            # Resolve the collection ID (Chroma's query endpoints want UUIDs)
+            collection_id = await _resolve_collection_id(client, base, collection_name)
+            if not collection_id:
+                logger.info("Chroma collection %r not found at %s", collection_name, base)
+                return None
+            _COLLECTION_IDS[key] = collection_id
+
+        try:
+            results = await _query_collection(client, base, collection_id, query_text, n_results)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                # The id is stale — the collection was recreated. Forget it,
+                # and the next message resolves it afresh.
+                _COLLECTION_IDS.pop(key, None)
+            raise
+        return _format_results(results)
 
 
 async def _resolve_collection_id(client: httpx.AsyncClient, base: str, name: str) -> str | None:
