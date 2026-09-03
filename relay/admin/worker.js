@@ -248,10 +248,11 @@ function logout() {
 }
 
 // ------------------------------------------------------------------ data
-async function logEvent(env, licenceId, kind, detail) {
-  await env.DB.prepare('INSERT INTO events (licence_id, at, kind, detail) VALUES (?1, ?2, ?3, ?4)')
-    .bind(licenceId, Date.now(), kind, clean(detail, 500)).run();
+function eventStmt(env, licenceId, kind, detail) {
+  return env.DB.prepare('INSERT INTO events (licence_id, at, kind, detail) VALUES (?1, ?2, ?3, ?4)')
+    .bind(licenceId, Date.now(), kind, clean(detail, 500));
 }
+async function logEvent(env, licenceId, kind, detail) { await eventStmt(env, licenceId, kind, detail).run(); }
 // The licence row plus what the installations say about it. The
 // installation figures come from one grouped pass over activations joined
 // on, not three correlated subqueries per row: D1 bills rows read, and the
@@ -305,9 +306,17 @@ async function issue(env, spec) {
   const id = newId(kind === 'org' ? 'org' : 'lic');
   const row = { id, kind, licensee, email, seats, issued, expires, grace_days: grace, features: JSON.stringify(features) };
   const token = await signToken(env, payloadFor(row));
-  await env.DB.prepare(`INSERT INTO licences (id, user_id, kind, licensee, email, seats, issued, expires, grace_days, features, token, notes, created_at, source)
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`)
-    .bind(id, userId, kind, licensee, email, seats, issued, expires, grace, row.features, token, clean(spec.notes, MAX.notes), Date.now(), spec.source || 'admin').run();
+  // With `unless_live`, the insert happens only if no live key exists for
+  // the address — decided inside the one statement, so two requests for
+  // one address arriving together cannot both issue (#512). The loser gets
+  // null and re-sends the winner's key.
+  const guard = spec.unless_live ? " WHERE NOT EXISTS (SELECT 1 FROM licences WHERE lower(email) = lower(?5) AND revoked = 0 AND (expires = '' OR expires >= ?15))" : '';
+  const args = [id, userId, kind, licensee, email, seats, issued, expires, grace, row.features, token, clean(spec.notes, MAX.notes), Date.now(), spec.source || 'admin'];
+  if (spec.unless_live) args.push(today());
+  const r = await env.DB.prepare(`INSERT INTO licences (id, user_id, kind, licensee, email, seats, issued, expires, grace_days, features, token, notes, created_at, source)
+                        SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14${guard}`)
+    .bind(...args).run();
+  if (!r.meta.changes) return null;
   await logEvent(env, id, 'issued', `${kind} · ${seats} seat(s) · expires ${expires || 'never'} · ${spec.source || 'admin'}`);
   return getLicence(env, id);
 }
@@ -374,22 +383,40 @@ function machineOf(body) {
 function describeMachine(m) {
   return `${m.hostname || m.id}${m.user ? ' (' + m.user + ')' : ''}${m.version ? ' · ShellMate ' + m.version : ''}`;
 }
-async function recordInstallation(env, row, machine, ip) {
-  if (!machine) return;
-  const now = Date.now();
-  const existing = await env.DB.prepare('SELECT * FROM activations WHERE licence_id = ?1 AND machine_id = ?2').bind(row.id, machine.id).first();
-  if (!existing) {
-    await env.DB.prepare('INSERT INTO activations (licence_id, machine_id, hostname, user, platform, version, first_seen, last_seen, seen_count, last_ip) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 1, ?8)')
-      .bind(row.id, machine.id, machine.hostname, machine.user, machine.platform, machine.version, now, ip).run();
-    await logEvent(env, row.id, 'activated', describeMachine(machine));
-  } else {
-    await env.DB.prepare('UPDATE activations SET hostname = ?1, user = ?2, platform = ?3, version = ?4, last_seen = ?5, seen_count = seen_count + 1, last_ip = ?6, removed_at = NULL WHERE licence_id = ?7 AND machine_id = ?8')
-      .bind(machine.hostname, machine.user, machine.platform, machine.version, now, ip, row.id, machine.id).run();
-    if (existing.removed_at) await logEvent(env, row.id, 'activated', describeMachine(machine) + ' — back after removal');
-    else if (existing.version !== machine.version && machine.version) await logEvent(env, row.id, 'updated', `${machine.hostname || machine.id} now on ShellMate ${machine.version}`);
+// One upsert, not a SELECT followed by an INSERT or UPDATE: the app announces
+// an activation on install and can refresh from the Settings button at the
+// same moment, and two first contacts for one (licence, machine) used to
+// make the second INSERT hit the primary key and answer 500 (#512). The
+// statements go in one batch — a transaction and a single round trip — with
+// whatever the caller wants written alongside. RETURNING seen_count says
+// whether this call was the first contact even when the SELECT before it
+// raced another request.
+const UPSERT_ACTIVATION = `INSERT INTO activations (licence_id, machine_id, hostname, user, platform, version, first_seen, last_seen, seen_count, last_ip)
+  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 1, ?8)
+  ON CONFLICT(licence_id, machine_id) DO UPDATE SET hostname = excluded.hostname, user = excluded.user, platform = excluded.platform,
+    version = excluded.version, last_seen = excluded.last_seen, seen_count = seen_count + 1, last_ip = excluded.last_ip, removed_at = NULL
+  RETURNING seen_count`;
+async function recordInstallation(env, row, machine, ip, alongside = []) {
+  if (!machine) {
+    if (alongside.length) await env.DB.batch(alongside);
+    return;
   }
-  const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE licence_id = ?1 AND removed_at IS NULL').bind(row.id).first()).n;
-  if (!existing && n > (Number(row.seats) || 1)) await logEvent(env, row.id, 'over-seats', `${n} installations on ${row.seats} seat(s)`);
+  const now = Date.now();
+  const [before, after, count] = await env.DB.batch([
+    env.DB.prepare('SELECT version, removed_at FROM activations WHERE licence_id = ?1 AND machine_id = ?2').bind(row.id, machine.id),
+    env.DB.prepare(UPSERT_ACTIVATION).bind(row.id, machine.id, machine.hostname, machine.user, machine.platform, machine.version, now, ip),
+    env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE licence_id = ?1 AND removed_at IS NULL').bind(row.id),
+    ...alongside,
+  ]);
+  const existing = before.results[0] || null;
+  const fresh = after.results.length ? after.results[0].seen_count === 1 : !existing;
+  const n = count.results[0].n;
+  const events = [];
+  if (fresh) events.push(eventStmt(env, row.id, 'activated', describeMachine(machine)));
+  else if (existing && existing.removed_at) events.push(eventStmt(env, row.id, 'activated', describeMachine(machine) + ' — back after removal'));
+  else if (existing && existing.version !== machine.version && machine.version) events.push(eventStmt(env, row.id, 'updated', `${machine.hostname || machine.id} now on ShellMate ${machine.version}`));
+  if (fresh && n > (Number(row.seats) || 1)) events.push(eventStmt(env, row.id, 'over-seats', `${n} installations on ${row.seats} seat(s)`));
+  if (events.length) await env.DB.batch(events);
   return n;
 }
 
@@ -404,9 +431,9 @@ async function application(request, env, path) {
     const row = await getLicence(env, id);
     if (!row) return json(404, { detail: 'No such licence.' });
     const ip = request.headers.get('CF-Connecting-IP') || '';
-    await env.DB.prepare('UPDATE licences SET last_refresh = ?1, refresh_count = refresh_count + 1, last_ip = ?2 WHERE id = ?3')
-      .bind(Date.now(), ip, id).run();
-    await recordInstallation(env, row, machineOf(body), ip);
+    const touch = env.DB.prepare('UPDATE licences SET last_refresh = ?1, refresh_count = refresh_count + 1, last_ip = ?2 WHERE id = ?3')
+      .bind(Date.now(), ip, id);
+    await recordInstallation(env, row, machineOf(body), ip, [touch]);
     if (row.revoked) return json(200, { id, revoked: true, reason: row.revoked_reason || '' });
     return json(200, { id, revoked: false, token: row.token, expires: row.expires || '' });
   }
@@ -450,18 +477,27 @@ async function publicRequest(request, env) {
   const email = clean(body.email, MAX.email);
   if (!name || !isEmail(email)) return json(400, { detail: 'A name and a valid email address are needed.' });
   if (!mailConfigured(env)) return json(503, { detail: 'Keys are sent by email and email is not configured yet. Contact support@foundry-ns.com.' });
-  // One live key per email: re-send it rather than issuing another.
-  const existing = await env.DB.prepare("SELECT * FROM licences WHERE lower(email) = lower(?1) AND revoked = 0 AND (expires = '' OR expires >= ?2) ORDER BY created_at DESC LIMIT 1")
+  // One live key per email: re-send it rather than issuing another. The
+  // insert itself checks again, so two requests arriving together for one
+  // address cannot both issue — the second finds the first's key and
+  // re-sends that.
+  const liveKey = () => env.DB.prepare("SELECT * FROM licences WHERE lower(email) = lower(?1) AND revoked = 0 AND (expires = '' OR expires >= ?2) ORDER BY created_at DESC LIMIT 1")
     .bind(email, today()).first();
   try {
+    let existing = await liveKey();
+    let row = null;
+    const days = Math.min(3650, Math.max(1, parseInt(settings.request_days, 10) || 30));
+    if (!existing) {
+      row = await issue(env, { kind: settings.request_kind === 'org' ? 'org' : 'person', licensee: name, email,
+                               org: clean(body.org, MAX.org), expires: addDays(days), notes: 'self-service request', source: 'request',
+                               unless_live: true });
+      if (!row) existing = await liveKey();
+    }
     if (existing) {
       await sendKey(env, existing, settings, 'issued');
       await logEvent(env, existing.id, 'requested', `re-sent to ${email}`);
       return json(200, { ok: true, detail: 'A key for that address already exists; it has been sent again.' });
     }
-    const days = Math.min(3650, Math.max(1, parseInt(settings.request_days, 10) || 30));
-    const row = await issue(env, { kind: settings.request_kind === 'org' ? 'org' : 'person', licensee: name, email,
-                                   org: clean(body.org, MAX.org), expires: addDays(days), notes: 'self-service request', source: 'request' });
     await sendKey(env, row, settings, 'issued');
     return json(201, { ok: true, detail: `Your key has been sent to ${email}. It is valid for ${days} days.` });
   } catch (err) {
