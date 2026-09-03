@@ -2940,17 +2940,21 @@ async def broadcast(request: BroadcastRequest) -> dict:
                     sent.append(f"{command}  [held: needs confirmation]")
                     continue
 
+                # Taken before the await (#477): process() resets these on
+                # every call, and a keystroke in this tab during the send
+                # would empty them.
+                completed_commands = list(pipeline.completed_commands)
+                expansion = pipeline.last_expansion
                 await asyncio.to_thread(
                     handler.send, outbound.encode("utf-8", errors="replace"))
                 # The alert tracker has to see "reload in 10" however it was
                 # sent (#330) — typed or broadcast, it schedules the same
                 # reload.
-                for completed in pipeline.completed_commands:
+                for completed in completed_commands:
                     try:
                         session["alerts"].observe_command(completed)
                     except Exception:
                         pass
-                expansion = pipeline.last_expansion
                 sent.append(expansion[1] if expansion else command)
             except Exception as exc:
                 logger.warning("Broadcast to %s failed on %r: %s", label, command, exc)
