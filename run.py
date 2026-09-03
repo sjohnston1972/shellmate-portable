@@ -224,6 +224,7 @@ def main() -> int:
 
     try:
         port = server.find_free_port(HOST, wanted)
+        server.listening_port = port          # for anything that must name it (#479)
     except OSError as exc:
         _fatal(str(exc))
         return 1

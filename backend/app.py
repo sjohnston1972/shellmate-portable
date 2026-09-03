@@ -2452,7 +2452,7 @@ async def system_quit() -> dict:
     except Exception as exc:
         logger.warning("Could not clear the instance lock on quit: %s", exc)
     live = [s.get("display_label") or s.get("hostname") or "a device"
-            for s in session_manager.get_all_sessions() if s.get("connected", True)]
+            for s in session_manager.get_all_sessions() if s.get("is_connected", True)]
     logger.info("Exit requested from the interface; %d session(s) open.", len(live))
 
     def go() -> None:
@@ -2495,7 +2495,11 @@ async def update_cancel() -> dict:
 @app.post("/api/system/update/apply")
 async def update_apply(request: Request) -> dict:
     """Swap the executable and relaunch (#444). Returns only on refusal."""
-    port = request.url.port or 8765
+    # The port the server actually bound (#479): behind a proxy the request
+    # URL may carry none, and a hardcoded 8765 made the helper poll the
+    # wrong port for 90 s and roll the update back.
+    from backend import server as server_module
+    port = getattr(server_module, "listening_port", None) or request.url.port or 8765
     try:
         return await asyncio.to_thread(updater.apply, session_manager, port)
     except PermissionError as exc:
@@ -3819,7 +3823,9 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
     if handler.is_connected and not session.get("is_connected"):
         session["is_connected"] = True
 
-    hostname_sent = False  # Only send hostname_detected once per session
+    # Once per *session*, not per socket (#479): a browser refresh used to
+    # re-run the profile rewrite and the store update.
+    session.setdefault("_hostname_sent", False)
 
     async def read_from_client() -> None:
         """Forward browser keystrokes / resize events to the device."""
@@ -4176,7 +4182,6 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
 
     async def read_from_channel() -> None:
         """Forward device output to the browser and the session buffer."""
-        nonlocal hostname_sent
         def _recv_and_bank() -> bytes | None:
             """
             recv() whose bytes survive the awaiting task being cancelled.
@@ -4346,13 +4351,13 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 # Name the tab after the device. Uses the shared cross-vendor
                 # prompt parser, so Junos and PAN-OS are recognised as well as
                 # IOS — the old pattern here understood Cisco only.
-                if not hostname_sent:
+                if not session.get("_hostname_sent"):
                     detected = detect_hostname(text)
                     if detected:
                         await websocket.send_text(
                             json.dumps({"type": "hostname_detected", "hostname": detected})
                         )
-                        hostname_sent = True
+                        session["_hostname_sent"] = True
                         # Connections are often opened by IP, so recording the
                         # real name is what makes searching by device work.
                         store.submit(store.update_session_hostname, session_id, detected)

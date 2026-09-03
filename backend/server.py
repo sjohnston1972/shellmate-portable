@@ -23,6 +23,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
+
+# The port this process bound, set by run.py once chosen (#479).
+listening_port = None
 from pathlib import Path
 
 from backend import paths
