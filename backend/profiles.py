@@ -377,11 +377,30 @@ def credential_storage(owner: str) -> str:
 
 def forget_credentials(profile_id: str) -> None:
     """Remove every remembered credential for a profile, from both stores."""
+    forget_many([profile_id])
+
+
+@_synchronised
+def forget_many(profile_ids) -> None:
+    """
+    Forget the credentials of several connections in one pass (#460): one
+    vault write covering every key, and one plaintext write, rather than a
+    full re-encryption of the vault per connection.
+    """
+    ids = [p for p in profile_ids if p]
+    if not ids:
+        return
     try:
-        vault.set_many({_credential_key(profile_id, f): "" for f in CREDENTIAL_FIELDS})
+        vault.set_many({_credential_key(pid, f): "" for pid in ids for f in CREDENTIAL_FIELDS})
     except VaultError:
         pass
-    _forget_plaintext(profile_id)
+    data = _load_plaintext()
+    dropped = False
+    for pid in ids:
+        if data.pop(pid, None) is not None:
+            dropped = True
+    if dropped:
+        _write_plaintext(data)
 
 
 # ---------------------------------------------------------------------------
@@ -1224,6 +1243,5 @@ def _delete_where(predicate) -> int:
     if not removed:
         return 0
     _save(kept)
-    for profile_id in removed:
-        forget_credentials(profile_id)
+    forget_many(removed)
     return len(removed)

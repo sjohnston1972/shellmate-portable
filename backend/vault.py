@@ -334,14 +334,25 @@ class Vault:
         self._write(entries)
 
     def set_many(self, values: dict[str, str]) -> None:
-        """Store several secrets in one write."""
+        """
+        Store several secrets in one write — or none, when nothing changes.
+
+        Forgetting credentials a connection never had used to re-encrypt and
+        rewrite the whole vault anyway; deleting a 200-device group did that
+        200 times (#460).
+        """
         entries = self._ensure_loaded()
+        changed = False
         for key, value in values.items():
             if value:
-                entries[key] = value
-            else:
-                entries.pop(key, None)
-        self._write(entries)
+                if entries.get(key) != value:
+                    entries[key] = value
+                    changed = True
+            elif key in entries:
+                entries.pop(key)
+                changed = True
+        if changed:
+            self._write(entries)
 
     def delete(self, key: str) -> None:
         """Remove a secret."""
