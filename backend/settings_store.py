@@ -6,6 +6,7 @@ Settings are stored in settings.json in the portable data directory
 Also provides effective-config helpers — settings.json overrides .env values
 for API keys, model URLs, and the Chroma DB URL.
 """
+import copy
 import json
 import logging
 import threading
@@ -365,6 +366,80 @@ SECRET_FIELDS = {
 }
 
 
+# The parsed settings, kept until the file changes (#458). Before this every
+# call re-read and re-parsed settings.json — and `advanced()` is called for
+# every line of device output, on the event loop, so a long `show run` on
+# one tab was a thousand file reads that every other tab waited behind.
+# The cache key is the file's identity, mtime and size; update_settings()
+# drops it explicitly as well, since two writes can share a timestamp.
+_cache: dict = {"key": None, "merged": None, "version": 0}
+_cache_lock = threading.Lock()
+
+
+def _file_key(settings_file: Path):
+    try:
+        st = settings_file.stat()
+    except OSError:
+        return ("absent", str(settings_file))
+    return (str(settings_file), st.st_mtime_ns, st.st_size)
+
+
+def _merged() -> dict:
+    """The effective settings, shared and read-only. Callers must not mutate."""
+    settings_file = paths.settings_file()
+    key = _file_key(settings_file)
+    with _cache_lock:
+        if _cache["key"] == key and _cache["merged"] is not None:
+            return _cache["merged"]
+    if key[0] == "absent":
+        merged = _deep_merge(DEFAULT_SETTINGS, {})
+    else:
+        try:
+            stored = jsonfile.read(settings_file, {}, expect=dict)
+            # A corrupt file is set aside by jsonfile, so this is now a first
+            # run in every sense: current defaults, not the legacy ones.
+            if not settings_file.exists():
+                merged = _deep_merge(DEFAULT_SETTINGS, {})
+            else:
+                merged = _deep_merge(DEFAULT_SETTINGS, _honour_legacy_defaults(stored))
+        except Exception:
+            merged = _deep_merge(DEFAULT_SETTINGS, {})
+    with _cache_lock:
+        _cache["key"] = key
+        _cache["merged"] = merged
+        _cache["version"] += 1
+    return merged
+
+
+def invalidate() -> None:
+    """Forget the cached settings; the next read parses the file again."""
+    with _cache_lock:
+        _cache["key"] = None
+
+
+def settings_version() -> int:
+    """
+    A number that changes whenever the settings are re-read. Anything that
+    derives something expensive from a setting — a compiled regex, say —
+    can keep its result until this moves rather than asking every time.
+    """
+    _merged()
+    return _cache["version"]
+
+
+def peek(section: str, key: str | None = None, default=None):
+    """
+    One value straight from the cached settings, without the copy that
+    get_settings() makes. For hot paths that only read.
+    """
+    block = _merged().get(section)
+    if key is None:
+        return block if block is not None else default
+    if not isinstance(block, dict):
+        return default
+    return block.get(key, default)
+
+
 def get_settings() -> dict:
     """
     Return raw stored settings deep-merged over the defaults.
@@ -372,15 +447,11 @@ def get_settings() -> dict:
     A settings file that exists but predates a setting keeps that setting's
     old default — see :data:`LEGACY_DEFAULTS`. Only a first run, where there
     is no file at all, gets the current one.
+
+    The result is a copy, because callers have always been free to change
+    what they get back; the shared parse behind it is never handed out.
     """
-    settings_file = paths.settings_file()
-    if not settings_file.exists():
-        return _deep_merge(DEFAULT_SETTINGS, {})
-    try:
-        stored = json.loads(settings_file.read_text(encoding="utf-8"))
-        return _deep_merge(DEFAULT_SETTINGS, _honour_legacy_defaults(stored))
-    except Exception:
-        return _deep_merge(DEFAULT_SETTINGS, {})
+    return copy.deepcopy(_merged())
 
 
 def _honour_legacy_defaults(stored: dict) -> dict:
@@ -492,6 +563,7 @@ def update_settings(partial: dict) -> dict:
                 merged["providers"][field] = ""
 
         jsonfile.write(paths.settings_file(), merged)
+        invalidate()
     return get_settings_for_ui()
 
 

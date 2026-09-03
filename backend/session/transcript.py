@@ -84,7 +84,17 @@ def _active_prompt_re():
     with a log line rather than leaving every session unparseable, which is why
     this is compiled here rather than at import.
     """
-    global _override_source, _override_re
+    global _override_source, _override_re, _override_seen
+    # Once per settings change, not once per line (#458): the version moves
+    # only when settings.json has been re-read.
+    try:
+        from backend.settings_store import settings_version
+        version = settings_version()
+    except Exception:
+        return PROMPT_RE
+    if version == _override_seen:
+        return _override_re or PROMPT_RE
+    _override_seen = version
     try:
         from backend.advanced import get as advanced
         source = str(advanced("history.prompt_pattern") or "")
@@ -128,6 +138,7 @@ def _compile_override(source: str):
     return compiled
 
 
+_override_seen: int = -1          # settings_version() the override was read at
 _override_source: str = ""
 _override_re = None
 

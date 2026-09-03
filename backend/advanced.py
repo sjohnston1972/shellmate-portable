@@ -833,9 +833,10 @@ def get(key: str) -> Any:
     if setting is None:
         raise KeyError(f"'{key}' is not an advanced setting.")
 
-    from backend.settings_store import get_settings
+    from backend.settings_store import peek
 
-    stored = (get_settings().get("advanced") or {})
+    # Read-only, from the cached parse: this runs per line of output (#458).
+    stored = peek("advanced") or {}
     if key not in stored:
         return setting.default
     return setting.clamp(stored[key])
