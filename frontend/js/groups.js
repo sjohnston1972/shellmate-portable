@@ -114,14 +114,31 @@
   // second, so the redraw used the state it was meant to invalidate and only
   // the *next* render was right. Both halves are here now, in the order they
   // have to happen (#203).
+  //
+  // Coalesced, and only while the dashboard is in front (#483). Every open,
+  // close and drop fires this, and "Connect all" on a forty-device group
+  // fired it eighty times while the terminals, not the dashboard, were on
+  // screen — each one emptying and rebuilding the whole tree. Hidden, the
+  // state is marked stale and nothing is drawn: showDashboard() renders on
+  // the way back in, and reads the live state then.
+  let _sessionsTimer = null;
   window.addEventListener('shellmate:sessions-changed', () => {
     liveStale = true;
-    // The tiles, not a re-fetch: which sessions are open cannot change which
-    // connections are saved, and re-reading 5,000 profiles on every drop
-    // would undo #188.
-    if (typeof window.renderWelcomeTiles === 'function') {
-      window.renderWelcomeTiles();
-    }
+    clearTimeout(_sessionsTimer);
+    _sessionsTimer = setTimeout(() => {
+      _sessionsTimer = null;
+      // Checked when the timer fires, not when the event arrived: createTab
+      // fires the event and then hides the dashboard, in that order.
+      const shown = typeof window.dashboardVisible === 'function'
+        ? window.dashboardVisible() : true;
+      if (!shown) return;
+      // The tiles, not a re-fetch: which sessions are open cannot change
+      // which connections are saved, and re-reading 5,000 profiles on every
+      // drop would undo #188.
+      if (typeof window.renderWelcomeTiles === 'function') {
+        window.renderWelcomeTiles();
+      }
+    }, 120);
   });
 
   function active() { return activeGroup; }
@@ -241,7 +258,7 @@
       [...selected].filter(k => groupCache.some(g => g.key === k)));
     if (anchor && !groupCache.some(g => g.key === anchor)) anchor = '';
 
-    if (liveStale) await _loadLive();
+    if (liveStale) _loadLive();
     renderTree(profiles || []);
   }
 
@@ -381,20 +398,23 @@
   let liveProfiles = new Set();
   let liveKeys = new Set();
 
-  async function _loadLive() {
-    try {
-      const res = await fetch('/api/sessions');
-      const list = res.ok ? await res.json() : [];
-      const open = list.filter(s => s.is_connected);
-      liveStale = false;
-      liveProfiles = new Set(open.map(s => s.profile_id).filter(Boolean));
-      liveKeys = new Set(open
-        .filter(s => !s.profile_id)
-        .map(s => `${(s.address || s.hostname || '').toLowerCase()}:${s.port || 0}`));
-    } catch (_) {
-      liveProfiles = new Set();
-      liveKeys = new Set();
-    }
+  /**
+   * Read the live state from the tab strip rather than /api/sessions (#483).
+   *
+   * The tabs already carry the profile id, the dialled address, the port
+   * and whether the socket is up — the same fields the fetch returned — and
+   * they are what the event that triggers this was fired about. The fetch
+   * was a round trip per render, and since `liveStale` was only cleared when
+   * it resolved, a burst of drops fired one per event, concurrently.
+   */
+  function _loadLive() {
+    const tabs = typeof window.getOpenTabs === 'function' ? window.getOpenTabs() : [];
+    const open = tabs.filter(t => t.isConnected);
+    liveStale = false;
+    liveProfiles = new Set(open.map(t => t.profileId).filter(Boolean));
+    liveKeys = new Set(open
+      .filter(t => !t.profileId)
+      .map(t => `${(t.address || t.hostname || '').toLowerCase()}:${t.port || 0}`));
   }
 
   /** Is this saved connection open right now? */
@@ -2381,55 +2401,9 @@
   // Dragging
   // -------------------------------------------------------------------------
 
-  let dragKey = '';
-
-  function _bindDrag(tile, group) {
-    tile.addEventListener('dragstart', (e) => {
-      dragKey = group.key;
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', group.key);
-      tile.classList.add('group-dragging');
-    });
-    tile.addEventListener('dragend', () => {
-      dragKey = '';
-      tile.classList.remove('group-dragging');
-      document.querySelectorAll('.group-drop').forEach(
-        el => el.classList.remove('group-drop'));
-    });
-
-    tile.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      tile.classList.add('group-drop');
-    });
-    tile.addEventListener('dragleave', () => tile.classList.remove('group-drop'));
-
-    tile.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      tile.classList.remove('group-drop');
-
-      // A connection dropped on a group joins it. Adding, never moving — it
-      // keeps every other group it was already in.
-      const profileId = e.dataTransfer.getData('application/x-shellmate-profile');
-      if (profileId) {
-        await _addMember(group, profileId);
-        return;
-      }
-
-      // Otherwise a group was dragged, and this is a rearrangement.
-      if (!dragKey || dragKey === group.key) return;
-      const keys = groupCache.map(g => g.key).filter(k => k !== dragKey);
-      keys.splice(keys.indexOf(group.key), 0, dragKey);
-      try {
-        await fetch('/api/groups/order', {
-          method:  'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ keys }),
-        });
-      } catch (_) { /* the order is a preference, not the data */ }
-      _refresh();
-    });
-  }
-
+  // The tile-to-tile drag that used to live here (`_bindDrag`) went with the
+  // group tiles themselves; the tree's chips and leaves bind their own drag
+  // handlers above, and this is what a drop onto a group does.
   async function _addMember(group, profileId) {
     try {
       const res = await fetch(

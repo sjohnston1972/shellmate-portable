@@ -22,6 +22,9 @@
   let contextMode     = 'active'; // 'active' | 'all' | '1'..'9'
   let streamingBubble = null;     // the <div> currently being filled
   const _outputWatchers = new Map();  // active command output watchers, by session (#317)
+  // Auto-analyses that arrived while a reply was still streaming (#489),
+  // sent one at a time as each reply finishes. Dropping them was silent.
+  const _pendingSilent = [];
 
   const QUICK_BUTTONS_KEY  = 'mate:quick-buttons';
   const DEFAULT_QUICK_BTNS = [
@@ -179,13 +182,22 @@
   // WebSocket
   // -----------------------------------------------------------------------
 
+  // Reconnect backoff (#492). Every close used to schedule another attempt
+  // two seconds later, forever — including when the server had refused the
+  // handshake and would refuse the next one the same way, and with the
+  // backend down it was a steady loop of error/close events.
+  const CHAT_RETRY_BASE_MS = 2000;
+  const CHAT_RETRY_MAX_MS  = 30000;
+  let _chatRetries = 0;       // consecutive failures; reset by a successful open
+
   function connectChatWs() {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${window.location.host}/ws/chat`;
     chatWs = new WebSocket(url);
 
+    chatWs.addEventListener('open', () => { _chatRetries = 0; });
     chatWs.addEventListener('message', handleWsMessage);
-    chatWs.addEventListener('close', () => {
+    chatWs.addEventListener('close', (event) => {
       // A drop mid-reply must release the chat (#315): isStreaming stayed
       // true and the send button stayed disabled forever — the reconnected
       // socket was unusable until "Clear chat" happened to be clicked.
@@ -193,8 +205,18 @@
         finishStreaming();
         appendErrorBubble('The connection dropped mid-reply. Reconnecting…');
       }
-      // Reconnect after a delay
-      setTimeout(connectChatWs, 2000);
+      // 1008 is the server saying no — an origin or authentication check
+      // failed. That does not change by asking again; say so and stop.
+      if (event && event.code === 1008) {
+        appendErrorBubble('The server refused the assistant connection. '
+          + 'Reload the page; if it happens again, check the server log.');
+        return;
+      }
+      // Doubling from two seconds, capped at thirty: quick when the server
+      // is restarting, quiet when it is gone.
+      const wait = Math.min(CHAT_RETRY_BASE_MS * Math.pow(2, _chatRetries), CHAT_RETRY_MAX_MS);
+      _chatRetries += 1;
+      setTimeout(connectChatWs, wait);
     });
     chatWs.addEventListener('error', () => {});
   }
@@ -397,11 +419,30 @@
     inputEl.focus();
     scrollToBottom();
     updateContextIndicator();
+
+    // The output of a command approved mid-reply goes next (#489). One at a
+    // time: this runs again when that reply finishes.
+    const queued = _pendingSilent.shift();
+    if (queued) {
+      setTimeout(() => sendSilent(queued.message, queued.sessionId, queued.autoAnalysis), 0);
+    }
   }
 
   function sendSilent(message, sessionId, autoAnalysis) {
-    if (isStreaming) return;
-    if (!chatWs || chatWs.readyState !== WebSocket.OPEN) return;
+    if (isStreaming) {
+      // Approve a command while the previous answer is still streaming —
+      // common in Investigate mode — and its output used to be dropped here
+      // with no message. Queued instead; finishStreaming() sends it.
+      if (autoAnalysis) _pendingSilent.push({ message, sessionId, autoAnalysis });
+      return;
+    }
+    if (!chatWs || chatWs.readyState !== WebSocket.OPEN) {
+      if (autoAnalysis) {
+        appendErrorBubble(`The output of "${autoAnalysis.command}" was not analysed: `
+          + 'the assistant is not connected.');
+      }
+      return;
+    }
     // A convenience, not the guarantee — the server enforces this too, so a
     // page left open cannot keep shipping output after it is switched off.
     if (autoAnalysis && window.shellmateAdvanced
@@ -669,8 +710,6 @@
       return;
     }
 
-    const baselineLines = tab.getBufferLines ? tab.getBufferLines() : 0;
-
     // An approved command is one investigation step (#403). Past the
     // budget the result is not fed back: the model was told to conclude,
     // and a loop that keeps feeding it is how "one more step" never ends.
@@ -684,7 +723,7 @@
         return;
       }
     }
-    startOutputWatcher(clean, baselineLines, tab.sessionId);
+    startOutputWatcher(clean, tab.sessionId);
   }
 
   /** Where an Investigate-mode run stands: approved commands so far. */
@@ -697,7 +736,11 @@
   // Output watcher — feeds command output back to the AI automatically
   // -----------------------------------------------------------------------
 
-  function startOutputWatcher(cmd, baselineLines, sessionId) {
+  // No baseline line count any more (#489): it was read from the tab
+  // projection, which never carries getBufferLines, so it was always 0 —
+  // and nothing in here ever used it. The watcher collects from the event
+  // stream, which needs no baseline.
+  function startOutputWatcher(cmd, sessionId) {
     // One watcher per session, not one global (#317): approving a command on
     // tab B used to silently cancel tab A's still-collecting watcher, and
     // A's analysis never arrived, with no sign why.
@@ -1223,6 +1266,9 @@
     streamingBubble      = null;
     isStreaming          = false;
     sendBtn.disabled     = false;
+    // A cleared chat is a fresh start; output waiting for the old
+    // conversation would be analysed with no conversation to belong to.
+    _pendingSilent.length = 0;
     _resetUsage();
     _investigation.steps = 0;
     // Reset Jira chat history so context estimate resets too

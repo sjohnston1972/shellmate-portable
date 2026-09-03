@@ -183,6 +183,16 @@ its own leaves behind.
 
 ## Coming back after a drop
 
+Not every drop is the device. The link between this window and ShellMate's
+own server can go on its own — the laptop sleeps, the desktop window is hidden
+long enough to be suspended, a proxy times out an idle connection — while the
+session to the device stays up, because it lives in the server, not the
+window. When that happens the tab says *reattaching* rather than going red,
+the socket is reopened with a growing pause between tries, and whatever the
+device said in the meantime is delivered when it reconnects. The tab is
+marked disconnected only when the server says the session has gone, or when
+the server itself cannot be reached for a couple of minutes.
+
 A dropped session keeps its tab so you can still read the buffer. Right-click
 the tab and choose **Reconnect** to bring it back — using the saved password
 if there is one, and asking only if there is not.

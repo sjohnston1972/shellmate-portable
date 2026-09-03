@@ -24,6 +24,16 @@
   let searchTimer = null;
   const SEARCH_DELAY_MS = 250;
 
+  /**
+   * Which search is the current one (#488).
+   *
+   * The debounce stops a query per keystroke; it does not order the replies.
+   * A slow search for "sh" could land after the fast one for "shutdown on
+   * core-1" and replace its results with its own, so every search takes a
+   * number and a reply that is not the latest is dropped.
+   */
+  let searchSeq = 0;
+
   document.addEventListener('DOMContentLoaded', () => {
     overlay       = document.getElementById('history-overlay');
     replayOverlay = document.getElementById('replay-overlay');
@@ -220,11 +230,17 @@
 
     resultsEl.innerHTML = '<div class="history-loading">Searching…</div>';
 
+    const seq = ++searchSeq;
     try {
       const res = await fetch(`/api/history/search?${params.toString()}`);
+      // Superseded while in flight: a newer search owns the results pane.
+      if (seq !== searchSeq) return;
       if (!res.ok) { showMessage('Search failed.'); return; }
-      renderResults(await res.json());
+      const data = await res.json();
+      if (seq !== searchSeq) return;
+      renderResults(data);
     } catch (e) {
+      if (seq !== searchSeq) return;
       showMessage('Could not reach the server.');
     }
   }

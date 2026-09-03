@@ -58,7 +58,19 @@
     const entry = sessions.get(sessionId);
     if (!entry || entry.endedMs !== null) return;
     entry.endedMs = Date.now();
+    // A frozen clock needs no ticks. The ticker used to stop only when the
+    // last session was *forgotten*, so a strip of all-disconnected tabs went
+    // on re-rendering the status bar every second (#491).
+    if (!anyCounting()) stopTicker();
     render();
+  }
+
+  /** Whether any session still has a clock running. */
+  function anyCounting() {
+    for (const entry of sessions.values()) {
+      if (entry.endedMs === null) return true;
+    }
+    return false;
   }
 
   /** Resume counting — a reconnect gets a fresh clock, not the old one. */
@@ -69,17 +81,23 @@
 
   function forget(sessionId) {
     sessions.delete(sessionId);
-    if (!sessions.size) stopTicker();
+    if (!anyCounting()) stopTicker();
     render();
   }
 
+  // One interval, and only while there is something to count and somebody
+  // to see it: through visibility.js (#491), it pauses with the window and
+  // redraws once on the way back so the clock is right immediately.
   function startTicker() {
     if (ticker) return;
-    ticker = setInterval(render, 1000);
+    ticker = window.shellmateVisibility
+      ? window.shellmateVisibility.every(render, 1000)
+      : { handle: setInterval(render, 1000),
+          stop() { clearInterval(this.handle); } };
   }
 
   function stopTicker() {
-    if (ticker) { clearInterval(ticker); ticker = null; }
+    if (ticker) { ticker.stop(); ticker = null; }
   }
 
   /**

@@ -146,7 +146,10 @@
       .filter(r => r && identity(r) !== identity(entry));
     kept.unshift(entry);
     window.shellmatePrefs.set('recent_connections', kept.slice(0, RECENT_MAX));
-    if (typeof window.renderWelcomeTiles === 'function') window.renderWelcomeTiles();
+    // No redraw here (#483). createTab fires `shellmate:sessions-changed` a
+    // moment later, which is the one redraw the dashboard gets per opening —
+    // and it hides the dashboard anyway, so this one was a full tree rebuild
+    // that nobody saw.
   }
 
   function createTab(sessionData) {
@@ -233,7 +236,10 @@
       username:         sessionData.username || '',
       terminalInstance: termData.terminal,
       fitAddon:         termData.fitAddon,
-      websocket:        termData.websocket,
+      // Read through to terminal.js each time rather than copied once: the
+      // socket is replaced when it drops and is reopened (#481), and a copy
+      // taken here would be the dead one for the rest of the session.
+      get websocket()   { return termData.websocket; },
       getBufferLines:   termData.getBufferLines,
       getContextChars:  termData.getContextChars,
       isConnected:      true,
@@ -314,6 +320,10 @@
     // different one — most likely under any ordering but 'opened'.
     const index = tabs.findIndex(t => t.sessionId === session_id);
     switchToTab(index === -1 ? newIndex : index);
+
+    // The caller may want to write to the terminal it just opened (#486) —
+    // the reconnect note depends on it, and returned nothing until now.
+    return tabObj;
   }
 
   /**
@@ -495,8 +505,21 @@
    */
   async function closeTab(index, options) {
     if (index < 0 || index >= tabs.length) return;
+    return _closeTabObject(tabs[index], options);
+  }
 
-    const tab = tabs[index];
+  /**
+   * Close a tab held by identity rather than by position (#482).
+   *
+   * An index is only good until the array changes, and everything in here
+   * awaits. Callers that hold a tab across an await — a reconnect, "close
+   * all", a group disconnect — go through this so that a tab spliced out
+   * meanwhile shifts nothing: the one that closes is the one that was asked
+   * for, or nothing at all if it has already gone.
+   */
+  async function _closeTabObject(tab, options) {
+    if (!tab || !tabs.includes(tab)) return;
+
     // Whatever happens next, this drop is ours. Set before the confirmation
     // rather than after: the socket can close while the dialog is open.
     tab.closingDeliberately = true;
@@ -515,15 +538,25 @@
               'carries on regardless.',
         confirmLabel: 'Close tab',
       });
-      if (!ok) return;
+      if (!ok) {
+        // Thought better of it, so a drop is not ours after all (#485). The
+        // flag was set before the question and never cleared, which left
+        // auto-reconnect switched off for this tab for good — Ctrl+W,
+        // cancel, and hours later the device reloads and the tab silently
+        // never retries. If it dropped while the question was open, the
+        // retry that the flag suppressed is started now.
+        tab.closingDeliberately = false;
+        if (!tab.isConnected) _maybeAutoReconnect(tab);
+        return;
+      }
     }
 
-    // Re-found by sessionId, not trusted by position (#313): the confirm
-    // above is an await, and the array can mutate under it — auto-reconnect
-    // replaces tabs, sortTabs() reorders them. Splicing the captured index
-    // then removed the wrong tab: a live entry vanished from the array while
-    // the closed one lingered, pointing at a disposed terminal.
-    index = tabs.findIndex(t => t === tab);
+    // Found by identity, and only now (#313): the confirm above is an await,
+    // and the array can mutate under it — auto-reconnect replaces tabs,
+    // sortTabs() reorders them. Splicing a captured index removed the wrong
+    // tab: a live entry vanished from the array while the closed one
+    // lingered, pointing at a disposed terminal.
+    const index = tabs.indexOf(tab);
     if (index === -1) return;   // something else already closed it
 
     const { sessionId, websocket, terminalInstance, containerId, tabEl } = tab;
@@ -744,8 +777,10 @@
       return;
     }
 
-    // Ctrl+1 through Ctrl+9 — switch to tab N
-    if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
+    // Ctrl+1 through Ctrl+9 — switch to tab N. Not with Alt held (#484):
+    // Ctrl+Alt+N is layout.js's chord for choosing a split, and without the
+    // exclusion the same keypress switched tabs as well.
+    if (e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') {
       const targetIndex = parseInt(e.key, 10) - 1;
       if (targetIndex < tabs.length) {
         e.preventDefault();
@@ -829,6 +864,11 @@
   function isAppShortcut(e) {
     if (e.ctrlKey && !e.altKey && (e.key === 't' || e.key === 'w')) return true;
     if (e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') return true;
+    // The layout chord (#484). Owned by layout.js, listed here so a focused
+    // terminal hands it back: xterm maps Alt+digit to ESC-digit and stops
+    // propagation, so from the terminal — the usual place to be — the
+    // device received `\x1b3` and layout.js never saw the key.
+    if (e.ctrlKey && e.altKey && !e.shiftKey && e.key >= '1' && e.key <= '9') return true;
     return SHORTCUTS.some(s => s.match(e));
   }
 
@@ -884,6 +924,10 @@
   function _rememberOpenTabs() {
     if (!window.shellmatePrefs) return;
     window.shellmatePrefs.set('open_tabs', tabs.map(t => ({
+      // The identity, where the tab has one (#487). Restore matches on it
+      // first and falls back to address, port and username only for a tab
+      // opened straight from the dialog.
+      profile_id:      t.profileId || '',
       label:           t.label,
       hostname:        t.hostname || '',
       port:            t.port || 0,
@@ -912,8 +956,15 @@
     const noPassword = [];
     let restored = 0;
 
+    // One download of the list for the whole loop (#487). Each entry used
+    // to fetch it afresh — at estate size 1.64 MB parsed once per tab, at
+    // the moment the backend is busiest opening sessions.
+    const profiles = await _profileList();
+
     for (const entry of remembered) {
-      const profile = await _exactProfileFor(entry);
+      // By identity when the tab recorded one, by resemblance otherwise.
+      const profile = (entry.profile_id && profiles.find(p => p.id === entry.profile_id))
+        || _exactProfileFor(entry, profiles);
 
       // Without saved credentials there is nothing to connect with, and
       // twelve password prompts on startup is not a feature. Named instead —
@@ -1005,6 +1056,7 @@
       const last = recorded[recorded.length - 1];
       if (last) {
         profile = await _profileForQuiet({
+          profileId:      last.profile_id || '',
           label:          last.label,
           hostname:       last.hostname,
           port:           last.port,
@@ -1040,16 +1092,7 @@
    * one was recorded. Anything less is reported as unrestorable, which is a
    * far better outcome than a confident connection to the wrong box.
    */
-  async function _exactProfileFor(entry) {
-    let profiles = [];
-    try {
-      const res = await fetch('/api/profiles');
-      profiles = res.ok ? await res.json() : [];
-    } catch (_) {
-      return null;
-    }
-    if (!Array.isArray(profiles)) profiles = profiles.profiles || [];
-
+  function _exactProfileFor(entry, profiles) {
     const type = entry.connection_type || 'ssh';
     return profiles.find(p =>
       (p.connection_type || 'ssh') === type
@@ -1060,17 +1103,26 @@
   }
 
   async function _profileById(id) {
+    const profiles = await _profileList();
+    return profiles.find(p => p.id === id) || null;
+  }
+
+  /**
+   * The profile list through the shared fetch (#215, #487), as an array.
+   *
+   * A bare array is what the API sends (#310) — `data.profiles` was once
+   * read here and was always undefined, so "New tab opens: chosen profile"
+   * never found its profile. Tolerated either way. A failed fetch is an
+   * empty list: every caller of this treats "no profiles" as the safe
+   * answer, and none of them is the group-tag path, which must not (#215).
+   */
+  async function _profileList() {
     try {
-      const res = await fetch('/api/profiles');
-      if (!res.ok) return null;
-      // A bare array (#310) — `data.profiles` was always undefined here, so
-      // "New tab opens: chosen profile" never found its profile and every
-      // New Tab click silently fell through to an empty dialog.
-      let profiles = await res.json();
-      if (!Array.isArray(profiles)) profiles = profiles.profiles || [];
-      return profiles.find(p => p.id === id) || null;
+      const data = await _allProfiles();
+      if (Array.isArray(data)) return data;
+      return (data && Array.isArray(data.profiles)) ? data.profiles : [];
     } catch (_) {
-      return null;
+      return [];
     }
   }
 
@@ -2083,11 +2135,9 @@
     e.preventDefault();
     _hideTabContextMenu();
 
-    let profiles = [];
-    try {
-      const res = await fetch('/api/profiles');
-      if (res.ok) profiles = await res.json();
-    } catch (_) { /* the New session option still works */ }
+    // Through the shared cache (#487); a failure leaves the list empty and
+    // the New session option still works.
+    const profiles = await _profileList();
 
     const items = [
       { icon: 'add_circle', label: 'New session', onClick: () => {
@@ -2331,7 +2381,6 @@
    */
   async function _reconnectSession(tab, opts) {
     const options = opts || {};
-    const index = tabs.findIndex(t => t.sessionId === tab.sessionId);
 
     let profile = options.profile || null;
     if (!profile) {
@@ -2359,14 +2408,21 @@
           // reconnect. It would not be asked about today — a disconnected tab
           // closes without a word — but saying so keeps this correct if that
           // ever changes, now that closing is asynchronous.
-          if (index !== -1) await closeTab(index, { force: true });
+          //
+          // By identity, not by an index taken at entry (#482). Several of
+          // these run at once — "Reconnect all", the per-tab retry timers —
+          // and each awaits twice before closing. The first to finish is
+          // spliced out, and an index captured before that pointed at
+          // whichever live tab had shifted into its place, which was then
+          // force-closed and deleted on the server while the dead tab stayed.
+          await _closeTabObject(tab, { force: true });
           const fresh = createTab(data);
           // Say so in the terminal. A session that silently reappears leaves
           // you unsure whether the scrollback above the line is from the same
           // boot of the device — which matters a great deal when you are
           // about to reason about what changed.
-          if (options.silent && fresh && fresh.terminal) {
-            fresh.terminal.write(RECONNECTED_NOTE);
+          if (options.silent && fresh && fresh.terminalInstance) {
+            fresh.terminalInstance.write(RECONNECTED_NOTE);
           }
           return true;
         }
@@ -2406,19 +2462,10 @@
    * not an address at all.
    */
   async function _copyAddress(tab) {
-    let address = tab.address || tab.hostname || '';
-    let port = tab.port;
-    try {
-      const res = await fetch('/api/sessions');
-      if (res.ok) {
-        const session = (await res.json())
-          .find(s => s.session_id === tab.sessionId);
-        if (session) {
-          address = session.address || session.hostname || address;
-          port = session.port || port;
-        }
-      }
-    } catch (_) { /* the tab's own copy is a reasonable fallback */ }
+    // The tab's own copy, which is what the session was created from (#493).
+    // This fetched /api/sessions to read back the same two fields.
+    const address = tab.address || tab.hostname || '';
+    const port = tab.port;
 
     if (!address) return;
     const text = (port && port !== 22) ? `${address}:${port}` : address;
@@ -2778,16 +2825,26 @@
     }
   }
 
+  /**
+   * What the two functions below need to know about a session, read from
+   * the tab rather than fetched back from /api/sessions (#493). Every field
+   * was stored on the tab when the session was created; the round trip
+   * returned the same values, and made "what is open" two sources of truth.
+   */
+  function _sessionFromTab(tab) {
+    return {
+      session_id:      tab.sessionId,
+      address:         tab.address || tab.hostname || '',
+      hostname:        tab.hostname || '',
+      port:            tab.port || 0,
+      username:        tab.username || '',
+      connection_type: tab.connectionType || 'ssh',
+      display_label:   tab.label || '',
+    };
+  }
+
   async function _saveConnection(tab) {
-    let session = null;
-    try {
-      const res = await fetch('/api/sessions');
-      if (res.ok) {
-        session = (await res.json())
-          .find(s => s.session_id === tab.sessionId) || null;
-      }
-    } catch (_) { /* nothing to save without it */ }
-    if (!session) return;
+    const session = _sessionFromTab(tab);
 
     const address = session.address || session.hostname || '';
     const isSerial = session.connection_type === 'serial';
@@ -2870,20 +2927,13 @@
   }
 
   async function _duplicateSession(tab) {
-    let session = null;
-    try {
-      const res      = await fetch('/api/sessions');
-      const sessions = await res.json();
-      session = sessions.find(s => s.session_id === tab.sessionId) || null;
-    } catch (err) {
-      console.error('Could not get session for duplicate:', err);
-    }
-    if (!session) return;
+    const session = _sessionFromTab(tab);
 
     // `address` is what was dialled and is never rewritten; `hostname` is
     // what the device calls itself.
     const address = session.address || session.hostname || '';
     const profile = await _profileForQuiet({
+      profileId:      tab.profileId || '',
       connectionType: session.connection_type || 'ssh',
       hostname:       address,
       port:           session.port,
@@ -2943,6 +2993,11 @@
     profileId:      t.profileId || '',
     label:          t.label,
     hostname:       t.hostname,
+    // What was dialled, never rewritten — `hostname` above becomes whatever
+    // the device calls itself. Anything matching a tab to a saved connection
+    // by address needs this one.
+    address:        t.address || t.hostname || '',
+    username:       t.username || '',
     // Address alone does not identify a device — a lab of containers behind
     // one address is distinguished only by port, which is why the group
     // counts match on both. Anything matching sessions to profiles needs it.
@@ -2981,8 +3036,8 @@
    * one onwards. The session id does not move (#181).
    */
   window.closeTabBySessionId = (sessionId, options) => {
-    const idx = tabs.findIndex(t => t.sessionId === sessionId);
-    return idx === -1 ? Promise.resolve() : closeTab(idx, options);
+    const tab = tabs.find(t => t.sessionId === sessionId);
+    return tab ? _closeTabObject(tab, options) : Promise.resolve();
   };
   window.getActiveTab     = getActiveTab;
   /** Everything the hover card (#435) can say about a tab. */
@@ -3015,7 +3070,10 @@
     hostname:    t.hostname || '',
     address:     _addressOf(t),
     isConnected: !!t.isConnected,
-    groups:      Array.isArray(t.groupNames) ? t.groupNames : [],
+    // The learned group lives in _tagCache (#490). This read `t.groupNames`,
+    // which nothing ever assigned, so typing a site name into Ctrl+P
+    // matched no tab.
+    groups:      [_tagCache.get(t.sessionId)].filter(Boolean),
   }));
   window.updateTabLabel   = updateTabLabel;
   window.setTabOrder      = setTabOrder;
@@ -3036,6 +3094,25 @@
     const kind = (detail.pending && detail.pending.kind) || '';
     // alerts.py uses RELOAD / COMMIT_CONFIRM.
     if (kind) tab.hadPendingReload = kind.toUpperCase().includes('RELOAD');
+  });
+
+  // The socket between this window and ShellMate dropped and is being
+  // reopened (#481). Not a disconnect — the session is still up on the
+  // server — so the tab says what is happening rather than going red.
+  window.addEventListener('shellmate:terminal-link', (e) => {
+    const detail = e.detail || {};
+    const tab = tabs.find(t => t.sessionId === detail.sessionId);
+    if (!tab || !tab.labelEl) return;
+    if (detail.state === 'reattaching') {
+      tab.labelEl.textContent = `${tab.label} (reattaching ${detail.attempt}/${detail.attempts})`;
+      tab.labelEl.title = 'The link between this window and ShellMate dropped. '
+        + 'The session itself is still up; the socket is being reopened.';
+    } else if (detail.state === 'attached') {
+      tab.labelEl.textContent = tab.label;
+      tab.labelEl.title = '';
+      updateStatusBar();
+    }
+    // 'lost' is followed by updateTabStatus(false), which labels the tab.
   });
 
   window.updateTabStatus  = updateTabStatus;

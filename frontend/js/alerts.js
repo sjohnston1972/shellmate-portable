@@ -109,9 +109,11 @@
       set(sessionId, pending);
     });
 
-    // A closed tab cannot have anything pending on it any more.
+    // A closed tab cannot have anything pending on it any more. The sweep
+    // pauses while the window is hidden (#491); it runs once on return.
     window.addEventListener('mate:tab-switched', prune);
-    setInterval(prune, 5000);
+    if (window.shellmateVisibility) window.shellmateVisibility.every(prune, 5000);
+    else setInterval(prune, 5000);
   });
 
   function settings() {

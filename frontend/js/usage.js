@@ -22,7 +22,10 @@
     el = document.getElementById('status-usage');
     if (!wrap || !el) return;
     tick();
-    setInterval(tick, EVERY_MS);
+    // Paused while the window is hidden (#491): a footprint readout nobody
+    // can see was fetching itself every five seconds behind a closed window.
+    if (window.shellmateVisibility) window.shellmateVisibility.every(tick, EVERY_MS);
+    else setInterval(tick, EVERY_MS);
   });
 
   async function tick() {
