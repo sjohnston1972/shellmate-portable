@@ -146,7 +146,10 @@
       .filter(r => r && identity(r) !== identity(entry));
     kept.unshift(entry);
     window.shellmatePrefs.set('recent_connections', kept.slice(0, RECENT_MAX));
-    if (typeof window.renderWelcomeTiles === 'function') window.renderWelcomeTiles();
+    // No redraw here (#483). createTab fires `shellmate:sessions-changed` a
+    // moment later, which is the one redraw the dashboard gets per opening —
+    // and it hides the dashboard anyway, so this one was a full tree rebuild
+    // that nobody saw.
   }
 
   function createTab(sessionData) {
@@ -2965,6 +2968,11 @@
     profileId:      t.profileId || '',
     label:          t.label,
     hostname:       t.hostname,
+    // What was dialled, never rewritten — `hostname` above becomes whatever
+    // the device calls itself. Anything matching a tab to a saved connection
+    // by address needs this one.
+    address:        t.address || t.hostname || '',
+    username:       t.username || '',
     // Address alone does not identify a device — a lab of containers behind
     // one address is distinguished only by port, which is why the group
     // counts match on both. Anything matching sessions to profiles needs it.
