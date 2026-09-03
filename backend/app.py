@@ -1267,9 +1267,10 @@ async def sftp_download(session_id: str, path: str) -> Response:
 async def sftp_upload(session_id: str, path: str, file: UploadFile = File(...)) -> dict:
     """Upload a file to the remote path."""
     session = _require_session(session_id)
-    data = await file.read()
+    # Streamed from the spooled upload, not read into memory whole (#480).
+    size = getattr(file, "size", None)
     try:
-        return await asyncio.to_thread(sftp.write_file, session, path, data)
+        return await asyncio.to_thread(sftp.write_file, session, path, file.file, size)
     except ConnectionError_ as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

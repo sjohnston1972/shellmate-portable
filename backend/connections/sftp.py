@@ -222,18 +222,39 @@ def read_file(session: dict, path: str) -> bytes:
         raise ConnectionError_(f"Could not read {path}: {exc}") from exc
 
 
-def write_file(session: dict, path: str, data: bytes) -> dict:
-    """Upload *data* to the remote *path*, overwriting what is there."""
-    if len(data) > _max_upload_bytes():
+def write_file(session: dict, path: str, data, size: int | None = None) -> dict:
+    """
+    Upload to the remote *path*, overwriting what is there.
+
+    *data* is bytes, or a readable binary file object streamed a megabyte
+    at a time (#480) — an upload used to be read into memory whole, up to
+    the 2 GB cap, in the process hosting every terminal session.
+    """
+    if size is None and isinstance(data, (bytes, bytearray)):
+        size = len(data)
+    if size is not None and size > _max_upload_bytes():
         raise ConnectionError_(
-            f"Upload is {len(data) / 1e9:.1f} GB, above the "
+            f"Upload is {size / 1e9:.1f} GB, above the "
             f"{_max_upload_bytes() / 1e9:.0f} GB limit."
         )
 
     sftp = _sftp_for(session)
     try:
         with sftp.open(path, "wb") as handle:
-            handle.write(data)
+            if isinstance(data, (bytes, bytearray)):
+                handle.write(data)
+            else:
+                handle.set_pipelined(True)
+                sent = 0
+                while True:
+                    chunk = data.read(1 << 20)
+                    if not chunk:
+                        break
+                    sent += len(chunk)
+                    if sent > _max_upload_bytes():
+                        raise ConnectionError_(
+                            f"Upload exceeded the {_max_upload_bytes() / 1e9:.0f} GB limit.")
+                    handle.write(chunk)
     except PermissionError as exc:
         raise ConnectionError_(f"Permission denied writing {path}") from exc
     except OSError as exc:
