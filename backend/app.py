@@ -4024,7 +4024,11 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
         if onboarder.done:
             return
 
-        at_prompt = bool(session["transcript"].last_prompt)
+        # A bare prompt with nothing typed after it (#474). last_prompt is
+        # never cleared, so it alone meant "has ever seen a prompt", and the
+        # paging command landed in a line the user had started.
+        at_prompt = bool(getattr(session["transcript"], "idle_at_prompt", False)) \
+            and not session["pipeline"].current_line
         if not onboarder.ready(at_prompt):
             return
 

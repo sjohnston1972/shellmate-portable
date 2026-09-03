@@ -262,6 +262,9 @@ class TranscriptParser:
 
     # Last prompt seen, so a record knows which device and mode it ran in.
     last_prompt: str = field(default="", init=False)
+    # True only while the device sits at a bare prompt with nothing typed
+    # after it; cleared by any other output (#474).
+    idle_at_prompt: bool = field(default=False, init=False)
 
     def feed(self, chunk: str) -> list[CommandRecord]:
         """
@@ -319,10 +322,17 @@ class TranscriptParser:
         # that as "no prompt seen yet" leaves everything downstream — device
         # fingerprinting, alias expansion, config capture — waiting for a
         # newline that only arrives once the user types something.
+        # Whether the device is sitting at a bare prompt right now (#474):
+        # true only when the unterminated tail is a prompt and nothing
+        # after it. `last_prompt` is never cleared, so it means "has ever
+        # seen a prompt" — and the paging command was typed into a line
+        # the user had started.
+        self.idle_at_prompt = False
         if self._partial:
             found = match_prompt(self._partial)
             if found:
                 self.last_prompt = found[0]
+                self.idle_at_prompt = not (found[1] if len(found) > 1 else "").strip()
                 if self._current is not None:
                     finished = self._finish_current()
                     if finished is not None:
