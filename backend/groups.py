@@ -402,10 +402,17 @@ def set_order(keys: list[str]) -> list[dict]:
     """Store a hand-arranged order, front to back."""
     groups = _load()
     by_key = {g.get("key"): g for g in groups}
+    # An order can name a group that no longer exists — the tree it was
+    # dragged in can be a deletion behind. Creating an entry for it brought
+    # the deleted group back as an empty ghost (#454). Only a group that is
+    # still in use — a tag on some connection — earns a stored entry here.
+    in_use = {t["tag"] for t in profiles_module.all_tags()}
     for position, name in enumerate(keys):
         key = _key(name)
         entry = by_key.get(key)
         if entry is None:
+            if key not in in_use and not any(k.startswith(f"{key}/") for k in in_use):
+                continue
             entry = {"id": str(uuid.uuid4()), "key": key, "name": key,
                      "colour": DEFAULT_COLOUR, "favourite": False}
             groups.append(entry)

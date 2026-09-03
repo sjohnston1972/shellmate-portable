@@ -394,6 +394,33 @@ def test_deleting_a_group_takes_its_subtree_with_it() -> None:
           str(result))
 
 
+def test_an_order_does_not_resurrect_a_deleted_group() -> None:
+    """
+    set_order() used to create a stored entry for any key it was handed, so
+    an order sent by a tree that predated a deletion brought the deleted
+    group back as an empty ghost (#454).
+    """
+    print("\n-- An order cannot bring a deleted group back --")
+    _reset()
+    gm.create_group("site-052")
+    pm.save_profile({"name": "sw1", "hostname": "10.0.0.1", "connection_type": "ssh",
+                     "tags": ["site-052/core"]})
+    gm.create_group("site-053")
+    gm.delete_group("site-052", delete_connections=True)
+    gm.set_order(["site-052", "site-053"])
+    keys = {g["key"] for g in gm.list_groups()}
+    check("the deleted group stays deleted", "site-052" not in keys, str(sorted(keys)))
+    check("the living one is ordered", "site-053" in keys)
+    pm.save_profile({"name": "sw2", "hostname": "10.0.0.2", "connection_type": "ssh",
+                     "tags": ["implicit/core"]})
+    gm.set_order(["implicit", "site-053"])
+    keys = {g["key"] for g in gm.list_groups()}
+    check("an implicit group still in use can be ordered", "implicit" in keys, str(sorted(keys)))
+    check("untagged connections can be deleted in one go",
+          pm.delete_untagged() == 0 and pm.save_profile({"name": "loose", "hostname": "10.0.0.3",
+                                                         "connection_type": "ssh"}) and pm.delete_untagged() == 1)
+
+
 def test_deleting_a_group_can_take_its_connections_too() -> None:
     """
     "Delete the connections too" (#360) removes exactly the connections that
@@ -487,7 +514,7 @@ def main() -> int:
         test_moving_a_group_takes_its_subtree_with_it,
         test_renaming_carries_implicit_subgroups_and_child_names_survive,
         test_deleting_a_group_takes_its_subtree_with_it,
-        test_deleting_a_group_can_take_its_connections_too,
+        test_deleting_a_group_can_take_its_connections_too, test_an_order_does_not_resurrect_a_deleted_group,
     )
     for test in tests:
         try:

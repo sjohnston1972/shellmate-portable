@@ -1200,6 +1200,11 @@ def delete_solely_tagged(tags) -> int:
     return _delete_where(orphaned)
 
 
+def delete_untagged() -> int:
+    """Delete every connection that is in no group at all (#454)."""
+    return _delete_where(lambda p: not normalise_tags(p.get("tags")))
+
+
 def _delete_where(predicate) -> int:
     """
     Remove every profile the predicate matches, and its credentials.

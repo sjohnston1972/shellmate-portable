@@ -2310,6 +2310,13 @@ async def create_profile(request: SaveProfileRequest) -> dict:
     return profile
 
 
+@app.delete("/api/profiles/untagged")
+async def delete_untagged_profiles() -> dict:
+    """Delete every connection that is in no group (#454). Returns the count."""
+    deleted = await asyncio.to_thread(profiles_module.delete_untagged)
+    return {"deleted": deleted}
+
+
 @app.delete("/api/profiles/{profile_id}")
 async def remove_profile(profile_id: str) -> dict:
     """Delete a saved profile."""

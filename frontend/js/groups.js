@@ -604,6 +604,19 @@
       if (open) expanded.delete(KEY); else expanded.add(KEY);
       _select();
     });
+    // One action for the aftermath of a "keep" that was meant as a delete
+    // (#454): a mistaken choice over a fifty-device site should not cost
+    // fifty deletions to undo.
+    chip.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      if (!window.shellmateMenu) return;
+      const n = profiles.length;
+      window.shellmateMenu.open(event, [
+        { icon: 'delete_forever', danger: true, disabled: !n,
+          label: n ? `Delete all ${n} ungrouped connection${n === 1 ? '' : 's'}…` : 'Nothing to delete',
+          onClick: () => _deleteUngrouped(n) },
+      ], { className: 'group-menu' });
+    });
 
     row.append(twist, chip);
     wrap.appendChild(row);
@@ -2010,6 +2023,12 @@
         + (subgroups ? `, its ${plural(subgroups, 'subgroup')}` : '')
         + ` and its colour go. Its ${plural(members.length, 'connection')}:`;
       const all = orphans === members.length;
+      // When every connection lives only here, deleting them is what
+      // "delete the group" means to the person doing it (#454): with keep
+      // selected, a site of fifty devices was deleted and all fifty turned
+      // up in Ungrouped, which read as the delete having failed. Shared
+      // connections keep the reversible default, because a device that is
+      // also in Core is evidently still wanted.
       choice = _deleteChoice({
         keep: !orphans
           ? 'Keep them where they are — they all belong to other groups too.'
@@ -2021,7 +2040,7 @@
           ? `Also delete ${all ? 'them' : `the ${orphans} that are only in this group`}`
             + ' — the saved connections and any credentials go, and cannot be recovered.'
           : '',
-      });
+      }, { removeFirst: all });
     }
 
     const KEEP_LABEL = 'Delete the group';
@@ -2041,7 +2060,7 @@
       title: `Delete the group "${group.name}"?`,
       body,
       content: choice ? choice.el : undefined,
-      confirmLabel: KEEP_LABEL,
+      confirmLabel: choice && choice.removing() ? REMOVE_LABEL : KEEP_LABEL,
       danger: true,
     });
     if (!ok) return;
@@ -2079,10 +2098,11 @@
    *        dialog still says where the connections go.
    * @returns {{el: Element, removing: () => boolean, onChange: Function}}
    */
-  function _deleteChoice(labels) {
+  function _deleteChoice(labels, options = {}) {
     const el = document.createElement('div');
     el.className = 'sm-dialog-choice';
     const api = { el, removing: () => false, onChange: null };
+    const removeFirst = Boolean(options.removeFirst && labels.remove);
 
     const row = (value, text, checked) => {
       const label = document.createElement('label');
@@ -2104,12 +2124,35 @@
       return radio;
     };
 
-    row('keep', labels.keep, true);
+    row('keep', labels.keep, !removeFirst);
     if (labels.remove) {
-      const remove = row('delete', labels.remove, false);
+      const remove = row('delete', labels.remove, removeFirst);
       api.removing = () => remove.checked;
     }
     return api;
+  }
+
+  async function _deleteUngrouped(n) {
+    const ok = await window.shellmateDialog.confirm({
+      title: `Delete all ${n} ungrouped connection${n === 1 ? '' : 's'}?`,
+      body: 'Every saved connection that is not in any group goes, with any credentials '
+          + 'remembered for it. Connections in a group are not touched. This cannot be undone.',
+      confirmLabel: `Delete ${n}`,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch('/api/profiles/untagged', { method: 'DELETE' });
+      if (!res.ok) throw new Error('Could not delete them.');
+      const data = await res.json();
+      _refresh();
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({ title: 'Ungrouped cleared',
+                                        body: `${data.deleted} connection${data.deleted === 1 ? '' : 's'} deleted.` });
+      }
+    } catch (e) {
+      _warn('Could not clear Ungrouped', e.message);
+    }
   }
 
   async function _update(key, changes) {
