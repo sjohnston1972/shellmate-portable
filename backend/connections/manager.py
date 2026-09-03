@@ -188,7 +188,11 @@ class SessionManager:
         Used by GET /api/sessions so the frontend can rebuild the tab bar
         after a page refresh.
         """
-        return [self._public_view(s) for s in self._sessions.values()]
+        # A snapshot first (#475): create_session and destroy_session run on
+        # worker threads, and iterating the live dict while one of them
+        # inserts or pops raised "dictionary changed size during iteration"
+        # into the sessions list, quit and the update blockers.
+        return [self._public_view(s) for s in list(self._sessions.values())]
 
     # ------------------------------------------------------------------
     # Session destruction
