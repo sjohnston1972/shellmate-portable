@@ -389,13 +389,19 @@ def _file_key(settings_file: Path):
     return (str(settings_file), st.st_mtime_ns, st.st_size)
 
 
-def _merged() -> dict:
-    """The effective settings, shared and read-only. Callers must not mutate."""
+def _merged(fresh: bool = False) -> dict:
+    """
+    The effective settings, shared and read-only. Callers must not mutate.
+
+    ``fresh`` always stats the file; the default trusts the last stat for a
+    quarter of a second, which is what the per-line hot path wants.
+    """
     settings_file = paths.settings_file()
     now = time.monotonic()
-    with _cache_lock:
-        if _cache["merged"] is not None and now - _cache["checked"] < _RECHECK_SECONDS:
-            return _cache["merged"]
+    if not fresh:
+        with _cache_lock:
+            if _cache["merged"] is not None and now - _cache["checked"] < _RECHECK_SECONDS:
+                return _cache["merged"]
     key = _file_key(settings_file)
     with _cache_lock:
         _cache["checked"] = now
@@ -434,7 +440,7 @@ def settings_version() -> int:
     derives something expensive from a setting — a compiled regex, say —
     can keep its result until this moves rather than asking every time.
     """
-    _merged()
+    _merged(fresh=True)
     return _cache["version"]
 
 
@@ -462,7 +468,7 @@ def get_settings() -> dict:
     The result is a copy, because callers have always been free to change
     what they get back; the shared parse behind it is never handed out.
     """
-    return copy.deepcopy(_merged())
+    return copy.deepcopy(_merged(fresh=True))
 
 
 def _honour_legacy_defaults(stored: dict) -> dict:
