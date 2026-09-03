@@ -130,5 +130,8 @@ decision unless every licensee is re-issued.
 | `/admin/api/mail/test` | the portal (cookie) | send a test message |
 | `/admin/api/stats` | the portal (cookie) | the overview numbers and recent events |
 
-Everything is rate-limited per IP. The application endpoints answer about
-one key at a time and never list anything.
+Everything is rate-limited per IP: 20 a minute for the login form and the
+request page, 300 a minute for the application's `/licence/*` calls, which
+have to absorb an organisation's seats installing behind one address on the
+same morning. The application endpoints answer about one key at a time and
+never list anything.

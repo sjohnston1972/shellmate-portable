@@ -21,8 +21,9 @@
  *
  * Everything from the network is treated as hostile: inputs are bounded and
  * typed, the admin API needs the cookie, logins, refreshes and requests are
- * rate-limited per IP, and the application endpoints never return anything
- * but the one key they were asked about.
+ * rate-limited per IP (the application endpoints on their own, wider,
+ * bucket), and the application endpoints never return anything but the one
+ * key they were asked about.
  *
  * Secrets: SIGNING_KEY_PKCS8_B64, ADMIN_PASSWORD, SESSION_SECRET,
  * RESEND_API_KEY (optional). Vars: PUBLIC_KEY_B64, PORTAL_TITLE.
@@ -95,10 +96,17 @@ function newId(prefix) {
   const raw = new Uint8Array(6); crypto.getRandomValues(raw);
   return prefix + '-' + [...raw].map(b => b.toString(16).padStart(2, '0')).join('');
 }
+// Two limiters, both per IP. RATE_LIMITER (20/min) guards the login form
+// and the public request page, where twenty is generous. The application
+// endpoints get APP_LIMITER, sized for the case org licences exist for: tens
+// of seats behind one NAT all installing on the same morning, each an
+// activate and a refresh. Sharing the small bucket with them answered 429
+// to legitimate copies, which then went quiet for days (#508).
 async function rateLimited(env, request, bucket) {
-  if (!env.RATE_LIMITER) return false;
+  const limiter = bucket === 'app' ? (env.APP_LIMITER || env.RATE_LIMITER) : env.RATE_LIMITER;
+  if (!limiter) return false;
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const { success } = await env.RATE_LIMITER.limit({ key: `${bucket}:${ip}` });
+  const { success } = await limiter.limit({ key: `${bucket}:${ip}` });
   return !success;
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
