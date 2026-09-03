@@ -23,6 +23,8 @@ from pathlib import Path
 
 import httpx
 
+from backend.ai import http
+
 from backend.paths import data_dir
 from backend.settings_store import get_effective
 
@@ -220,9 +222,8 @@ async def check(provider: str) -> ProviderResult:
         url, headers = spec["models_url"], spec["headers"](key)
 
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(TIMEOUT, connect=CONNECT_TIMEOUT)
-        ) as client:
+        client = http.shared("providers", httpx.Timeout(TIMEOUT, connect=CONNECT_TIMEOUT))
+        if True:
             response = await client.get(url, headers=headers)
     except httpx.ConnectError:
         if provider == "ollama":

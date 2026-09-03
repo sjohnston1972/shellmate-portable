@@ -28,6 +28,8 @@ from typing import Optional
 
 import httpx
 
+from backend.ai import http
+
 from backend.config import CHROMA_URL, CHROMA_COLLECTION
 from backend.settings_store import get_effective
 
@@ -76,7 +78,8 @@ async def health_check() -> dict:
 
     base = url.rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECS) as client:
+        client = http.shared("chroma", _TIMEOUT_SECS)
+        if True:
             for path in ("/api/v2/heartbeat", "/api/v1/heartbeat"):
                 r = await client.get(base + path)
                 if r.status_code == 200:
@@ -123,7 +126,8 @@ async def query_design_guidelines(
 async def _lookup(base: str, collection_name: str, query_text: str, n_results: int) -> Optional[list[dict]]:
     """Resolve the collection (from cache when possible), then query it."""
     key = (base, collection_name)
-    async with httpx.AsyncClient(timeout=_TIMEOUT_SECS) as client:
+    client = http.shared("chroma", _TIMEOUT_SECS)
+    if True:
         collection_id = _COLLECTION_IDS.get(key)
         if not collection_id:
             # Resolve the collection ID (Chroma's query endpoints want UUIDs)

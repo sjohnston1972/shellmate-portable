@@ -12,7 +12,7 @@ from backend.advanced import get as advanced
 
 from backend.config import OLLAMA_HOST, OLLAMA_MODEL
 from backend.settings_store import get_effective
-from backend.ai import turns
+from backend.ai import http, turns
 from backend.ai.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,8 @@ async def stream_response(
         "keep_alive": f"{int(advanced('ai.ollama_keep_alive'))}m",
     }
 
-    async with httpx.AsyncClient(timeout=advanced("ai.request_timeout")) as client:
+    client = http.shared(__name__.rsplit(".", 1)[-1], advanced("ai.request_timeout"))   # reused (#503)
+    if True:
         async with client.stream("POST", url, json=payload) as resp:
             if resp.status_code != 200:
                 body = await resp.aread()

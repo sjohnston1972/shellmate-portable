@@ -1683,6 +1683,13 @@ async def send_feedback(request: FeedbackRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@app.on_event("shutdown")
+async def _close_ai_clients() -> None:
+    """The shared provider clients (#503)."""
+    from backend.ai import http as ai_http
+    await ai_http.aclose_all()
+
+
 @app.on_event("startup")
 async def _start_backup_scheduler() -> None:
     """The once-a-minute check for scheduled backups (#408)."""

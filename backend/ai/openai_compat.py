@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import httpx
 
 from backend.advanced import get as advanced
-from backend.ai import turns
+from backend.ai import http, turns
 from backend.ai.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -167,7 +167,8 @@ async def stream(
         system_prompt or SYSTEM_PROMPT, history, full_user_message))
     usage: dict = {}
 
-    async with httpx.AsyncClient(timeout=advanced("ai.request_timeout")) as client:
+    client = http.shared(__name__.rsplit(".", 1)[-1], advanced("ai.request_timeout"))   # reused (#503)
+    if True:
         for attempt in (1, 2, 3):
             async with client.stream(
                 "POST", provider.url, headers=headers, json=payload

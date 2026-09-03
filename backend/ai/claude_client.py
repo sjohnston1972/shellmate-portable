@@ -13,7 +13,7 @@ from backend.advanced import get as advanced
 
 from backend.config import ANTHROPIC_API_KEY
 from backend.settings_store import get_effective
-from backend.ai import turns
+from backend.ai import http, turns
 from backend.ai.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -149,7 +149,8 @@ async def stream_response(
     if _accepts_sampling(payload["model"]):
         payload["temperature"] = advanced("ai.temperature")
 
-    async with httpx.AsyncClient(timeout=advanced("ai.request_timeout")) as client:
+    client = http.shared(__name__.rsplit(".", 1)[-1], advanced("ai.request_timeout"))   # reused (#503)
+    if True:
         for attempt in (1, 2):
             async with client.stream(
                 "POST", CLAUDE_API_URL, headers=headers, json=payload

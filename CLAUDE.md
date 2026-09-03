@@ -118,8 +118,10 @@ shellmate/
 │   │   ├── chroma_client.py     # Optional Chroma vector-DB client for ShellMate
 │   │   ├── claude_client.py     # Streaming Claude API client for ShellMate
 │   │   ├── deepseek_client.py   # Streaming DeepSeek client for ShellMate
+│   │   ├── http.py              # One httpx client per provider, reused across requests (#503)
 │   │   ├── ollama_client.py     # Streaming Ollama API client for ShellMate
 │   │   ├── openai_client.py     # Streaming OpenAI client for ShellMate
+│   │   ├── openai_compat.py     # The one streaming loop for the OpenAI-shaped providers
 │   │   ├── prompt_store.py      # The system prompts, as data rather than code
 │   │   ├── prompts.py           # AI system prompts for ShellMate
 │   │   ├── providers.py         # Model discovery per provider, cached to models.json
