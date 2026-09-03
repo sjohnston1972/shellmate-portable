@@ -237,8 +237,12 @@ def run_now(key: str) -> dict:
     from backend import groups as groups_module
     from backend.profiles import profiles_tagged
     profiles = profiles_tagged(key, include_nested=True)
+    group_id = next((g.get("id") for g in groups_module.list_groups() if g.get("key") == key), None)
     result = run_group(key, profiles, _connect, _capture, _open_session_for, _destroy)
-    groups_module.update_group(key, {"backup_last": result})
+    # Recorded on the group by id (#466): a rename that landed while the
+    # backup ran used to make this create a ghost entry under the old key.
+    current = next((g for g in groups_module.list_groups() if g.get("id") == group_id), None)
+    groups_module.update_group(current["key"] if current else key, {"backup_last": result})
     return result
 
 
@@ -259,15 +263,15 @@ def _open_session_for(profile: dict):
 def _connect(profile: dict) -> dict:
     """A headless session from a saved profile, credentials filled in server-side."""
     from backend.connections.base import ConnectionParams
-    from backend.profiles import load_credentials, resolve_set
+    from backend.profiles import load_credentials
     fields = {k: profile.get(k) for k in (
         "hostname", "port", "username", "private_key_path", "private_key_username",
         "jump_host", "jump_port", "jump_username", "jump_private_key_path") if profile.get(k)}
     params = ConnectionParams(connection_type="ssh", display_label=profile.get("name", ""), **fields)
-    if profile.get("credential_ref"):
-        for field, value in resolve_set(profile["credential_ref"]).items():
-            if not getattr(params, field, ""):
-                setattr(params, field, value)
+    # One resolution (#466): load_credentials() already prefers the
+    # connection's own credentials and falls back to its named set, so the
+    # explicit resolve_set() before it was the same set resolved twice,
+    # with a full profile scan each time, sequentially across the group.
     for field, value in load_credentials(profile.get("id", "")).items():
         if not getattr(params, field, ""):
             setattr(params, field, value)
