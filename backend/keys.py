@@ -192,11 +192,27 @@ def _write_private(path: Path, private, passphrase: str) -> None:
     # Created restrictively rather than written and then fixed: between the two
     # there is a window where the key is readable, and it is the only window
     # that matters.
-    handle = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    #
+    # And written beside the target, then swapped in (#461). Opening the
+    # existing key with O_TRUNC left it at zero bytes until the write
+    # finished; a stick pulled or full during "change passphrase" cost the
+    # only copy of the key, which is the loss this module exists to prevent.
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    handle = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        os.write(handle, pem)
-    finally:
-        os.close(handle)
+        try:
+            os.write(handle, pem)
+            os.fsync(handle)
+        finally:
+            os.close(handle)
+        restrict(temporary)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
 
     restrict(path)
 
