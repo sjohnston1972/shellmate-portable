@@ -1,5 +1,6 @@
 """
-test_store_writer.py — History writes land off the caller's thread (#459).
+test_store_writer.py — History writes land off the caller's thread (#459),
+and what lands is redacted (#463).
 
 The terminal read loop hands records to the store and carries on; the
 writer thread commits them in order. Run: python test_store_writer.py
@@ -40,6 +41,13 @@ def record(command: str, output: str = "") -> CommandRecord:
                          started_at=time.time(), duration_ms=1)
 
 
+SECRET_CONFIG = (
+    "hostname sw\n"
+    "enable secret 5 $1$abcd$efghijklmnopqrstuvwxy\n"
+    "snmp-server community s3cr3t RO\n"
+)
+
+
 def main() -> int:
     print("=" * 52)
     print("  Store writer")
@@ -54,9 +62,7 @@ def main() -> int:
     elapsed = time.perf_counter() - t
     check("submitting fifty records returns at once", elapsed < 0.05, f"{elapsed * 1000:.0f} ms")
     check("flush waits for them", store.flush(timeout=5.0))
-    rows = store.session_commands("s1") if hasattr(store, "session_commands") else None
-    if rows is None:
-        rows = store.search("show thing", limit=100)
+    rows = store.search("show thing", limit=100)
     check("all fifty are stored", len(rows) == 50, str(len(rows)))
     seq = [r["sequence"] for r in store.connect().execute(
         "SELECT sequence FROM commands WHERE session_id = 's1' ORDER BY sequence").fetchall()]
@@ -73,23 +79,21 @@ def main() -> int:
     hits = store.search("arpshow", limit=10)
     check("a mistyped command still misses cleanly", isinstance(hits, list))
     hits = store.search("ip ar", limit=10)
-    check("a substring of a command is found", any("show ip arp" in (h.get("command") or "") for h in hits), str(hits[:1]))
+    check("a substring of a command is found",
+          any("show ip arp" in (h.get("command") or "") for h in hits), str(hits[:1]))
 
-
-    print("
--- Stored output is redacted like the logs are --")
-    store.add_command("s1", record("show run", "enable secret 5 $1$abcd$efghijklmnopqrstuvwxy
-snmp-server community s3cr3t RO"))
-    store.flush(timeout=5.0)
-    row = store.connect().execute("SELECT output FROM commands WHERE command = 'show run'").fetchone()[0]
+    print("\n-- Stored output is redacted like the logs are (#463) --")
+    store.add_command("s1", record("show run", SECRET_CONFIG))
+    row = store.connect().execute(
+        "SELECT output FROM commands WHERE command = 'show run'").fetchone()[0]
     check("the enable secret is not in the database", "$1$abcd" not in row, row)
-    check("  nor the community", "s3cr3t" not in row, row)
-    snap = store.add_snapshot("sw", "hostname sw
-enable secret 5 $1$abcd$efghijklmnopqrstuvwxy
-")
-    stored = store.connect().execute("SELECT content FROM config_snapshots WHERE hostname = 'sw'").fetchone()[0]
+    check("  nor the community string", "s3cr3t" not in row, row)
+    check("  but the rest of the output is", "hostname sw" in row, row)
+    store.add_snapshot("sw", SECRET_CONFIG)
+    stored = store.connect().execute(
+        "SELECT content FROM config_snapshots WHERE hostname = 'sw'").fetchone()[0]
     check("a configuration snapshot is stored redacted", "$1$abcd" not in stored, stored)
-    store.close() if hasattr(store, "close") else None
+
     print("\n" + "=" * 52)
     print(f"  {passed} passed  |  {len(failed)} failed")
     print("=" * 52)
