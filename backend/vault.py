@@ -31,10 +31,13 @@ Design notes worth keeping:
 """
 
 import base64
+import functools
 import ctypes
 import json
 import logging
 import os
+import threading
+import tempfile
 import sys
 from ctypes import wintypes
 from typing import Any
@@ -68,8 +71,27 @@ SCRYPT_MAXMEM = 128 * SCRYPT_N * SCRYPT_R * 2
 DPAPI_ENTROPY = b"ShellMate Portable vault v1"
 
 
+
+def _locked(method):
+    """
+    Serialise one vault operation (#462). A credential save racing a settings
+    save that carries an API key used to have both threads mutate the entry
+    dict and write the same vault.tmp: one renamed a partial file, or the
+    other's replace failed, and an entry could go missing from whichever
+    file survived. settings_store grew a lock for this in #336; the vault
+    had none.
+    """
+    @functools.wraps(method)
+    def inner(self, *args, **kwargs):
+        with self._io_lock:
+            return method(self, *args, **kwargs)
+    return inner
+
+
 class VaultError(Exception):
     """Raised for vault failures, with a message suitable for the user."""
+    _io_lock = threading.RLock()
+
 
 
 class VaultLocked(VaultError):
@@ -267,6 +289,7 @@ class Vault:
 
     # -- unlocking -----------------------------------------------------------
 
+    @_locked
     def unlock(self, password: str = "") -> None:
         """
         Load and decrypt the vault into memory.
@@ -324,6 +347,7 @@ class Vault:
             # than breaking every settings read in the application.
             return default
 
+    @_locked
     def set(self, key: str, value: str) -> None:
         """Store a secret. An empty value removes the entry."""
         entries = self._ensure_loaded()
@@ -333,6 +357,7 @@ class Vault:
             entries.pop(key, None)
         self._write(entries)
 
+    @_locked
     def set_many(self, values: dict[str, str]) -> None:
         """
         Store several secrets in one write — or none, when nothing changes.
@@ -354,6 +379,7 @@ class Vault:
         if changed:
             self._write(entries)
 
+    @_locked
     def delete(self, key: str) -> None:
         """Remove a secret."""
         self.set(key, "")
@@ -374,6 +400,7 @@ class Vault:
 
     # -- persistence ---------------------------------------------------------
 
+    @_locked
     def _write(self, entries: dict[str, str]) -> None:
         """Encrypt and persist the entry set."""
         mode = self.mode()
@@ -409,17 +436,26 @@ class Vault:
         before it takes the place of the old one.
         """
         target = self.path
-        temporary = target.with_suffix(".tmp")
+        temporary = None
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            temporary.write_text(json.dumps(document, indent=2), encoding="utf-8")
+            # A name of its own per writer: two processes sharing a data
+            # folder cannot truncate each other's half-written file.
+            fd, name = tempfile.mkstemp(prefix=".vault.", suffix=".tmp", dir=str(target.parent))
+            temporary = Path(name)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(document, indent=2))
+                handle.flush()
+                os.fsync(handle.fileno())
             os.replace(temporary, target)
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
             raise VaultError(f"Could not write the vault: {exc}") from exc
 
     # -- changing mode -------------------------------------------------------
 
+    @_locked
     def set_mode(self, mode: str, password: str = "") -> None:
         """
         Switch between DPAPI and master-password storage, re-encrypting.
