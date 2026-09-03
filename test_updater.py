@@ -59,9 +59,12 @@ def fake_transport(sha: str | None, size: int | None = None):
         if url.endswith(".sha256"):
             return httpx.Response(200, text=f"{sha}  ShellMate-Portable.exe\n")
         if url.endswith("ShellMate-Portable.exe"):
+            transport.downloads += 1
             return httpx.Response(200, content=EXE_BYTES)
         return httpx.Response(404)
-    return httpx.MockTransport(handler)
+    transport = httpx.MockTransport(handler)
+    transport.downloads = 0
+    return transport
 
 
 class PatchedClient(httpx.Client):
@@ -103,6 +106,12 @@ def test_download() -> None:
         check("  the file is where the state says", s["path"] and Path(s["path"]).read_bytes() == EXE_BYTES)
         check("  and the version came from the tag", s["version"] == "9.9.9", s["version"])
 
+        updater._set(phase="idle")
+        updater.start_download("x/y")
+        s = wait_for_phase("ready", "failed")
+        check("asking again does not download again — the verified file is reused (#450)",
+              s["phase"] == "ready" and PatchedClient.transport.downloads == 1, f"{s['phase']} downloads={PatchedClient.transport.downloads}")
+
         PatchedClient.transport = fake_transport("0" * 64)
         updater._set(phase="idle")
         updater.start_download("x/y")
@@ -136,6 +145,12 @@ def test_helper_and_apply() -> None:
     check("  starts the new copy and checks its port", "--updated" in script and "8765/api/health" in script)
     check("  and puts the old one back if it does not answer", "Putting the previous one back" in script
           and script.index("Putting the previous") > script.index("--updated"))
+    check("  never uses timeout, which needs a console the helper has not got (#450)",
+          "timeout /t" not in script and "ping -n" in script)
+    check("  retries the move instead of trying once", ":aside" in script and "tries%% lss 30" in script.replace("%", "%%"))
+    check("  and writes a verdict the next start can read", 'echo OK:' in script and 'echo FAILED:' in script)
+    both = updater.helper_script(Path(r"C:\x\ShellMate-Portable.exe"), Path(r"C:\x\new.exe"), 8765, 4242, 4200)
+    check("  waits for the bootloader parent too when given one", 'PID eq 4200' in both and 'PID eq 4242' in both)
 
     class Manager:
         def __init__(self, pending): self.pending = pending

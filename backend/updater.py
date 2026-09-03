@@ -51,6 +51,11 @@ _state: dict = {
     "started": 0.0,
 }
 _cancel = threading.Event()
+_last_attempt: dict = {}     # what the helper's log said at startup, reported once
+
+
+def attempt_log() -> Path:
+    return updates_dir() / "apply-update.log"
 
 
 def updates_dir() -> Path:
@@ -61,6 +66,7 @@ def state() -> dict:
     with _lock:
         out = dict(_state)
     out["licensed"] = licence.has_feature("updates")
+    out["last_attempt"] = dict(_last_attempt)
     return out
 
 
@@ -137,6 +143,13 @@ def _download(repo: str) -> None:
             if len(expected) != 64:
                 raise RuntimeError("The checksum file is not a SHA-256.")
 
+            # Downloaded earlier and still intact: say so and stop. Opening the
+            # modal twice used to fetch the file twice (#450).
+            if _already_verified(target, expected, release["size"]):
+                _set(phase="ready", path=str(target), received=target.stat().st_size, total=target.stat().st_size)
+                logger.info("Update %s was already downloaded and verified: %s", version, target)
+                return
+
             digest = hashlib.sha256()
             received = 0
             limit = release["size"] or (200 * 1024 * 1024)
@@ -173,6 +186,20 @@ def _download(repo: str) -> None:
         _set(phase="failed", error=str(exc))
 
 
+def _already_verified(target: Path, expected: str, size: int) -> bool:
+    """True when the file is there, the size the release says, and hashes right."""
+    try:
+        if not target.exists() or (size and target.stat().st_size != size):
+            return False
+        digest = hashlib.sha256()
+        with open(target, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest() == expected
+    except OSError:
+        return False
+
+
 def _cleanup_partials() -> None:
     try:
         for part in updates_dir().glob("*.part"):
@@ -197,55 +224,82 @@ def blockers(session_manager) -> list[str]:
     return names
 
 
-def helper_script(current: Path, fresh: Path, port: int, pid: int) -> str:
+def helper_script(current: Path, fresh: Path, port: int, pid: int, parent_pid: int = 0) -> str:
     """
     The batch file that does the swap after this process has gone.
 
-    Waits for the PID to disappear, moves the running exe aside, moves the
-    verified download into place, starts it, and gives it a minute to answer
-    on its port. If it does not, the old file comes back and is started
-    instead. The `.old` file is left for the new copy to remove on a good
-    launch (see `tidy_after_launch`).
+    Waits for the PID to disappear — and the bootloader's, because a
+    `--onefile` build is two processes and the parent keeps the executable
+    open a moment after the child has exited — moves the running exe aside,
+    moves the verified download into place, starts it, and gives it ninety
+    seconds to answer on its port. If it does not, the old file comes back
+    and is started instead.
+
+    Three things learned the hard way (#450):
+
+    - The helper has no console, so ``timeout`` fails at once and every
+      wait was zero. Delays are ``ping`` against loopback instead.
+    - The move is retried for half a minute rather than tried once, because
+      the file is still held for a moment after the process is gone.
+    - Nobody sees ``echo`` from a windowless script. Every step goes to
+      ``apply-update.log`` beside it, ending ``OK`` or ``FAILED: why``, and
+      the next start reads it (`tidy_after_launch`) so a failed update is
+      said out loud rather than silently undone.
     """
     old = current.with_name(current.stem + ".old.exe")
-    return "\r\n".join([
+    log = fresh.parent / "apply-update.log"
+    lines = [
         "@echo off",
         "setlocal",
         "title ShellMate update",
         f"set CURRENT={current}",
         f"set FRESH={fresh}",
         f"set OLD={old}",
+        f"set LOG={log}",
         f"set PID={pid}",
+        f"set PORT={port}",
+        'echo started %date% %time%> "%LOG%"',
         "echo Waiting for ShellMate to close...",
         ":wait",
-        'tasklist /FI "PID eq %PID%" 2>NUL | find "%PID%" >NUL',
-        "if not errorlevel 1 (timeout /t 1 /nobreak >NUL & goto wait)",
-        "timeout /t 1 /nobreak >NUL",
-        'if exist "%OLD%" del /f /q "%OLD%"',
-        'move /y "%CURRENT%" "%OLD%" >NUL || (echo Could not move the old executable aside. & goto fail)',
-        'move /y "%FRESH%" "%CURRENT%" >NUL || (echo Could not move the new executable into place. & move /y "%OLD%" "%CURRENT%" >NUL & goto fail)',
-        'echo Starting the new ShellMate...',
+    ]
+    lines.append('tasklist /FI "PID eq %PID%" 2>NUL | find "%PID%" >NUL && (ping -n 2 127.0.0.1 >NUL & goto wait)')
+    if parent_pid:
+        lines.append(f'tasklist /FI "PID eq {parent_pid}" 2>NUL | find "{parent_pid}" >NUL && (ping -n 2 127.0.0.1 >NUL & goto wait)')
+    lines += [
+        'echo process gone>> "%LOG%"',
+        "ping -n 2 127.0.0.1 >NUL",
+        "set /a tries=0",
+        ":aside",
+        'if exist "%OLD%" del /f /q "%OLD%" >NUL 2>&1',
+        'move /y "%CURRENT%" "%OLD%" >NUL 2>&1 && goto aside_done',
+        "set /a tries+=1",
+        "if %tries% lss 30 (ping -n 2 127.0.0.1 >NUL & goto aside)",
+        'echo FAILED: could not move the old executable aside after 30 seconds; it is still in use>> "%LOG%"',
+        "exit /b 1",
+        ":aside_done",
+        'move /y "%FRESH%" "%CURRENT%" >NUL 2>&1 || (echo FAILED: could not move the new executable into place>> "%LOG%" & move /y "%OLD%" "%CURRENT%" >NUL & exit /b 1)',
+        'echo swapped; starting the new copy>> "%LOG%"',
         'start "" "%CURRENT%" --updated',
         "set /a tries=0",
         ":check",
-        "timeout /t 2 /nobreak >NUL",
-        f'powershell -NoProfile -Command "try {{ (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:{port}/api/health).StatusCode }} catch {{ 0 }}" | find "200" >NUL',
-        "if not errorlevel 1 goto done",
+        "ping -n 3 127.0.0.1 >NUL",
+        f'powershell -NoProfile -Command "try {{ (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:{port}/api/health).StatusCode }} catch {{ 0 }}" | find "200" >NUL && goto done',
         "set /a tries+=1",
-        "if %tries% lss 30 goto check",
-        'echo The new ShellMate did not start. Putting the previous one back.',
+        "if %tries% lss 45 goto check",
+        'echo FAILED: the new copy did not answer on port %PORT% within 90 seconds. Putting the previous one back>> "%LOG%"',
         'taskkill /F /IM "' + current.name + '" >NUL 2>&1',
-        'move /y "%CURRENT%" "%FRESH%" >NUL',
-        'move /y "%OLD%" "%CURRENT%" >NUL',
+        "ping -n 2 127.0.0.1 >NUL",
+        'move /y "%CURRENT%" "%FRESH%" >NUL 2>&1',
+        'move /y "%OLD%" "%CURRENT%" >NUL 2>&1',
         'start "" "%CURRENT%"',
-        ":fail",
-        "echo Update not applied. Press any key to close.",
-        "pause >NUL",
         "exit /b 1",
         ":done",
+        'echo OK: the new copy answered on port %PORT%>> "%LOG%"',
+        'del /f /q "%OLD%" >NUL 2>&1',
         "exit /b 0",
         "",
-    ])
+    ]
+    return "\r\n".join(lines)
 
 
 def apply(session_manager, port: int) -> dict:
@@ -275,7 +329,9 @@ def apply(session_manager, port: int) -> dict:
     if not fresh.exists():
         raise RuntimeError("The downloaded file is gone. Download it again.")
     helper = updates_dir() / "apply-update.cmd"
-    helper.write_text(helper_script(exe, fresh, port, os.getpid()), encoding="utf-8")
+    parent = os.getppid() if paths.is_frozen() else 0      # the --onefile bootloader
+    helper.write_text(helper_script(exe, fresh, port, os.getpid(), parent), encoding="utf-8")
+    attempt_log().unlink(missing_ok=True)
     _set(phase="applying")
 
     from backend import server
@@ -299,18 +355,48 @@ def apply(session_manager, port: int) -> dict:
 
 def tidy_after_launch() -> str:
     """
-    Called at startup: a `.old.exe` beside the executable means the last
-    update worked (this copy is running). Remove it and say so.
+    Called at startup. Reads what the helper's log says about the last swap:
+
+    - ``OK`` — the helper finished; remove the log and any `.old.exe` it
+      left. Returns the path removed, for the startup log.
+    - ``FAILED`` — the helper put the previous copy back. Keep the reason in
+      `_last_attempt` so the interface can say so once, and remove the log.
+    - neither — the helper is still running its checks against this very
+      copy. Touch nothing: it needs the `.old.exe` to roll back with.
+
+    Without a log, a `.old.exe` older than ten minutes is a leftover from a
+    helper that never got to its own cleanup, and goes.
     """
+    global _last_attempt
     if not paths.is_frozen():
         return ""
     exe = Path(sys.executable)
     old = exe.with_name(exe.stem + ".old.exe")
+    log = attempt_log()
+    verdict = ""
+    try:
+        if log.exists():
+            lines = [ln.strip() for ln in log.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+            verdict = lines[-1] if lines else ""
+    except OSError:
+        verdict = ""
+    if verdict.startswith("FAILED"):
+        _last_attempt = {"ok": False, "detail": verdict[len("FAILED:"):].strip()}
+        logger.warning("The last update did not apply: %s", _last_attempt["detail"])
+        log.unlink(missing_ok=True)
+        return ""
+    if log.exists() and not verdict.startswith("OK"):
+        return ""                                    # the helper is mid-check
+    if verdict.startswith("OK"):
+        _last_attempt = {"ok": True, "detail": verdict[len("OK:"):].strip()}
+        log.unlink(missing_ok=True)
     if old.exists():
-        try:
-            old.unlink()
-            logger.info("Removed the previous executable left by the updater.")
-            return str(old)
-        except OSError as exc:
-            logger.info("The previous executable could not be removed yet: %s", exc)
+        stale = verdict.startswith("OK") or (time.time() - old.stat().st_mtime) > 600
+        if stale:
+            try:
+                old.unlink()
+                logger.info("Removed the previous executable left by the updater.")
+                return str(old)
+            except OSError as exc:
+                logger.info("The previous executable could not be removed yet: %s", exc)
     return ""

@@ -72,6 +72,16 @@
   }
 
   async function startupCheck() {
+    // A swap that the helper had to undo is said here, once (#450).
+    try {
+      const s = await (await fetch('/api/system/update/status')).json();
+      const last = s && s.last_attempt;
+      if (last && last.ok === false) {
+        toast({ severity: 'warning', icon: 'error', title: 'The last update did not apply',
+                body: `${last.detail || 'The helper put the previous version back.'} You are still on ${s.current || 'the previous version'}.`,
+                sticky: true });
+      }
+    } catch (_) { /* nothing to report */ }
     if (!A('diag.update_check', true)) return;
     let info;
     try { info = await fetchStatus(); } catch (_) { return; }   // air-gapped: say nothing
@@ -160,6 +170,20 @@
       }
       startDownload(progress, fill, label, primary, later, skip);
     });
+
+    // Already downloaded and verified — from an earlier visit, or a
+    // download that finished while the modal was closed — goes straight
+    // to the restart, rather than fetching the file again (#450).
+    if (licensed) {
+      fetch('/api/system/update/status').then(r => r.json()).then((s) => {
+        if (!s || s.phase !== 'ready' || s.version !== info.latest) return;
+        progress.classList.remove('hidden');
+        fill.style.width = '100%';
+        label.textContent = `ShellMate ${s.version} is downloaded and verified.`;
+        primary.textContent = 'Restart into the new version';
+        primary.onclick = (e) => { e.stopImmediatePropagation(); applyNow(label, primary, later); };
+      }).catch(() => {});
+    }
     later.addEventListener('click', () => { remember({ snoozed_version: info.latest, snoozed_until: Date.now() + 24 * 3600 * 1000 }); close(); });
     skip.addEventListener('click', () => { remember({ skipped_version: info.latest }); close(); });
 
