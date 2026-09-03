@@ -57,6 +57,11 @@ wrangler deploy
 The custom domain needs `foundry-ns.com` to be a zone on the same Cloudflare
 account; `wrangler deploy` creates the DNS record.
 
+The three secrets have no defaults. A deployment without `SESSION_SECRET`
+answers 500 to any session cookie rather than accepting one signed with a
+guessable key, and one without `ADMIN_PASSWORD` answers 500 to the login
+form; both are logged. Set them before the first visit.
+
 ### Cloudflare Access in front of the portal
 
 The portal sits behind Cloudflare Access (team `clydeford`), so reaching it

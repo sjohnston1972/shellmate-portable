@@ -26,6 +26,9 @@
  *
  * Secrets: SIGNING_KEY_PKCS8_B64, ADMIN_PASSWORD, SESSION_SECRET,
  * RESEND_API_KEY (optional). Vars: PUBLIC_KEY_B64, PORTAL_TITLE.
+ * The first three have no defaults: signing, the password login and the
+ * session cookie each throw when theirs is missing, so a half-configured
+ * deployment answers 500 rather than accepting a cookie anyone could forge.
  */
 
 const SESSION_COOKIE = 'sma_session';
@@ -124,8 +127,14 @@ function payloadFor(row) {
 }
 
 // ------------------------------------------------------------------ sessions
+// No default for the secret. With one, a deployment that forgot
+// `wrangler secret put SESSION_SECRET` would accept any cookie signed with
+// the default, which anyone can compute — full admin from a fresh
+// environment, with nothing in the logs. Refusing is what signer() already
+// does for the signing key; the session code does the same (#504).
 async function hmac(env, text) {
-  const key = await crypto.subtle.importKey('raw', enc.encode(env.SESSION_SECRET || 'unset'),
+  if (!env.SESSION_SECRET) throw new Error('SESSION_SECRET is not set.');
+  const key = await crypto.subtle.importKey('raw', enc.encode(env.SESSION_SECRET),
                                             { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return b64url(await crypto.subtle.sign('HMAC', key, enc.encode(text)));
 }
@@ -186,11 +195,12 @@ function timingSafeEqual(a, b) {
 }
 async function login(request, env) {
   if (await rateLimited(env, request, 'login')) return json(429, { detail: 'Too many attempts. Wait a minute.' });
+  if (!env.ADMIN_PASSWORD) throw new Error('ADMIN_PASSWORD is not set.');
   let body = {};
   try { body = await request.json(); } catch (_) { return json(400, { detail: 'JSON expected.' }); }
   const given = String(body.password || '');
-  const wanted = String(env.ADMIN_PASSWORD || '');
-  if (!wanted || given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
+  const wanted = String(env.ADMIN_PASSWORD);
+  if (given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
     await new Promise(r => setTimeout(r, 400));
     return json(401, { detail: 'Wrong password.' });
   }
