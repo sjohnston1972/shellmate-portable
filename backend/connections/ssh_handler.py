@@ -111,6 +111,81 @@ def _host_key_policy():
     return paramiko.AutoAddPolicy()
 
 
+def _check_host_key(transport, hostname: str, port: int) -> None:
+    """
+    Apply the host-key policy to a transport we drove ourselves (#472).
+
+    `SSHClient.connect()` is the only place paramiko compares the server's
+    key with known_hosts and consults the policy. The no-credential and
+    keyboard-interactive paths build a Transport by hand and never call
+    connect(), so `ssh.host_key_policy = reject` protected the password
+    path and silently not these two. Same comparison, same policy, before
+    any authentication.
+    """
+    import paramiko
+
+    try:
+        key = transport.get_remote_server_key()
+    except Exception:
+        key = None
+    if key is None or not hasattr(key, "get_name"):
+        return                                   # a transport with no key to check (tests)
+    client = paramiko.SSHClient()
+    try:
+        client.load_system_host_keys()
+    except Exception:
+        pass
+    name = hostname if port == 22 else f"[{hostname}]:{port}"
+    known = client.get_host_keys().lookup(name)
+    if known is not None and known.get(key.get_name()) is not None:
+        if known[key.get_name()] != key:
+            raise ConnectionError_(
+                f"The host key for {hostname} has changed since it was last seen. "
+                "If the device was replaced or re-imaged, update its entry in known_hosts.")
+        return
+    try:
+        _host_key_policy().missing_host_key(client, name, key)
+    except paramiko.SSHException as exc:
+        raise ConnectionError_(
+            f"{hostname} presented a host key that is not in known_hosts, and the "
+            "host-key policy is set to reject unknown keys.") from exc
+
+
+def _check_host_key(transport, hostname: str, port: int) -> None:
+    """
+    Apply the host-key policy to a transport we drove ourselves (#472).
+
+    `SSHClient.connect()` is the only place paramiko compares the server's
+    key with known_hosts and consults the policy. The no-credential and
+    keyboard-interactive paths build a Transport by hand and never call
+    connect(), so `ssh.host_key_policy = reject` protected the password
+    path and silently not these two. Same comparison, same policy, before
+    any authentication.
+    """
+    import paramiko
+
+    key = transport.get_remote_server_key()
+    client = paramiko.SSHClient()
+    try:
+        client.load_system_host_keys()
+    except Exception:
+        pass
+    name = hostname if port == 22 else f"[{hostname}]:{port}"
+    known = client.get_host_keys().lookup(name)
+    if known is not None and known.get(key.get_name()) is not None:
+        if known[key.get_name()] != key:
+            raise ConnectionError_(
+                f"The host key for {hostname} has changed since it was last seen. "
+                "If the device was replaced or re-imaged, update its entry in known_hosts.")
+        return
+    try:
+        _host_key_policy().missing_host_key(client, name, key)
+    except paramiko.SSHException as exc:
+        raise ConnectionError_(
+            f"{hostname} presented a host key that is not in known_hosts, and the "
+            "host-key policy is set to reject unknown keys.") from exc
+
+
 def _algorithm_overrides() -> dict:
     """
     Turn the user's chosen algorithm lists into paramiko's disabled_algorithms.
@@ -285,6 +360,7 @@ class SSHHandler(ConnectionHandler):
             transport = paramiko.Transport(raw, disabled_algorithms=(
                 disabled or {}).get("disabled_algorithms"))
             transport.start_client(timeout=advanced("ssh.banner_timeout"))
+            _check_host_key(transport, params.hostname, params.port)
 
             # auth_none returns the methods still required. An empty list is
             # the device saying "come in".
@@ -373,6 +449,7 @@ class SSHHandler(ConnectionHandler):
             transport = paramiko.Transport(raw, disabled_algorithms=(
                 disabled or {}).get("disabled_algorithms"))
             transport.start_client(timeout=advanced("ssh.banner_timeout"))
+            _check_host_key(transport, params.hostname, params.port)
             transport.auth_interactive(username, handler)
         except paramiko.AuthenticationException as exc:
             if transport is not None:
@@ -420,6 +497,12 @@ class SSHHandler(ConnectionHandler):
             sock = self._open_jump_channel() if params.jump_host else None
 
             self._client = paramiko.SSHClient()
+            try:
+                # Without this, nothing is ever "known" and a reject policy
+                # refuses every device (#472).
+                self._client.load_system_host_keys()
+            except Exception:
+                pass
             # AutoAddPolicy is deliberate: this is an interactive terminal
             # where the user is choosing what to connect to, and network gear
             # legitimately changes host keys after an RMA or an image upgrade.
@@ -588,6 +671,10 @@ class SSHHandler(ConnectionHandler):
         logger.info("Opening jump host %s:%s", params.jump_host, params.jump_port)
 
         self._jump_client = paramiko.SSHClient()
+        try:
+            self._jump_client.load_system_host_keys()      # see #472
+        except Exception:
+            pass
         # The same settings as the target connection, rather than three
         # hardcoded values.
         #
