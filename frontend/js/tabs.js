@@ -763,8 +763,10 @@
       return;
     }
 
-    // Ctrl+1 through Ctrl+9 — switch to tab N
-    if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
+    // Ctrl+1 through Ctrl+9 — switch to tab N. Not with Alt held (#484):
+    // Ctrl+Alt+N is layout.js's chord for choosing a split, and without the
+    // exclusion the same keypress switched tabs as well.
+    if (e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') {
       const targetIndex = parseInt(e.key, 10) - 1;
       if (targetIndex < tabs.length) {
         e.preventDefault();
@@ -848,6 +850,11 @@
   function isAppShortcut(e) {
     if (e.ctrlKey && !e.altKey && (e.key === 't' || e.key === 'w')) return true;
     if (e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') return true;
+    // The layout chord (#484). Owned by layout.js, listed here so a focused
+    // terminal hands it back: xterm maps Alt+digit to ESC-digit and stops
+    // propagation, so from the terminal — the usual place to be — the
+    // device received `\x1b3` and layout.js never saw the key.
+    if (e.ctrlKey && e.altKey && !e.shiftKey && e.key >= '1' && e.key <= '9') return true;
     return SHORTCUTS.some(s => s.match(e));
   }
 
