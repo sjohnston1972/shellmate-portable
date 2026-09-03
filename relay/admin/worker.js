@@ -1,38 +1,46 @@
 /**
  * worker.js — The ShellMate licence service and its admin portal (#447).
  *
- * One Cloudflare Worker, two faces:
+ * One Cloudflare Worker, three faces:
  *
- *   /licence/refresh, /licence/check   what the application calls
- *   /  and /admin/*                    the portal for the person who
- *                                       issues, renews and revokes keys
+ *   /licence/refresh, /licence/check      what the application calls
+ *   /request                               a public page that issues a key
+ *                                          on its own, when switched on
+ *   /  and /admin/*                        the portal: issue, renew, revoke,
+ *                                          email keys, people, reports
  *
- * Keys are Ed25519-signed tokens (see backend/licence.py for the format).
- * The private key is a Worker secret and never leaves here; the public
- * half ships inside ShellMate. Records live in D1. The portal is a single
- * page served by this Worker, styled after workspace.foundry-ns.com, and
- * protected by a password (secret) exchanged for an HMAC session cookie.
+ * Keys are Ed25519-signed tokens (see backend/licence.py). The private key
+ * is a Worker secret; the public half ships inside ShellMate. Records live
+ * in D1. The portal is a single page served here, styled after
+ * workspace.foundry-ns.com, behind a password and an HMAC session cookie,
+ * with hash routes so the browser's Back button means something.
  *
- * Everything from the network is treated as hostile: inputs are bounded
- * and typed, the admin API needs the cookie, logins and refreshes are
+ * Email goes through Resend (https://resend.com) when RESEND_API_KEY is set
+ * and the sender domain is verified there; without it the portal says so
+ * and keys are copied by hand instead.
+ *
+ * Everything from the network is treated as hostile: inputs are bounded and
+ * typed, the admin API needs the cookie, logins, refreshes and requests are
  * rate-limited per IP, and the application endpoints never return anything
  * but the one key they were asked about.
  *
- * Secrets (wrangler secret put): SIGNING_KEY_PKCS8_B64, ADMIN_PASSWORD,
- * SESSION_SECRET. Vars: PUBLIC_KEY_B64, PORTAL_TITLE.
+ * Secrets: SIGNING_KEY_PKCS8_B64, ADMIN_PASSWORD, SESSION_SECRET,
+ * RESEND_API_KEY (optional). Vars: PUBLIC_KEY_B64, PORTAL_TITLE.
  */
 
 const SESSION_COOKIE = 'sma_session';
 const SESSION_HOURS = 12;
-const MAX = { name: 120, email: 200, org: 120, notes: 2000, reason: 300, seats: 100000 };
+const MAX = { name: 120, email: 200, org: 120, notes: 2000, reason: 300, seats: 100000, text: 4000 };
+const SETTING_KEYS = ['requests_enabled', 'request_days', 'request_kind', 'mail_from', 'mail_subject', 'mail_intro', 'portal_notice'];
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
     try {
       if (path === '/health') return json(200, { ok: true, service: 'shellmate-admin' });
       if (path.startsWith('/licence/')) return application(request, env, path);
+      if (path === '/request') return publicRequest(request, env);
       if (path === '/admin/login' && request.method === 'POST') return login(request, env);
       if (path === '/admin/logout') return logout();
       if (path.startsWith('/admin/api/')) {
@@ -70,6 +78,7 @@ function fromB64(text) {
   return Uint8Array.from(bin, c => c.charCodeAt(0));
 }
 function clean(value, max) { return String(value == null ? '' : value).trim().slice(0, max); }
+function isEmail(text) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text); }
 function isoDate(value) {
   const text = clean(value, 32);
   if (!text) return '';
@@ -77,6 +86,7 @@ function isoDate(value) {
   return text;
 }
 function today() { return new Date().toISOString().slice(0, 10); }
+function addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
 function newId(prefix) {
   const raw = new Uint8Array(6); crypto.getRandomValues(raw);
   return prefix + '-' + [...raw].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -87,6 +97,7 @@ async function rateLimited(env, request, bucket) {
   const { success } = await env.RATE_LIMITER.limit({ key: `${bucket}:${ip}` });
   return !success;
 }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 // ------------------------------------------------------------------ signing
 let signingKey = null;
@@ -170,8 +181,81 @@ async function getLicence(env, id) {
 }
 function publicRow(row) {
   if (!row) return null;
-  const out = { ...row, revoked: !!row.revoked, features: JSON.parse(row.features || '["updates"]') };
+  return { ...row, revoked: !!row.revoked, features: JSON.parse(row.features || '["updates"]') };
+}
+async function getSettings(env) {
+  const rows = await env.DB.prepare('SELECT key, value FROM settings').all();
+  const out = {};
+  for (const r of rows.results) out[r.key] = r.value;
   return out;
+}
+async function setSetting(env, key, value) {
+  await env.DB.prepare('INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .bind(key, value).run();
+}
+
+/** Issue and record a licence. Shared by the portal and the request page. */
+async function issue(env, spec) {
+  const kind = spec.kind === 'org' ? 'org' : 'person';
+  const licensee = clean(spec.licensee, MAX.name);
+  if (!licensee) throw new Error('A licensee name is needed.');
+  const seats = Math.min(MAX.seats, Math.max(1, parseInt(spec.seats, 10) || 1));
+  const expires = isoDate(spec.expires);
+  const issued = isoDate(spec.issued) || today();
+  const grace = Math.min(365, Math.max(0, parseInt(spec.grace_days, 10) || 14));
+  const features = Array.isArray(spec.features) && spec.features.length ? spec.features.map(f => clean(f, 40)) : ['updates'];
+  const email = clean(spec.email, MAX.email);
+  let userId = clean(spec.user_id, 64) || null;
+  if (!userId && email) {
+    const existing = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = lower(?1)').bind(email).first();
+    if (existing) userId = existing.id;
+    else if (spec.create_user !== false) {
+      userId = newId('usr');
+      await env.DB.prepare('INSERT INTO users (id, name, email, org, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
+        .bind(userId, licensee, email, kind === 'org' ? licensee : clean(spec.org, MAX.org), '', Date.now()).run();
+    }
+  }
+  const id = newId(kind === 'org' ? 'org' : 'lic');
+  const row = { id, kind, licensee, email, seats, issued, expires, grace_days: grace, features: JSON.stringify(features) };
+  const token = await signToken(env, payloadFor(row));
+  await env.DB.prepare(`INSERT INTO licences (id, user_id, kind, licensee, email, seats, issued, expires, grace_days, features, token, notes, created_at, source)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`)
+    .bind(id, userId, kind, licensee, email, seats, issued, expires, grace, row.features, token, clean(spec.notes, MAX.notes), Date.now(), spec.source || 'admin').run();
+  await logEvent(env, id, 'issued', `${kind} · ${seats} seat(s) · expires ${expires || 'never'} · ${spec.source || 'admin'}`);
+  return getLicence(env, id);
+}
+
+// ------------------------------------------------------------------ email
+function mailConfigured(env) { return !!env.RESEND_API_KEY; }
+
+async function sendKey(env, row, settings, kind = 'issued') {
+  if (!mailConfigured(env)) throw new Error('Email is not configured: set the RESEND_API_KEY secret and verify the sender domain at resend.com.');
+  if (!row.email || !isEmail(row.email)) throw new Error('This licence has no email address to send to.');
+  const from = settings.mail_from || 'ShellMate <licences@foundry-ns.com>';
+  const subject = settings.mail_subject || 'Your ShellMate licence key';
+  const intro = settings.mail_intro || 'Your ShellMate licence key is below.';
+  const text = [
+    `Hello ${row.licensee},`, '',
+    intro, '',
+    row.token, '',
+    `Licence: ${row.kind === 'org' ? `organisation, ${row.seats} seat(s)` : 'personal'} · issued ${row.issued} · expires ${row.expires || 'never'}.`,
+    kind === 'renewed' ? 'This is a renewal. A copy of ShellMate that already has your previous key picks the new one up on its next refresh; nothing needs re-entering.' : '',
+    '', 'ShellMate works without a licence; the key lets it update itself from inside the application.',
+    '', 'Foundry Networks and Services — support@foundry-ns.com',
+  ].filter(l => l !== null).join('\n');
+  const htmlBody = `<div style="font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#0f172a;max-width:640px"><p>Hello ${esc(row.licensee)},</p><p>${esc(intro)}</p><pre style="font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#f6f7f9;border:1px solid #e6e8ec;border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-all">${esc(row.token)}</pre><p style="color:#64748b;font-size:13px">Licence: ${esc(row.kind === 'org' ? `organisation, ${row.seats} seat(s)` : 'personal')} · issued ${esc(row.issued)} · expires ${esc(row.expires || 'never')}.${kind === 'renewed' ? '<br>This is a renewal: a copy of ShellMate that has your previous key picks this one up on its next refresh.' : ''}</p><p style="color:#64748b;font-size:13px">ShellMate works without a licence; the key lets it update itself from inside the application.</p><p style="color:#94a3b8;font-size:12px">Foundry Networks and Services · support@foundry-ns.com</p></div>`;
+  const resp = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to: [row.email], subject, text, html: htmlBody,
+      attachments: [{ filename: `shellmate-${row.id}.key`, content: btoa(row.token + '\n') }] }),
+  });
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => '');
+    throw new Error(`The mail service answered ${resp.status}: ${detail.slice(0, 200)}`);
+  }
+  await env.DB.prepare('UPDATE licences SET last_sent = ?1, sent_count = sent_count + 1 WHERE id = ?2').bind(Date.now(), row.id).run();
+  await logEvent(env, row.id, 'emailed', `${kind} key to ${row.email}`);
 }
 
 // ------------------------------------------------------------------ the application's endpoints
@@ -199,69 +283,138 @@ async function application(request, env, path) {
   return json(404, { detail: 'Not found.' });
 }
 
+// ------------------------------------------------------------------ the public request page
+async function publicRequest(request, env) {
+  const settings = await getSettings(env);
+  const enabled = settings.requests_enabled === '1';
+  if (request.method === 'GET') return html(requestPage(env, settings, enabled));
+  if (request.method !== 'POST') return json(405, { detail: 'GET or POST.' });
+  if (!enabled) return json(403, { detail: 'Licence requests are not open at the moment.' });
+  if (await rateLimited(env, request, 'request')) return json(429, { detail: 'Too many requests. Try again in a minute.' });
+  let body = {};
+  try { body = await request.json(); } catch (_) { return json(400, { detail: 'JSON expected.' }); }
+  const name = clean(body.name, MAX.name);
+  const email = clean(body.email, MAX.email);
+  if (!name || !isEmail(email)) return json(400, { detail: 'A name and a valid email address are needed.' });
+  if (!mailConfigured(env)) return json(503, { detail: 'Keys are sent by email and email is not configured yet. Contact support@foundry-ns.com.' });
+  // One live key per email: re-send it rather than issuing another.
+  const existing = await env.DB.prepare("SELECT * FROM licences WHERE lower(email) = lower(?1) AND revoked = 0 AND (expires = '' OR expires >= ?2) ORDER BY created_at DESC LIMIT 1")
+    .bind(email, today()).first();
+  try {
+    if (existing) {
+      await sendKey(env, existing, settings, 'issued');
+      await logEvent(env, existing.id, 'requested', `re-sent to ${email}`);
+      return json(200, { ok: true, detail: 'A key for that address already exists; it has been sent again.' });
+    }
+    const days = Math.min(3650, Math.max(1, parseInt(settings.request_days, 10) || 30));
+    const row = await issue(env, { kind: settings.request_kind === 'org' ? 'org' : 'person', licensee: name, email,
+                                   org: clean(body.org, MAX.org), expires: addDays(days), notes: 'self-service request', source: 'request' });
+    await sendKey(env, row, settings, 'issued');
+    return json(201, { ok: true, detail: `Your key has been sent to ${email}. It is valid for ${days} days.` });
+  } catch (err) {
+    return json(502, { detail: err.message });
+  }
+}
+
 // ------------------------------------------------------------------ the admin API
 async function adminApi(request, env, path) {
   const url = new URL(request.url);
   const method = request.method;
   const body = method === 'POST' || method === 'PUT' ? await request.json().catch(() => ({})) : {};
+  const settings = await getSettings(env);
 
   if (path === '/admin/api/stats') {
-    const total = await env.DB.prepare('SELECT COUNT(*) AS n FROM licences').first();
-    const active = await env.DB.prepare("SELECT COUNT(*) AS n FROM licences WHERE revoked = 0 AND (expires = '' OR expires >= ?1)").bind(today()).first();
-    const expiring = await env.DB.prepare("SELECT COUNT(*) AS n FROM licences WHERE revoked = 0 AND expires != '' AND expires >= ?1 AND expires <= ?2").bind(today(), addDays(30)).first();
-    const users = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first();
-    const recent = await env.DB.prepare('SELECT e.*, l.licensee FROM events e LEFT JOIN licences l ON l.id = e.licence_id ORDER BY e.at DESC LIMIT 12').all();
-    return json(200, { licences: total.n, active: active.n, expiring: expiring.n, users: users.n, events: recent.results });
+    const t = today();
+    const [total, active, expiring, expired, revoked, users, month] = await Promise.all([
+      env.DB.prepare('SELECT COUNT(*) AS n FROM licences').first(),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM licences WHERE revoked = 0 AND (expires = '' OR expires >= ?1)").bind(t).first(),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM licences WHERE revoked = 0 AND expires != '' AND expires >= ?1 AND expires <= ?2").bind(t, addDays(30)).first(),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM licences WHERE revoked = 0 AND expires != '' AND expires < ?1").bind(t).first(),
+      env.DB.prepare('SELECT COUNT(*) AS n FROM licences WHERE revoked = 1').first(),
+      env.DB.prepare('SELECT COUNT(*) AS n FROM users').first(),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM licences WHERE created_at >= ?1").bind(Date.now() - 30 * 86400000).first(),
+    ]);
+    const recent = await env.DB.prepare('SELECT e.*, l.licensee FROM events e LEFT JOIN licences l ON l.id = e.licence_id ORDER BY e.at DESC LIMIT 15').all();
+    return json(200, { licences: total.n, active: active.n, expiring: expiring.n, expired: expired.n, revoked: revoked.n,
+                       users: users.n, issued_30d: month.n, events: recent.results,
+                       mail: mailConfigured(env), requests: settings.requests_enabled === '1', notice: settings.portal_notice || '' });
+  }
+
+  if (path === '/admin/api/reports') {
+    const t = today();
+    const [byMonth, byKind, bySource, expiring, seats] = await Promise.all([
+      env.DB.prepare("SELECT substr(issued,1,7) AS month, COUNT(*) AS n FROM licences GROUP BY month ORDER BY month DESC LIMIT 24").all(),
+      env.DB.prepare('SELECT kind, COUNT(*) AS n, SUM(seats) AS seats FROM licences WHERE revoked = 0 GROUP BY kind').all(),
+      env.DB.prepare('SELECT source, COUNT(*) AS n FROM licences GROUP BY source').all(),
+      env.DB.prepare("SELECT * FROM licences WHERE revoked = 0 AND expires != '' AND expires >= ?1 AND expires <= ?2 ORDER BY expires").bind(t, addDays(90)).all(),
+      env.DB.prepare("SELECT SUM(seats) AS n FROM licences WHERE revoked = 0 AND (expires = '' OR expires >= ?1)").bind(t).first(),
+    ]);
+    const buckets = { d30: 0, d60: 0, d90: 0 };
+    for (const l of expiring.results) {
+      if (l.expires <= addDays(30)) buckets.d30 += 1; else if (l.expires <= addDays(60)) buckets.d60 += 1; else buckets.d90 += 1;
+    }
+    return json(200, { by_month: byMonth.results.reverse(), by_kind: byKind.results, by_source: bySource.results,
+                       expiring: expiring.results.map(publicRow), buckets, seats_in_force: seats.n || 0 });
+  }
+
+  if (path === '/admin/api/settings' && method === 'GET') {
+    return json(200, { settings, mail: mailConfigured(env), public_key: env.PUBLIC_KEY_B64 || '',
+                       request_url: `${url.origin}/request` });
+  }
+  if (path === '/admin/api/settings' && method === 'PUT') {
+    for (const key of SETTING_KEYS) {
+      if (key in body) await setSetting(env, key, key === 'requests_enabled' ? (body[key] ? '1' : '0') : clean(body[key], MAX.text));
+    }
+    return json(200, { settings: await getSettings(env) });
+  }
+  if (path === '/admin/api/mail/test' && method === 'POST') {
+    const to = clean(body.to, MAX.email);
+    if (!isEmail(to)) return json(400, { detail: 'A valid address is needed.' });
+    try {
+      await sendKey(env, { id: 'test', licensee: 'Test', email: to, kind: 'person', seats: 1, issued: today(), expires: '', token: 'SM1.test.test' }, settings, 'issued')
+        .catch(err => { if (!/UPDATE|no such/i.test(err.message)) throw err; });
+      return json(200, { ok: true });
+    } catch (err) { return json(502, { detail: err.message }); }
   }
 
   if (path === '/admin/api/licences' && method === 'GET') {
     const q = clean(url.searchParams.get('q'), 120).toLowerCase();
-    const rows = q
-      ? await env.DB.prepare('SELECT * FROM licences WHERE lower(licensee) LIKE ?1 OR lower(email) LIKE ?1 OR lower(id) LIKE ?1 OR lower(notes) LIKE ?1 ORDER BY created_at DESC LIMIT 500').bind(`%${q}%`).all()
-      : await env.DB.prepare('SELECT * FROM licences ORDER BY created_at DESC LIMIT 500').all();
+    const status = clean(url.searchParams.get('status'), 20);
+    const kind = clean(url.searchParams.get('kind'), 10);
+    const where = []; const args = [];
+    if (q) { where.push('(lower(licensee) LIKE ? OR lower(email) LIKE ? OR lower(id) LIKE ? OR lower(notes) LIKE ?)'); args.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`); }
+    if (kind === 'person' || kind === 'org') { where.push('kind = ?'); args.push(kind); }
+    const t = today();
+    if (status === 'active') { where.push("revoked = 0 AND (expires = '' OR expires > ?)"); args.push(addDays(30)); }
+    else if (status === 'expiring') { where.push("revoked = 0 AND expires != '' AND expires >= ? AND expires <= ?"); args.push(t, addDays(30)); }
+    else if (status === 'expired') { where.push("revoked = 0 AND expires != '' AND expires < ?"); args.push(t); }
+    else if (status === 'revoked') { where.push('revoked = 1'); }
+    const sql = 'SELECT * FROM licences' + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY created_at DESC LIMIT 1000';
+    const rows = await env.DB.prepare(sql).bind(...args).all();
     return json(200, { licences: rows.results.map(publicRow) });
   }
 
   if (path === '/admin/api/licences' && method === 'POST') {
-    const kind = body.kind === 'org' ? 'org' : 'person';
-    const licensee = clean(body.licensee, MAX.name);
-    if (!licensee) return json(400, { detail: 'A licensee name is needed.' });
-    const seats = Math.min(MAX.seats, Math.max(1, parseInt(body.seats, 10) || 1));
-    let expires, issued;
-    try { expires = isoDate(body.expires); issued = isoDate(body.issued) || today(); }
-    catch (err) { return json(400, { detail: err.message }); }
-    const grace = Math.min(365, Math.max(0, parseInt(body.grace_days, 10) || 14));
-    const features = Array.isArray(body.features) && body.features.length ? body.features.map(f => clean(f, 40)) : ['updates'];
-    const email = clean(body.email, MAX.email);
-    let userId = clean(body.user_id, 64) || null;
-    if (!userId && email) {
-      const existing = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = lower(?1)').bind(email).first();
-      if (existing) userId = existing.id;
-      else if (body.create_user !== false) {
-        userId = newId('usr');
-        await env.DB.prepare('INSERT INTO users (id, name, email, org, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-          .bind(userId, licensee, email, kind === 'org' ? licensee : clean(body.org, MAX.org), '', Date.now()).run();
+    try {
+      const row = await issue(env, { ...body, source: 'admin' });
+      let mailed = false, mail_error = '';
+      if (body.send !== false && row.email && mailConfigured(env)) {
+        try { await sendKey(env, row, settings, 'issued'); mailed = true; } catch (err) { mail_error = err.message; }
       }
-    }
-    const id = newId(kind === 'org' ? 'org' : 'lic');
-    const row = { id, kind, licensee, email, seats, issued, expires, grace_days: grace, features: JSON.stringify(features) };
-    const token = await signToken(env, payloadFor(row));
-    await env.DB.prepare(`INSERT INTO licences (id, user_id, kind, licensee, email, seats, issued, expires, grace_days, features, token, notes, created_at)
-                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`)
-      .bind(id, userId, kind, licensee, email, seats, issued, expires, grace, row.features, token, clean(body.notes, MAX.notes), Date.now()).run();
-    await logEvent(env, id, 'issued', `${kind} · ${seats} seat(s) · expires ${expires || 'never'}`);
-    return json(201, { licence: publicRow(await getLicence(env, id)) });
+      return json(201, { licence: publicRow(await getLicence(env, row.id)), mailed, mail_error });
+    } catch (err) { return json(400, { detail: err.message }); }
   }
 
-  const m = path.match(/^\/admin\/api\/licences\/([^/]+)(?:\/(revoke|restore|renew|events))?$/);
+  const m = path.match(/^\/admin\/api\/licences\/([^/]+)(?:\/(revoke|restore|renew|send))?$/);
   if (m) {
     const id = decodeURIComponent(m[1]);
     const row = await getLicence(env, id);
     if (!row) return json(404, { detail: 'No such licence.' });
     const action = m[2];
     if (!action && method === 'GET') {
-      const events = await env.DB.prepare('SELECT * FROM events WHERE licence_id = ?1 ORDER BY at DESC LIMIT 50').bind(id).all();
-      return json(200, { licence: publicRow(row), events: events.results });
+      const events = await env.DB.prepare('SELECT * FROM events WHERE licence_id = ?1 ORDER BY at DESC LIMIT 100').bind(id).all();
+      const user = row.user_id ? await env.DB.prepare('SELECT * FROM users WHERE id = ?1').bind(row.user_id).first() : null;
+      return json(200, { licence: publicRow(row), events: events.results, user });
     }
     if (!action && method === 'DELETE') {
       await env.DB.prepare('DELETE FROM licences WHERE id = ?1').bind(id).run();
@@ -269,8 +422,8 @@ async function adminApi(request, env, path) {
       return json(200, { deleted: true });
     }
     if (!action && method === 'PUT') {
-      const notes = clean(body.notes, MAX.notes);
-      await env.DB.prepare('UPDATE licences SET notes = ?1 WHERE id = ?2').bind(notes, id).run();
+      await env.DB.prepare('UPDATE licences SET notes = ?1, email = ?2 WHERE id = ?3')
+        .bind(clean(body.notes, MAX.notes), 'email' in body ? clean(body.email, MAX.email) : row.email, id).run();
       return json(200, { licence: publicRow(await getLicence(env, id)) });
     }
     if (action === 'revoke' && method === 'POST') {
@@ -290,18 +443,29 @@ async function adminApi(request, env, path) {
       const seats = body.seats ? Math.min(MAX.seats, Math.max(1, parseInt(body.seats, 10) || row.seats)) : row.seats;
       const updated = { ...row, expires, seats, issued: today() };
       const token = await signToken(env, payloadFor(updated));
-      await env.DB.prepare('UPDATE licences SET expires = ?1, seats = ?2, issued = ?3, token = ?4, revoked = 0, revoked_reason = \'\' WHERE id = ?5')
+      await env.DB.prepare("UPDATE licences SET expires = ?1, seats = ?2, issued = ?3, token = ?4, revoked = 0, revoked_reason = '' WHERE id = ?5")
         .bind(expires, seats, updated.issued, token, id).run();
       await logEvent(env, id, 'renewed', `expires ${expires || 'never'} · ${seats} seat(s)`);
+      let mailed = false, mail_error = '';
+      const fresh = await getLicence(env, id);
+      if (body.send !== false && fresh.email && mailConfigured(env)) {
+        try { await sendKey(env, fresh, settings, 'renewed'); mailed = true; } catch (err) { mail_error = err.message; }
+      }
+      return json(200, { licence: publicRow(await getLicence(env, id)), mailed, mail_error });
+    }
+    if (action === 'send' && method === 'POST') {
+      try { await sendKey(env, row, settings, body.kind === 'renewed' ? 'renewed' : 'issued'); }
+      catch (err) { return json(502, { detail: err.message }); }
       return json(200, { licence: publicRow(await getLicence(env, id)) });
     }
   }
 
   if (path === '/admin/api/users' && method === 'GET') {
     const q = clean(url.searchParams.get('q'), 120).toLowerCase();
+    const base = 'SELECT u.*, (SELECT COUNT(*) FROM licences l WHERE l.user_id = u.id) AS licences, (SELECT COUNT(*) FROM licences l WHERE l.user_id = u.id AND l.revoked = 0 AND (l.expires = \'\' OR l.expires >= ?1)) AS active FROM users u';
     const rows = q
-      ? await env.DB.prepare('SELECT u.*, (SELECT COUNT(*) FROM licences l WHERE l.user_id = u.id) AS licences FROM users u WHERE lower(name) LIKE ?1 OR lower(email) LIKE ?1 OR lower(org) LIKE ?1 ORDER BY created_at DESC LIMIT 500').bind(`%${q}%`).all()
-      : await env.DB.prepare('SELECT u.*, (SELECT COUNT(*) FROM licences l WHERE l.user_id = u.id) AS licences FROM users u ORDER BY created_at DESC LIMIT 500').all();
+      ? await env.DB.prepare(base + ' WHERE lower(name) LIKE ?2 OR lower(email) LIKE ?2 OR lower(org) LIKE ?2 ORDER BY created_at DESC LIMIT 1000').bind(today(), `%${q}%`).all()
+      : await env.DB.prepare(base + ' ORDER BY created_at DESC LIMIT 1000').bind(today()).all();
     return json(200, { users: rows.results });
   }
   if (path === '/admin/api/users' && method === 'POST') {
@@ -333,9 +497,8 @@ async function adminApi(request, env, path) {
   }
   return json(404, { detail: 'Not found.' });
 }
-function addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
 
-// ------------------------------------------------------------------ the portal
+// ------------------------------------------------------------------ pages
 const STYLE = `
 :root { --accent:#00a3ff; --accent-soft:#e6f5ff; --ink:#0f172a; --ink-2:#334155; --ink-3:#64748b; --ink-4:#94a3b8;
   --bg:#f6f7f9; --card:#fcfcfd; --line:#e6e8ec; --line-2:#d7dbe0; --danger:#b03a32; --warn:#b07208; --ok:#2c7a42;
@@ -346,7 +509,7 @@ a { color:var(--accent); text-decoration:none } a:hover { text-decoration:underl
 h1,h2,h3 { font-family:var(--font-display); margin:0; letter-spacing:-.01em } h1{font-size:22px} h2{font-size:17px} h3{font-size:14px}
 .mono { font-family:var(--font-mono); font-size:12px }
 .app { display:grid; grid-template-columns:232px 1fr; min-height:100vh }
-.side { background:#fff; border-right:1px solid var(--line); padding:20px 14px; display:flex; flex-direction:column; gap:4px }
+.side { background:#fff; border-right:1px solid var(--line); padding:20px 14px; display:flex; flex-direction:column; gap:4px; position:sticky; top:0; height:100vh }
 .brand { display:flex; align-items:center; gap:10px; padding:4px 8px 18px; font-family:var(--font-display); font-weight:700; font-size:16px }
 .brand .dot { width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg,var(--accent),#7cd4ff); display:grid; place-items:center; color:#fff; font-size:13px }
 .nav { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:var(--radius-sm); color:var(--ink-2); cursor:pointer; font-weight:500 }
@@ -354,35 +517,42 @@ h1,h2,h3 { font-family:var(--font-display); margin:0; letter-spacing:-.01em } h1
 .nav svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2 }
 .side .foot { margin-top:auto; font-size:12px; color:var(--ink-4); padding:8px 10px }
 .main { padding:28px 32px; max-width:1180px }
-.top { display:flex; align-items:center; justify-content:space-between; margin-bottom:22px; gap:16px }
+.top { display:flex; align-items:center; justify-content:space-between; margin-bottom:22px; gap:16px; flex-wrap:wrap }
 .top .sub { color:var(--ink-3); margin-top:2px }
+.crumbs { font-size:12px; color:var(--ink-4); margin-bottom:8px } .crumbs a { color:var(--ink-3) }
 .btn { font:inherit; font-weight:600; padding:8px 14px; border-radius:var(--radius-sm); border:1px solid var(--line-2); background:#fff; color:var(--ink-2); cursor:pointer; display:inline-flex; align-items:center; gap:6px }
 .btn:hover { background:var(--bg) } .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff } .btn.primary:hover { filter:brightness(.95) }
-.btn.danger { color:var(--danger); border-color:#e8c4c1 } .btn.sm { padding:5px 10px; font-size:12px }
-.btn:disabled { opacity:.5; cursor:default }
+.btn.danger { color:var(--danger); border-color:#e8c4c1 } .btn.sm { padding:5px 10px; font-size:12px } .btn:disabled { opacity:.5; cursor:default }
 .cards { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:22px }
 .card { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px }
+.card.click { cursor:pointer } .card.click:hover { border-color:var(--accent) }
 .card .k { color:var(--ink-3); font-size:12px; font-weight:500 } .card .v { font-family:var(--font-display); font-size:26px; font-weight:700; margin-top:4px }
-.panel { background:#fff; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden }
-.panel .bar { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--line) }
-.panel .bar input { flex:1; max-width:360px }
+.panel { background:#fff; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; margin-bottom:18px }
+.panel .bar { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap }
+.panel .bar input[type=search], .panel .bar input[type=text] { flex:1; min-width:200px; max-width:360px }
+.panel .bar select { width:auto }
+.panel .body { padding:18px }
 input, select, textarea { font:inherit; padding:8px 10px; border:1px solid var(--line-2); border-radius:var(--radius-sm); background:#fff; color:var(--ink); width:100% }
-input:focus, select:focus, textarea:focus { outline:2px solid var(--accent-soft); border-color:var(--accent) }
-table { width:100%; border-collapse:collapse } th { text-align:left; font-size:12px; color:var(--ink-3); font-weight:600; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--card) }
+input[type=checkbox] { width:auto } input:focus, select:focus, textarea:focus { outline:2px solid var(--accent-soft); border-color:var(--accent) }
+table { width:100%; border-collapse:collapse } th { text-align:left; font-size:12px; color:var(--ink-3); font-weight:600; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--card); white-space:nowrap }
+th.sort { cursor:pointer; user-select:none } th.sort:hover { color:var(--ink) } th .dir { font-size:10px; margin-left:4px }
 td { padding:11px 16px; border-bottom:1px solid var(--line); vertical-align:top } tr:hover td { background:#fafbfc } tr.click { cursor:pointer }
 .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600 }
-.pill.ok { background:#e7f5ec; color:var(--ok) } .pill.warn { background:#fdf3e1; color:var(--warn) } .pill.bad { background:#fbe9e7; color:var(--danger) } .pill.grey { background:var(--bg); color:var(--ink-3) }
+.pill.ok { background:#e7f5ec; color:var(--ok) } .pill.warn { background:#fdf3e1; color:var(--warn) } .pill.bad { background:#fbe9e7; color:var(--danger) } .pill.grey { background:var(--bg); color:var(--ink-3) } .pill.blue { background:var(--accent-soft); color:#0369a1 }
 .form { display:grid; grid-template-columns:1fr 1fr; gap:14px 18px } .form .full { grid-column:1/-1 } label { display:block; font-size:12px; font-weight:600; color:var(--ink-2); margin-bottom:5px } .hint { font-size:12px; color:var(--ink-4); margin-top:4px }
-.drawer { position:fixed; inset:0 0 0 auto; width:min(560px,100%); background:#fff; border-left:1px solid var(--line); box-shadow:-12px 0 32px rgba(15,23,42,.08); padding:24px 26px; overflow:auto; z-index:20 }
-.scrim { position:fixed; inset:0; background:rgba(15,23,42,.25); z-index:19 }
 .key { font-family:var(--font-mono); font-size:11px; word-break:break-all; background:var(--bg); border:1px solid var(--line); border-radius:var(--radius-sm); padding:10px; user-select:all }
 .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap } .grow { flex:1 }
-.kv { display:grid; grid-template-columns:130px 1fr; gap:6px 12px; font-size:13px } .kv .k { color:var(--ink-3) }
+.kv { display:grid; grid-template-columns:140px 1fr; gap:6px 12px; font-size:13px } .kv .k { color:var(--ink-3) }
 .events { list-style:none; padding:0; margin:0 } .events li { padding:8px 0; border-bottom:1px solid var(--line); font-size:13px } .events time { color:var(--ink-4); font-size:12px; margin-right:8px }
-.toast { position:fixed; right:20px; bottom:20px; background:var(--ink); color:#fff; padding:10px 14px; border-radius:var(--radius-sm); font-size:13px; z-index:30 }
+.toast { position:fixed; right:20px; bottom:20px; background:var(--ink); color:#fff; padding:10px 14px; border-radius:var(--radius-sm); font-size:13px; z-index:30; max-width:420px }
 .login { min-height:100vh; display:grid; place-items:center } .login .card { width:360px; padding:28px }
 .empty { padding:36px; text-align:center; color:var(--ink-4) }
-@media (max-width:860px){ .app{grid-template-columns:1fr} .side{display:none} .cards{grid-template-columns:1fr 1fr} .form{grid-template-columns:1fr} }
+.notice { background:#fff8e6; border:1px solid #f1dfae; color:#7a5a08; padding:10px 14px; border-radius:var(--radius-sm); margin-bottom:18px; font-size:13px }
+.bars { display:flex; align-items:flex-end; gap:6px; height:120px; padding:8px 0 } .bars .b { flex:1; background:var(--accent-soft); border:1px solid #bfe4ff; border-radius:4px 4px 0 0; position:relative; min-width:14px }
+.bars .b span { position:absolute; bottom:100%; left:0; right:0; text-align:center; font-size:10px; color:var(--ink-3) } .bars .b i { position:absolute; top:100%; left:0; right:0; text-align:center; font-size:10px; color:var(--ink-4); font-style:normal; margin-top:4px }
+.two { display:grid; grid-template-columns:1fr 1fr; gap:18px }
+.request { max-width:520px; margin:8vh auto; padding:0 16px }
+@media (max-width:900px){ .app{grid-template-columns:1fr} .side{display:none} .cards{grid-template-columns:1fr 1fr} .form,.two{grid-template-columns:1fr} }
 `;
 const FONTS = '<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">';
 
@@ -393,97 +563,170 @@ function loginPage(env) {
 <script>document.getElementById('f').onsubmit=async e=>{e.preventDefault();const r=await fetch('/admin/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:document.getElementById('p').value})});if(r.ok)location.reload();else document.getElementById('err').textContent=(await r.json()).detail||'Wrong password.';};</script></body></html>`;
 }
 
-function portalPage(env) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(env.PORTAL_TITLE || 'ShellMate Admin')}</title>${FONTS}<style>${STYLE}</style></head>
-<body><div class="app">
-<aside class="side"><div class="brand"><span class="dot">S</span> ${esc(env.PORTAL_TITLE || 'ShellMate Admin')}</div>
-<div class="nav active" data-view="overview"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Overview</div>
-<div class="nav" data-view="licences"><svg viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7 7 5 5 0 0 1 7-7zm0 0L19 3.5M15 5l2 2"/></svg>Licences</div>
-<div class="nav" data-view="people"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>People</div>
-<div class="nav" data-view="issue"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>Issue a licence</div>
-<div class="foot">Public key<br><span class="mono">${esc((env.PUBLIC_KEY_B64 || '').slice(0, 20))}…</span><br><a href="/admin/logout">Sign out</a></div></aside>
-<main class="main" id="main"></main></div>
-<script>${PORTAL_JS}</script></body></html>`;
+function requestPage(env, settings, enabled) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ShellMate licence</title>${FONTS}<style>${STYLE}</style></head>
+<body><div class="request"><div class="brand"><span class="dot">S</span> ShellMate licence</div>
+<div class="card" style="padding:24px">${enabled ? `
+<h2>Request a licence key</h2><p class="hint" style="margin:6px 0 16px">The key is sent to your email and is valid for ${esc(settings.request_days || '30')} days. ShellMate works without one; the key lets it update itself from inside the application.</p>
+<form id="f" class="form"><div class="full"><label>Name</label><input id="name" required maxlength="120"></div><div class="full"><label>Email</label><input id="email" type="email" required maxlength="200"></div><div class="full"><label>Organisation (optional)</label><input id="org" maxlength="120"></div>
+<div class="full"><button class="btn primary" id="go">Send me a key</button></div></form><p class="hint" id="msg"></p>
+<script>document.getElementById('f').onsubmit=async e=>{e.preventDefault();const b=document.getElementById('go');b.disabled=true;const r=await fetch('/request',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:document.getElementById('name').value,email:document.getElementById('email').value,org:document.getElementById('org').value})});const d=await r.json().catch(()=>({}));document.getElementById('msg').textContent=d.detail||(r.ok?'Sent.':'Something went wrong.');document.getElementById('msg').style.color=r.ok?'var(--ok)':'var(--danger)';b.disabled=false;};</script>`
+: `<h2>Licence requests are closed</h2><p class="hint" style="margin-top:6px">Keys are issued by Foundry Networks and Services. Write to <a href="mailto:support@foundry-ns.com">support@foundry-ns.com</a>.</p>`}
+</div></div></body></html>`;
 }
-function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+function portalPage(env) {
+  const nav = [
+    ['overview', 'Overview', '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'],
+    ['licences', 'Licences', '<path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7 7 5 5 0 0 1 7-7zm0 0L19 3.5M15 5l2 2"/>'],
+    ['people', 'People', '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>'],
+    ['issue', 'Issue a licence', '<circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/>'],
+    ['reports', 'Reports', '<path d="M3 3v18h18"/><path d="M7 15l4-4 4 4 5-6"/>'],
+    ['settings', 'Settings', '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'],
+  ].map(([v, t, p]) => `<a class="nav" data-view="${v}" href="#/${v}"><svg viewBox="0 0 24 24">${p}</svg>${t}</a>`).join('');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(env.PORTAL_TITLE || 'ShellMate Admin')}</title>${FONTS}<style>${STYLE}</style></head>
+<body><div class="app"><aside class="side"><div class="brand"><span class="dot">S</span> ${esc(env.PORTAL_TITLE || 'ShellMate Admin')}</div>${nav}
+<div class="foot"><a href="/request" target="_blank">Public request page</a><br><a href="/admin/logout">Sign out</a></div></aside>
+<main class="main" id="main"></main></div><script>${PORTAL_JS}</script></body></html>`;
+}
 
 const PORTAL_JS = String.raw`
 const $ = (s, r=document) => r.querySelector(s);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api = async (path, opts={}) => { const r = await fetch(path, {headers:{'content-type':'application/json'}, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined}); const d = await r.json().catch(()=>({})); if (!r.ok) throw new Error(d.detail || ('HTTP '+r.status)); return d; };
-const toast = m => { const t = document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>t.remove(), 2600); };
+const toast = m => { const t = document.createElement('div'); t.className='toast'; t.textContent=m; document.body.appendChild(t); setTimeout(()=>t.remove(), 3200); };
 const when = ts => ts ? new Date(ts).toLocaleString() : '—';
-const status = l => l.revoked ? ['bad','revoked'] : !l.expires ? ['ok','perpetual'] : (l.expires < today() ? ['bad','expired'] : (l.expires <= addDays(30) ? ['warn','expiring'] : ['ok','active']));
 const today = () => new Date().toISOString().slice(0,10);
 const addDays = n => { const d=new Date(); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+const status = l => l.revoked ? ['bad','revoked'] : !l.expires ? ['ok','perpetual'] : (l.expires < today() ? ['bad','expired'] : (l.expires <= addDays(30) ? ['warn','expiring'] : ['ok','active']));
 const main = $('#main');
-document.querySelectorAll('.nav').forEach(n => n.onclick = () => go(n.dataset.view));
-function go(view, arg) { document.querySelectorAll('.nav').forEach(n => n.classList.toggle('active', n.dataset.view===view)); ({overview, licences, people, issue})[view](arg); }
+function debounce(f, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; }
+function crumbs(...parts) { return '<div class="crumbs">' + parts.map((p, i) => i < parts.length - 1 ? '<a href="#/'+p[1]+'">'+esc(p[0])+'</a> › ' : esc(p[0])).join('') + '</div>'; }
+function back(hash, label) { return '<a class="btn sm" href="#/'+hash+'">← '+esc(label)+'</a>'; }
+function csv(rows, columns, name) { const lines = [columns.join(',')].concat(rows.map(r => columns.map(c => '"'+String(r[c]==null?'':r[c]).replace(/"/g,'""')+'"').join(','))); const a = document.createElement('a'); a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(lines.join('\n')); a.download = name; a.click(); }
+
+// ---- router: #/view, #/view/id, #/view?q=
+function route() {
+  const hash = location.hash.replace(/^#\/?/, '') || 'overview';
+  const [pathPart, query] = hash.split('?');
+  const [view, id] = pathPart.split('/');
+  const params = Object.fromEntries(new URLSearchParams(query || ''));
+  document.querySelectorAll('.nav').forEach(n => n.classList.toggle('active', n.dataset.view === view));
+  const pages = { overview, licences, licence: detail, people, person, issue, reports, settings };
+  const fn = pages[view] || overview;
+  Promise.resolve(fn(id ? decodeURIComponent(id) : params)).catch(e => { main.innerHTML = '<div class="empty">'+esc(e.message)+'</div>'; });
+}
+window.addEventListener('hashchange', route);
 
 async function overview() {
-  main.innerHTML = '<div class="top"><div><h1>Overview</h1><div class="sub">Licences issued, who holds them, and what happened lately.</div></div><button class="btn primary" onclick="go(\'issue\')">Issue a licence</button></div><div class="cards" id="cards"></div><div class="panel"><div class="bar"><h2>Recent activity</h2></div><ul class="events" id="ev" style="padding:6px 16px"></ul></div>';
+  main.innerHTML = '<div class="top"><div><h1>Overview</h1><div class="sub">Licences issued, who holds them, and what happened lately.</div></div><a class="btn primary" href="#/issue">Issue a licence</a></div><div id="notice"></div><div class="cards" id="cards"></div><div class="two"><div class="panel"><div class="bar"><h2>Recent activity</h2></div><ul class="events" id="ev" style="padding:6px 16px"></ul></div><div class="panel"><div class="bar"><h2>Service</h2></div><div class="body kv" id="svc"></div></div></div>';
   const s = await api('/admin/api/stats');
-  $('#cards').innerHTML = [['Licences', s.licences],['Active', s.active],['Expiring in 30 days', s.expiring],['People', s.users]].map(([k,v]) => '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>').join('');
-  $('#ev').innerHTML = s.events.length ? s.events.map(e => '<li><time>'+esc(when(e.at))+'</time><b>'+esc(e.kind)+'</b> '+esc(e.licensee||'')+' <span style="color:var(--ink-3)">'+esc(e.detail)+'</span></li>').join('') : '<li class="empty">Nothing yet.</li>';
+  if (s.notice) $('#notice').innerHTML = '<div class="notice">'+esc(s.notice)+'</div>';
+  $('#cards').innerHTML = [['Active licences', s.active, 'licences?status=active'],['Expiring in 30 days', s.expiring, 'licences?status=expiring'],['Expired', s.expired, 'licences?status=expired'],['Revoked', s.revoked, 'licences?status=revoked'],['Issued in 30 days', s.issued_30d, 'reports'],['All licences', s.licences, 'licences'],['People', s.users, 'people'],['Email', s.mail ? 'configured' : 'not set up', 'settings']]
+    .map(([k,v,h]) => '<div class="card click" onclick="location.hash=\'#/'+h+'\'"><div class="k">'+k+'</div><div class="v">'+esc(v)+'</div></div>').join('');
+  $('#ev').innerHTML = s.events.length ? s.events.map(e => '<li><time>'+esc(when(e.at))+'</time><b>'+esc(e.kind)+'</b> '+(e.licence_id?'<a href="#/licence/'+encodeURIComponent(e.licence_id)+'">'+esc(e.licensee||e.licence_id)+'</a>':'')+' <span style="color:var(--ink-3)">'+esc(e.detail)+'</span></li>').join('') : '<li class="empty">Nothing yet.</li>';
+  $('#svc').innerHTML = '<span class="k">Email</span><span>'+(s.mail?'<span class="pill ok">configured</span>':'<span class="pill warn">not configured</span> <a href="#/settings">set up</a>')+'</span><span class="k">Public requests</span><span>'+(s.requests?'<span class="pill ok">open</span>':'<span class="pill grey">closed</span>')+' <a href="/request" target="_blank">page</a></span>';
 }
 
-async function licences(q='') {
-  main.innerHTML = '<div class="top"><div><h1>Licences</h1><div class="sub">Every key issued. Click one for its details, key text and history.</div></div><button class="btn primary" onclick="go(\'issue\')">Issue a licence</button></div><div class="panel"><div class="bar"><input id="q" placeholder="Search by name, email, id or notes…" value="'+esc(q)+'"><span id="count" class="hint"></span></div><table><thead><tr><th>Licensee</th><th>Kind</th><th>Seats</th><th>Expires</th><th>Status</th><th>Last refresh</th></tr></thead><tbody id="rows"></tbody></table></div>';
-  const load = async () => { const d = await api('/admin/api/licences?q='+encodeURIComponent($('#q').value)); $('#count').textContent = d.licences.length + ' shown'; $('#rows').innerHTML = d.licences.length ? d.licences.map(l => { const [c,t]=status(l); return '<tr class="click" data-id="'+esc(l.id)+'"><td><b>'+esc(l.licensee)+'</b><br><span class="hint">'+esc(l.email)+' · <span class="mono">'+esc(l.id)+'</span></span></td><td>'+esc(l.kind)+'</td><td>'+l.seats+'</td><td>'+esc(l.expires||'never')+'</td><td><span class="pill '+c+'">'+t+'</span></td><td class="hint">'+esc(l.last_refresh?when(l.last_refresh)+' ('+l.refresh_count+')':'never')+'</td></tr>'; }).join('') : '<tr><td colspan="6" class="empty">No licences match.</td></tr>'; document.querySelectorAll('tr.click').forEach(r => r.onclick = () => detail(r.dataset.id)); };
-  $('#q').oninput = debounce(load, 250); await load();
+let sortState = { col: 'created_at', dir: -1 };
+async function licences(params) {
+  const q = params.q || '', st = params.status || '', kind = params.kind || '';
+  main.innerHTML = crumbs(['Licences','licences']) + '<div class="top"><div><h1>Licences</h1><div class="sub">Every key issued. Click one for its details, key text and history.</div></div><div class="row"><button class="btn" id="csv">Export CSV</button><a class="btn primary" href="#/issue">Issue a licence</a></div></div>'
+   + '<div class="panel"><div class="bar"><input type="search" id="q" placeholder="Search by name, email, id or notes…" value="'+esc(q)+'"><select id="status"><option value="">Any status</option><option value="active">Active</option><option value="expiring">Expiring in 30 days</option><option value="expired">Expired</option><option value="revoked">Revoked</option></select><select id="kind"><option value="">Any kind</option><option value="person">Person</option><option value="org">Organisation</option></select><span id="count" class="hint"></span></div><table><thead><tr>'
+   + [['licensee','Licensee'],['kind','Kind'],['seats','Seats'],['issued','Issued'],['expires','Expires'],['status','Status'],['last_refresh','Last refresh'],['last_sent','Emailed']].map(([c,t]) => '<th class="sort" data-col="'+c+'">'+t+'<span class="dir"></span></th>').join('') + '</tr></thead><tbody id="rows"></tbody></table></div>';
+  $('#status').value = st; $('#kind').value = kind;
+  let rows = [];
+  const render = () => {
+    const col = sortState.col, dir = sortState.dir;
+    const val = l => col === 'status' ? status(l)[1] : (l[col] == null ? '' : l[col]);
+    const sorted = rows.slice().sort((a,b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : 0) * dir; });
+    document.querySelectorAll('th.sort').forEach(th => th.querySelector('.dir').textContent = th.dataset.col === col ? (dir > 0 ? '▲' : '▼') : '');
+    $('#count').textContent = rows.length + ' shown';
+    $('#rows').innerHTML = sorted.length ? sorted.map(l => { const [c,t]=status(l); return '<tr class="click" data-id="'+esc(l.id)+'"><td><b>'+esc(l.licensee)+'</b><br><span class="hint">'+esc(l.email)+' · <span class="mono">'+esc(l.id)+'</span>'+(l.source==='request'?' · <span class="pill blue">self-service</span>':'')+'</span></td><td>'+esc(l.kind)+'</td><td>'+l.seats+'</td><td>'+esc(l.issued)+'</td><td>'+esc(l.expires||'never')+'</td><td><span class="pill '+c+'">'+t+'</span></td><td class="hint">'+esc(l.last_refresh?when(l.last_refresh)+' ('+l.refresh_count+')':'never')+'</td><td class="hint">'+esc(l.last_sent?when(l.last_sent):'—')+'</td></tr>'; }).join('') : '<tr><td colspan="8" class="empty">No licences match.</td></tr>';
+    document.querySelectorAll('tr.click').forEach(r => r.onclick = () => location.hash = '#/licence/'+encodeURIComponent(r.dataset.id));
+  };
+  const load = async () => { const p = new URLSearchParams({q: $('#q').value, status: $('#status').value, kind: $('#kind').value}); history.replaceState(null, '', '#/licences?'+p); rows = (await api('/admin/api/licences?'+p)).licences; render(); };
+  $('#q').oninput = debounce(load, 250); $('#status').onchange = load; $('#kind').onchange = load;
+  document.querySelectorAll('th.sort').forEach(th => th.onclick = () => { if (sortState.col === th.dataset.col) sortState.dir *= -1; else sortState = {col: th.dataset.col, dir: 1}; render(); });
+  $('#csv').onclick = () => csv(rows.map(l => ({...l, status: status(l)[1], features: l.features.join(' ')})), ['id','licensee','email','kind','seats','issued','expires','status','grace_days','features','source','refresh_count','last_refresh','sent_count','last_sent','notes'], 'shellmate-licences.csv');
+  await load();
 }
-function debounce(f, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; }
 
 async function detail(id) {
   const d = await api('/admin/api/licences/'+encodeURIComponent(id)); const l = d.licence; const [c,t] = status(l);
-  const scrim = document.createElement('div'); scrim.className='scrim'; const dr = document.createElement('div'); dr.className='drawer';
-  dr.innerHTML = '<div class="row"><h2 class="grow">'+esc(l.licensee)+' <span class="pill '+c+'">'+t+'</span></h2><button class="btn sm" id="x">Close</button></div>'
-   + '<div class="kv" style="margin:16px 0"><span class="k">Id</span><span class="mono">'+esc(l.id)+'</span><span class="k">Kind</span><span>'+esc(l.kind)+'</span><span class="k">Email</span><span>'+esc(l.email||'—')+'</span><span class="k">Seats</span><span>'+l.seats+'</span><span class="k">Issued</span><span>'+esc(l.issued)+'</span><span class="k">Expires</span><span>'+esc(l.expires||'never')+' <span class="hint">('+l.grace_days+' day grace)</span></span><span class="k">Features</span><span>'+esc(l.features.join(', '))+'</span><span class="k">Refreshes</span><span>'+l.refresh_count+' · last '+esc(when(l.last_refresh))+(l.last_ip?' from '+esc(l.last_ip):'')+'</span>'+(l.revoked?'<span class="k">Revoked</span><span style="color:var(--danger)">'+esc(l.revoked_reason||'no reason given')+'</span>':'')+'</div>'
-   + '<label>Licence key <span class="hint">— what the licensee pastes into ShellMate</span></label><div class="key" id="key">'+esc(l.token)+'</div><div class="row" style="margin:8px 0 18px"><button class="btn sm" id="copy">Copy key</button><button class="btn sm" id="dl">Download .key file</button></div>'
-   + '<label>Notes</label><textarea id="notes" rows="3">'+esc(l.notes||'')+'</textarea><div class="row" style="margin:8px 0 18px"><button class="btn sm" id="savenotes">Save notes</button></div>'
-   + '<h3>Renew</h3><div class="row" style="margin:8px 0 18px"><input type="date" id="renew" value="'+esc(l.expires||'')+'" style="max-width:180px"><input type="number" id="seats" min="1" value="'+l.seats+'" style="max-width:100px" title="Seats"><button class="btn sm primary" id="dorenew">Renew and re-sign</button></div><p class="hint" style="margin-top:-12px">Renewing keeps the id, signs a new key with the new expiry, and the licensee\'s copy picks it up at its next refresh — no re-entry needed.</p>'
-   + '<h3>'+(l.revoked?'Restore':'Revoke')+'</h3><div class="row" style="margin:8px 0 18px">'+(l.revoked?'<button class="btn sm" id="restore">Restore this licence</button>':'<input id="reason" placeholder="Reason (shown to the licensee)"><button class="btn sm danger" id="revoke">Revoke</button>')+'</div>'
-   + '<h3>History</h3><ul class="events">'+(d.events.map(e => '<li><time>'+esc(when(e.at))+'</time><b>'+esc(e.kind)+'</b> <span style="color:var(--ink-3)">'+esc(e.detail)+'</span></li>').join('')||'<li class="hint">Nothing yet.</li>')+'</ul>'
-   + '<div style="margin-top:22px"><button class="btn sm danger" id="del">Delete this licence record</button></div>';
-  document.body.append(scrim, dr);
-  const close = () => { scrim.remove(); dr.remove(); };
-  scrim.onclick = close; $('#x', dr).onclick = close;
-  $('#copy', dr).onclick = () => navigator.clipboard.writeText(l.token).then(() => toast('Key copied'));
-  $('#dl', dr).onclick = () => { const a = document.createElement('a'); a.href = 'data:text/plain,'+encodeURIComponent(l.token+'\n'); a.download = 'shellmate-'+l.id+'.key'; a.click(); };
-  $('#savenotes', dr).onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id), {method:'PUT', body:{notes: $('#notes', dr).value}}); toast('Saved'); };
-  $('#dorenew', dr).onclick = async () => { try { await api('/admin/api/licences/'+encodeURIComponent(id)+'/renew', {method:'POST', body:{expires: $('#renew', dr).value, seats: $('#seats', dr).value}}); toast('Renewed'); close(); detail(id); } catch (e) { toast(e.message); } };
-  if ($('#revoke', dr)) $('#revoke', dr).onclick = async () => { if (!confirm('Revoke this licence? Its copy of ShellMate stops updating at its next refresh.')) return; await api('/admin/api/licences/'+encodeURIComponent(id)+'/revoke', {method:'POST', body:{reason: $('#reason', dr).value}}); toast('Revoked'); close(); detail(id); };
-  if ($('#restore', dr)) $('#restore', dr).onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id)+'/restore', {method:'POST'}); toast('Restored'); close(); detail(id); };
-  $('#del', dr).onclick = async () => { if (!confirm('Delete the record entirely? The key stops verifying with the service and cannot be restored.')) return; await api('/admin/api/licences/'+encodeURIComponent(id), {method:'DELETE'}); toast('Deleted'); close(); go('licences'); };
+  main.innerHTML = crumbs(['Licences','licences'], [l.licensee]) + '<div class="top"><div class="row">'+back('licences','Licences')+'<h1>'+esc(l.licensee)+' <span class="pill '+c+'">'+t+'</span></h1></div><div class="row"><button class="btn" id="send">Email the key</button>'+(l.user?'<a class="btn" href="#/person/'+encodeURIComponent(l.user_id)+'">Open person</a>':'')+'</div></div>'
+   + '<div class="two"><div><div class="panel"><div class="bar"><h2>Details</h2></div><div class="body kv">'
+   + '<span class="k">Id</span><span class="mono">'+esc(l.id)+'</span><span class="k">Kind</span><span>'+esc(l.kind)+'</span><span class="k">Email</span><span><span class="row"><input id="email" value="'+esc(l.email||'')+'" style="max-width:280px"><button class="btn sm" id="saveemail">Save</button></span></span><span class="k">Seats</span><span>'+l.seats+'</span><span class="k">Issued</span><span>'+esc(l.issued)+'</span><span class="k">Expires</span><span>'+esc(l.expires||'never')+' <span class="hint">('+l.grace_days+' day grace)</span></span><span class="k">Features</span><span>'+esc(l.features.join(', '))+'</span><span class="k">Source</span><span>'+esc(l.source||'admin')+'</span><span class="k">Refreshes</span><span>'+l.refresh_count+' · last '+esc(when(l.last_refresh))+(l.last_ip?' from '+esc(l.last_ip):'')+'</span><span class="k">Emailed</span><span>'+(l.sent_count||0)+' time(s) · last '+esc(when(l.last_sent))+'</span>'+(l.revoked?'<span class="k">Revoked</span><span style="color:var(--danger)">'+esc(l.revoked_reason||'no reason given')+'</span>':'')+'</div></div>'
+   + '<div class="panel"><div class="bar"><h2>Licence key</h2><span class="hint">what the licensee pastes into ShellMate</span></div><div class="body"><div class="key">'+esc(l.token)+'</div><div class="row" style="margin-top:8px"><button class="btn sm" id="copy">Copy key</button><button class="btn sm" id="dl">Download .key file</button></div></div></div>'
+   + '<div class="panel"><div class="bar"><h2>Notes</h2></div><div class="body"><textarea id="notes" rows="3">'+esc(l.notes||'')+'</textarea><div class="row" style="margin-top:8px"><button class="btn sm" id="savenotes">Save notes</button></div></div></div></div>'
+   + '<div><div class="panel"><div class="bar"><h2>Renew</h2></div><div class="body"><div class="row"><input type="date" id="renew" value="'+esc(l.expires||'')+'" style="max-width:180px"><input type="number" id="seats" min="1" value="'+l.seats+'" style="max-width:100px" title="Seats"><label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="renewsend" checked> email the new key</label></div><div class="row" style="margin-top:10px"><button class="btn sm primary" id="dorenew">Renew and re-sign</button></div><p class="hint">Keeps the id and signs a new key with the new expiry. A copy of ShellMate holding the old key picks the new one up at its next refresh — no re-entry needed.</p></div></div>'
+   + '<div class="panel"><div class="bar"><h2>'+(l.revoked?'Restore':'Revoke')+'</h2></div><div class="body"><div class="row">'+(l.revoked?'<button class="btn sm" id="restore">Restore this licence</button>':'<input id="reason" placeholder="Reason (shown to the licensee)" style="max-width:320px"><button class="btn sm danger" id="revoke">Revoke</button>')+'</div></div></div>'
+   + '<div class="panel"><div class="bar"><h2>History</h2></div><ul class="events" style="padding:6px 16px">'+(d.events.map(e => '<li><time>'+esc(when(e.at))+'</time><b>'+esc(e.kind)+'</b> <span style="color:var(--ink-3)">'+esc(e.detail)+'</span></li>').join('')||'<li class="hint">Nothing yet.</li>')+'</ul></div>'
+   + '<button class="btn sm danger" id="del">Delete this licence record</button></div></div>';
+  $('#copy').onclick = () => navigator.clipboard.writeText(l.token).then(() => toast('Key copied'));
+  $('#dl').onclick = () => { const a = document.createElement('a'); a.href = 'data:text/plain,'+encodeURIComponent(l.token+'\n'); a.download = 'shellmate-'+l.id+'.key'; a.click(); };
+  $('#savenotes').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id), {method:'PUT', body:{notes: $('#notes').value}}); toast('Notes saved'); };
+  $('#saveemail').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id), {method:'PUT', body:{notes: $('#notes').value, email: $('#email').value}}); toast('Email saved'); };
+  $('#send').onclick = async () => { $('#send').disabled = true; try { await api('/admin/api/licences/'+encodeURIComponent(id)+'/send', {method:'POST'}); toast('Key emailed to '+l.email); route(); } catch (e) { toast(e.message); $('#send').disabled = false; } };
+  $('#dorenew').onclick = async () => { try { const r = await api('/admin/api/licences/'+encodeURIComponent(id)+'/renew', {method:'POST', body:{expires: $('#renew').value, seats: $('#seats').value, send: $('#renewsend').checked}}); toast('Renewed'+(r.mailed?' and emailed':r.mail_error?' — email failed: '+r.mail_error:'')); route(); } catch (e) { toast(e.message); } };
+  if ($('#revoke')) $('#revoke').onclick = async () => { if (!confirm('Revoke this licence? Its copy of ShellMate stops updating at its next refresh.')) return; await api('/admin/api/licences/'+encodeURIComponent(id)+'/revoke', {method:'POST', body:{reason: $('#reason').value}}); toast('Revoked'); route(); };
+  if ($('#restore')) $('#restore').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id)+'/restore', {method:'POST'}); toast('Restored'); route(); };
+  $('#del').onclick = async () => { if (!confirm('Delete the record entirely? The key stops verifying with the service and cannot be restored.')) return; await api('/admin/api/licences/'+encodeURIComponent(id), {method:'DELETE'}); toast('Deleted'); location.hash = '#/licences'; };
 }
 
-async function people() {
-  main.innerHTML = '<div class="top"><div><h1>People</h1><div class="sub">Who holds licences. A person is created automatically when a licence is issued with an email.</div></div><button class="btn" id="add">Add a person</button></div><div class="panel"><div class="bar"><input id="q" placeholder="Search by name, email or organisation…"></div><table><thead><tr><th>Name</th><th>Email</th><th>Organisation</th><th>Licences</th><th>Added</th></tr></thead><tbody id="rows"></tbody></table></div>';
-  const load = async () => { const d = await api('/admin/api/users?q='+encodeURIComponent($('#q').value)); $('#rows').innerHTML = d.users.length ? d.users.map(u => '<tr class="click" data-id="'+esc(u.id)+'"><td><b>'+esc(u.name)+'</b></td><td>'+esc(u.email)+'</td><td>'+esc(u.org)+'</td><td>'+u.licences+'</td><td class="hint">'+esc(when(u.created_at))+'</td></tr>').join('') : '<tr><td colspan="5" class="empty">Nobody yet.</td></tr>'; document.querySelectorAll('tr.click').forEach(r => r.onclick = () => person(r.dataset.id)); };
-  $('#q').oninput = debounce(load, 250); $('#add').onclick = () => person(null); await load();
+async function people(params) {
+  main.innerHTML = crumbs(['People','people']) + '<div class="top"><div><h1>People</h1><div class="sub">Who holds licences. A person is created automatically when a licence is issued with an email.</div></div><div class="row"><button class="btn" id="csv">Export CSV</button><a class="btn primary" href="#/person/new">Add a person</a></div></div><div class="panel"><div class="bar"><input type="search" id="q" placeholder="Search by name, email or organisation…" value="'+esc(params.q||'')+'"><span id="count" class="hint"></span></div><table><thead><tr><th>Name</th><th>Email</th><th>Organisation</th><th>Licences</th><th>Active</th><th>Added</th></tr></thead><tbody id="rows"></tbody></table></div>';
+  let rows = [];
+  const load = async () => { rows = (await api('/admin/api/users?q='+encodeURIComponent($('#q').value))).users; $('#count').textContent = rows.length + ' shown'; $('#rows').innerHTML = rows.length ? rows.map(u => '<tr class="click" data-id="'+esc(u.id)+'"><td><b>'+esc(u.name)+'</b></td><td>'+esc(u.email)+'</td><td>'+esc(u.org)+'</td><td>'+u.licences+'</td><td>'+u.active+'</td><td class="hint">'+esc(when(u.created_at))+'</td></tr>').join('') : '<tr><td colspan="6" class="empty">Nobody yet.</td></tr>'; document.querySelectorAll('tr.click').forEach(r => r.onclick = () => location.hash = '#/person/'+encodeURIComponent(r.dataset.id)); };
+  $('#q').oninput = debounce(load, 250); $('#csv').onclick = () => csv(rows, ['id','name','email','org','licences','active','notes','created_at'], 'shellmate-people.csv'); await load();
 }
 async function person(id) {
-  const d = id ? await api('/admin/api/users/'+encodeURIComponent(id)) : {user:{name:'',email:'',org:'',notes:''}, licences:[]}; const u = d.user;
-  const scrim = document.createElement('div'); scrim.className='scrim'; const dr = document.createElement('div'); dr.className='drawer';
-  dr.innerHTML = '<div class="row"><h2 class="grow">'+(id?esc(u.name):'New person')+'</h2><button class="btn sm" id="x">Close</button></div><div class="form" style="margin:16px 0"><div><label>Name</label><input id="name" value="'+esc(u.name)+'"></div><div><label>Email</label><input id="email" value="'+esc(u.email)+'"></div><div class="full"><label>Organisation</label><input id="org" value="'+esc(u.org)+'"></div><div class="full"><label>Notes</label><textarea id="notes" rows="3">'+esc(u.notes)+'</textarea></div></div><div class="row"><button class="btn primary" id="save">Save</button>'+(id?'<button class="btn" id="issue">Issue a licence to them</button><span class="grow"></span><button class="btn danger" id="del">Delete</button>':'')+'</div>'
-   + (id ? '<h3 style="margin-top:22px">Licences</h3><table style="margin-top:8px"><tbody>'+(d.licences.map(l => { const [c,t]=status(l); return '<tr class="click" data-id="'+esc(l.id)+'"><td>'+esc(l.kind)+' · '+l.seats+' seat(s)</td><td>'+esc(l.expires||'never')+'</td><td><span class="pill '+c+'">'+t+'</span></td></tr>'; }).join('')||'<tr><td class="hint">None yet.</td></tr>')+'</tbody></table>' : '');
-  document.body.append(scrim, dr); const close = () => { scrim.remove(); dr.remove(); }; scrim.onclick = close; $('#x', dr).onclick = close;
-  dr.querySelectorAll('tr.click').forEach(r => r.onclick = () => { close(); detail(r.dataset.id); });
-  $('#save', dr).onclick = async () => { const body = {name: $('#name',dr).value, email: $('#email',dr).value, org: $('#org',dr).value, notes: $('#notes',dr).value}; try { await api(id ? '/admin/api/users/'+encodeURIComponent(id) : '/admin/api/users', {method: id?'PUT':'POST', body}); toast('Saved'); close(); go('people'); } catch (e) { toast(e.message); } };
-  if (id) { $('#issue', dr).onclick = () => { close(); go('issue', u); }; $('#del', dr).onclick = async () => { if (!confirm('Delete this person? Their licences are kept but no longer linked.')) return; await api('/admin/api/users/'+encodeURIComponent(id), {method:'DELETE'}); close(); go('people'); }; }
+  const isNew = id === 'new';
+  const d = isNew ? {user:{name:'',email:'',org:'',notes:''}, licences:[]} : await api('/admin/api/users/'+encodeURIComponent(id)); const u = d.user;
+  main.innerHTML = crumbs(['People','people'], [isNew?'New person':u.name]) + '<div class="top"><div class="row">'+back('people','People')+'<h1>'+(isNew?'New person':esc(u.name))+'</h1></div>'+(isNew?'':'<a class="btn primary" href="#/issue?user='+encodeURIComponent(id)+'">Issue a licence to them</a>')+'</div>'
+   + '<div class="two"><div class="panel"><div class="bar"><h2>Details</h2></div><div class="body form"><div><label>Name</label><input id="name" value="'+esc(u.name)+'"></div><div><label>Email</label><input id="email" value="'+esc(u.email)+'"></div><div class="full"><label>Organisation</label><input id="org" value="'+esc(u.org)+'"></div><div class="full"><label>Notes</label><textarea id="notes" rows="3">'+esc(u.notes)+'</textarea></div><div class="full row"><button class="btn primary" id="save">Save</button><span class="grow"></span>'+(isNew?'':'<button class="btn danger" id="del">Delete</button>')+'</div></div></div>'
+   + (isNew ? '' : '<div class="panel"><div class="bar"><h2>Licences</h2></div><table><tbody>'+(d.licences.map(l => { const [c,t]=status(l); return '<tr class="click" data-id="'+esc(l.id)+'"><td>'+esc(l.kind)+' · '+l.seats+' seat(s)</td><td>'+esc(l.expires||'never')+'</td><td><span class="pill '+c+'">'+t+'</span></td></tr>'; }).join('')||'<tr><td class="empty">None yet.</td></tr>')+'</tbody></table></div>')+'</div>';
+  document.querySelectorAll('tr.click').forEach(r => r.onclick = () => location.hash = '#/licence/'+encodeURIComponent(r.dataset.id));
+  $('#save').onclick = async () => { const body = {name: $('#name').value, email: $('#email').value, org: $('#org').value, notes: $('#notes').value}; try { const r = await api(isNew ? '/admin/api/users' : '/admin/api/users/'+encodeURIComponent(id), {method: isNew?'POST':'PUT', body}); toast('Saved'); location.hash = '#/person/'+encodeURIComponent(r.user.id); if (!isNew) route(); } catch (e) { toast(e.message); } };
+  if (!isNew) $('#del').onclick = async () => { if (!confirm('Delete this person? Their licences are kept but no longer linked.')) return; await api('/admin/api/users/'+encodeURIComponent(id), {method:'DELETE'}); location.hash = '#/people'; };
 }
 
-async function issue(prefill) {
-  const p = prefill || {};
-  main.innerHTML = '<div class="top"><div><h1>Issue a licence</h1><div class="sub">Signed here, verified offline in ShellMate. The key is shown once it is made; it can always be reopened from the list.</div></div></div><div class="panel" style="padding:20px"><div class="form">'
+async function issue(params) {
+  let p = {};
+  if (params.user) { try { p = (await api('/admin/api/users/'+encodeURIComponent(params.user))).user; } catch (_) {} }
+  const s = await api('/admin/api/stats');
+  main.innerHTML = crumbs(['Issue a licence','issue']) + '<div class="top"><div><h1>Issue a licence</h1><div class="sub">Signed here, verified offline in ShellMate. '+(s.mail?'The key is emailed to the licensee as it is made.':'Email is not configured, so the key is shown here to copy — <a href="#/settings">set up email</a>.')+'</div></div></div><div class="panel"><div class="body form">'
    + '<div><label>Kind</label><select id="kind"><option value="person">Person</option><option value="org">Organisation</option></select></div><div><label>Seats</label><input type="number" id="seats" min="1" value="1"><div class="hint">People: 1. Organisations: how many engineers.</div></div>'
    + '<div><label>Licensee</label><input id="licensee" placeholder="Name or organisation" value="'+esc(p.org||p.name||'')+'"></div><div><label>Email</label><input id="email" placeholder="Where the key goes" value="'+esc(p.email||'')+'"></div>'
    + '<div><label>Expires</label><input type="date" id="expires"><div class="hint">Leave blank for a perpetual key.</div></div><div><label>Grace period (days)</label><input type="number" id="grace" min="0" max="365" value="14"><div class="hint">How long an expired key keeps working while a renewal is confirmed.</div></div>'
    + '<div class="full"><label>Notes</label><input id="notes" placeholder="Invoice number, reseller, anything you will want later"></div>'
-   + '<div class="full row"><button class="btn primary" id="go">Issue and sign</button><label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="mkuser" checked style="width:auto"> add to People if the email is new</label></div></div><div id="out"></div></div>';
+   + '<div class="full row"><button class="btn primary" id="go">Issue and sign</button><label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="send" '+(s.mail?'checked':'disabled')+'> email the key</label><label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="mkuser" checked> add to People if new</label></div></div><div id="out"></div></div>';
   if (p.org) $('#kind').value = 'org';
-  const q = $('#expires'); const d = new Date(); d.setFullYear(d.getFullYear()+1); q.value = d.toISOString().slice(0,10);
-  $('#go').onclick = async () => { const body = {kind: $('#kind').value, seats: $('#seats').value, licensee: $('#licensee').value, email: $('#email').value, expires: $('#expires').value, grace_days: $('#grace').value, notes: $('#notes').value, create_user: $('#mkuser').checked, user_id: p.id||''}; $('#go').disabled = true; try { const r = await api('/admin/api/licences', {method:'POST', body}); const l = r.licence; $('#out').innerHTML = '<div style="margin-top:22px"><h3>Issued to '+esc(l.licensee)+' <span class="pill ok">'+esc(l.id)+'</span></h3><p class="hint">Send them this key. They paste it under Settings → Licence in ShellMate.</p><div class="key">'+esc(l.token)+'</div><div class="row" style="margin-top:10px"><button class="btn sm" id="copy">Copy key</button><button class="btn sm" id="open">Open the record</button></div></div>'; $('#copy').onclick = () => navigator.clipboard.writeText(l.token).then(()=>toast('Key copied')); $('#open').onclick = () => detail(l.id); toast('Licence issued'); } catch (e) { toast(e.message); } finally { $('#go').disabled = false; } };
+  const d = new Date(); d.setFullYear(d.getFullYear()+1); $('#expires').value = d.toISOString().slice(0,10);
+  $('#go').onclick = async () => { const body = {kind: $('#kind').value, seats: $('#seats').value, licensee: $('#licensee').value, email: $('#email').value, expires: $('#expires').value, grace_days: $('#grace').value, notes: $('#notes').value, create_user: $('#mkuser').checked, user_id: p.id||'', send: $('#send').checked}; $('#go').disabled = true; try { const r = await api('/admin/api/licences', {method:'POST', body}); const l = r.licence; $('#out').innerHTML = '<div class="body"><h3>Issued to '+esc(l.licensee)+' <span class="pill ok">'+esc(l.id)+'</span>'+(r.mailed?' <span class="pill blue">emailed</span>':'')+'</h3>'+(r.mail_error?'<p class="hint" style="color:var(--danger)">Email failed: '+esc(r.mail_error)+'</p>':'')+'<p class="hint">'+(r.mailed?'Sent to '+esc(l.email)+'. ':'')+'They paste it under Settings → Licence in ShellMate.</p><div class="key">'+esc(l.token)+'</div><div class="row" style="margin-top:10px"><button class="btn sm" id="copy">Copy key</button><a class="btn sm" href="#/licence/'+encodeURIComponent(l.id)+'">Open the record</a></div></div>'; $('#copy').onclick = () => navigator.clipboard.writeText(l.token).then(()=>toast('Key copied')); toast('Licence issued'); } catch (e) { toast(e.message); } finally { $('#go').disabled = false; } };
 }
-go('overview');
+
+async function reports() {
+  const r = await api('/admin/api/reports');
+  const max = Math.max(1, ...r.by_month.map(m => m.n));
+  main.innerHTML = crumbs(['Reports','reports']) + '<div class="top"><div><h1>Reports</h1><div class="sub">What is in force, what is running out, and how issuing has gone.</div></div><button class="btn" id="csv">Export renewals CSV</button></div>'
+   + '<div class="cards">'+[['Seats in force', r.seats_in_force],['Expiring in 30 days', r.buckets.d30],['31–60 days', r.buckets.d60],['61–90 days', r.buckets.d90]].map(([k,v]) => '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>').join('')+'</div>'
+   + '<div class="two"><div class="panel"><div class="bar"><h2>Issued per month</h2></div><div class="body"><div class="bars" style="margin-bottom:22px">'+(r.by_month.map(m => '<div class="b" style="height:'+Math.round(100*m.n/max)+'%"><span>'+m.n+'</span><i>'+esc(m.month.slice(2))+'</i></div>').join('')||'<div class="empty">Nothing issued yet.</div>')+'</div></div></div>'
+   + '<div class="panel"><div class="bar"><h2>In force, by kind</h2></div><table><thead><tr><th>Kind</th><th>Licences</th><th>Seats</th></tr></thead><tbody>'+(r.by_kind.map(k => '<tr><td>'+esc(k.kind)+'</td><td>'+k.n+'</td><td>'+k.seats+'</td></tr>').join('')||'<tr><td colspan="3" class="empty">None.</td></tr>')+'</tbody></table><div class="bar"><h2>By source</h2></div><table><tbody>'+(r.by_source.map(k => '<tr><td>'+esc(k.source)+'</td><td>'+k.n+'</td></tr>').join('')||'<tr><td class="empty">None.</td></tr>')+'</tbody></table></div></div>'
+   + '<div class="panel"><div class="bar"><h2>Renewals due in the next 90 days</h2><span class="hint">'+r.expiring.length+'</span></div><table><thead><tr><th>Licensee</th><th>Email</th><th>Kind</th><th>Seats</th><th>Expires</th><th>Last refresh</th></tr></thead><tbody>'+(r.expiring.map(l => '<tr class="click" data-id="'+esc(l.id)+'"><td><b>'+esc(l.licensee)+'</b></td><td>'+esc(l.email)+'</td><td>'+esc(l.kind)+'</td><td>'+l.seats+'</td><td>'+esc(l.expires)+'</td><td class="hint">'+esc(l.last_refresh?when(l.last_refresh):'never')+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">Nothing due.</td></tr>')+'</tbody></table></div>';
+  document.querySelectorAll('tr.click').forEach(t => t.onclick = () => location.hash = '#/licence/'+encodeURIComponent(t.dataset.id));
+  $('#csv').onclick = () => csv(r.expiring, ['id','licensee','email','kind','seats','issued','expires','refresh_count','last_refresh'], 'shellmate-renewals-90d.csv');
+}
+
+async function settings() {
+  const d = await api('/admin/api/settings'); const s = d.settings;
+  main.innerHTML = crumbs(['Settings','settings']) + '<div class="top"><div><h1>Settings</h1><div class="sub">Email, the public request page, and what the portal says.</div></div></div>'
+   + '<div class="two"><div><div class="panel"><div class="bar"><h2>Email</h2>'+(d.mail?'<span class="pill ok">configured</span>':'<span class="pill warn">not configured</span>')+'</div><div class="body form">'+(d.mail?'':'<div class="full notice">Keys are emailed through <a href="https://resend.com" target="_blank">Resend</a>. Create an account, verify the sending domain (foundry-ns.com), make an API key, then run <span class="mono">wrangler secret put RESEND_API_KEY</span> in relay/admin and redeploy. Until then keys are copied by hand.</div>')+'<div class="full"><label>From</label><input id="mail_from" value="'+esc(s.mail_from||'')+'"><div class="hint">Must be on the verified domain, e.g. ShellMate &lt;licences@foundry-ns.com&gt;.</div></div><div class="full"><label>Subject</label><input id="mail_subject" value="'+esc(s.mail_subject||'')+'"></div><div class="full"><label>Introduction</label><textarea id="mail_intro" rows="3">'+esc(s.mail_intro||'')+'</textarea><div class="hint">Above the key. The licence details, the .key attachment and the footer are added automatically.</div></div><div class="full row"><input id="testto" placeholder="Send a test to…" style="max-width:280px"><button class="btn sm" id="test" '+(d.mail?'':'disabled')+'>Send test</button></div></div></div></div>'
+   + '<div><div class="panel"><div class="bar"><h2>Public request page</h2></div><div class="body form"><div class="full"><label class="row" style="font-weight:600"><input type="checkbox" id="requests_enabled" '+(s.requests_enabled==='1'?'checked':'')+'> Open — anyone can request a key at <a href="'+esc(d.request_url)+'" target="_blank">'+esc(d.request_url)+'</a></label><div class="hint">A key is issued and emailed on its own, one live key per address; a second request re-sends the existing one. Needs email configured. Rate-limited per address.</div></div><div><label>Valid for (days)</label><input type="number" id="request_days" min="1" max="3650" value="'+esc(s.request_days||'30')+'"></div><div><label>Kind</label><select id="request_kind"><option value="person" '+(s.request_kind!=='org'?'selected':'')+'>Person</option><option value="org" '+(s.request_kind==='org'?'selected':'')+'>Organisation</option></select></div></div></div>'
+   + '<div class="panel"><div class="bar"><h2>Portal</h2></div><div class="body form"><div class="full"><label>Notice on the overview</label><input id="portal_notice" value="'+esc(s.portal_notice||'')+'" placeholder="e.g. Renewals for the Glasgow site are due in October"></div><div class="full"><label>Public key</label><div class="key">'+esc(d.public_key)+'</div><div class="hint">Baked into ShellMate. Rotating it invalidates every issued key.</div></div></div></div>'
+   + '<div class="row"><button class="btn primary" id="save">Save settings</button></div></div></div>';
+  $('#save').onclick = async () => { const body = {}; for (const k of ['mail_from','mail_subject','mail_intro','request_days','request_kind','portal_notice']) body[k] = $('#'+k).value; body.requests_enabled = $('#requests_enabled').checked; try { await api('/admin/api/settings', {method:'PUT', body}); toast('Settings saved'); } catch (e) { toast(e.message); } };
+  $('#test').onclick = async () => { try { await api('/admin/api/mail/test', {method:'POST', body:{to: $('#testto').value}}); toast('Test sent'); } catch (e) { toast(e.message); } };
+}
+route();
 `;

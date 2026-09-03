@@ -174,7 +174,8 @@ window still shows what the new version contains and where to fetch it by
 hand.
 
 A key is a line beginning `SM1.` — paste it into **Settings → Licence**, or
-import the `.key` file it was sent as. It is verified on this machine against
+import the `.key` file it was sent as. Keys come by email from Foundry
+Networks and Services; the Licence section links to the request page. It is verified on this machine against
 a public key built into ShellMate, so an air-gapped installation is licensed
 exactly like a connected one; nothing about your devices is sent anywhere,
 and the key lives in `licence.key` in the data folder, never in

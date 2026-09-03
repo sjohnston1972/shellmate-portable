@@ -2,8 +2,9 @@
 
 A Cloudflare Worker at `https://shellmate-admin.foundry-ns.com` (#447). It
 signs licence keys, answers the application's refresh and revocation
-questions, and serves the portal where keys are issued, renewed and revoked
-and the people who hold them are recorded.
+questions, emails keys to licensees, serves an optional public request page
+that issues keys on its own, and serves the portal where keys are issued,
+renewed and revoked, people are recorded, and reports are read.
 
 ## How it fits together
 
@@ -13,9 +14,23 @@ and the people who hold them are recorded.
 - **Refresh**: ShellMate posts its key id to `/licence/refresh` now and then.
   The answer is the current token (a renewal arrives this way with no
   re-entry) or `revoked: true` with the reason.
-- **Records** live in D1 (`schema.sql`): people, licences, and an event log.
+- **Records** live in D1 (`schema.sql`, then `schema-v2.sql`): people,
+  licences, an event log, and the portal's settings.
+- **Email** goes through [Resend](https://resend.com) when the
+  `RESEND_API_KEY` secret is set and the sender domain is verified there.
+  Keys are emailed on issue and on renewal, with the `.key` file attached,
+  and can be re-sent from a licence's page. Without the secret the portal
+  says so and keys are copied by hand.
+- **The public request page** (`/request`) is off until switched on under
+  Settings. Open, it issues a personal key valid for a configurable number
+  of days and emails it — one live key per address; a second request
+  re-sends the existing one. Rate-limited per IP; needs email configured.
 - **The portal** is one page served by the Worker, password-protected, with
-  an HMAC session cookie.
+  an HMAC session cookie and hash routes so Back works: Overview, Licences
+  (search, filters by status and kind, sortable columns, CSV export),
+  licence pages (key, email, renew, revoke, notes, history), People, Issue,
+  Reports (issued per month, in force by kind and source, renewals due in
+  30/60/90 days with CSV) and Settings.
 
 ## Setting it up
 
@@ -23,14 +38,25 @@ and the people who hold them are recorded.
 cd relay/admin
 wrangler d1 create shellmate-licences            # paste the id into wrangler.toml
 wrangler d1 execute shellmate-licences --remote --file=schema.sql
+wrangler d1 execute shellmate-licences --remote --file=schema-v2.sql
 wrangler secret put SIGNING_KEY_PKCS8_B64        # Ed25519 private key, PKCS#8 DER, base64
 wrangler secret put ADMIN_PASSWORD               # the portal password
 wrangler secret put SESSION_SECRET               # any long random string
+wrangler secret put RESEND_API_KEY               # optional: email
 wrangler deploy
 ```
 
 The custom domain needs `foundry-ns.com` to be a zone on the same Cloudflare
 account; `wrangler deploy` creates the DNS record.
+
+### Email through Resend
+
+1. Create an account at resend.com and add `foundry-ns.com` as a domain;
+   publish the DNS records it gives you (SPF, DKIM) in Cloudflare.
+2. Make an API key with sending permission and store it:
+   `wrangler secret put RESEND_API_KEY`, then `wrangler deploy`.
+3. In the portal's Settings, set the From address on that domain, the
+   subject and the introduction, and press *Send test*.
 
 ### The signing key
 
@@ -57,10 +83,14 @@ decision unless every licensee is re-issued.
 |---|---|---|
 | `POST /licence/refresh` `{id}` | the app | current token, or revoked + reason |
 | `GET /licence/check?id=` | the app, support | kind, expiry, revoked |
+| `GET` / `POST /request` | the public | the request page; issues and emails a key when open |
 | `GET /health` | anyone | liveness |
 | `POST /admin/login` | the portal | password → session cookie |
-| `/admin/api/licences` … | the portal (cookie) | list, issue, detail, renew, revoke, restore, delete, notes |
+| `/admin/api/licences` … | the portal (cookie) | list with filters, issue (emails), detail, renew (emails), revoke, restore, send, delete, notes and email |
 | `/admin/api/users` … | the portal (cookie) | list, add, detail, edit, delete |
+| `/admin/api/reports` | the portal (cookie) | issued per month, by kind and source, renewals due, seats in force |
+| `/admin/api/settings` | the portal (cookie) | email wording, the request page, the overview notice |
+| `/admin/api/mail/test` | the portal (cookie) | send a test message |
 | `/admin/api/stats` | the portal (cookie) | the overview numbers and recent events |
 
 Everything is rate-limited per IP. The application endpoints answer about
