@@ -96,6 +96,7 @@ shellmate/
 │   ├── fingerprint.py           # Work out what kind of device is on the other end
 │   ├── groups.py                # Groups on the dashboard
 │   ├── jira_client.py           # Jira Cloud REST API client for ShellMate session reporting
+│   ├── jsonfile.py              # The one way a JSON data file is read and written (#457)
 │   ├── keys.py                  # Making SSH keys, not just using them
 │   ├── licence.py               # Licence keys, verified without a network (#446)
 │   ├── onboard.py               # What happens in the first few seconds of a session
@@ -195,6 +196,7 @@ shellmate/
 │       ├── uptime.js            # How long each session has been up
 │       ├── usage.js             # ShellMate's own footprint, in the status bar (#266)
 │       ├── vault.js             # Unlock prompt and vault settings
+│       ├── visibility.js        # Timers that stop while the window is hidden (#491)
 └── profiles/examples.json       # Example connection profile
 ```
 
