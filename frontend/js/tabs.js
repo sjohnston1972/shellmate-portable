@@ -534,7 +534,17 @@
               'carries on regardless.',
         confirmLabel: 'Close tab',
       });
-      if (!ok) return;
+      if (!ok) {
+        // Thought better of it, so a drop is not ours after all (#485). The
+        // flag was set before the question and never cleared, which left
+        // auto-reconnect switched off for this tab for good — Ctrl+W,
+        // cancel, and hours later the device reloads and the tab silently
+        // never retries. If it dropped while the question was open, the
+        // retry that the flag suppressed is started now.
+        tab.closingDeliberately = false;
+        if (!tab.isConnected) _maybeAutoReconnect(tab);
+        return;
+      }
     }
 
     // Found by identity, and only now (#313): the confirm above is an await,
