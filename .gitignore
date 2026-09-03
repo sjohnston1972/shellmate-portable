@@ -40,3 +40,4 @@ Thumbs.db
 
 # wrangler's local state (relay deploys)
 relay/.wrangler/
+relay/**/.wrangler/
