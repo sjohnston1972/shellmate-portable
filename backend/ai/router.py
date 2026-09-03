@@ -3,6 +3,7 @@ router.py — Routes AI chat requests to the correct backend (Claude / xAI / Ope
 Builds context from session buffers, optionally retrieves design-guideline snippets
 from a configured Chroma vector DB, and streams the response.
 """
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 
@@ -97,8 +98,12 @@ async def stream_chat(
     if active_session_id:
         session = session_manager.get_session(active_session_id)
         if session:
-            device_context = _device_facts(session)
-            parsed_tables = _parsed_tables(session)
+            # Both are synchronous work — two history-database reads and
+            # up to a dozen TextFSM parses — and this runs inside the chat
+            # socket's handler, so they go to a thread rather than holding
+            # every other socket while they finish (#496).
+            device_context = await asyncio.to_thread(_device_facts, session)
+            parsed_tables = await asyncio.to_thread(_parsed_tables, session)
             active_label = (
                 session.get("display_label") or
                 session.get("hostname", active_session_id[:8])

@@ -87,6 +87,65 @@ def test_tables_for_records() -> None:
     check("a cap on how many", len(parsed.tables_for("ios", [records[1]] * 6, limit=2)) == 2)
 
 
+SNMP = """Community name: s3cr3t-rw
+Community Index: cisco0
+Community SecurityName: s3cr3t-rw
+storage-type: nonvolatile        active
+"""
+
+
+def configure(redact_secrets: bool) -> None:
+    from backend import settings_store
+    settings_store.update_settings({"logging": {"redact_secrets": redact_secrets}})
+
+
+def test_rows_are_redacted() -> None:
+    """A table is another way out of the machine, so it goes through the same door (#496)."""
+    print("\n-- Through redaction --")
+    from backend.session import outbound
+    record = CommandRecord(command="show snmp community", output=SNMP)
+    check("the fixture parses at all", parsed.parse("ios", "show snmp community", SNMP), "no template?")
+
+    configure(redact_secrets=True)
+    check("redaction is on for the test", outbound.redaction_enabled())
+    tables = parsed.tables_for("ios", [record])
+    check("a community string does not reach the table",
+          tables and "s3cr3t-rw" not in tables[0], str(tables))
+    check("  and the mask is there in its place", tables and "********" in tables[0], str(tables))
+
+    configure(redact_secrets=False)
+    tables = parsed.tables_for("ios", [record])
+    check("with redaction off the value is shown, and the memo did not serve the masked one",
+          tables and "s3cr3t-rw" in tables[0], str(tables))
+    configure(redact_secrets=True)
+
+
+def test_tables_are_memoised() -> None:
+    print("\n-- Parsed once --")
+    configure(redact_secrets=True)
+    record = CommandRecord(command="show ip interface brief", output=BRIEF)
+    calls = []
+    real = parsed.parse
+
+    def counting(platform_id, command, output):
+        calls.append(command)
+        return real(platform_id, command, output)
+
+    parsed.parse = counting
+    try:
+        first = parsed.tables_for("ios", [record])
+        second = parsed.tables_for("ios", [record])
+        check("the same record is parsed once across two questions",
+              len(calls) == 1 and first == second, str(calls))
+        check("a record with no template is remembered as such too",
+              parsed.tables_for("ios", [CommandRecord(command="conf t", output="x")] * 3) == []
+              and len(calls) == 2, str(calls))
+        parsed.tables_for("nxos", [record])
+        check("a different platform is parsed again", len(calls) == 3, str(calls))
+    finally:
+        parsed.parse = real
+
+
 def test_reaches_the_prompt() -> None:
     print("\n-- In the prompt --")
     from backend.ai.prompts import build_context_prompt
@@ -113,7 +172,8 @@ def main() -> int:
     print("=" * 52)
     print("  Structured output")
     print("=" * 52)
-    for test in (test_parsing, test_rendering, test_tables_for_records, test_reaches_the_prompt):
+    for test in (test_parsing, test_rendering, test_tables_for_records,
+                 test_rows_are_redacted, test_tables_are_memoised, test_reaches_the_prompt):
         try:
             test()
         except Exception as exc:

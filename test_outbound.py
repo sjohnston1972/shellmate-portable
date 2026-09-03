@@ -261,6 +261,23 @@ def test_no_path_bypasses_the_helper() -> None:
           "these bypass the outbound helper and will send raw output: "
           + ", ".join(offenders))
 
+    # The same for a command record's output (#496): the modules that shape
+    # content for the model may read it only on a line that passes it
+    # through redact_text(). transcript.py owns the record; the history
+    # store keeps it on disk, which is what the logging switch governs.
+    record_reads = re.compile(
+        r"""\.output\b|\brec\w*\[["']output["']\]|getattr\([^,]+,\s*["']output["']""")
+    offenders = []
+    for path in list(Path("backend/ai").rglob("*.py")) + [Path("backend/session/parsed.py")]:
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#") or "``" in line:
+                continue
+            if record_reads.search(line) and "redact_text(" not in line:
+                offenders.append(f"{path.as_posix()}:{number}")
+    check("nothing shapes a command record's output for the model without redacting it",
+          not offenders,
+          "these read record output without redact_text(): " + ", ".join(offenders))
+
 
 def main() -> int:
     print("\n" + "=" * 52)
