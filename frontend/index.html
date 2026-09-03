@@ -398,6 +398,13 @@
       <!-- Pushed to the right and only present when something is pending, so
            the countdown is the one thing in the bar that draws the eye. -->
       <span id="status-alert"></span>
+      <!-- Quitting was only in the tray, and closing the window hides it (#452).
+           Pushed to the far right, away from anything pressed by habit. -->
+      <button type="button" id="status-exit" class="status-btn status-exit"
+              title="Exit ShellMate — closes every session and ends the application"
+              aria-label="Exit ShellMate">
+        <span class="material-symbols-outlined">power</span> Exit
+      </button>
     </footer>
 
   </div><!-- /#right-main -->
@@ -2778,6 +2785,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/chat.js"></script>
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/update.js"></script>
+  <script src="/static/js/exit.js"></script>
   <script src="/static/js/licence.js"></script>
   <script src="/static/js/credentials.js"></script>
   <script src="/static/js/discovery.js"></script>

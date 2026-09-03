@@ -1774,6 +1774,27 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 }
 #status-bar .status-btn:hover,
 #status-bar .status-btn:focus-visible { color: var(--on-surface); background: var(--surface-high); }
+
+/* Exit ShellMate (#452): far right, with its word, and red only on hover so
+   it is findable without being the loudest thing in the bar. */
+#status-bar .status-exit {
+  margin-left: auto;
+  gap: 4px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+#status-bar .status-exit:hover,
+#status-bar .status-exit:focus-visible { color: var(--error); background: var(--error-tint, var(--surface-high)); }
+
+#exit-farewell {
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface); color: var(--on-surface);
+  text-align: center; font-family: 'Inter', sans-serif;
+}
+#exit-farewell .material-symbols-outlined { font-size: 40px; color: var(--on-surface-dim); }
+#exit-farewell h2 { margin: 8px 0 4px; font-size: 18px; }
+#exit-farewell p { margin: 0; color: var(--on-surface-dim); }
 #status-bar .status-btn .material-symbols-outlined { font-size: var(--icon-sm); }
 
 #status-bar {

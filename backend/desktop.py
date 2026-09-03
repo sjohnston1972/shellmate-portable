@@ -416,6 +416,13 @@ class Desktop:
 
     def run(self) -> None:
         """Show the UI and block until the user quits."""
+        # The status bar's Exit (#452) comes in over the API and must end
+        # everything the tray's Quit ends — so it is the same method.
+        try:
+            from backend import app as app_module
+            app_module.register_quit_hook(self.quit)
+        except Exception as exc:
+            logger.warning("Could not register the quit hook: %s", exc)
         self._tray = Tray(self.port, self._show_window, self.quit,
                           on_restart=self.restart_from_tray)
         has_tray = self._tray.start()

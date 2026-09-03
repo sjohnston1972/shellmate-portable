@@ -160,6 +160,7 @@ shellmate/
 │       ├── discovery.js         # The panel that finds devices on the network
 │       ├── docs.js              # The built-in manual, and the support link
 │       ├── drift.js             # "This device has changed since you were last here. Want to see?"
+│       ├── exit.js              # Exit ShellMate from the status bar (#452)
 │       ├── feedback.js          # The bug / feature-request reporter (#370)
 │       ├── filepicker.js        # Choosing a file on this machine
 │       ├── forwards.js          # Port forwards on a session (#405)

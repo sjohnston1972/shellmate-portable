@@ -2424,6 +2424,43 @@ async def update_check() -> dict:
     }
 
 
+# The desktop shell registers its quit here (#452), so the status bar's Exit
+# ends the tray, the window and the server together — the same path the tray's
+# Quit takes. Without a shell (--no-window, --browser) the process just ends.
+_quit_hook = None
+
+
+def register_quit_hook(fn) -> None:
+    global _quit_hook
+    _quit_hook = fn
+
+
+@app.post("/api/system/quit")
+async def system_quit() -> dict:
+    """Exit ShellMate: every session closes and the process ends (#452)."""
+    from backend import server as server_module
+    try:
+        server_module.clear_lock()
+    except Exception as exc:
+        logger.warning("Could not clear the instance lock on quit: %s", exc)
+    live = [s.get("display_label") or s.get("hostname") or "a device"
+            for s in session_manager.get_all_sessions() if s.get("connected", True)]
+    logger.info("Exit requested from the interface; %d session(s) open.", len(live))
+
+    def go() -> None:
+        time.sleep(0.4)                      # let the answer leave first
+        hook = _quit_hook
+        if hook is not None:
+            try:
+                hook(confirm=False)
+                return
+            except Exception as exc:
+                logger.warning("The desktop shell could not quit cleanly: %s", exc)
+        os._exit(0)
+    threading.Thread(target=go, daemon=True, name="quit").start()
+    return {"quitting": True, "sessions": len(live)}
+
+
 @app.get("/api/system/update/status")
 async def update_status() -> dict:
     """Where a download stands (#443)."""

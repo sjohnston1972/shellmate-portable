@@ -20,7 +20,9 @@ log rather than failing.
 ## The window
 
 It opens as a normal desktop application. Closing the window does **not** end
-your sessions: ShellMate keeps running in the system tray with every
+your sessions — to quit, use **Exit** at the right end of the status bar (it
+says how many sessions are still connected before it closes them), or
+**Quit** in the tray menu. ShellMate keeps running in the system tray with every
 connection alive, which matters when you have shut the window on a device
 that is halfway through a reload. Reopen it from the tray icon, or choose
 **Quit** there to stop properly.
