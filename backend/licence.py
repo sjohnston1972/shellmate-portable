@@ -350,6 +350,11 @@ def refresh(timeout: float = 8.0) -> dict:
     installation is on record. A renewed key comes back as a fresh token and
     replaces the installed one. Unreachable is not an error — the status
     simply stays what the local key says.
+
+    ``refresh`` in the result is one of ``current``, ``renewed``,
+    ``revoked``, ``unknown`` (404), ``unreachable``, ``unreadable`` or
+    ``service answered N``. Only the first three are answers; the rest are
+    not recorded as a refresh, so the next pass asks again.
     """
     licence = load()
     if licence is None:
@@ -362,17 +367,33 @@ def refresh(timeout: float = 8.0) -> dict:
     except Exception as exc:
         logger.info("Licence refresh: service unreachable (%s)", exc.__class__.__name__)
         return {**status(licence), "refresh": "unreachable"}
-    state = _state()
-    state["refreshed_at"] = time.time()
+
+    # Only a definitive answer counts as a refresh. Anything else — a 404
+    # from a route that is not published just now, a 429 on a busy morning,
+    # a 5xx — leaves ``refreshed_at`` alone so the next pass retries within
+    # hours rather than in three days (#508), and leaves the local verdict
+    # alone too: a 404 used to mark the key revoked, which turned a
+    # misconfigured service into every installed licence in the field
+    # saying "revoked" (#478). Revocation is learned from a 200 body that
+    # says ``revoked: true`` and from nothing else.
     if resp.status_code == 404:
-        state["revoked"] = "the key is not known to the licence service"
-        _write_state(state)
+        logger.warning("Licence refresh: the service does not know key %s (404); "
+                       "leaving the local status as it is", licence.id)
         return {**status(licence), "refresh": "unknown"}
     if resp.status_code != 200:
-        _write_state(state)
+        logger.info("Licence refresh: service answered %s", resp.status_code)
         return {**status(licence), "refresh": f"service answered {resp.status_code}"}
-    data = resp.json()
-    if data.get("revoked"):
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        logger.warning("Licence refresh: the service's answer was not a JSON object")
+        return {**status(licence), "refresh": "unreadable"}
+
+    state = _state()
+    state["refreshed_at"] = time.time()
+    if data.get("revoked") is True:
         state["revoked"] = str(data.get("reason") or True)
         _write_state(state)
         return {**status(licence), "refresh": "revoked"}

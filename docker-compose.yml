@@ -8,11 +8,14 @@ services:
     env_file:
       - .env
     environment:
-      # Override host so uvicorn binds inside the container (the .env default is 127.0.0.1)
+      # Bind inside the container rather than the .env default of 127.0.0.1.
+      # The image starts through run.py, which reads both of these; change
+      # the port here and in `ports:` together.
       SHELLMATE_HOST: 0.0.0.0
       SHELLMATE_PORT: 8765
       # REQUIRED for this deployment, and ShellMate refuses to start without
-      # it. Binding 0.0.0.0 removes the only thing protecting SSH sessions to
+      # it — run.py checks, so a plain `docker run` is refused as well, not
+      # only this compose file. Binding 0.0.0.0 removes the only thing protecting SSH sessions to
       # your network equipment, your saved credentials and the file browser —
       # ShellMate has no authentication by default precisely because nothing
       # but the local machine can normally reach the port.

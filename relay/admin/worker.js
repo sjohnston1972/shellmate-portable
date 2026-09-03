@@ -21,15 +21,20 @@
  *
  * Everything from the network is treated as hostile: inputs are bounded and
  * typed, the admin API needs the cookie, logins, refreshes and requests are
- * rate-limited per IP, and the application endpoints never return anything
- * but the one key they were asked about.
+ * rate-limited per IP (the application endpoints on their own, wider,
+ * bucket), and the application endpoints never return anything but the one
+ * key they were asked about.
  *
  * Secrets: SIGNING_KEY_PKCS8_B64, ADMIN_PASSWORD, SESSION_SECRET,
  * RESEND_API_KEY (optional). Vars: PUBLIC_KEY_B64, PORTAL_TITLE.
+ * The first three have no defaults: signing, the password login and the
+ * session cookie each throw when theirs is missing, so a half-configured
+ * deployment answers 500 rather than accepting a cookie anyone could forge.
  */
 
 const SESSION_COOKIE = 'sma_session';
 const SESSION_HOURS = 12;
+const EVENT_KEEP_DAYS = 90;   // how long login and refreshed events are kept
 const MAX = { name: 120, email: 200, org: 120, notes: 2000, reason: 300, seats: 100000, text: 4000 };
 const SETTING_KEYS = ['requests_enabled', 'request_days', 'request_kind', 'mail_from', 'mail_subject', 'mail_intro', 'portal_notice'];
 
@@ -37,15 +42,19 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
+    // `return await`, not `return`: a promise handed back from inside a
+    // try block is not awaited by it, so a handler that threw skipped the
+    // catch below and surfaced as an unhandled rejection — Cloudflare's
+    // error page rather than the JSON 500 this was written to give.
     try {
       if (path === '/health') return json(200, { ok: true, service: 'shellmate-admin' });
-      if (path.startsWith('/licence/')) return application(request, env, path);
-      if (path === '/request') return publicRequest(request, env);
-      if (path === '/admin/login' && request.method === 'POST') return login(request, env);
+      if (path.startsWith('/licence/')) return await application(request, env, path);
+      if (path === '/request') return await publicRequest(request, env);
+      if (path === '/admin/login' && request.method === 'POST') return await login(request, env);
       if (path === '/admin/logout') return logout();
       if (path.startsWith('/admin/api/')) {
         if (!(await authed(request, env))) return json(401, { detail: 'Sign in first.' });
-        return adminApi(request, env, path);
+        return await adminApi(request, env, path);
       }
       if (path === '/' || path === '/admin') {
         const who = await accessIdentity(request, env);
@@ -56,6 +65,16 @@ export default {
       console.error(err && err.stack || err);
       return json(500, { detail: 'The service hit an error. It has been logged.' });
     }
+  },
+
+  // On the cron in wrangler.toml. Every login and every refresh appends an
+  // event and nothing else ever removed one (#511). The kinds that are
+  // noise after a season are pruned; issued, renewed, revoked, activated
+  // and the rest are the licence's history and stay.
+  async scheduled(event, env) {
+    const r = await env.DB.prepare("DELETE FROM events WHERE kind IN ('login', 'refreshed') AND at < ?1")
+      .bind(Date.now() - EVENT_KEEP_DAYS * 86400000).run();
+    console.log(`events: pruned ${r.meta.changes} login/refreshed rows older than ${EVENT_KEEP_DAYS} days`);
   },
 };
 
@@ -92,13 +111,43 @@ function newId(prefix) {
   const raw = new Uint8Array(6); crypto.getRandomValues(raw);
   return prefix + '-' + [...raw].map(b => b.toString(16).padStart(2, '0')).join('');
 }
+// Two limiters, both per IP. RATE_LIMITER (20/min) guards the login form
+// and the public request page, where twenty is generous. The application
+// endpoints get APP_LIMITER, sized for the case org licences exist for: tens
+// of seats behind one NAT all installing on the same morning, each an
+// activate and a refresh. Sharing the small bucket with them answered 429
+// to legitimate copies, which then went quiet for days (#508).
 async function rateLimited(env, request, bucket) {
-  if (!env.RATE_LIMITER) return false;
+  const limiter = bucket === 'app' ? (env.APP_LIMITER || env.RATE_LIMITER) : env.RATE_LIMITER;
+  if (!limiter) return false;
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-  const { success } = await env.RATE_LIMITER.limit({ key: `${bucket}:${ip}` });
+  const { success } = await limiter.limit({ key: `${bucket}:${ip}` });
   return !success;
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// A spreadsheet cell that cannot become a formula. Excel and LibreOffice
+// evaluate a cell that starts with = + - or @, or with a tab or carriage
+// return before one of them, when a CSV is opened; the name and
+// organisation on the public request page are typed by strangers and land
+// in the portal's exports, which the admin opens (#513). A leading
+// apostrophe makes the cell text. Defined here and embedded in the portal
+// script below so the page and the tests share the one definition.
+function csvCell(value) {
+  const text = String(value == null ? '' : value);
+  return '"' + (/^[=+\-@\t\r]/.test(text) ? "'" + text : text).replace(/"/g, '""') + '"';
+}
+// A request body as an object, {} for no body at all, or null when it is not
+// JSON or not an object. A malformed body used to be read as {} and acted
+// on: `renew` with no expiry signed a perpetual key and un-revoked it, and a
+// PUT blanked every field it did not find (#507). Missing means missing.
+async function readBody(request) {
+  const text = await request.text().catch(() => '');
+  if (!text.trim()) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) { return null; }
+}
 
 // ------------------------------------------------------------------ signing
 let signingKey = null;
@@ -124,8 +173,14 @@ function payloadFor(row) {
 }
 
 // ------------------------------------------------------------------ sessions
+// No default for the secret. With one, a deployment that forgot
+// `wrangler secret put SESSION_SECRET` would accept any cookie signed with
+// the default, which anyone can compute — full admin from a fresh
+// environment, with nothing in the logs. Refusing is what signer() already
+// does for the signing key; the session code does the same (#504).
 async function hmac(env, text) {
-  const key = await crypto.subtle.importKey('raw', enc.encode(env.SESSION_SECRET || 'unset'),
+  if (!env.SESSION_SECRET) throw new Error('SESSION_SECRET is not set.');
+  const key = await crypto.subtle.importKey('raw', enc.encode(env.SESSION_SECRET),
                                             { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return b64url(await crypto.subtle.sign('HMAC', key, enc.encode(text)));
 }
@@ -140,6 +195,22 @@ async function makeSession(env) {
 // application's audience tag; a missing or bad one falls through to the
 // password cookie, which remains as the fallback.
 let accessCerts = { at: 0, keys: [] };
+// The team's signing keys: refreshed hourly, and at once for a kid not in
+// hand, which is what a Cloudflare key rotation looks like — waiting the
+// hour out meant the portal fell back to the password page meanwhile. A
+// fetch for an unknown kid is allowed once a minute, so a made-up kid in a
+// forged header cannot have the Worker hammering the certs endpoint.
+async function accessKeys(env, kid) {
+  const age = Date.now() - accessCerts.at;
+  const stale = age > 3600 * 1000;
+  const unknown = !accessCerts.keys.some(k => k.kid === kid);
+  if (stale || (unknown && age > 60 * 1000)) {
+    const resp = await fetch(`https://${env.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`);
+    if (resp.ok) accessCerts = { at: Date.now(), keys: (await resp.json()).keys || [] };
+    else if (stale) return [];
+  }
+  return accessCerts.keys;
+}
 async function accessIdentity(request, env) {
   const jwt = request.headers.get('cf-access-jwt-assertion');
   if (!jwt || !env.ACCESS_TEAM_DOMAIN || !env.ACCESS_AUD) return null;
@@ -152,12 +223,7 @@ async function accessIdentity(request, env) {
     if (payload.exp < now || payload.iss !== `https://${env.ACCESS_TEAM_DOMAIN}`) return null;
     const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
     if (!aud.includes(env.ACCESS_AUD)) return null;
-    if (Date.now() - accessCerts.at > 3600 * 1000) {
-      const resp = await fetch(`https://${env.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`);
-      if (!resp.ok) return null;
-      accessCerts = { at: Date.now(), keys: (await resp.json()).keys || [] };
-    }
-    const jwk = accessCerts.keys.find(k => k.kid === header.kid);
+    const jwk = (await accessKeys(env, header.kid)).find(k => k.kid === header.kid);
     if (!jwk) return null;
     const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
     const ok = await crypto.subtle.verify({ name: 'RSASSA-PKCS1-v1_5' }, key, fromB64(parts[2]), enc.encode(`${parts[0]}.${parts[1]}`));
@@ -186,11 +252,12 @@ function timingSafeEqual(a, b) {
 }
 async function login(request, env) {
   if (await rateLimited(env, request, 'login')) return json(429, { detail: 'Too many attempts. Wait a minute.' });
+  if (!env.ADMIN_PASSWORD) throw new Error('ADMIN_PASSWORD is not set.');
   let body = {};
   try { body = await request.json(); } catch (_) { return json(400, { detail: 'JSON expected.' }); }
   const given = String(body.password || '');
-  const wanted = String(env.ADMIN_PASSWORD || '');
-  if (!wanted || given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
+  const wanted = String(env.ADMIN_PASSWORD);
+  if (given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
     await new Promise(r => setTimeout(r, 400));
     return json(401, { detail: 'Wrong password.' });
   }
@@ -207,17 +274,32 @@ function logout() {
 }
 
 // ------------------------------------------------------------------ data
-async function logEvent(env, licenceId, kind, detail) {
-  await env.DB.prepare('INSERT INTO events (licence_id, at, kind, detail) VALUES (?1, ?2, ?3, ?4)')
-    .bind(licenceId, Date.now(), kind, clean(detail, 500)).run();
+function eventStmt(env, licenceId, kind, detail) {
+  return env.DB.prepare('INSERT INTO events (licence_id, at, kind, detail) VALUES (?1, ?2, ?3, ?4)')
+    .bind(licenceId, Date.now(), kind, clean(detail, 500));
 }
-// The licence row plus what the installations say about it.
-const LICENCE_COLS = `licences.*,
-  (SELECT COUNT(*) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) AS installs,
-  (SELECT MIN(first_seen) FROM activations a WHERE a.licence_id = licences.id) AS first_activated,
-  (SELECT MAX(last_seen) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) AS last_seen`;
+async function logEvent(env, licenceId, kind, detail) { await eventStmt(env, licenceId, kind, detail).run(); }
+// The licence row plus what the installations say about it. The
+// installation figures come from one grouped pass over activations joined
+// on, not three correlated subqueries per row: D1 bills rows read, and the
+// old shape was up to four probes per licence on every list (#509). The
+// join is scoped to one licence when only one is wanted, so a single lookup
+// does not aggregate the whole table.
+function installsJoin(scoped = false) {
+  return `LEFT JOIN (SELECT licence_id, SUM(removed_at IS NULL) AS installs, MIN(first_seen) AS first_activated,
+                            MAX(CASE WHEN removed_at IS NULL THEN last_seen END) AS last_seen
+                     FROM activations${scoped ? ' WHERE licence_id = ?1' : ''} GROUP BY licence_id) i ON i.licence_id = licences.id`;
+}
+const LICENCE_COLS = 'licences.*, COALESCE(i.installs, 0) AS installs, i.first_activated, i.last_seen';
 async function getLicence(env, id) {
-  return env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences WHERE id = ?1`).bind(id).first();
+  return env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences ${installsJoin(true)} WHERE licences.id = ?1`).bind(id).first();
+}
+// Paging on the licence list: newest first, the cursor naming the last row
+// seen as created_at:id so a page boundary between two rows created in the
+// same millisecond is still exact. Anything unparseable is no cursor.
+function parseCursor(text) {
+  const m = /^(\d{1,16}):([\w-]{1,64})$/.exec(clean(text, 100));
+  return m ? { at: Number(m[1]), id: m[2] } : null;
 }
 function publicRow(row) {
   if (!row) return null;
@@ -246,29 +328,50 @@ async function issue(env, spec) {
   const features = Array.isArray(spec.features) && spec.features.length ? spec.features.map(f => clean(f, 40)) : ['updates'];
   const email = clean(spec.email, MAX.email);
   let userId = clean(spec.user_id, 64) || null;
-  if (!userId && email) {
-    const existing = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = lower(?1)').bind(email).first();
-    if (existing) userId = existing.id;
-    else if (spec.create_user !== false) {
-      userId = newId('usr');
-      await env.DB.prepare('INSERT INTO users (id, name, email, org, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-        .bind(userId, licensee, email, kind === 'org' ? licensee : clean(spec.org, MAX.org), '', Date.now()).run();
-    }
-  }
+  if (!userId && email) userId = await personFor(env, email, licensee, kind === 'org' ? licensee : clean(spec.org, MAX.org), spec.create_user !== false);
   const id = newId(kind === 'org' ? 'org' : 'lic');
   const row = { id, kind, licensee, email, seats, issued, expires, grace_days: grace, features: JSON.stringify(features) };
   const token = await signToken(env, payloadFor(row));
-  await env.DB.prepare(`INSERT INTO licences (id, user_id, kind, licensee, email, seats, issued, expires, grace_days, features, token, notes, created_at, source)
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`)
-    .bind(id, userId, kind, licensee, email, seats, issued, expires, grace, row.features, token, clean(spec.notes, MAX.notes), Date.now(), spec.source || 'admin').run();
+  // With `unless_live`, the insert happens only if no live key exists for
+  // the address — decided inside the one statement, so two requests for
+  // one address arriving together cannot both issue (#512). The loser gets
+  // null and re-sends the winner's key.
+  const guard = spec.unless_live ? " WHERE NOT EXISTS (SELECT 1 FROM licences WHERE lower(email) = lower(?5) AND revoked = 0 AND (expires = '' OR expires >= ?15))" : '';
+  const args = [id, userId, kind, licensee, email, seats, issued, expires, grace, row.features, token, clean(spec.notes, MAX.notes), Date.now(), spec.source || 'admin'];
+  if (spec.unless_live) args.push(today());
+  const r = await env.DB.prepare(`INSERT INTO licences (id, user_id, kind, licensee, email, seats, issued, expires, grace_days, features, token, notes, created_at, source)
+                        SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14${guard}`)
+    .bind(...args).run();
+  if (!r.meta.changes) return null;
   await logEvent(env, id, 'issued', `${kind} · ${seats} seat(s) · expires ${expires || 'never'} · ${spec.source || 'admin'}`);
   return getLicence(env, id);
 }
 
+// The person for an address, created if there is none. One address is one
+// person: users(lower(email)) is unique (schema-v4.sql), so when two
+// requests for the same address arrive together the second INSERT is
+// ignored rather than failing, and both end up on the row that won.
+async function personFor(env, email, name, org, create) {
+  const found = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = lower(?1)').bind(email).first();
+  if (found) return found.id;
+  if (!create) return null;
+  const id = newId('usr');
+  const r = await env.DB.prepare('INSERT OR IGNORE INTO users (id, name, email, org, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
+    .bind(id, name, email, org, '', Date.now()).run();
+  if (r.meta.changes) return id;
+  const other = await env.DB.prepare('SELECT id FROM users WHERE lower(email) = lower(?1)').bind(email).first();
+  return other ? other.id : null;
+}
+function isUniqueViolation(err) { return /UNIQUE constraint/i.test(err && err.message || ''); }
+
 // ------------------------------------------------------------------ email
 function mailConfigured(env) { return !!env.RESEND_API_KEY; }
 
-async function sendKey(env, row, settings, kind = 'issued') {
+// `record` is false for the Settings page's test message: there is no
+// licence row to update, and an UPDATE matching nothing does not throw, so
+// the old "let it fail" approach logged an 'emailed' event for a licence
+// called test that the overview then linked to a page that 404s (#514).
+async function sendKey(env, row, settings, kind = 'issued', record = true) {
   if (!mailConfigured(env)) throw new Error('Email is not configured: set the RESEND_API_KEY secret and verify the sender domain at resend.com.');
   if (!row.email || !isEmail(row.email)) throw new Error('This licence has no email address to send to.');
   const from = settings.mail_from || 'ShellMate <licences@foundry-ns.com>';
@@ -294,6 +397,7 @@ async function sendKey(env, row, settings, kind = 'issued') {
     const detail = await resp.text().catch(() => '');
     throw new Error(`The mail service answered ${resp.status}: ${detail.slice(0, 200)}`);
   }
+  if (!record) return;
   await env.DB.prepare('UPDATE licences SET last_sent = ?1, sent_count = sent_count + 1 WHERE id = ?2').bind(Date.now(), row.id).run();
   await logEvent(env, row.id, 'emailed', `${kind} key to ${row.email}`);
 }
@@ -310,22 +414,40 @@ function machineOf(body) {
 function describeMachine(m) {
   return `${m.hostname || m.id}${m.user ? ' (' + m.user + ')' : ''}${m.version ? ' · ShellMate ' + m.version : ''}`;
 }
-async function recordInstallation(env, row, machine, ip) {
-  if (!machine) return;
-  const now = Date.now();
-  const existing = await env.DB.prepare('SELECT * FROM activations WHERE licence_id = ?1 AND machine_id = ?2').bind(row.id, machine.id).first();
-  if (!existing) {
-    await env.DB.prepare('INSERT INTO activations (licence_id, machine_id, hostname, user, platform, version, first_seen, last_seen, seen_count, last_ip) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 1, ?8)')
-      .bind(row.id, machine.id, machine.hostname, machine.user, machine.platform, machine.version, now, ip).run();
-    await logEvent(env, row.id, 'activated', describeMachine(machine));
-  } else {
-    await env.DB.prepare('UPDATE activations SET hostname = ?1, user = ?2, platform = ?3, version = ?4, last_seen = ?5, seen_count = seen_count + 1, last_ip = ?6, removed_at = NULL WHERE licence_id = ?7 AND machine_id = ?8')
-      .bind(machine.hostname, machine.user, machine.platform, machine.version, now, ip, row.id, machine.id).run();
-    if (existing.removed_at) await logEvent(env, row.id, 'activated', describeMachine(machine) + ' — back after removal');
-    else if (existing.version !== machine.version && machine.version) await logEvent(env, row.id, 'updated', `${machine.hostname || machine.id} now on ShellMate ${machine.version}`);
+// One upsert, not a SELECT followed by an INSERT or UPDATE: the app announces
+// an activation on install and can refresh from the Settings button at the
+// same moment, and two first contacts for one (licence, machine) used to
+// make the second INSERT hit the primary key and answer 500 (#512). The
+// statements go in one batch — a transaction and a single round trip — with
+// whatever the caller wants written alongside. RETURNING seen_count says
+// whether this call was the first contact even when the SELECT before it
+// raced another request.
+const UPSERT_ACTIVATION = `INSERT INTO activations (licence_id, machine_id, hostname, user, platform, version, first_seen, last_seen, seen_count, last_ip)
+  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 1, ?8)
+  ON CONFLICT(licence_id, machine_id) DO UPDATE SET hostname = excluded.hostname, user = excluded.user, platform = excluded.platform,
+    version = excluded.version, last_seen = excluded.last_seen, seen_count = seen_count + 1, last_ip = excluded.last_ip, removed_at = NULL
+  RETURNING seen_count`;
+async function recordInstallation(env, row, machine, ip, alongside = []) {
+  if (!machine) {
+    if (alongside.length) await env.DB.batch(alongside);
+    return;
   }
-  const n = (await env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE licence_id = ?1 AND removed_at IS NULL').bind(row.id).first()).n;
-  if (!existing && n > (Number(row.seats) || 1)) await logEvent(env, row.id, 'over-seats', `${n} installations on ${row.seats} seat(s)`);
+  const now = Date.now();
+  const [before, after, count] = await env.DB.batch([
+    env.DB.prepare('SELECT version, removed_at FROM activations WHERE licence_id = ?1 AND machine_id = ?2').bind(row.id, machine.id),
+    env.DB.prepare(UPSERT_ACTIVATION).bind(row.id, machine.id, machine.hostname, machine.user, machine.platform, machine.version, now, ip),
+    env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE licence_id = ?1 AND removed_at IS NULL').bind(row.id),
+    ...alongside,
+  ]);
+  const existing = before.results[0] || null;
+  const fresh = after.results.length ? after.results[0].seen_count === 1 : !existing;
+  const n = count.results[0].n;
+  const events = [];
+  if (fresh) events.push(eventStmt(env, row.id, 'activated', describeMachine(machine)));
+  else if (existing && existing.removed_at) events.push(eventStmt(env, row.id, 'activated', describeMachine(machine) + ' — back after removal'));
+  else if (existing && existing.version !== machine.version && machine.version) events.push(eventStmt(env, row.id, 'updated', `${machine.hostname || machine.id} now on ShellMate ${machine.version}`));
+  if (fresh && n > (Number(row.seats) || 1)) events.push(eventStmt(env, row.id, 'over-seats', `${n} installations on ${row.seats} seat(s)`));
+  if (events.length) await env.DB.batch(events);
   return n;
 }
 
@@ -340,9 +462,9 @@ async function application(request, env, path) {
     const row = await getLicence(env, id);
     if (!row) return json(404, { detail: 'No such licence.' });
     const ip = request.headers.get('CF-Connecting-IP') || '';
-    await env.DB.prepare('UPDATE licences SET last_refresh = ?1, refresh_count = refresh_count + 1, last_ip = ?2 WHERE id = ?3')
-      .bind(Date.now(), ip, id).run();
-    await recordInstallation(env, row, machineOf(body), ip);
+    const touch = env.DB.prepare('UPDATE licences SET last_refresh = ?1, refresh_count = refresh_count + 1, last_ip = ?2 WHERE id = ?3')
+      .bind(Date.now(), ip, id);
+    await recordInstallation(env, row, machineOf(body), ip, [touch]);
     if (row.revoked) return json(200, { id, revoked: true, reason: row.revoked_reason || '' });
     return json(200, { id, revoked: false, token: row.token, expires: row.expires || '' });
   }
@@ -386,22 +508,34 @@ async function publicRequest(request, env) {
   const email = clean(body.email, MAX.email);
   if (!name || !isEmail(email)) return json(400, { detail: 'A name and a valid email address are needed.' });
   if (!mailConfigured(env)) return json(503, { detail: 'Keys are sent by email and email is not configured yet. Contact support@foundry-ns.com.' });
-  // One live key per email: re-send it rather than issuing another.
-  const existing = await env.DB.prepare("SELECT * FROM licences WHERE lower(email) = lower(?1) AND revoked = 0 AND (expires = '' OR expires >= ?2) ORDER BY created_at DESC LIMIT 1")
+  // One live key per email: re-send it rather than issuing another. The
+  // insert itself checks again, so two requests arriving together for one
+  // address cannot both issue — the second finds the first's key and
+  // re-sends that.
+  const liveKey = () => env.DB.prepare("SELECT * FROM licences WHERE lower(email) = lower(?1) AND revoked = 0 AND (expires = '' OR expires >= ?2) ORDER BY created_at DESC LIMIT 1")
     .bind(email, today()).first();
   try {
+    let existing = await liveKey();
+    let row = null;
+    const days = Math.min(3650, Math.max(1, parseInt(settings.request_days, 10) || 30));
+    if (!existing) {
+      row = await issue(env, { kind: settings.request_kind === 'org' ? 'org' : 'person', licensee: name, email,
+                               org: clean(body.org, MAX.org), expires: addDays(days), notes: 'self-service request', source: 'request',
+                               unless_live: true });
+      if (!row) existing = await liveKey();
+    }
     if (existing) {
       await sendKey(env, existing, settings, 'issued');
       await logEvent(env, existing.id, 'requested', `re-sent to ${email}`);
       return json(200, { ok: true, detail: 'A key for that address already exists; it has been sent again.' });
     }
-    const days = Math.min(3650, Math.max(1, parseInt(settings.request_days, 10) || 30));
-    const row = await issue(env, { kind: settings.request_kind === 'org' ? 'org' : 'person', licensee: name, email,
-                                   org: clean(body.org, MAX.org), expires: addDays(days), notes: 'self-service request', source: 'request' });
     await sendKey(env, row, settings, 'issued');
     return json(201, { ok: true, detail: `Your key has been sent to ${email}. It is valid for ${days} days.` });
   } catch (err) {
-    return json(502, { detail: err.message });
+    // The message stays in the log. Verbatim it would hand an anonymous
+    // caller the mail provider's own response body.
+    console.error('request:', err && err.stack || err);
+    return json(502, { detail: 'The key could not be sent just now. Try again in a few minutes, or write to support@foundry-ns.com.' });
   }
 }
 
@@ -409,7 +543,11 @@ async function publicRequest(request, env) {
 async function adminApi(request, env, path) {
   const url = new URL(request.url);
   const method = request.method;
-  const body = method === 'POST' || method === 'PUT' ? await request.json().catch(() => ({})) : {};
+  let body = {};
+  if (method === 'POST' || method === 'PUT') {
+    body = await readBody(request);
+    if (body === null) return json(400, { detail: 'The body must be a JSON object.' });
+  }
   const settings = await getSettings(env);
 
   if (path === '/admin/api/stats') {
@@ -429,7 +567,10 @@ async function adminApi(request, env, path) {
       env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE removed_at IS NULL').first(),
       env.DB.prepare('SELECT COUNT(*) AS n FROM activations WHERE removed_at IS NULL AND last_seen >= ?1').bind(Date.now() - 7 * 86400000).first(),
     ]);
-    const recent = await env.DB.prepare('SELECT e.*, l.licensee FROM events e LEFT JOIN licences l ON l.id = e.licence_id ORDER BY e.at DESC LIMIT 15').all();
+    // By id, not by at: ids are AUTOINCREMENT and so in the same order as
+    // at, and the rowid is the table's own index, where ordering by at
+    // meant sorting the whole log on every visit (#511).
+    const recent = await env.DB.prepare('SELECT e.*, l.licensee FROM events e LEFT JOIN licences l ON l.id = e.licence_id ORDER BY e.id DESC LIMIT 15').all();
     return json(200, { licences: total.n, active: active.n, expiring: expiring.n, expired: expired.n, revoked: revoked.n,
                        users: users.n, issued_30d: month.n, events: recent.results,
                        activated: activated.n, unactivated: active.n - activated.n, installations: installs.n, seen_7d: seen7.n,
@@ -447,8 +588,8 @@ async function adminApi(request, env, path) {
     ]);
     const [versions, unactivated, overSeats] = await Promise.all([
       env.DB.prepare("SELECT version, COUNT(*) AS n FROM activations WHERE removed_at IS NULL GROUP BY version ORDER BY version DESC").all(),
-      env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences WHERE revoked = 0 AND (expires = '' OR expires >= ?1) AND created_at <= ?2 AND NOT EXISTS (SELECT 1 FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) ORDER BY created_at`).bind(t, Date.now() - 7 * 86400000).all(),
-      env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences WHERE revoked = 0 AND seats < (SELECT COUNT(*) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL) ORDER BY installs DESC`).all(),
+      env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences ${installsJoin()} WHERE revoked = 0 AND (expires = '' OR expires >= ?1) AND created_at <= ?2 AND COALESCE(i.installs, 0) = 0 ORDER BY created_at LIMIT 500`).bind(t, Date.now() - 7 * 86400000).all(),
+      env.DB.prepare(`SELECT ${LICENCE_COLS} FROM licences ${installsJoin()} WHERE revoked = 0 AND seats < COALESCE(i.installs, 0) ORDER BY installs DESC LIMIT 500`).all(),
     ]);
     const buckets = { d30: 0, d60: 0, d90: 0 };
     for (const l of expiring.results) {
@@ -473,8 +614,7 @@ async function adminApi(request, env, path) {
     const to = clean(body.to, MAX.email);
     if (!isEmail(to)) return json(400, { detail: 'A valid address is needed.' });
     try {
-      await sendKey(env, { id: 'test', licensee: 'Test', email: to, kind: 'person', seats: 1, issued: today(), expires: '', token: 'SM1.test.test' }, settings, 'issued')
-        .catch(err => { if (!/UPDATE|no such/i.test(err.message)) throw err; });
+      await sendKey(env, { id: 'test', licensee: 'Test', email: to, kind: 'person', seats: 1, issued: today(), expires: '', token: 'SM1.test.test' }, settings, 'issued', false);
       return json(200, { ok: true });
     } catch (err) { return json(502, { detail: err.message }); }
   }
@@ -491,12 +631,20 @@ async function adminApi(request, env, path) {
     else if (status === 'expiring') { where.push("revoked = 0 AND expires != '' AND expires >= ? AND expires <= ?"); args.push(t, addDays(30)); }
     else if (status === 'expired') { where.push("revoked = 0 AND expires != '' AND expires < ?"); args.push(t); }
     else if (status === 'revoked') { where.push('revoked = 1'); }
-    else if (status === 'activated') { where.push("revoked = 0 AND (expires = '' OR expires >= ?) AND EXISTS (SELECT 1 FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL)"); args.push(t); }
-    else if (status === 'unactivated') { where.push("revoked = 0 AND (expires = '' OR expires >= ?) AND NOT EXISTS (SELECT 1 FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL)"); args.push(t); }
-    else if (status === 'overseats') { where.push('revoked = 0 AND seats < (SELECT COUNT(*) FROM activations a WHERE a.licence_id = licences.id AND a.removed_at IS NULL)'); }
-    const sql = `SELECT ${LICENCE_COLS} FROM licences` + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY created_at DESC LIMIT 1000';
-    const rows = await env.DB.prepare(sql).bind(...args).all();
-    return json(200, { licences: rows.results.map(publicRow) });
+    else if (status === 'activated') { where.push("revoked = 0 AND (expires = '' OR expires >= ?) AND COALESCE(i.installs, 0) > 0"); args.push(t); }
+    else if (status === 'unactivated') { where.push("revoked = 0 AND (expires = '' OR expires >= ?) AND COALESCE(i.installs, 0) = 0"); args.push(t); }
+    else if (status === 'overseats') { where.push('revoked = 0 AND seats < COALESCE(i.installs, 0)'); }
+    const cursor = parseCursor(url.searchParams.get('cursor'));
+    if (cursor) { where.push('(created_at < ? OR (created_at = ? AND licences.id < ?))'); args.push(cursor.at, cursor.at, cursor.id); }
+    const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit'), 10) || 200));
+    // One more than asked for says whether there is a next page without a
+    // second COUNT query; it is not returned.
+    const sql = `SELECT ${LICENCE_COLS} FROM licences ${installsJoin()}` + (where.length ? ' WHERE ' + where.join(' AND ') : '')
+              + ` ORDER BY created_at DESC, licences.id DESC LIMIT ${limit + 1}`;
+    const rows = (await env.DB.prepare(sql).bind(...args).all()).results;
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    return json(200, { licences: page.map(publicRow), next_cursor: rows.length > limit ? `${last.created_at}:${last.id}` : '' });
   }
 
   if (path === '/admin/api/licences' && method === 'POST') {
@@ -537,8 +685,11 @@ async function adminApi(request, env, path) {
       return json(200, { deleted: true });
     }
     if (!action && method === 'PUT') {
+      // Only the fields that were sent change; a body without `notes` is
+      // not a request to empty them.
       await env.DB.prepare('UPDATE licences SET notes = ?1, email = ?2 WHERE id = ?3')
-        .bind(clean(body.notes, MAX.notes), 'email' in body ? clean(body.email, MAX.email) : row.email, id).run();
+        .bind('notes' in body ? clean(body.notes, MAX.notes) : row.notes,
+              'email' in body ? clean(body.email, MAX.email) : row.email, id).run();
       return json(200, { licence: publicRow(await getLicence(env, id)) });
     }
     if (action === 'revoke' && method === 'POST') {
@@ -553,14 +704,19 @@ async function adminApi(request, env, path) {
       return json(200, { licence: publicRow(await getLicence(env, id)) });
     }
     if (action === 'renew' && method === 'POST') {
+      // The expiry must be stated, blank meaning perpetual on purpose; a
+      // body that simply lacks it is refused rather than read as "never".
+      // Revocation is lifted only when asked: renewing is not restoring.
+      if (!('expires' in body)) return json(400, { detail: 'expires is needed: a date, or blank for a perpetual key.' });
       let expires;
       try { expires = isoDate(body.expires); } catch (err) { return json(400, { detail: err.message }); }
       const seats = body.seats ? Math.min(MAX.seats, Math.max(1, parseInt(body.seats, 10) || row.seats)) : row.seats;
+      const restore = !!row.revoked && body.restore === true;
       const updated = { ...row, expires, seats, issued: today() };
       const token = await signToken(env, payloadFor(updated));
-      await env.DB.prepare("UPDATE licences SET expires = ?1, seats = ?2, issued = ?3, token = ?4, revoked = 0, revoked_reason = '' WHERE id = ?5")
+      await env.DB.prepare(`UPDATE licences SET expires = ?1, seats = ?2, issued = ?3, token = ?4${restore ? ", revoked = 0, revoked_reason = ''" : ''} WHERE id = ?5`)
         .bind(expires, seats, updated.issued, token, id).run();
-      await logEvent(env, id, 'renewed', `expires ${expires || 'never'} · ${seats} seat(s)`);
+      await logEvent(env, id, 'renewed', `expires ${expires || 'never'} · ${seats} seat(s)${restore ? ' · restored' : ''}`);
       let mailed = false, mail_error = '';
       const fresh = await getLicence(env, id);
       if (body.send !== false && fresh.email && mailConfigured(env)) {
@@ -587,8 +743,13 @@ async function adminApi(request, env, path) {
     const name = clean(body.name, MAX.name);
     if (!name) return json(400, { detail: 'A name is needed.' });
     const id = newId('usr');
-    await env.DB.prepare('INSERT INTO users (id, name, email, org, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-      .bind(id, name, clean(body.email, MAX.email), clean(body.org, MAX.org), clean(body.notes, MAX.notes), Date.now()).run();
+    try {
+      await env.DB.prepare('INSERT INTO users (id, name, email, org, notes, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
+        .bind(id, name, clean(body.email, MAX.email), clean(body.org, MAX.org), clean(body.notes, MAX.notes), Date.now()).run();
+    } catch (err) {
+      if (isUniqueViolation(err)) return json(409, { detail: 'A person with that email address already exists.' });
+      throw err;
+    }
     return json(201, { user: await env.DB.prepare('SELECT * FROM users WHERE id = ?1').bind(id).first() });
   }
   const u = path.match(/^\/admin\/api\/users\/([^/]+)$/);
@@ -601,8 +762,14 @@ async function adminApi(request, env, path) {
       return json(200, { user: row, licences: licences.results.map(publicRow) });
     }
     if (method === 'PUT') {
-      await env.DB.prepare('UPDATE users SET name = ?1, email = ?2, org = ?3, notes = ?4 WHERE id = ?5')
-        .bind(clean(body.name, MAX.name) || row.name, clean(body.email, MAX.email), clean(body.org, MAX.org), clean(body.notes, MAX.notes), id).run();
+      const field = (key, max) => (key in body ? clean(body[key], max) : row[key]);
+      try {
+        await env.DB.prepare('UPDATE users SET name = ?1, email = ?2, org = ?3, notes = ?4 WHERE id = ?5')
+          .bind(field('name', MAX.name) || row.name, field('email', MAX.email), field('org', MAX.org), field('notes', MAX.notes), id).run();
+      } catch (err) {
+        if (isUniqueViolation(err)) return json(409, { detail: 'Another person already has that email address.' });
+        throw err;
+      }
       return json(200, { user: await env.DB.prepare('SELECT * FROM users WHERE id = ?1').bind(id).first() });
     }
     if (method === 'DELETE') {
@@ -719,7 +886,8 @@ const main = $('#main');
 function debounce(f, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; }
 function crumbs(...parts) { return '<div class="crumbs">' + parts.map((p, i) => i < parts.length - 1 ? '<a href="#/'+p[1]+'">'+esc(p[0])+'</a> › ' : esc(p[0])).join('') + '</div>'; }
 function back(hash, label) { return '<a class="btn sm" href="#/'+hash+'">← '+esc(label)+'</a>'; }
-function csv(rows, columns, name) { const lines = [columns.join(',')].concat(rows.map(r => columns.map(c => '"'+String(r[c]==null?'':r[c]).replace(/"/g,'""')+'"').join(','))); const a = document.createElement('a'); a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(lines.join('\n')); a.download = name; a.click(); }
+${csvCell}
+function csv(rows, columns, name) { const lines = [columns.join(',')].concat(rows.map(r => columns.map(c => csvCell(r[c])).join(','))); const a = document.createElement('a'); a.href = 'data:text/csv;charset=utf-8,'+encodeURIComponent(lines.join('\n')); a.download = name; a.click(); }
 
 // ---- router: #/view, #/view/id, #/view?q=
 function route() {
@@ -751,20 +919,27 @@ async function licences(params) {
    + '<div class="panel"><div class="bar"><input type="search" id="q" placeholder="Search by name, email, id or notes…" value="'+esc(q)+'"><select id="status"><option value="">Any status</option><option value="active">Active</option><option value="expiring">Expiring in 30 days</option><option value="activated">Activated</option><option value="unactivated">Never activated</option><option value="overseats">Over seats</option><option value="expired">Expired</option><option value="revoked">Revoked</option></select><select id="kind"><option value="">Any kind</option><option value="person">Person</option><option value="org">Organisation</option></select><span id="count" class="hint"></span></div><table><thead><tr>'
    + [['licensee','Licensee'],['kind','Kind'],['seats','Seats'],['issued','Issued'],['expires','Expires'],['status','Status'],['installs','Installed'],['last_refresh','Last refresh'],['last_sent','Emailed']].map(([c,t]) => '<th class="sort" data-col="'+c+'">'+t+'<span class="dir"></span></th>').join('') + '</tr></thead><tbody id="rows"></tbody></table></div>';
   $('#status').value = st; $('#kind').value = kind;
-  let rows = [];
+  let rows = [], next = '', seq = 0, lastKey = null;
+  const query = () => new URLSearchParams({q: $('#q').value, status: $('#status').value, kind: $('#kind').value});
+  const page = cursor => api('/admin/api/licences?' + query() + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
   const render = () => {
     const col = sortState.col, dir = sortState.dir;
     const val = l => col === 'status' ? status(l)[1] : (l[col] == null ? '' : l[col]);
     const sorted = rows.slice().sort((a,b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : 0) * dir; });
     document.querySelectorAll('th.sort').forEach(th => th.querySelector('.dir').textContent = th.dataset.col === col ? (dir > 0 ? '▲' : '▼') : '');
-    $('#count').textContent = rows.length + ' shown';
+    $('#count').innerHTML = rows.length + ' shown' + (next ? ' <button class="btn sm" id="more">Load more</button>' : '');
+    if ($('#more')) $('#more').onclick = async () => { $('#more').disabled = true; const d = await page(next); rows = rows.concat(d.licences); next = d.next_cursor || ''; render(); };
     $('#rows').innerHTML = sorted.length ? sorted.map(l => { const [c,t]=status(l); return '<tr class="click" data-id="'+esc(l.id)+'"><td><b>'+esc(l.licensee)+'</b><br><span class="hint">'+esc(l.email)+' · <span class="mono">'+esc(l.id)+'</span>'+(l.source==='request'?' · <span class="pill blue">self-service</span>':'')+'</span></td><td>'+esc(l.kind)+'</td><td>'+l.seats+'</td><td>'+esc(l.issued)+'</td><td>'+esc(l.expires||'never')+'</td><td><span class="pill '+c+'">'+t+'</span></td><td>'+installed(l)+'</td><td class="hint">'+esc(l.last_refresh?when(l.last_refresh)+' ('+l.refresh_count+')':'never')+'</td><td class="hint">'+esc(l.last_sent?when(l.last_sent):'—')+'</td></tr>'; }).join('') : '<tr><td colspan="9" class="empty">No licences match.</td></tr>';
     document.querySelectorAll('tr.click').forEach(r => r.onclick = () => location.hash = '#/licence/'+encodeURIComponent(r.dataset.id));
   };
-  const load = async () => { const p = new URLSearchParams({q: $('#q').value, status: $('#status').value, kind: $('#kind').value}); history.replaceState(null, '', '#/licences?'+p); rows = (await api('/admin/api/licences?'+p)).licences; render(); };
-  $('#q').oninput = debounce(load, 250); $('#status').onchange = load; $('#kind').onchange = load;
+  // The first page only, and not again for the same filters; a slower
+  // earlier answer arriving after a newer one is dropped.
+  const load = async () => { const p = query(); const key = String(p); if (key === lastKey) return; lastKey = key; history.replaceState(null, '', '#/licences?'+p); const mine = ++seq; const d = await page(''); if (mine !== seq) return; rows = d.licences; next = d.next_cursor || ''; render(); };
+  const everything = async () => { let out = rows.slice(), c = next; while (c) { const d = await page(c); out = out.concat(d.licences); c = d.next_cursor || ''; } return out; };
+  $('#q').oninput = debounce(load, 300); $('#status').onchange = load; $('#kind').onchange = load;
   document.querySelectorAll('th.sort').forEach(th => th.onclick = () => { if (sortState.col === th.dataset.col) sortState.dir *= -1; else sortState = {col: th.dataset.col, dir: 1}; render(); });
-  $('#csv').onclick = () => csv(rows.map(l => ({...l, status: status(l)[1], features: l.features.join(' ')})), ['id','licensee','email','kind','seats','issued','expires','status','installs','first_activated','last_seen','grace_days','features','source','refresh_count','last_refresh','sent_count','last_sent','notes'], 'shellmate-licences.csv');
+  // The export is every matching row, following the pages, not just what is on screen.
+  $('#csv').onclick = async () => { $('#csv').disabled = true; try { csv((await everything()).map(l => ({...l, status: status(l)[1], features: l.features.join(' ')})), ['id','licensee','email','kind','seats','issued','expires','status','installs','first_activated','last_seen','grace_days','features','source','refresh_count','last_refresh','sent_count','last_sent','notes'], 'shellmate-licences.csv'); } finally { $('#csv').disabled = false; } };
   await load();
 }
 
@@ -776,7 +951,7 @@ async function detail(id) {
    + '<div class="panel"><div class="bar"><h2>Licence key</h2><span class="hint">what the licensee pastes into ShellMate</span></div><div class="body"><div class="key">'+esc(l.token)+'</div><div class="row" style="margin-top:8px"><button class="btn sm" id="copy">Copy key</button><button class="btn sm" id="dl">Download .key file</button></div></div></div>'
    + '<div class="panel"><div class="bar"><h2>Installations</h2><span class="hint">'+(l.installs||0)+' of '+l.seats+' seat(s) in use</span></div>'+(d.activations.length ? '<table><thead><tr><th>Machine</th><th>User</th><th>Platform</th><th>Version</th><th>First seen</th><th>Last seen</th><th></th></tr></thead><tbody>'+d.activations.map(a => '<tr'+(a.removed_at?' style="opacity:.55"':'')+'><td><b>'+esc(a.hostname||a.machine_id)+'</b>'+(a.removed_at?' <span class="pill grey">removed '+esc(when(a.removed_at))+'</span>':'')+'</td><td>'+esc(a.user||'—')+'</td><td class="hint">'+esc(a.platform||'—')+'</td><td class="mono">'+esc(a.version||'?')+'</td><td class="hint">'+esc(when(a.first_seen))+'</td><td class="hint">'+esc(when(a.last_seen))+' ('+a.seen_count+')</td><td><button class="btn sm forget" data-m="'+esc(a.machine_id)+'" title="Free the seat; the copy re-registers at its next refresh if it is still there">Forget</button></td></tr>').join('')+'</tbody></table>' : '<div class="body hint">No copy of ShellMate has reported this key yet. It is recorded the moment the key is entered, and again at every refresh.</div>')+'</div>'
    + '<div class="panel"><div class="bar"><h2>Notes</h2></div><div class="body"><textarea id="notes" rows="3">'+esc(l.notes||'')+'</textarea><div class="row" style="margin-top:8px"><button class="btn sm" id="savenotes">Save notes</button></div></div></div></div>'
-   + '<div><div class="panel"><div class="bar"><h2>Renew</h2></div><div class="body"><div class="row"><input type="date" id="renew" value="'+esc(l.expires||'')+'" style="max-width:180px"><input type="number" id="seats" min="1" value="'+l.seats+'" style="max-width:100px" title="Seats"><label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="renewsend" checked> email the new key</label></div><div class="row" style="margin-top:10px"><button class="btn sm primary" id="dorenew">Renew and re-sign</button></div><p class="hint">Keeps the id and signs a new key with the new expiry. A copy of ShellMate holding the old key picks the new one up at its next refresh — no re-entry needed.</p></div></div>'
+   + '<div><div class="panel"><div class="bar"><h2>Renew</h2></div><div class="body"><div class="row"><input type="date" id="renew" value="'+esc(l.expires||'')+'" style="max-width:180px"><input type="number" id="seats" min="1" value="'+l.seats+'" style="max-width:100px" title="Seats"><label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="renewsend" checked> email the new key</label>'+(l.revoked?'<label class="row" style="margin:0;font-weight:400"><input type="checkbox" id="renewrestore"> restore it too</label>':'')+'</div><div class="row" style="margin-top:10px"><button class="btn sm primary" id="dorenew">Renew and re-sign</button></div><p class="hint">Keeps the id and signs a new key with the new expiry; a blank date makes it perpetual. A copy of ShellMate holding the old key picks the new one up at its next refresh — no re-entry needed.'+(l.revoked?' This licence is revoked and stays revoked unless <i>restore it too</i> is ticked.':'')+'</p></div></div>'
    + '<div class="panel"><div class="bar"><h2>'+(l.revoked?'Restore':'Revoke')+'</h2></div><div class="body"><div class="row">'+(l.revoked?'<button class="btn sm" id="restore">Restore this licence</button>':'<input id="reason" placeholder="Reason (shown to the licensee)" style="max-width:320px"><button class="btn sm danger" id="revoke">Revoke</button>')+'</div></div></div>'
    + '<div class="panel"><div class="bar"><h2>History</h2></div><ul class="events" style="padding:6px 16px">'+(d.events.map(e => '<li><time>'+esc(when(e.at))+'</time><b>'+esc(e.kind)+'</b> <span style="color:var(--ink-3)">'+esc(e.detail)+'</span></li>').join('')||'<li class="hint">Nothing yet.</li>')+'</ul></div>'
    + '<button class="btn sm danger" id="del">Delete this licence record</button></div></div>';
@@ -786,7 +961,7 @@ async function detail(id) {
   $('#savenotes').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id), {method:'PUT', body:{notes: $('#notes').value}}); toast('Notes saved'); };
   $('#saveemail').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id), {method:'PUT', body:{notes: $('#notes').value, email: $('#email').value}}); toast('Email saved'); };
   $('#send').onclick = async () => { $('#send').disabled = true; try { await api('/admin/api/licences/'+encodeURIComponent(id)+'/send', {method:'POST'}); toast('Key emailed to '+l.email); route(); } catch (e) { toast(e.message); $('#send').disabled = false; } };
-  $('#dorenew').onclick = async () => { try { const r = await api('/admin/api/licences/'+encodeURIComponent(id)+'/renew', {method:'POST', body:{expires: $('#renew').value, seats: $('#seats').value, send: $('#renewsend').checked}}); toast('Renewed'+(r.mailed?' and emailed':r.mail_error?' — email failed: '+r.mail_error:'')); route(); } catch (e) { toast(e.message); } };
+  $('#dorenew').onclick = async () => { try { const r = await api('/admin/api/licences/'+encodeURIComponent(id)+'/renew', {method:'POST', body:{expires: $('#renew').value, seats: $('#seats').value, send: $('#renewsend').checked, restore: !!($('#renewrestore') && $('#renewrestore').checked)}}); toast('Renewed'+(r.mailed?' and emailed':r.mail_error?' — email failed: '+r.mail_error:'')); route(); } catch (e) { toast(e.message); } };
   if ($('#revoke')) $('#revoke').onclick = async () => { if (!confirm('Revoke this licence? Its copy of ShellMate stops updating at its next refresh.')) return; await api('/admin/api/licences/'+encodeURIComponent(id)+'/revoke', {method:'POST', body:{reason: $('#reason').value}}); toast('Revoked'); route(); };
   if ($('#restore')) $('#restore').onclick = async () => { await api('/admin/api/licences/'+encodeURIComponent(id)+'/restore', {method:'POST'}); toast('Restored'); route(); };
   $('#del').onclick = async () => { if (!confirm('Delete the record entirely? The key stops verifying with the service and cannot be restored.')) return; await api('/admin/api/licences/'+encodeURIComponent(id), {method:'DELETE'}); toast('Deleted'); location.hash = '#/licences'; };
@@ -851,3 +1026,6 @@ async function settings() {
 }
 route();
 `;
+
+// For relay/admin/test_worker.mjs. The runtime reads only the default export.
+export { clean, isoDate, isEmail, csvCell, parseCursor, machineOf, readBody, makeSession, timingSafeEqual };

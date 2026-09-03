@@ -135,6 +135,104 @@ def test_storage_and_features() -> None:
         licence.PUBLIC_KEY_B64 = saved
 
 
+class _Answer:
+    """A canned httpx response: a status, and a JSON body or none."""
+
+    def __init__(self, status: int, body=None) -> None:
+        self.status_code = status
+        self._body = body
+
+    def json(self):
+        if self._body is None:
+            raise ValueError("not JSON")
+        return self._body
+
+
+def test_refresh() -> None:
+    print("\n-- Refresh: what the service's answers mean --")
+    import httpx
+    licence.PUBLIC_KEY_B64, saved = PUB_B64, licence.PUBLIC_KEY_B64
+    real_post = httpx.post
+    calls: list[tuple[str, dict]] = []
+
+    def serve(answer) -> None:
+        def post(url, **kwargs):
+            calls.append((url, kwargs.get("json") or {}))
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        httpx.post = post
+
+    try:
+        licence.install(make())
+        current = licence.load().token
+        serve(_Answer(200, {"id": "lic-test01", "revoked": False, "token": current, "expires": day(30)}))
+        r = licence.refresh()
+        check("a 200 saying current is 'current' and records the refresh",
+              r["refresh"] == "current" and bool(licence._state().get("refreshed_at")), str(r))
+        check("  and sends the id and the machine record, nothing else",
+              calls[-1][0].endswith("/licence/refresh") and set(calls[-1][1]) == {"id", "machine"} and calls[-1][1]["id"] == "lic-test01")
+
+        renewed = make(expires=day(400))
+        serve(_Answer(200, {"id": "lic-test01", "revoked": False, "token": renewed, "expires": day(400)}))
+        r = licence.refresh()
+        check("a new token from the service is installed in place of the old one",
+              r["refresh"] == "renewed" and licence.load().expires == day(400), str(r))
+        serve(_Answer(200, {"id": "lic-test01", "revoked": False, "token": "SM1.bad.bad"}))
+        r = licence.refresh()
+        check("a token that does not verify is refused and the installed key kept",
+              r["refresh"] == "current" and licence.load().expires == day(400), str(r))
+
+        licence._write_state({"refreshed_at": 1.0})
+        serve(_Answer(404, {"detail": "No such licence."}))
+        r = licence.refresh()
+        st = licence._state()
+        check("a 404 is 'unknown': not revoked, and not counted as a refresh (#478)",
+              r["refresh"] == "unknown" and r["state"] == "active" and "revoked" not in st and st.get("refreshed_at") == 1.0,
+              f"{r['refresh']} {r['state']} {st}")
+        serve(_Answer(429, {"detail": "Too many requests."}))
+        r = licence.refresh()
+        check("a 429 is reported and not counted as a refresh (#508)",
+              r["refresh"] == "service answered 429" and licence._state().get("refreshed_at") == 1.0, str(r))
+        check("  so the next background pass asks again rather than waiting three days",
+              licence.maybe_refresh() is not None and len(calls) >= 6)
+        serve(_Answer(503, None))
+        r = licence.refresh()
+        check("a 5xx likewise", r["refresh"] == "service answered 503" and r["state"] == "active", str(r))
+        serve(_Answer(200, None))
+        r = licence.refresh()
+        check("a 200 without a JSON body is 'unreadable' and nothing is written",
+              r["refresh"] == "unreadable" and licence._state().get("refreshed_at") == 1.0, str(r))
+        serve(_Answer(200, ["not", "an", "object"]))
+        check("  a JSON body that is not an object too", licence.refresh()["refresh"] == "unreadable")
+
+        serve(_Answer(200, {"id": "lic-test01", "revoked": "yes", "token": licence.load().token}))
+        r = licence.refresh()
+        check("only a literal revoked: true revokes — a truthy string does not", r["state"] == "active", str(r))
+        serve(_Answer(200, {"id": "lic-test01", "revoked": True, "reason": "refunded"}))
+        r = licence.refresh()
+        check("revoked: true revokes, with the reason, and the updater loses its licence",
+              r["refresh"] == "revoked" and r["state"] == "revoked" and "refunded" in r["detail"] and not r["valid"]
+              and not licence.has_feature("updates"), str(r))
+        serve(_Answer(404, {}))
+        check("a later 404 does not clear a real revocation either", licence.refresh()["state"] == "revoked")
+        serve(_Answer(200, {"id": "lic-test01", "revoked": False, "token": licence.load().token}))
+        r = licence.refresh()
+        check("a 200 saying not revoked lifts the local revocation", r["state"] == "active" and r["valid"], str(r))
+
+        serve(ConnectionError("no route to host"))
+        r = licence.refresh()
+        check("unreachable is 'unreachable' and the local verdict stands",
+              r["refresh"] == "unreachable" and r["state"] == "active", str(r))
+        licence.remove()
+        check("a refresh with no key installed is the 'none' status and asks nothing",
+              licence.refresh()["state"] == "none" and calls[-1][1].get("id") == "lic-test01")
+    finally:
+        httpx.post = real_post
+        licence.PUBLIC_KEY_B64 = saved
+        licence.remove()
+
+
 def _fails(fn, needle: str) -> bool:
     try:
         fn()
@@ -149,7 +247,7 @@ def main() -> int:
     print("=" * 52)
     print("  Licence keys")
     print("=" * 52)
-    for test in (test_verification, test_status, test_storage_and_features):
+    for test in (test_verification, test_status, test_storage_and_features, test_refresh):
         try:
             test()
         except Exception as exc:

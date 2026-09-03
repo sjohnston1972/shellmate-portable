@@ -14,8 +14,12 @@ renewed and revoked, people are recorded, and reports are read.
 - **Refresh**: ShellMate posts its key id to `/licence/refresh` now and then.
   The answer is the current token (a renewal arrives this way with no
   re-entry) or `revoked: true` with the reason.
-- **Records** live in D1 (`schema.sql`, `schema-v2.sql`, `schema-v3.sql`):
-  people, licences, an event log, the portal's settings, and installations.
+- **Records** live in D1 (`schema.sql`, `schema-v2.sql`, `schema-v3.sql`,
+  `schema-v4.sql`, applied in that order): people, licences, an event log,
+  the portal's settings, and installations.
+- **The event log** keeps a licence's history for good. Two kinds are
+  noise after a season — `login` and `refreshed` — and a weekly cron
+  (`[triggers]` in `wrangler.toml`) deletes those older than 90 days.
 - **Installations**: a copy of ShellMate reports the machine it is on (name,
   user, platform, version, and a stable hash as id) when a key is entered,
   when it is removed, and at every refresh. The portal shows them on the
@@ -47,6 +51,7 @@ wrangler d1 create shellmate-licences            # paste the id into wrangler.to
 wrangler d1 execute shellmate-licences --remote --file=schema.sql
 wrangler d1 execute shellmate-licences --remote --file=schema-v2.sql
 wrangler d1 execute shellmate-licences --remote --file=schema-v3.sql
+wrangler d1 execute shellmate-licences --remote --file=schema-v4.sql
 wrangler secret put SIGNING_KEY_PKCS8_B64        # Ed25519 private key, PKCS#8 DER, base64
 wrangler secret put ADMIN_PASSWORD               # the portal password
 wrangler secret put SESSION_SECRET               # any long random string
@@ -56,6 +61,11 @@ wrangler deploy
 
 The custom domain needs `foundry-ns.com` to be a zone on the same Cloudflare
 account; `wrangler deploy` creates the DNS record.
+
+The three secrets have no defaults. A deployment without `SESSION_SECRET`
+answers 500 to any session cookie rather than accepting one signed with a
+guessable key, and one without `ADMIN_PASSWORD` answers 500 to the login
+form; both are logged. Set them before the first visit.
 
 ### Cloudflare Access in front of the portal
 
@@ -107,6 +117,26 @@ print("PUBLIC_KEY_B64 =", base64.b64encode(priv.public_key().public_bytes(
 Rotating the key invalidates every issued licence, so it is a once-only
 decision unless every licensee is re-issued.
 
+## Tests
+
+`node relay/admin/test_worker.mjs` (Node 20 or later; CI runs it) imports
+both Workers the way the runtime does and drives their helpers and their
+`fetch` handlers with a fake D1 that records every statement. It proves the
+refusals — missing secrets, malformed bodies, wrong password, a
+prototype-named report type — which limiter each endpoint uses, that the
+mail test records nothing, and which SQL a request causes.
+
+It does not run that SQL. The step after this one is a
+[`@cloudflare/vitest-pool-workers`](https://developers.cloudflare.com/workers/testing/vitest-integration/)
+suite, which would need: a `vitest.config` pointing `wrangler.toml` at a
+local D1 binding; a setup that applies `schema.sql`, `schema-v2.sql`,
+`schema-v3.sql` and `schema-v4.sql` in that order (which also proves the
+migrations apply cleanly); a throwaway Ed25519 key as
+`SIGNING_KEY_PKCS8_B64` with `ADMIN_PASSWORD` and `SESSION_SECRET` set; and
+`fetch` mocked for Resend. The SQL in this Worker was checked against the
+four schema files in plain SQLite when it was written, so the suite's job
+is to keep it that way.
+
 ## Endpoints
 
 | Path | Who | What |
@@ -118,12 +148,15 @@ decision unless every licensee is re-issued.
 | `GET` / `POST /request` | the public | the request page; issues and emails a key when open |
 | `GET /health` | anyone | liveness |
 | `POST /admin/login` | the portal | password → session cookie |
-| `/admin/api/licences` … | the portal (cookie) | list with filters, issue (emails), detail with installations, renew (emails), revoke, restore, send, delete, notes and email; `DELETE …/activations/:machine` forgets one |
+| `/admin/api/licences` … | the portal (cookie) | list with filters, paged (`?limit=`, up to 500, and `?cursor=` from the previous answer's `next_cursor`), issue (emails), detail with installations, renew (emails; `restore: true` to lift a revocation), revoke, restore, send, delete, notes and email; `DELETE …/activations/:machine` forgets one |
 | `/admin/api/users` … | the portal (cookie) | list, add, detail, edit, delete |
 | `/admin/api/reports` | the portal (cookie) | issued per month, by kind and source, renewals due, seats in force |
 | `/admin/api/settings` | the portal (cookie) | email wording, the request page, the overview notice |
 | `/admin/api/mail/test` | the portal (cookie) | send a test message |
 | `/admin/api/stats` | the portal (cookie) | the overview numbers and recent events |
 
-Everything is rate-limited per IP. The application endpoints answer about
-one key at a time and never list anything.
+Everything is rate-limited per IP: 20 a minute for the login form and the
+request page, 300 a minute for the application's `/licence/*` calls, which
+have to absorb an organisation's seats installing behind one address on the
+same morning. The application endpoints answer about one key at a time and
+never list anything.

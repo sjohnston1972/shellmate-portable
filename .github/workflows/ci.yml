@@ -4,7 +4,10 @@
 # icacls, the Edge lookup and the WebView2 window fallbacks, none of which a
 # Linux runner can vouch for. Every test_*.py runs through tools/run_tests.py
 # so a single failing file fails the job, then the executable is built the
-# same way a release is built and kept as an artifact.
+# same way a release is built, started once and asked for its health, its
+# licence status and a frontend file (#516) — the tests run from source, so
+# only this catches a hidden import or data file that build.spec missed
+# and that comes back empty in a frozen build — and kept as an artifact.
 #
 # A tag of the form v1.2.3 also publishes a GitHub release carrying the exe,
 # which is what the in-app update check compares itself against.
@@ -12,8 +15,12 @@
 # Code signing runs only when the repository holds a certificate:
 #   SIGN_CERT_PFX_BASE64  the .pfx, base64-encoded
 #   SIGN_CERT_PASSWORD    its password
-# Without them the step is skipped and the build is unsigned, as it is
-# today. Windows SDK signtool ships on the hosted runner.
+# Without them an ordinary push builds unsigned, but a release tag fails:
+# an unsigned release would otherwise ship with no line saying so (#505).
+# The secrets are mapped at job level because a step's `if` is evaluated
+# before that step's own `env:` exists — a step-level mapping is always
+# empty at that moment and the step never runs. Windows SDK signtool ships
+# on the hosted runner.
 
 name: CI
 
@@ -32,6 +39,9 @@ jobs:
   test-and-build:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      SIGN_CERT_PFX_BASE64: ${{ secrets.SIGN_CERT_PFX_BASE64 }}
+      SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +52,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          # The install reads the lock, so the cache has to turn over with it.
+          cache-dependency-path: |
+            requirements.lock
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
@@ -55,15 +69,68 @@ jobs:
         env:
           PYTHONUTF8: "1"
 
+      - name: Test the Workers
+        run: node relay/admin/test_worker.mjs
+
       - name: Build the portable executable
         run: pyinstaller build.spec --noconfirm
 
-      - name: Sign the executable
-        if: ${{ env.SIGN_CERT_PFX_BASE64 != '' }}
+      # The frozen exe, not the source tree: --no-window serves and opens
+      # nothing. The port comes from ShellMate-Data/shellmate.lock beside
+      # the exe once it is up (8765 is tried in the meantime, being its
+      # preference); then every request below must answer 200 with a body.
+      # A startup failure in a windowed build shows a message box and waits,
+      # which is why there is a deadline and the log is printed either way.
+      - name: Run the executable it built
         shell: pwsh
-        env:
-          SIGN_CERT_PFX_BASE64: ${{ secrets.SIGN_CERT_PFX_BASE64 }}
-          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          $exe = Resolve-Path dist\ShellMate-Portable.exe
+          $data = Join-Path (Split-Path $exe) "ShellMate-Data"
+          $lock = Join-Path $data "shellmate.lock"
+          $log = Join-Path $data "shellmate.log"
+          $proc = Start-Process -FilePath $exe -ArgumentList "--no-window" -PassThru
+          $failed = $null
+          try {
+            $port = 0
+            $deadline = (Get-Date).AddSeconds(120)
+            while ((Get-Date) -lt $deadline) {
+              if ($proc.HasExited) { throw "The executable exited with code $($proc.ExitCode) before it was serving." }
+              $try = 8765
+              if (Test-Path $lock) {
+                try { $try = [int](Get-Content $lock -Raw | ConvertFrom-Json).port } catch { }
+              }
+              try {
+                $r = Invoke-WebRequest "http://127.0.0.1:$try/api/health" -UseBasicParsing -TimeoutSec 2
+                if ($r.StatusCode -eq 200 -and $r.Content -match 'shellmate-portable') { $port = $try; break }
+              } catch { }
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $port) { throw "Nothing answered /api/health within 120 s." }
+            Write-Host "Serving on port $port"
+            foreach ($path in "/api/health", "/api/licence", "/", "/static/js/terminal.js", "/static/vendor/xterm.js") {
+              $r = Invoke-WebRequest "http://127.0.0.1:$port$path" -UseBasicParsing -TimeoutSec 10
+              if ($r.StatusCode -ne 200) { throw "$path answered $($r.StatusCode)" }
+              if ($r.Content.Length -lt 20) { throw "$path answered 200 with an empty body" }
+              Write-Host ("  {0,-28} 200  {1,8} bytes" -f $path, $r.Content.Length)
+            }
+          } catch {
+            $failed = $_
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+            if (Test-Path $log) { Write-Host "----- shellmate.log -----"; Get-Content $log -Tail 60 }
+          }
+          if ($failed) { Write-Host "::error::$failed"; exit 1 }
+
+      - name: Refuse to release unsigned
+        if: startsWith(github.ref, 'refs/tags/v') && env.SIGN_CERT_PFX_BASE64 == ''
+        shell: pwsh
+        run: |
+          Write-Host "::error::A release tag needs the SIGN_CERT_PFX_BASE64 and SIGN_CERT_PASSWORD secrets; this build would ship unsigned."
+          exit 1
+
+      - name: Sign the executable
+        if: env.SIGN_CERT_PFX_BASE64 != ''
+        shell: pwsh
         run: |
           $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_CERT_PFX_BASE64))

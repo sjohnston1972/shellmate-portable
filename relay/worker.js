@@ -33,6 +33,8 @@ const LABELS = {
   feature: ['enhancement', 'user-reported'],
 };
 
+export { labelsFor };
+
 export default {
   async fetch(request, env) {
     if (request.method !== 'POST') {
@@ -59,7 +61,7 @@ export default {
       return json(400, { detail: 'The body must be JSON.' });
     }
 
-    const labels = LABELS[report.type];
+    const labels = labelsFor(report.type);
     if (!labels) {
       return json(400, { detail: "type must be 'bug' or 'feature'." });
     }
@@ -102,6 +104,14 @@ export default {
     return json(200, { status: 'ok', issue: issue.number });
   },
 };
+
+// Own keys only. A plain LABELS[type] resolves "constructor" to Object and
+// "__proto__" to Object.prototype — both truthy — and the issue was then
+// filed with no labels at all, which the header above says a client must
+// not be able to do (#515).
+function labelsFor(type) {
+  return typeof type === 'string' && Object.hasOwn(LABELS, type) ? LABELS[type] : null;
+}
 
 function json(status, payload) {
   return new Response(JSON.stringify(payload), {
