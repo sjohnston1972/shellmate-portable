@@ -611,19 +611,23 @@
    */
   async function openProfile(p, card) {
     try {
-      const openIds = (typeof window.getOpenSessionIds === 'function')
-        ? window.getOpenSessionIds() : [];
-      if (openIds.length) {
-        const r = await fetch('/api/sessions');
-        if (r.ok) {
-          const sessions = await r.json();
-          const openSet  = new Set(openIds);
-          const match = sessions.find(s => openSet.has(s.session_id) && sameTarget(s, p));
-          if (match && typeof window.switchToTabBySessionId === 'function') {
-            window.switchToTabBySessionId(match.session_id);
-            return;
-          }
-        }
+      // From the tab strip, not a round trip to /api/sessions (#493): the
+      // tabs already carry the profile id, the dialled address, port and
+      // username, and they *are* the list of what is open.
+      const open = (typeof window.getOpenTabs === 'function') ? window.getOpenTabs() : [];
+      const match = open.find(t => sameTarget({
+        profile_id:      t.profileId,
+        connection_type: t.connectionType,
+        // The address that was dialled. `hostname` on a tab is rewritten
+        // with whatever the device calls itself, which is not what a saved
+        // connection holds.
+        hostname:        t.address,
+        port:            t.port,
+        username:        t.username,
+      }, p));
+      if (match && typeof window.switchToTabBySessionId === 'function') {
+        window.switchToTabBySessionId(match.sessionId);
+        return;
       }
     } catch (_) { /* fall through to dialog */ }
 

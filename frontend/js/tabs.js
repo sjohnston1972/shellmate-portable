@@ -2462,19 +2462,10 @@
    * not an address at all.
    */
   async function _copyAddress(tab) {
-    let address = tab.address || tab.hostname || '';
-    let port = tab.port;
-    try {
-      const res = await fetch('/api/sessions');
-      if (res.ok) {
-        const session = (await res.json())
-          .find(s => s.session_id === tab.sessionId);
-        if (session) {
-          address = session.address || session.hostname || address;
-          port = session.port || port;
-        }
-      }
-    } catch (_) { /* the tab's own copy is a reasonable fallback */ }
+    // The tab's own copy, which is what the session was created from (#493).
+    // This fetched /api/sessions to read back the same two fields.
+    const address = tab.address || tab.hostname || '';
+    const port = tab.port;
 
     if (!address) return;
     const text = (port && port !== 22) ? `${address}:${port}` : address;
@@ -2834,16 +2825,26 @@
     }
   }
 
+  /**
+   * What the two functions below need to know about a session, read from
+   * the tab rather than fetched back from /api/sessions (#493). Every field
+   * was stored on the tab when the session was created; the round trip
+   * returned the same values, and made "what is open" two sources of truth.
+   */
+  function _sessionFromTab(tab) {
+    return {
+      session_id:      tab.sessionId,
+      address:         tab.address || tab.hostname || '',
+      hostname:        tab.hostname || '',
+      port:            tab.port || 0,
+      username:        tab.username || '',
+      connection_type: tab.connectionType || 'ssh',
+      display_label:   tab.label || '',
+    };
+  }
+
   async function _saveConnection(tab) {
-    let session = null;
-    try {
-      const res = await fetch('/api/sessions');
-      if (res.ok) {
-        session = (await res.json())
-          .find(s => s.session_id === tab.sessionId) || null;
-      }
-    } catch (_) { /* nothing to save without it */ }
-    if (!session) return;
+    const session = _sessionFromTab(tab);
 
     const address = session.address || session.hostname || '';
     const isSerial = session.connection_type === 'serial';
@@ -2926,20 +2927,13 @@
   }
 
   async function _duplicateSession(tab) {
-    let session = null;
-    try {
-      const res      = await fetch('/api/sessions');
-      const sessions = await res.json();
-      session = sessions.find(s => s.session_id === tab.sessionId) || null;
-    } catch (err) {
-      console.error('Could not get session for duplicate:', err);
-    }
-    if (!session) return;
+    const session = _sessionFromTab(tab);
 
     // `address` is what was dialled and is never rewritten; `hostname` is
     // what the device calls itself.
     const address = session.address || session.hostname || '';
     const profile = await _profileForQuiet({
+      profileId:      tab.profileId || '',
       connectionType: session.connection_type || 'ssh',
       hostname:       address,
       port:           session.port,

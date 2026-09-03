@@ -2401,55 +2401,9 @@
   // Dragging
   // -------------------------------------------------------------------------
 
-  let dragKey = '';
-
-  function _bindDrag(tile, group) {
-    tile.addEventListener('dragstart', (e) => {
-      dragKey = group.key;
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', group.key);
-      tile.classList.add('group-dragging');
-    });
-    tile.addEventListener('dragend', () => {
-      dragKey = '';
-      tile.classList.remove('group-dragging');
-      document.querySelectorAll('.group-drop').forEach(
-        el => el.classList.remove('group-drop'));
-    });
-
-    tile.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      tile.classList.add('group-drop');
-    });
-    tile.addEventListener('dragleave', () => tile.classList.remove('group-drop'));
-
-    tile.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      tile.classList.remove('group-drop');
-
-      // A connection dropped on a group joins it. Adding, never moving — it
-      // keeps every other group it was already in.
-      const profileId = e.dataTransfer.getData('application/x-shellmate-profile');
-      if (profileId) {
-        await _addMember(group, profileId);
-        return;
-      }
-
-      // Otherwise a group was dragged, and this is a rearrangement.
-      if (!dragKey || dragKey === group.key) return;
-      const keys = groupCache.map(g => g.key).filter(k => k !== dragKey);
-      keys.splice(keys.indexOf(group.key), 0, dragKey);
-      try {
-        await fetch('/api/groups/order', {
-          method:  'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ keys }),
-        });
-      } catch (_) { /* the order is a preference, not the data */ }
-      _refresh();
-    });
-  }
-
+  // The tile-to-tile drag that used to live here (`_bindDrag`) went with the
+  // group tiles themselves; the tree's chips and leaves bind their own drag
+  // handlers above, and this is what a drop onto a group does.
   async function _addMember(group, profileId) {
     try {
       const res = await fetch(
