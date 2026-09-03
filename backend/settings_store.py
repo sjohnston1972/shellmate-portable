@@ -10,6 +10,7 @@ import copy
 import json
 import logging
 import threading
+import time
 from pathlib import Path
 
 from backend import config as env_config, jsonfile
@@ -372,8 +373,12 @@ SECRET_FIELDS = {
 # one tab was a thousand file reads that every other tab waited behind.
 # The cache key is the file's identity, mtime and size; update_settings()
 # drops it explicitly as well, since two writes can share a timestamp.
-_cache: dict = {"key": None, "merged": None, "version": 0}
+_cache: dict = {"key": None, "merged": None, "version": 0, "checked": 0.0}
 _cache_lock = threading.Lock()
+# How often the file is stat()ed to notice an edit made by hand. A stat is
+# ~20 us on Windows, which per line of output is still the largest cost;
+# once a quarter-second is plenty for a file people edit in Notepad.
+_RECHECK_SECONDS = 0.25
 
 
 def _file_key(settings_file: Path):
@@ -387,8 +392,13 @@ def _file_key(settings_file: Path):
 def _merged() -> dict:
     """The effective settings, shared and read-only. Callers must not mutate."""
     settings_file = paths.settings_file()
+    now = time.monotonic()
+    with _cache_lock:
+        if _cache["merged"] is not None and now - _cache["checked"] < _RECHECK_SECONDS:
+            return _cache["merged"]
     key = _file_key(settings_file)
     with _cache_lock:
+        _cache["checked"] = now
         if _cache["key"] == key and _cache["merged"] is not None:
             return _cache["merged"]
     if key[0] == "absent":
@@ -415,6 +425,7 @@ def invalidate() -> None:
     """Forget the cached settings; the next read parses the file again."""
     with _cache_lock:
         _cache["key"] = None
+        _cache["checked"] = 0.0
 
 
 def settings_version() -> int:
