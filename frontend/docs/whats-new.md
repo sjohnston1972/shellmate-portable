@@ -4,6 +4,12 @@ One section per release, newest first. The first run of a new version
 offers this page; **Updates** in the sidebar asks GitHub whether a newer one
 exists.
 
+## 1.1.1
+
+- A small release published so that a 1.1.0 copy has something to update
+  to — the first update applied from inside ShellMate. If you are reading
+  this in the what's-new window after a restart, the swap worked.
+
 ## 1.1.0
 
 - **Updates from inside ShellMate.** A newer release opens ShellMate's own
