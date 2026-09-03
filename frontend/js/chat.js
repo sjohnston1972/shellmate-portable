@@ -182,13 +182,22 @@
   // WebSocket
   // -----------------------------------------------------------------------
 
+  // Reconnect backoff (#492). Every close used to schedule another attempt
+  // two seconds later, forever — including when the server had refused the
+  // handshake and would refuse the next one the same way, and with the
+  // backend down it was a steady loop of error/close events.
+  const CHAT_RETRY_BASE_MS = 2000;
+  const CHAT_RETRY_MAX_MS  = 30000;
+  let _chatRetries = 0;       // consecutive failures; reset by a successful open
+
   function connectChatWs() {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${window.location.host}/ws/chat`;
     chatWs = new WebSocket(url);
 
+    chatWs.addEventListener('open', () => { _chatRetries = 0; });
     chatWs.addEventListener('message', handleWsMessage);
-    chatWs.addEventListener('close', () => {
+    chatWs.addEventListener('close', (event) => {
       // A drop mid-reply must release the chat (#315): isStreaming stayed
       // true and the send button stayed disabled forever — the reconnected
       // socket was unusable until "Clear chat" happened to be clicked.
@@ -196,8 +205,18 @@
         finishStreaming();
         appendErrorBubble('The connection dropped mid-reply. Reconnecting…');
       }
-      // Reconnect after a delay
-      setTimeout(connectChatWs, 2000);
+      // 1008 is the server saying no — an origin or authentication check
+      // failed. That does not change by asking again; say so and stop.
+      if (event && event.code === 1008) {
+        appendErrorBubble('The server refused the assistant connection. '
+          + 'Reload the page; if it happens again, check the server log.');
+        return;
+      }
+      // Doubling from two seconds, capped at thirty: quick when the server
+      // is restarting, quiet when it is gone.
+      const wait = Math.min(CHAT_RETRY_BASE_MS * Math.pow(2, _chatRetries), CHAT_RETRY_MAX_MS);
+      _chatRetries += 1;
+      setTimeout(connectChatWs, wait);
     });
     chatWs.addEventListener('error', () => {});
   }
