@@ -49,9 +49,7 @@ async def stream_response(
     Yields text chunks as they arrive.
     Raises if Ollama is unreachable or returns an error.
     """
-    full_user_message = (
-        f"{context_block}\n\n=== ENGINEER'S QUESTION ===\n{user_message}"
-    )
+    full_user_message = turns.user_content(context_block, user_message)
 
     host = get_effective("ollama_host", OLLAMA_HOST)
     url = f"{host.rstrip('/')}/api/chat"

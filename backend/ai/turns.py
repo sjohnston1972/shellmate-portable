@@ -92,6 +92,20 @@ def trim_block(max_turns: int) -> int:
     return min(4, max_turns // 2)
 
 
+def user_content(context_block: str, user_message: str) -> str:
+    """
+    The user message as the model receives it: the context block, then the
+    question under its own heading.
+
+    With no context block it is the message alone. The session summary
+    sends its whole task as the message, and a "question" heading over a
+    note-writing task was the wrong framing for it (#502).
+    """
+    if not (context_block or "").strip():
+        return user_message
+    return f"{context_block}\n\n=== ENGINEER'S QUESTION ===\n{user_message}"
+
+
 def openai_messages(system: str, history: list | None, user: str) -> list[dict]:
     """The message list for an OpenAI-shaped chat completion."""
     return ([{"role": "system", "content": system}]

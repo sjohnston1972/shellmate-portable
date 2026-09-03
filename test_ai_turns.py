@@ -234,6 +234,47 @@ def test_usage_passes_through_the_router() -> None:
           isinstance(got[-1], dict) and got[-1]["usage"]["input"] == 12, str(got))
 
 
+def test_session_notes_are_not_troubleshooting() -> None:
+    """The summary runs under its own persona, not the one that suggests commands (#502)."""
+    print("\n-- Session notes --")
+    from backend.ai import ollama_client, summarize
+    from backend.ai.prompts import SYSTEM_PROMPT
+
+    check("the notes persona never mentions command tags",
+          "SUGGEST_CMD" not in summarize.NOTES_SYSTEM_PROMPT
+          and "suggest commands" in summarize.NOTES_SYSTEM_PROMPT)
+    check("  where the default persona does", "SUGGEST_CMD" in SYSTEM_PROMPT)
+
+    seen: dict = {}
+
+    async def fake(user_message, context_block, model=None, system_prompt=None, history=None):
+        seen.update({"message": user_message, "context": context_block, "system": system_prompt})
+        yield "notes"
+
+    class FakeManager:
+        def get_session(self, sid):
+            return None
+
+    original = ollama_client.stream_response
+    ollama_client.stream_response = fake
+    try:
+        text = asyncio.run(summarize.summarize_session([], None, "ollama", FakeManager()))
+    finally:
+        ollama_client.stream_response = original
+    check("the summary is asked for under the notes persona",
+          seen.get("system") == summarize.NOTES_SYSTEM_PROMPT, str(seen.get("system"))[:80])
+    check("  with the task as the message and no context block",
+          seen.get("context") == "" and "TASK:" in seen.get("message", ""))
+    check("  and the reply comes back whole", text == "notes", text)
+
+    check("no context block means no question heading",
+          turns.user_content("", "TASK: write notes") == "TASK: write notes")
+    framed = turns.user_content("=== ACTIVE SESSION ===\nout", "why?")
+    check("  a context block is followed by the question under its heading",
+          framed.startswith("=== ACTIVE SESSION ===") and framed.endswith("=== ENGINEER'S QUESTION ===\nwhy?"),
+          framed)
+
+
 def test_ollama_error_inside_the_stream() -> None:
     """Ollama reports a mid-stream failure as an error line on a 200 (#500)."""
     print("\n-- Ollama: an error line on a 200 --")
@@ -277,7 +318,7 @@ def main() -> int:
     for test in (test_history_is_shaped_for_the_apis, test_history_is_trimmed_in_blocks,
                  test_stable_context_sits_in_the_system_block, test_provider_shapes,
                  test_device_facts_are_worded_honestly, test_usage_passes_through_the_router,
-                 test_ollama_error_inside_the_stream):
+                 test_ollama_error_inside_the_stream, test_session_notes_are_not_troubleshooting):
         try:
             test()
         except Exception as exc:

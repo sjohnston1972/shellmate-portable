@@ -16,6 +16,18 @@ from backend.session import outbound
 logger = logging.getLogger(__name__)
 
 
+#: The persona for writing notes. Not the troubleshoot prompt (#502): that
+#: one tells the model to suggest one command at a time in [SUGGEST_CMD]
+#: tags and to flag dangerous ones, and notes written under it arrived
+#: with command blocks and warnings in them — on their way into a ticket.
+NOTES_SYSTEM_PROMPT = (
+    "You are a senior network engineer writing up a shell session for a "
+    "ticket. You write plain, factual notes about what was done and what "
+    "was found, in prose. You do not suggest commands, do not use tags or "
+    "markup of any kind, do not address the reader, and do not add anything "
+    "that is not in the material you are given."
+)
+
 _TASK_INSTRUCTIONS = (
     "TASK: Write post-session notes for a network-engineering shell session.\n"
     "Read the terminal transcripts and chat history below, then produce a "
@@ -95,11 +107,13 @@ async def summarize_session(
     else:
         from backend.ai.ollama_client import stream_response
 
-    # The streaming clients expect (user_message, context_block) and prepend
-    # their own SYSTEM_PROMPT. Pass our task instructions in the user message
-    # and an empty context block so we get a clean summary.
+    # The streaming clients take (user_message, context_block). The task
+    # goes as the message with no context block — the transcripts are in
+    # the task itself — and under the note-writing persona rather than the
+    # clients' default, which is the troubleshoot one (#502).
     chunks: list[str] = []
-    async for chunk in stream_response(user_prompt, "", model=model):
+    async for chunk in stream_response(user_prompt, "", model=model,
+                                       system_prompt=NOTES_SYSTEM_PROMPT):
         if isinstance(chunk, str):
             chunks.append(chunk)
     return "".join(chunks).strip()
