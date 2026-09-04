@@ -155,7 +155,11 @@ of your estate to keep in step, and a run is pointed at exactly what you
 chose rather than at whatever was pushed months ago.
 
 **Show what would be sent** displays it before you start — the hosts, and
-the ones left out with their reason.
+the ones left out with their reason. While a run is going, and afterwards
+in its history, the panel says which inventory it was actually pointed at:
+the one ShellMate sent, or a path the runner holds. In a change record
+those are different claims, and after the fact they are otherwise
+indistinguishable.
 
 If you would rather the runner held a copy permanently, put a file in its
 `/runner/inventory` directory yourself; anything there merges with the

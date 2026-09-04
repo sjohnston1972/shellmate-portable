@@ -729,6 +729,26 @@
     else if (label === 'successful') _pill(pill, 'ok', 'Successful');
     else if (label) _pill(pill, 'error', label);
     _renderTallies(state.summary || {});
+    _renderInventoryUsed(state.inventory || '');
+  }
+
+  /**
+   * Which inventory the run was actually pointed at (#585).
+   *
+   * The runner reports the path it used, and for an estate run that is the
+   * per-job file ShellMate sent rather than the inventory the container
+   * holds. Saying which matters in a change record: "it ran against the
+   * hosts I chose" is a different claim from "it ran against whatever the
+   * runner had", and the two are indistinguishable after the fact.
+   */
+  function _renderInventoryUsed(path) {
+    const el = document.getElementById('ansible-live-target');
+    if (!el) return;
+    if (!path) { el.textContent = ''; el.title = ''; return; }
+    const sent = path.includes('.inline') || path.includes('artifacts');
+    el.textContent = sent ? 'against the inventory ShellMate sent'
+                          : `against ${path}`;
+    el.title = path;
   }
 
   /** The per-host tallies, in the words Ansible itself uses. */
