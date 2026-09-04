@@ -63,8 +63,8 @@ failed: list[str] = []
 
 #: Every area the nav offers. A tab with no script behind it switches to a
 #: blank rectangle and reports nothing, so the list is asserted, not implied.
-AREAS = ["dashboard", "playbooks", "builder", "templates", "inventory",
-         "environments", "keys", "repositories"]
+AREAS = ["dashboard", "playbooks", "runs", "builder", "templates",
+         "inventory", "environments", "keys", "repositories"]
 
 
 def check(name: str, condition: bool, detail: str = "") -> None:

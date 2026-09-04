@@ -327,6 +327,11 @@
               <span class="material-symbols-outlined">description</span>
               <span class="av-tab-label">Playbooks</span>
             </button>
+            <button type="button" class="av-tab" data-av-go="runs"
+                    title="What has run, and what it did">
+              <span class="material-symbols-outlined">history</span>
+              <span class="av-tab-label">Runs</span>
+            </button>
             <button type="button" class="av-tab" data-av-go="builder"
                     title="Build a playbook from a description">
               <span class="material-symbols-outlined">smart_toy</span>
@@ -418,12 +423,28 @@
         <div id="ansible-events" class="ansible-events"></div>
       </section>
 
-      <!-- ===== What this browser has watched ===== -->
-      <section class="settings-section">
-        <h3 class="settings-section-title">Recent runs</h3>
-        <p class="settings-section-hint">What this browser has watched. The service has no endpoint that lists past runs, so this is ShellMate's own note of them rather than the runner's record — a run started from somewhere else will not be here.</p>
-        <div id="ansible-history"></div>
-      </section>
+            </div>
+          </section>
+
+          <!-- ===== Runs ===== -->
+          <section class="av-area" id="av-runs" data-av-area="runs" hidden>
+            <header class="av-area-head">
+              <h3>Runs</h3>
+              <p>What has run, against what, and what it changed. The runner
+                 keeps its own record, which survives a restart and includes
+                 runs started from elsewhere; ShellMate keeps a note of the
+                 ones this browser watched, which is where the tallies and
+                 the report come from.</p>
+            </header>
+            <div class="av-area-body" id="av-runs-body">
+              <section class="av-block">
+                <h4 class="av-block-title">On the runner</h4>
+                <div id="ansible-jobs"></div>
+              </section>
+              <section class="av-block">
+                <h4 class="av-block-title">Watched from this browser</h4>
+                <div id="ansible-history"></div>
+              </section>
             </div>
           </section>
 
@@ -3540,6 +3561,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/ansible_estate.js"></script>
   <script src="/static/js/ansible_dashboard.js"></script>
   <script src="/static/js/ansible_playbooks.js"></script>
+  <script src="/static/js/ansible_runs.js"></script>
   <script src="/static/js/ansible_builder.js"></script>
   <script src="/static/js/ansible_templates.js"></script>
   <script src="/static/js/ansible_inventory.js"></script>

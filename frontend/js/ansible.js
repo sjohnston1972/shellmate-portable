@@ -1322,6 +1322,15 @@
     if (typeof window._showCopyToast === 'function') window._showCopyToast();
   }
 
+  // The Runs area (#591) renders the runner's own record; the notes this
+  // browser took, and the watching, still live here because they are built
+  // from the event stream as it arrives.
+  window.ansibleRenderHistory = renderHistory;
+  window.ansibleWatchJob = (job) => {
+    if (window.ansibleView) window.ansibleView.show('playbooks');
+    watch({ uuid: job.id, playbook: job.playbook || job.id,
+            target: job.limit || '', check: !!job.check });
+  };
   window.openAnsible = openAnsible;
   // Named so the browser tests can reach the seams without a container in
   // the loop: a runner is not something a test suite can stand up, but the
