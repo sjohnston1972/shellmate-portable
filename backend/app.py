@@ -2146,44 +2146,33 @@ async def set_profile_tags(profile_id: str, request: TagsRequest) -> dict:
                 profiles_module.set_tags, profile_id, request.tags)}
 
 
-# Same reason as the group routes above: a tag is a group key, and a
-# nested one carries a slash.
-@app.post("/api/tags/{tag:path}/connect")
-async def connect_tag(tag: str) -> dict:
+async def _open_profiles(targets: list[dict]) -> list[dict]:
     """
-    Open a session to every connection carrying a tag.
+    Open a session to each of these saved connections, and report on each.
 
     Bounded concurrency, for the same reason broadcast has it: forty
     simultaneous SSH handshakes through one bastion buries it, and a fleet is
     exactly where somebody would use this.
 
     Each result comes back individually. A partial failure has to be visible
-    rather than assumed — the same reasoning broadcast already records, and it
+    rather than assumed - the same reasoning broadcast already records, and it
     matters more here because the whole point is not watching each one.
-    """
-    # Everything beneath it too (#207). A site holds no devices directly —
-    # they carry their subgroup's tag only — so an exact match found nothing
-    # and "Connect all" on a site reported it was empty, while the tree
-    # beside it showed a count of fifty.
-    targets = await asyncio.to_thread(
-        profiles_module.profiles_tagged, tag, True)
-    if not targets:
-        raise HTTPException(status_code=404,
-                            detail=f"Nothing is tagged '{tag}'.")
 
+    Shared by the tag route and by a hand-picked selection (#537), so the
+    pacing and the per-device reporting cannot come to differ between them.
+    """
     # The same reading of broadcast.concurrency as broadcast itself (#333):
     # 0 is documented as "no limit". max(1, 0) turned the default into
     # Semaphore(1), and "Connect all" on fifty devices opened them strictly
-    # one at a time — worst case fifty connect timeouts end to end.
+    # one at a time - worst case fifty connect timeouts end to end.
     concurrency = int(advanced_setting("broadcast.concurrency"))
     limit = asyncio.Semaphore(concurrency) if concurrency else None
     results: list[dict] = []
 
     async def open_one(profile: dict) -> None:
         async with (limit or contextlib.nullcontext()):
-            # The second connect path, through the same resolution as the
-            # other two (#545): what a group lends applies here or the tile
-            # and the tab disagree about which bastion was used.
+            # Every connect path resolves what the groups lend the same way
+            # (#545): what a tile says and what a tab does must agree.
             dialled = profiles_module.effective(profile)
             kind = dialled.get("connection_type") or "ssh"
             params = ConnectionParams(
@@ -2210,18 +2199,69 @@ async def connect_tag(tag: str) -> dict:
                 results.append({"ok": True, "name": profile.get("name", ""),
                                 "session": session})
             except Exception as exc:
-                logger.info("Tag connect failed for %s: %s",
+                logger.info("Batch connect failed for %s: %s",
                             profile.get("name", ""), exc)
                 results.append({"ok": False, "name": profile.get("name", ""),
                                 "error": str(exc)})
 
     await asyncio.gather(*(open_one(p) for p in targets))
+    return results
+
+
+# Same reason as the group routes above: a tag is a group key, and a
+# nested one carries a slash.
+@app.post("/api/tags/{tag:path}/connect")
+async def connect_tag(tag: str) -> dict:
+    """
+    Open a session to every connection carrying a tag.
+
+    Paced and reported per device by ``_open_profiles``.
+    """
+    # Everything beneath it too (#207). A site holds no devices directly —
+    # they carry their subgroup's tag only — so an exact match found nothing
+    # and "Connect all" on a site reported it was empty, while the tree
+    # beside it showed a count of fifty.
+    targets = await asyncio.to_thread(
+        profiles_module.profiles_tagged, tag, True)
+    if not targets:
+        raise HTTPException(status_code=404,
+                            detail=f"Nothing is tagged '{tag}'.")
+
+    results = await _open_profiles(targets)
 
     opened = sum(1 for r in results if r["ok"])
     logger.info("Connected %s of %s devices tagged '%s'",
                 opened, len(targets), tag)
     return {"tag": tag, "opened": opened, "total": len(targets),
             "results": results}
+
+
+class ConnectManyRequest(BaseModel):
+    """Body for POST /api/sessions/many."""
+
+    profile_ids: list[str] = []
+
+
+@app.post("/api/sessions/many")
+async def connect_many(request: ConnectManyRequest) -> dict:
+    """
+    Open a session to each of a hand-picked set of connections (#537).
+
+    The tag route above answers "connect this group"; this answers "connect
+    these six", which is the question somebody actually has after looking at
+    a tree. Same pacing, same per-device reporting.
+    """
+    wanted = [pid for pid in request.profile_ids if pid]
+    saved = {p.get("id"): p for p in await asyncio.to_thread(get_profiles)}
+    targets = [saved[pid] for pid in dict.fromkeys(wanted) if pid in saved]
+    if not targets:
+        raise HTTPException(status_code=404,
+                            detail="None of those connections are saved any more.")
+
+    results = await _open_profiles(targets)
+    opened = sum(1 for r in results if r["ok"])
+    logger.info("Connected %s of %s selected devices", opened, len(targets))
+    return {"opened": opened, "total": len(targets), "results": results}
 
 
 @app.get("/api/serial/ports")
@@ -2632,6 +2672,32 @@ async def save_profiles_csv(request: ProfileExportRequest) -> dict:
     with contextlib.suppress(Exception):
         await asyncio.to_thread(desktop.reveal, str(Path(folder)))
     return {"path": str(target)}
+
+
+class BulkProfileRequest(BaseModel):
+    """Body for PUT /api/profiles/bulk."""
+
+    profile_ids: list[str] = []
+    #: Only the fields being changed. An absent one is left alone; one sent
+    #: empty is cleared. profiles.BULK_FIELDS says which are allowed, and a
+    #: secret or an inventory fact is refused rather than dropped.
+    changes: dict = {}
+
+
+@app.put("/api/profiles/bulk")
+async def update_profiles_bulk(request: BulkProfileRequest) -> dict:
+    """
+    Change the same fields on many saved connections at once (#537).
+
+    Declared **before** any /api/profiles/{id} route for the reason the group
+    routes record: FastAPI matches in declaration order, and "bulk" would
+    otherwise be read as a profile id.
+    """
+    try:
+        return await asyncio.to_thread(
+            profiles_module.update_many, request.profile_ids, request.changes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.delete("/api/profiles/untagged")

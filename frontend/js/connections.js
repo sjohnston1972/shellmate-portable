@@ -415,6 +415,8 @@
    * a bastion is not buried by them.
    */
   window.connectTag = connectTag;
+  // The same thing for a hand-picked set rather than a whole group (#537).
+  window.connectMany = connectMany;
   // The tree's leaves connect the same way a dashboard tile does. A second
   // connect path would be one more thing to keep in step — openProfile
   // already switches to an existing tab rather than opening a duplicate.
@@ -431,9 +433,50 @@
       : Promise.resolve(window.confirm(`Open ${count} connections tagged ${tag}?`)));
     if (!ok) return;
 
+    await openBatch(`/api/tags/${encodeURIComponent(tag)}/connect`, null,
+                    `Everything tagged "${tag}" is connected.`);
+  }
+
+  /**
+   * Open a session to each of a hand-picked set of connections (#537).
+   *
+   * The tag route answers "connect this group"; this answers "connect these
+   * six", which is the question somebody has after looking at a tree and
+   * picking out the ones that matter. Same backend pacing, same per-device
+   * reporting - one route, so the two cannot drift.
+   */
+  async function connectMany(ids, what) {
+    const count = (ids || []).length;
+    if (!count) return;
+
+    const ok = await (window.shellmateDialog
+      ? window.shellmateDialog.confirm({
+          title: `Open ${count} connection${count === 1 ? '' : 's'}?`,
+          body: 'Each opens its own tab. Any that cannot connect are reported '
+                + 'rather than silently skipped.',
+          confirmLabel: 'Open them',
+        })
+      : Promise.resolve(window.confirm(`Open ${count} connections?`)));
+    if (!ok) return;
+
+    await openBatch('/api/sessions/many', { profile_ids: ids },
+                    `${what || 'The selection'} is connected.`);
+  }
+
+  /**
+   * Post a batch connect and turn what comes back into tabs.
+   *
+   * Every result is accounted for. A device that failed is named with the
+   * reason - the whole point of opening fifty at once is not watching each
+   * one, so anything that did not open has to come and find you.
+   */
+  async function openBatch(url, body, allWell) {
     try {
-      const res = await fetch(`/api/tags/${encodeURIComponent(tag)}/connect`,
-                              { method: 'POST' });
+      const res = await fetch(url, {
+        method:  'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body:    body ? JSON.stringify(body) : undefined,
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Could not open them.');
 
@@ -449,14 +492,14 @@
           title: `${data.opened} of ${data.total} opened`,
           body: failed.length
             ? failed.map(r => `${r.name}: ${r.error}`).join('\n')
-            : `Everything tagged "${tag}" is connected.`,
+            : allWell,
         });
       }
     } catch (e) {
       if (window.shellmateAlerts && window.shellmateAlerts.notify) {
         window.shellmateAlerts.notify({
           severity: 'warning', icon: 'error',
-          title: 'Could not open the group', body: e.message,
+          title: 'Could not open them', body: e.message,
         });
       }
     }
@@ -663,6 +706,24 @@
       clear.title = 'Forget the recently-used list';
       clear.addEventListener('click', _clearRecents);
       box.append(line, clear);
+
+      // Open the lot (#537). Only the ones that would open on a click of
+      // their own tile: a recent connection that was never saved has nothing
+      // to connect with, and one with no credential would only stall the
+      // batch on a dialog.
+      const ready = _recentTiles(profileCache)
+        .filter(p => p.id && p.ready_to_connect);
+      if (ready.length > 1) {
+        const all = document.createElement('button');
+        all.type = 'button';
+        all.className = 'btn-tertiary welcome-clear-recents';
+        all.textContent = `Connect ${ready.length}`;
+        all.title = 'Open a tab for each of the recent connections that has '
+                  + 'what it needs to connect';
+        all.addEventListener('click',
+          () => connectMany(ready.map(p => p.id), 'The recent connections'));
+        box.appendChild(all);
+      }
       return;
     }
 

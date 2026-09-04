@@ -587,6 +587,35 @@ reported by name rather than silently skipped. It is deliberately not offered
 for the whole unfiltered dashboard: opening two hundred tabs should not be
 one click away.
 
+### Working on several connections at once
+
+**Ctrl+click** connections in the tree to pick out several, **Shift+click** for
+a run of them, and right-click the selection for a menu that acts on all of
+them at once.
+
+**Edit N connections…** changes the same fields across the lot: username,
+port, connection type, platform, shared credential, jump host with its port
+and username, and which SSH authentication they use. Every field starts at
+*leave as they are*, so the dialog changes what you name and nothing else; a
+box left empty changes nothing, and a single dash clears that field on all of
+them. "The service account on all of Glasgow changed" is one dialog rather
+than fifty.
+
+Two things it will not do. **It never edits a password** — point the
+selection at a shared credential instead and change that in one place. And
+where an edit would give two connections the same identity — the same
+address, port and username over the same transport — that one is **skipped
+and named**, "sw1-as-neteng: would merge with sw1", rather than merged.
+Merging two saved connections discards one of their credentials, and doing
+that as a side effect of a username change is not something you would find
+out about until the day you needed the other password.
+
+**Connect N** and **Disconnect N** are on the same menu, so the six that
+looked odd this morning open together without being a group first. The
+handshakes are paced exactly as **Connect all** paces them, and anything that
+fails to connect is named. The recently-used row on the dashboard has the
+same button, for the ones that have what they need to connect.
+
 ### What a group lends its connections
 
 Right-click a group for **Group defaults…**. A username, a shared credential,

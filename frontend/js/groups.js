@@ -1340,17 +1340,27 @@
   }
 
   /**
-   * The menu a multi-selection of connections gets (#399): the same four
-   * things the single-leaf menu offers, each acting on every selected row,
-   * and a way to let the selection go.
+   * The menu a multi-selection of connections gets (#399): the same things
+   * the single-leaf menu offers, each acting on every selected row, and a
+   * way to let the selection go.
    *
-   * Edit is not here. Five connections cannot share one dialog, and a menu
-   * entry that edited only the row under the pointer would be exactly the
-   * confusion this menu exists to remove.
+   * Edit *is* here now (#537). "Five connections cannot share one dialog"
+   * was answered by the groups' own bulk edit: every field defaults to
+   * leave-as-they-are, so the dialog says what it will change and changes
+   * nothing else. "The service account on all of Glasgow changed" was fifty
+   * round trips before it.
    */
   function _leafBulkMenu(event) {
     const n = leafSelection.size;
     const items = [
+      { icon: 'tune', label: `Edit ${n} connections…`, onClick: _bulkEditLeaves },
+      // Connecting a hand-picked set, rather than a whole group (#537) -
+      // usually the more useful of the two, because the set is what you were
+      // just looking at.
+      { icon: 'add_circle', label: `Connect ${n}`, onClick: _connectLeaves },
+      { icon: 'stop_circle', label: `Disconnect ${n}`, danger: true,
+        onClick: _disconnectLeaves },
+      'sep',
       { icon: 'content_copy', label: `Copy ${n} to group…`,
         onClick: () => _bulkMoveLeaves(false) },
       { icon: 'tab_duplicate', label: `Move ${n} to group…`,
@@ -1623,6 +1633,144 @@
     for (const { id, from } of leaves) await _setMembership(id, from, false);
     _clearLeafSelection();
     _refresh();
+  }
+
+  /**
+   * Change the same fields on every selected connection (#537).
+   *
+   * Three-state, like the groups' bulk edit: every field starts at
+   * leave-as-they-are, because the difference between editing fifty
+   * connections and flattening fifty connections is exactly that default.
+   *
+   * One request, one load and one save on the server. Anything the edit
+   * would push onto another connection's identity is skipped and named
+   * rather than merged — a merge here loses a saved credential.
+   */
+  async function _bulkEditLeaves() {
+    const leaves = _selectedLeaves();
+    if (!leaves.length) return;
+
+    let sets = [];
+    let platforms = [];
+    try {
+      const data = await (await fetch('/api/credential-sets')).json();
+      sets = data.sets || [];
+    } catch (_) { /* none offered */ }
+    try {
+      const data = await (await fetch('/api/platforms')).json();
+      platforms = Object.entries(data.platforms || {})
+        .map(([id, spec]) => ({ value: id, label: spec.name || id }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+    } catch (_) { /* none offered */ }
+
+    const KEEP  = { value: '', label: 'Leave as they are' };
+    const CLEAR = { value: '-', label: 'Clear it' };
+    const n = leaves.length;
+
+    const answer = await window.shellmateDialog.form({
+      title: `Edit ${n} connections`,
+      body:  'Everything here starts at "leave as they are". A box left '
+             + 'empty changes nothing; a single dash clears that field on all '
+             + 'of them. Passwords are not edited here — point them at a '
+             + 'shared credential instead.',
+      list:  leaves.map(l => ({ text: l.name })),
+      confirmLabel: `Apply to ${n}`,
+      fields: [
+        { name: 'username', label: 'Username', type: 'text', value: '',
+          placeholder: 'Leave as they are' },
+        { name: 'credential_ref', label: 'Shared credential', type: 'select',
+          options: [KEEP, { value: '-', label: 'None — detach them' },
+                    ...sets.map(set => ({
+                      value: set.id,
+                      label: set.username ? `${set.name} (${set.username})` : set.name,
+                    }))] },
+        { name: 'connection_type', label: 'Connection type', type: 'select',
+          options: [KEEP, { value: 'ssh', label: 'SSH' },
+                    { value: 'telnet', label: 'Telnet' },
+                    { value: 'serial', label: 'Serial console' }] },
+        { name: 'auth_method', label: 'SSH authentication', type: 'select',
+          options: [KEEP, { value: 'password', label: 'Password' },
+                    { value: 'key', label: 'Key' }, CLEAR] },
+        { name: 'platform', label: 'Platform', type: 'select',
+          options: [KEEP, CLEAR, ...platforms] },
+        { name: 'port', label: 'Port', type: 'text', value: '',
+          placeholder: 'Leave as they are' },
+        { name: 'jump_host', label: 'Jump host / bastion', type: 'text',
+          value: '', placeholder: 'Leave as they are' },
+        { name: 'jump_port', label: 'Jump host port', type: 'text', value: '',
+          placeholder: 'Leave as they are' },
+        { name: 'jump_username', label: 'Jump host username', type: 'text',
+          value: '', placeholder: 'Leave as they are' },
+      ],
+      validate: (values) => {
+        const bad = ['port', 'jump_port'].find(name => {
+          const raw = values[name];
+          if (!raw || raw === '-') return false;
+          const number = Number(raw);
+          return !Number.isInteger(number) || number < 1 || number > 65535;
+        });
+        if (bad) return 'A port has to be a number between 1 and 65535.';
+        return Object.values(values).some(Boolean)
+          ? '' : 'Nothing here would change. Pick at least one field.';
+      },
+    });
+    if (!answer) return;
+
+    // Only what was actually chosen travels: an absent field is what "leave
+    // as they are" *is*, and sending every box as "" would clear the lot.
+    const changes = {};
+    Object.entries(answer).forEach(([field, raw]) => {
+      if (!raw) return;
+      changes[field] = raw === '-' ? '' : raw;
+    });
+    if (!Object.keys(changes).length) return;
+
+    try {
+      const res = await fetch('/api/profiles/bulk', {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ profile_ids: leaves.map(l => l.id), changes }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Could not apply it.');
+
+      const skipped = data.skipped || [];
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          severity: skipped.length ? 'warning' : 'info',
+          icon: skipped.length ? 'warning' : 'check_circle',
+          title: `${(data.updated || []).length} of ${leaves.length} changed`,
+          // Named in full: a connection that was skipped because it would
+          // have merged with another is something to go and look at.
+          body: skipped.length
+            ? skipped.map(s => `${s.name}: ${s.why}`).join('\n')
+            : '',
+        });
+      }
+    } catch (e) {
+      _warn('Could not apply the edit', e.message);
+    }
+    _clearLeafSelection();
+    _refresh();
+  }
+
+  /** Open a session to every selected connection (#537). */
+  function _connectLeaves() {
+    const leaves = _selectedLeaves();
+    if (!leaves.length) return;
+    if (typeof window.connectMany === 'function') {
+      window.connectMany(leaves.map(l => l.id),
+                         `${leaves.length} selected connections`);
+    }
+    _clearLeafSelection();
+  }
+
+  /** Close every open session belonging to a selected connection (#537). */
+  async function _disconnectLeaves() {
+    const ids = new Set(leafSelection.keys());
+    const members = profileCache.filter(p => ids.has(p.id));
+    await _closeSessionsFor(members, `${ids.size} selected connections`);
+    _clearLeafSelection();
   }
 
   /**
@@ -1964,9 +2112,18 @@
    * Closing the window only hides it for exactly that reason.
    */
   async function _disconnectAll(group) {
+    await _closeSessionsFor(_membersUnder(group.key), `"${group.name}"`);
+  }
+
+  /**
+   * Close every open session belonging to these connections.
+   *
+   * Shared by the group menu and by a selection (#537) so the two cannot
+   * come to disagree about what counts as an open session for a device.
+   */
+  async function _closeSessionsFor(members, what) {
     // The same address:port match the live badges use, so what gets closed
     // and what was counted agree about what "this device" means.
-    const members = _membersUnder(group.key);
     const ids = new Set(members.map(p => p.id));
     const keys = new Set(members.map(
       p => `${(p.hostname || '').toLowerCase()}:${p.port || 0}`));
@@ -1977,13 +2134,13 @@
         : keys.has(`${(tab.hostname || '').toLowerCase()}:${tab.port || 0}`)));
 
     if (!tabs.length) {
-      _warn('Nothing to disconnect', `No open sessions from "${group.name}".`);
+      _warn('Nothing to disconnect', `No open sessions from ${what}.`);
       return;
     }
 
     const ok = await window.shellmateDialog.confirm({
       title: `Disconnect ${tabs.length} session${tabs.length === 1 ? '' : 's'} `
-             + `from "${group.name}"?`,
+             + `from ${what}?`,
       body:  'They close on the device as well as here, and anything running '
              + 'in them stops.',
       confirmLabel: 'Disconnect them',

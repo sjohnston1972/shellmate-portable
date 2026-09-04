@@ -1230,6 +1230,180 @@ def save_profile(fields: dict) -> dict:
     return profile
 
 
+# ---------------------------------------------------------------------------
+# Editing many at once (#537)
+#
+# "The service account on all of Glasgow changed" was fifty dialogs, because
+# every field change is one save_profile() call and each of those parses and
+# rewrites the whole file. One load and one save, the shape retag_many() and
+# save_many() established.
+#
+# Two things this refuses rather than does quietly, and both are the point:
+#
+# **A secret is refused, not stripped.** SECRET_FIELDS would drop a password
+# and report success, leaving somebody believing fifty devices had been given
+# one.
+#
+# **A merge is refused, not performed.** Username and port are part of what
+# makes two saved connections the same connection, so setting one username
+# across a selection can push two of them onto the same identity. dedupe
+# merges those deliberately and loses a credential doing it (#73); here it
+# would be an accident, so the connection is skipped and named instead.
+# ---------------------------------------------------------------------------
+
+#: What a bulk edit may set. Everything a person chose; nothing a device
+#: said. INVENTORY_FIELDS are facts the device states about itself and are
+#: overwritten by whatever it says next, so a user writing them would be
+#: recording an opinion where an observation belongs.
+BULK_FIELDS = (
+    "username",
+    "port",
+    "connection_type",
+    "platform",
+    "auth_method",
+    "credential_ref",
+    "jump_host",
+    "jump_port",
+    "jump_username",
+)
+
+#: Transports a connection can be changed to. Serial is deliberately here:
+#: a batch wrongly imported as SSH is exactly what somebody would want to fix.
+_BULK_TYPES = ("ssh", "telnet", "serial")
+
+
+def _clean_bulk_changes(changes: dict) -> tuple[dict, set]:
+    """
+    One bulk edit as fields to set and fields to clear.
+
+    An absent key means *leave it alone* - that is what makes editing five
+    connections at once safe. An explicitly empty one means clear it, which
+    is the only way to detach a shared credential from a selection.
+
+    Raises:
+        ValueError: A secret, an inventory fact, an unknown field, or a value
+            that is not one. Said plainly, because it is shown in the dialog.
+    """
+    if not isinstance(changes, dict):
+        raise ValueError("There is nothing to change.")
+
+    if set(changes) & SECRET_FIELDS:
+        raise ValueError(
+            "Passwords are not edited in bulk. Point the connections at a "
+            "shared credential instead, and change it in one place.")
+
+    stated = set(changes) & set(INVENTORY_FIELDS)
+    if stated:
+        raise ValueError(
+            f"{', '.join(sorted(stated))} is what the device said about "
+            f"itself. Only the device may state it.")
+
+    unknown = sorted(set(changes) - set(BULK_FIELDS))
+    if unknown:
+        raise ValueError(f"{', '.join(unknown)} is not a field a bulk edit sets.")
+
+    sets: dict = {}
+    clears: set = set()
+    for field in BULK_FIELDS:
+        if field not in changes:
+            continue
+        value = changes[field]
+        if value is None or (isinstance(value, str) and not value.strip()):
+            clears.add(field)
+            continue
+        if field in ("port", "jump_port"):
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"'{value}' is not a port number.") from None
+            if not 1 <= number <= 65535:
+                raise ValueError(f"{number} is not a port number.")
+            sets[field] = number
+        elif field == "connection_type":
+            kind = str(value).strip().lower()
+            if kind not in _BULK_TYPES:
+                raise ValueError(f"'{value}' is not a connection type ShellMate has.")
+            sets[field] = kind
+        else:
+            sets[field] = " ".join(str(value).split())
+
+    if not sets and not clears:
+        raise ValueError("There is nothing to change.")
+    return sets, clears
+
+
+def _label(profile: dict) -> str:
+    """What to call a connection when reporting on it."""
+    return (profile.get("name") or profile.get("hostname")
+            or profile.get("serial_port") or profile.get("id", "?"))
+
+
+@_synchronised
+def update_many(profile_ids, changes: dict) -> dict:
+    """
+    Set the same fields on many saved connections, in one load and one save.
+
+    Returns:
+        ``{"updated": [{id, name}], "skipped": [{id, name, why}]}``. A
+        connection is skipped rather than merged when the edit would give it
+        the same identity as another saved connection - see ``identity()``.
+
+    Raises:
+        ValueError: The change itself is unusable. A single *connection* that
+            cannot take it is not this: it is reported in ``skipped``, and
+            the rest go through.
+    """
+    sets, clears = _clean_bulk_changes(changes)
+
+    wanted = [pid for pid in (profile_ids or []) if pid]
+    if not wanted:
+        raise ValueError("No connections were named.")
+
+    profiles = _load()
+    by_id = {p.get("id"): p for p in profiles if p.get("id")}
+    targets = [by_id[pid] for pid in dict.fromkeys(wanted) if pid in by_id]
+    if not targets:
+        raise ValueError("None of those connections are saved any more.")
+
+    # Every identity that will still exist and is not being edited. A target
+    # is added back as it is resolved, with whichever identity it ends up
+    # holding, so two targets cannot be moved onto each other either.
+    editing = {p.get("id") for p in targets}
+    taken: dict[tuple, dict] = {}
+    for profile in profiles:
+        if profile.get("id") not in editing:
+            taken.setdefault(identity(profile), profile)
+
+    updated: list[dict] = []
+    skipped: list[dict] = []
+
+    for profile in targets:
+        proposed = {**profile, **sets}
+        for field in clears:
+            proposed.pop(field, None)
+
+        clash = taken.get(identity(proposed))
+        if clash is not None:
+            skipped.append({"id": profile.get("id", ""), "name": _label(profile),
+                            "why": f"would merge with {_label(clash)}"})
+            # Unchanged, so it keeps the identity it had - and nothing else
+            # in the batch may be moved onto that either.
+            taken.setdefault(identity(profile), profile)
+            continue
+
+        profile.update(sets)
+        for field in clears:
+            profile.pop(field, None)
+        taken[identity(profile)] = profile
+        updated.append({"id": profile.get("id", ""), "name": _label(profile)})
+
+    if updated:
+        _save(profiles)
+
+    missing = len(dict.fromkeys(wanted)) - len(targets)
+    return {"updated": updated, "skipped": skipped, "missing": missing}
+
+
 def _looks_like_an_address(name: str) -> bool:
     """Whether a profile name is a bare IPv4/IPv6 address rather than a name."""
     try:
