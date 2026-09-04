@@ -655,6 +655,16 @@ SETTINGS: tuple[Setting, ...] = (
             "window, so an approved `show running-config` on a large chassis "
             "sent the whole thing. The most recent lines are the ones worth "
             "having.", minimum=1, maximum=5000, unit="lines"),
+    Setting("ai.drift_lines", "Lines of the configuration diff sent", 200, "int",
+            "How much of \"what changed since your last visit\" travels with "
+            "each question about this device.",
+            "ShellMate captures the running configuration on connect and diffs "
+            "it against the last visit, and the model was told only *when* the "
+            "capture happened — so it guessed at the change from whatever "
+            "`show run` happened to be in the buffer (#549). A large chassis "
+            "can produce a diff of thousands of lines; what is over the cap is "
+            "announced rather than dropped silently. Zero sends none of it.",
+            minimum=0, maximum=5000, unit="lines"),
     Setting("ai.redact_context", "Mask secrets in what is sent", True, "bool",
             "Apply the same redaction that covers session logs.",
             "Terminal output going to a third-party API is at least as "

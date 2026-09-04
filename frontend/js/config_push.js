@@ -110,7 +110,10 @@
       window.showConfigDiff({
         hostname: tab.hostname || tab.label, changed: diff.changed,
         added: diff.added, removed: diff.removed, days_since: 0, diff: diff.diff,
-      }, { display_label: tab.label });
+        // Named so Explain in that window means *this push* rather than
+        // whatever the connect-time drift check found (#549).
+        old_id: result.before_id, new_id: result.after_id,
+      }, { display_label: tab.label, session_id: tab.sessionId });
       _offerRestore(tab, result.before_id);
     } else if (window.shellmateAlerts) {
       window.shellmateAlerts.notify({ severity: 'info', icon: 'tune',

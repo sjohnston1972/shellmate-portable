@@ -166,6 +166,85 @@ def test_jira_export() -> None:
           "09461A1D0A1B" not in quoted, quoted)
 
 
+# A drift diff the way an archive actually produces one: a credential
+# changed, and the surrounding configuration as context (#549).
+DRIFT_DIFF = """--- core-sw-01 @ 2026-09-01 09:00
++++ core-sw-01 @ 2026-09-04 09:00
+@@ -1,6 +1,6 @@
+ hostname core-sw-01
+-username neteng password 7 09461A1D0A1B
++username neteng password 7 09461A1D0A1B
+ enable secret 5 $1$abcd$efghijklmnop
+ snmp-server community s3cr3t-rw RW
+ interface GigabitEthernet0/1
+  description uplink to core
+"""
+
+
+def test_drift_diff_to_the_assistant() -> None:
+    """
+    #549: the diff is configuration, so it leaves through the same door.
+
+    The whole point of feeding drift to the model is that it carries the
+    running configuration of a device — which is precisely the content the
+    redaction exists for. Composed in the browser this would have arrived at
+    the provider untouched.
+    """
+    print("\n-- The drift diff handed to the assistant --")
+    configure()
+    from backend.ai import explain, prompts
+
+    session = make_session()
+    session["drift"] = {
+        "available": True, "changed": 2, "added": 1, "removed": 1,
+        "days_since": 3, "diff": DRIFT_DIFF,
+    }
+
+    facts = explain.drift_facts(session)
+    check("a drift report with changes produces facts", bool(facts))
+    assert_clean("drift diff", facts["diff"])
+
+    # And the whole way through: the block the model is actually shown.
+    block = "\n".join(prompts.render_drift_block(facts, "core-sw-01"))
+    assert_clean("rendered drift block", block)
+    check("the block says how much changed and when",
+          "2 lines differ" in block and "3 days ago" in block, block)
+
+    # The prompt the Explain button produces, end to end.
+    message = explain.diff_prompt({}, session)
+    assert_clean("explain prompt", message)
+    check("the explain prompt asks the question the engineer has",
+          explain.DIFF_QUESTION in message, message[:200])
+
+    # A session with no drift report has nothing to explain, and says so by
+    # returning nothing rather than sending an empty diff to a provider.
+    check("no drift report means no prompt", explain.diff_prompt({}, make_session()) == "")
+    check("and no facts", explain.drift_facts(make_session()) is None)
+
+
+def test_drift_diff_is_capped() -> None:
+    """A large chassis produces a diff of thousands of lines; it is a bill."""
+    print("\n-- The cap on it --")
+    configure()
+    from backend.ai import explain
+
+    settings_store.update_settings({"advanced": {"ai.drift_lines": 3}})
+    session = make_session()
+    session["drift"] = {"available": True, "changed": 40, "added": 20,
+                        "removed": 20, "diff": DRIFT_DIFF}
+    text = explain.drift_facts(session)["diff"]
+    check("the diff is trimmed to the configured number of lines",
+          len(text.splitlines()) == 4, f"{len(text.splitlines())} lines")
+    check("and what was left out is announced rather than dropped silently",
+          "more diff lines not shown" in text, text)
+
+    settings_store.update_settings({"advanced": {"ai.drift_lines": 0}})
+    off = explain.drift_facts(session)["diff"]
+    check("zero sends none of it, and says so",
+          "not sent" in off and "hostname core-sw-01" not in off, off)
+    settings_store.update_settings({"advanced": {}})
+
+
 def test_the_switch() -> None:
     print("\n-- Turning it off --")
     configure(redact_secrets=False)
@@ -290,6 +369,8 @@ def main() -> int:
         test_chat_context,
         test_session_summary,
         test_jira_export,
+        test_drift_diff_to_the_assistant,
+        test_drift_diff_is_capped,
         test_the_switch,
         test_credential_forms,
         test_no_path_bypasses_the_helper,

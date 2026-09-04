@@ -809,7 +809,11 @@ async def session_drift(session_id: str) -> dict:
     """
     session = _require_session(session_id)
     try:
-        return await asyncio.to_thread(drift_report, session)
+        report = await asyncio.to_thread(drift_report, session)
+        # Kept on the session so the assistant can be told what changed
+        # without capturing the configuration a second time (#549).
+        session["drift"] = report
+        return report
     except (OSError, ConnectionError_) as exc:
         # The device dropped the session while the capture ran; that is a
         # state of the world, not a server fault.
@@ -4656,6 +4660,27 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     except Exception:
                         platform_id = ""
                 user_message = _auto_analysis_prompt(auto, platform_id)
+
+            # Explain a configuration diff (#549): the drift report for this
+            # session, or any two stored captures. Composed server-side for
+            # the same reason as the block above — it carries configuration,
+            # so `outbound` has to see it before a provider does.
+            diff_request = msg.get("diff_request")
+            if isinstance(diff_request, dict):
+                from backend.ai import explain
+                sess = session_manager.get_session(session_id) if session_id else None
+                user_message = await asyncio.to_thread(
+                    explain.diff_prompt, diff_request, sess)
+                if not user_message:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": "There is no configuration diff to explain — "
+                                   "ShellMate has no capture of this device yet.",
+                    }))
+                    # No "done" as well: the browser's error handler already
+                    # closes the streaming bubble, and a second close pops the
+                    # queue of pending analyses behind it.
+                    continue
 
             # Investigate mode (#403): how many steps have been approved.
             step = msg.get("investigate_step")

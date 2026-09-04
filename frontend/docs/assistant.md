@@ -267,6 +267,15 @@ device — a reload counting down, a commit waiting to be confirmed — and when
 the configuration was last captured. The assistant used to guess the vendor
 from the shape of the prompt while the application knew the answer.
 
+It also carries **what changed since your last visit**, when the connect-time
+drift check found anything: the diff itself, masked and capped, labelled as
+something ShellMate captured rather than something you typed. "What changed
+since yesterday" is the first question in most outages and the answer was
+already in the archive; until now the assistant reconstructed it from whatever
+`show run` happened to be in the buffer. The cap is **Lines of the
+configuration diff sent** in Stockton, under AI Assistant — zero sends none of
+it.
+
 ## Memory
 
 The last few exchanges travel with each request, so "and the other

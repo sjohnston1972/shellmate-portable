@@ -264,6 +264,15 @@
       return;
     }
 
+    // "/diff" asks about what changed on this device since the last visit
+    // (#549). The diff is fetched, capped and masked by the server; nothing
+    // about it is assembled here.
+    if (/^\/diff\s*$/i.test(text)) {
+      inputEl.value = '';
+      askAboutDiff({});
+      return;
+    }
+
     // "/investigate <problem>" switches to Investigate mode and asks (#403).
     let text2 = text;
     const inv = text.match(/^\/investigate\b\s*/i);
@@ -484,6 +493,71 @@
       context_mode:  picked ? 'selected' : contextMode,
       mode:          aiMode,
     }));
+  }
+
+  /**
+   * Ask the assistant about a configuration diff (#549).
+   *
+   * The diff never travels from here. Only which snapshots to compare goes
+   * up — `{old_id, new_id}`, or nothing at all for this session's connect-time
+   * drift report — and the server reads them out of its own archive, masks
+   * them and writes the question. A prompt built in this file would reach the
+   * provider with the running configuration inside it and `outbound` would
+   * never see it, which is exactly the shape of bug #489.
+   *
+   * @param {{oldId?: number, newId?: number, sessionId?: string, label?: string}} spec
+   */
+  function askAboutDiff(spec) {
+    const opts = spec || {};
+    _revealPanel();
+    if (isStreaming) {
+      appendErrorBubble('One question at a time — this one is still being answered.');
+      return;
+    }
+    if (!chatWs || chatWs.readyState !== WebSocket.OPEN) {
+      appendErrorBubble('The assistant is not connected.');
+      return;
+    }
+    const activeTab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+    const sid = opts.sessionId || (activeTab ? activeTab.sessionId : null);
+
+    const asked = opts.label
+      ? `Explain the configuration changes — ${opts.label}`
+      : 'Explain the configuration changes on this device.';
+    appendUserBubble(asked);
+    if (typeof window.addJiraChatMessage === 'function') {
+      window.addJiraChatMessage('user', asked);
+    }
+
+    const history = _recentHistory();
+    startStreamingBubble();
+    if (streamingBubble && sid) streamingBubble.dataset.contextSession = sid;
+    isStreaming = true;
+    sendBtn.disabled = true;
+
+    const openIds = typeof window.getOpenSessionIds === 'function' ? window.getOpenSessionIds() : [];
+    const picked = typeof window.getChatContextSelection === 'function'
+      ? window.getChatContextSelection() : null;
+    chatWs.send(JSON.stringify({
+      message:      '',
+      history,
+      diff_request: { old_id: opts.oldId || null, new_id: opts.newId || null },
+      session_id:   sid,
+      open_session_ids: openIds,
+      context_session_ids: picked,
+      backend:      currentBackend,
+      model:        currentModel,
+      context_mode: picked ? 'selected' : contextMode,
+      mode:         typeof window.getShellmateMode === 'function' ? window.getShellmateMode() : 'tshoot',
+    }));
+  }
+
+  /** Bring the chat pane back if it is hidden — an answer nobody can see is none. */
+  function _revealPanel() {
+    const ai = (window.shellmateSettings || {}).ai || {};
+    if (ai.panel_enabled === false && typeof window.toggleAiPanel === 'function') {
+      window.toggleAiPanel();
+    }
   }
 
   function _flashTab(tab) {
@@ -1305,6 +1379,9 @@
   // Expose for test access and for settings.js to update the backend selector
   window._chatInjectCommand  = injectCommand;
   window._chatSend           = sendMessage;
+  // Used by the diff window's Explain button and the config-push review
+  // (#549, #550). Both send identifiers, never device configuration.
+  window.shellmateAskAboutDiff = askAboutDiff;
   window._chatSetBackend     = (val) => {
     if (backendSelect) backendSelect.value = val;
     const idx = val.indexOf(':');

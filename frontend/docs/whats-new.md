@@ -6,6 +6,14 @@ exists.
 
 ## 1.1.3
 
+- **The assistant can see what changed.** The configuration diff from the
+  connect-time drift check now travels with your questions, and an **Explain**
+  button in the diff window asks what the changes do and whether they could
+  cause what you are seeing — for the drift since your last visit, a
+  configuration you have just applied, or any two captures you pick. `/diff`
+  in the chat asks the same thing. The diff is masked and capped on the
+  server, like everything else that leaves the machine.
+
 - An **update channel** under Stockton → Diagnostics: `stable` offers only
   full releases, `beta` also offers prereleases for people trying a build
   early, marked Beta in the update window. **What's new in this version**

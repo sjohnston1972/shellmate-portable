@@ -2027,6 +2027,14 @@ GigEth0/2     unassigned    YES unset  down     down
     <div id="diff-panel" class="side-panel side-panel-wide">
       <div class="panel-header">
         <h2 class="panel-title" id="diff-title">Configuration changes</h2>
+        <!-- #549: ShellMate already holds the answer to "what changed since
+             yesterday"; this hands it to the assistant, masked, rather than
+             leaving it to guess from whatever is in the terminal buffer. -->
+        <button id="diff-explain" class="btn-tertiary"
+                title="Ask the assistant what these changes do, and whether they could cause what you are seeing">
+          <span class="material-symbols-outlined">smart_toy</span>
+          Explain
+        </button>
         <button id="diff-copy-all" class="btn-tertiary" title="Copy the whole diff">
           <span class="material-symbols-outlined">content_copy</span>
           Copy all
