@@ -843,7 +843,7 @@
       match: e => e.ctrlKey && e.key === 'PageDown', run: () => _stepTab(1) },
     { keys: 'Ctrl+PageUp', what: 'Previous tab',
       match: e => e.ctrlKey && e.key === 'PageUp', run: () => _stepTab(-1) },
-    { keys: 'Ctrl+P', what: 'Find a tab by name',
+    { keys: 'Ctrl+P', what: 'Find a tab, or type an address to connect',
       match: e => e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'p',
       run: _call('openTabPalette') },
     // Ctrl+R is the browser's reload, which — unlike Ctrl+T and Ctrl+N —

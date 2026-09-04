@@ -137,7 +137,7 @@ whole conversation. The [AI assistant](#assistant) page explains it.
 | `Ctrl+Shift+V` | Paste |
 | `Ctrl+C` | Copy if text is selected, otherwise send an interrupt |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab (`Ctrl+PageDown` / `Ctrl+PageUp` in a browser) |
-| `Ctrl+P` | Find a tab by name, hostname or group |
+| `Ctrl+P` | Find a tab by name, hostname or group — or type an address to connect |
 | `Ctrl+R` | Recall a command already run on this device (Enter types it, Ctrl+Enter runs it) |
 | `` Ctrl+` `` | Focus the terminal |
 | `Ctrl+Shift+A` | Focus the assistant's input |
@@ -164,7 +164,7 @@ Tabs are a tablist: Tab reaches the active one, the arrow keys move along
 the strip and switch as they go, Enter or Space selects, and Delete closes.
 Every right-click menu takes the arrow keys, Home and End, Enter and Escape,
 and puts focus back where it was when it closes. `Ctrl+P` finds a tab by
-name when the strip has overflowed. `Ctrl+/` lists every shortcut.
+name when the strip has overflowed, and connects to an address typed into it. `Ctrl+/` lists every shortcut.
 
 ### Renaming a tab
 

@@ -123,6 +123,43 @@ device.
 
 Leave the username blank to log in by hand.
 
+## Quick connect
+
+An address in a ticket or a chat message should be a session in two
+keystrokes. Press **Ctrl+P** and type it.
+
+| What you type | What it dials |
+|---|---|
+| `10.1.20.5` | SSH to 10.1.20.5 on port 22 |
+| `admin@10.1.20.5:2022` | SSH as `admin`, port 2022 |
+| `ssh core-sw -p 2200` | SSH to `core-sw`, port 2200 |
+| `telnet 10.1.1.1 2003` | Telnet to a terminal-server port |
+| `COM5 115200` | A serial console at 115200 baud |
+
+The **Connect to …** row appears at the top of the list with the full details
+beside it — transport, user, address and port — because `10.1.1.1 2003` is a
+terminal server port to one person and a typo to another, and the only defence
+is seeing the answer before Enter rather than after.
+
+Enter opens it. The connection dialog appears only when something is still
+missing: telnet and serial connect straight away, and SSH stops at the
+password field with everything else filled in.
+
+**A saved connection wins.** If the address matches one you have already set
+up, the row says **Open** and its name instead, and Enter uses the saved
+profile — its credentials, its group, its key, its jump host. An open tab for
+it switches to that tab rather than connecting twice.
+
+If your clipboard already holds an address when you press Ctrl+P it is filled
+in and selected, so it is one keystroke to take and one to replace. Some
+webview builds refuse clipboard access; the box says so rather than appearing
+to ignore what you copied.
+
+The rest of the time this box is the tab finder it has always been. A
+connection is only offered when what you typed is unambiguously a target — a
+transport word, a username, a port, an IP address or a COM port — so an
+ordinary search for `glasgow` does not offer to dial it.
+
 ## Saved connections
 
 Every successful connection is saved so it appears on the dashboard.

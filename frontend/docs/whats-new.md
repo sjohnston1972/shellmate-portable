@@ -18,6 +18,12 @@ exists.
   gains the same two buttons, aimed at the tab matching its recorded
   hostname rather than at whichever tab is in front of you.
 
+- **Quick connect.** `Ctrl+P` now takes an address as well as a tab name:
+  `10.1.20.5`, `admin@host:2022`, `telnet host 2003` or `COM5 115200`. The
+  first row shows exactly what will be dialled, a saved connection for the
+  same address wins and opens with its own credentials, and an address
+  already in your clipboard is filled in for you.
+
 - An **update channel** under Stockton → Diagnostics: `stable` offers only
   full releases, `beta` also offers prereleases for people trying a build
   early, marked Beta in the update window. **What's new in this version**

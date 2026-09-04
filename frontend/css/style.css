@@ -1597,6 +1597,10 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   white-space: nowrap;
 }
 .tab-palette-empty { padding: 12px; color: var(--on-surface-muted); font-size: 13px; }
+/* Quick connect (#533). The one row that opens a session rather than moving
+   between them, so it reads as the action it is. */
+.tab-palette-connect .tab-palette-name { color: var(--primary); }
+.tab-palette-connect .tab-palette-dot { background: var(--primary); }
 /* Command recall (#522) lists device commands, which are read as code. */
 .tab-palette-command {
   font-family: 'JetBrains Mono', monospace;

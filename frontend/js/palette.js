@@ -36,6 +36,9 @@
   let recallTab = null;
   let recallCommands = [];
 
+  /** Set when the clipboard could not be read, to say so rather than not. */
+  let clipboardNote = '';
+
   function build() {
     box = document.createElement('div');
     box.id = 'tab-palette';
@@ -79,20 +82,55 @@
   function open() {
     if (!box) build();
     mode = 'tabs';
-    const tabs = typeof window.listTabs === 'function' ? window.listTabs() : [];
-    if (!tabs.length) {
-      if (window.shellmateAlerts) {
-        window.shellmateAlerts.notify({ severity: 'info', icon: 'tab',
-          title: 'No tabs open', body: 'Ctrl+T opens a connection.' });
-      }
-      return;
-    }
+    clipboardNote = '';
     box.classList.remove('hidden');
-    input.placeholder = 'Find a tab by name, hostname or group…';
-    input.setAttribute('aria-label', 'Find a tab');
+    // The box is a tab finder *and* a way to dial something (#533), so it
+    // opens with no tabs at all — which is exactly when somebody has an
+    // address in a ticket and nothing open to find.
+    input.placeholder = 'Find a tab, or type an address to connect…';
+    input.setAttribute('aria-label', 'Find a tab or connect to an address');
     input.value = '';
     render('');
     input.focus();
+    _prefillFromClipboard();
+  }
+
+  /**
+   * Offer what is in the clipboard, when it is a target (#533).
+   *
+   * An IP arrives from a ticket or a chat by being copied, so by the time
+   * anybody opens this box the address is usually already in hand. Prefilled
+   * and selected, so it is one keystroke to take and one to replace.
+   *
+   * Only when it parses as a target: pasting the last thing somebody copied
+   * into a search box on the off-chance is not helpful, it is startling.
+   */
+  async function _prefillFromClipboard() {
+    if (!navigator.clipboard || !navigator.clipboard.readText) return;
+    try {
+      const raw = String(await navigator.clipboard.readText() || '');
+      const text = raw.split('\n')[0].trim();
+      // Opened, typed in, and closed again while that resolved.
+      if (!box || box.classList.contains('hidden') || mode !== 'tabs') return;
+      if (input.value || !text || text.length > 120) return;
+
+      const target = typeof window.parseConnectTarget === 'function'
+        ? window.parseConnectTarget(text) : null;
+      if (!target) return;
+
+      input.value = text;
+      // Selected rather than merely present: typing replaces it, so an
+      // offer nobody wanted costs nothing.
+      input.select();
+      render(text);
+    } catch (err) {
+      // Refused, or a webview with no clipboard bridge. Said in the box
+      // rather than as a toast — nobody asked for a paste — but said.
+      console.info('Palette clipboard read refused:', (err && err.message) || err);
+      if (!box || box.classList.contains('hidden') || mode !== 'tabs') return;
+      clipboardNote = 'The clipboard could not be read here — type an address instead.';
+      if (!input.value) render('');
+    }
   }
 
   /**
@@ -191,48 +229,129 @@
 
     const tabs = typeof window.listTabs === 'function' ? window.listTabs() : [];
     matches = rank(query, tabs);
+
+    // A typed target comes first (#533). An address from a ticket is a
+    // session in two keystrokes, and where an open tab genuinely matches the
+    // same text it is one row down rather than gone.
+    const target = typeof window.parseConnectTarget === 'function'
+      ? window.parseConnectTarget(query) : null;
+    if (target) matches.unshift({ connect: target });
+
     highlighted = 0;
     list.innerHTML = '';
 
     if (!matches.length) {
       const empty = document.createElement('div');
       empty.className = 'tab-palette-empty';
-      empty.textContent = 'No tab matches that.';
+      empty.textContent = !tabs.length
+        ? 'Nothing open. Type an address — 10.1.1.1, admin@host:2022, telnet host 2003 or COM5 — to connect.'
+        : (query.trim()
+            ? 'No tab matches that. An address, admin@host:port or COM5 connects.'
+            : 'No tab matches that.');
       list.appendChild(empty);
+      _renderNote();
       return;
     }
 
-    matches.slice(0, 40).forEach(({ tab }, i) => {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'tab-palette-row' + (i === 0 ? ' active' : '');
-      row.setAttribute('role', 'option');
-      row.dataset.index = String(i);
-
-      const dot = document.createElement('span');
-      dot.className = 'tab-palette-dot' + (tab.isConnected ? ' live' : '');
-
-      const name = document.createElement('span');
-      name.className = 'tab-palette-name';
-      name.textContent = tab.label || tab.hostname || '';
-
-      const detail = document.createElement('span');
-      detail.className = 'tab-palette-detail';
-      const bits = [];
-      if (tab.address && tab.address !== tab.label) bits.push(tab.address);
-      if (tab.groups && tab.groups.length) bits.push(tab.groups.join(', '));
-      if (!tab.isConnected) bits.push('disconnected');
-      detail.textContent = bits.join('  ·  ');
-
-      const number = document.createElement('span');
-      number.className = 'tab-palette-number';
-      number.textContent = tab.index < 9 ? `Ctrl+${tab.index + 1}` : '';
-
-      row.append(dot, name, detail, number);
-      row.addEventListener('click', () => choose(i));
-      row.addEventListener('mousemove', () => highlight(i));
-      list.appendChild(row);
+    matches.slice(0, 40).forEach((match, i) => {
+      list.appendChild(match.connect
+        ? connectRow(match.connect, i)
+        : tabRow(match.tab, i));
     });
+    _renderNote();
+  }
+
+  function tabRow(tab, i) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'tab-palette-row' + (i === 0 ? ' active' : '');
+    row.setAttribute('role', 'option');
+    row.dataset.index = String(i);
+
+    const dot = document.createElement('span');
+    dot.className = 'tab-palette-dot' + (tab.isConnected ? ' live' : '');
+
+    const name = document.createElement('span');
+    name.className = 'tab-palette-name';
+    name.textContent = tab.label || tab.hostname || '';
+
+    const detail = document.createElement('span');
+    detail.className = 'tab-palette-detail';
+    const bits = [];
+    if (tab.address && tab.address !== tab.label) bits.push(tab.address);
+    if (tab.groups && tab.groups.length) bits.push(tab.groups.join(', '));
+    if (!tab.isConnected) bits.push('disconnected');
+    detail.textContent = bits.join('  ·  ');
+
+    const number = document.createElement('span');
+    number.className = 'tab-palette-number';
+    number.textContent = tab.index < 9 ? `Ctrl+${tab.index + 1}` : '';
+
+    row.append(dot, name, detail, number);
+    row.addEventListener('click', () => choose(i));
+    row.addEventListener('mousemove', () => highlight(i));
+    return row;
+  }
+
+  /**
+   * "Connect to …", with exactly what will be dialled beside it (#533).
+   *
+   * The detail line is not decoration. `10.1.1.1 2003` is a telnet port to
+   * one person and an address followed by a typo to another, and the only
+   * defence against dialling the wrong thing is showing the answer before
+   * Enter rather than after.
+   */
+  function connectRow(target, i) {
+    const saved = typeof window.savedProfileForTarget === 'function'
+      ? window.savedProfileForTarget(target) : null;
+
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'tab-palette-row tab-palette-connect' + (i === 0 ? ' active' : '');
+    row.setAttribute('role', 'option');
+    row.dataset.index = String(i);
+
+    const dot = document.createElement('span');
+    dot.className = 'tab-palette-dot';
+
+    const name = document.createElement('span');
+    name.className = 'tab-palette-name';
+    // A saved connection wins and says so: it carries the credentials, the
+    // group and the key, and connecting ad hoc to an address somebody has
+    // already set up would ask for a password they saved months ago.
+    name.textContent = saved
+      ? `Open ${saved.name || target.hostname || target.serial_port}`
+      : `Connect to ${target.hostname || target.serial_port}`;
+
+    const detail = document.createElement('span');
+    detail.className = 'tab-palette-detail';
+    detail.textContent = typeof window.describeConnectTarget === 'function'
+      ? window.describeConnectTarget(target) : '';
+
+    const hint = document.createElement('span');
+    hint.className = 'tab-palette-number';
+    hint.textContent = saved ? 'saved' : 'Enter';
+
+    row.append(dot, name, detail, hint);
+    row.addEventListener('click', () => choose(i));
+    row.addEventListener('mousemove', () => highlight(i));
+    return row;
+  }
+
+  /**
+   * The clipboard note, when there is one (#533, following #426).
+   *
+   * A refused clipboard read is not worth a toast — nobody asked for a paste,
+   * the box was merely being helpful — but it is worth saying, or somebody
+   * who was told the address in their clipboard appears here is left
+   * wondering why it did not.
+   */
+  function _renderNote() {
+    if (!clipboardNote) return;
+    const note = document.createElement('div');
+    note.className = 'tab-palette-empty';
+    note.textContent = clipboardNote;
+    list.appendChild(note);
   }
 
   /**
@@ -329,6 +448,12 @@
 
     if (mode === 'commands') {
       chooseCommand(match.command, Boolean(run));
+      return;
+    }
+
+    if (match.connect) {
+      close();
+      if (typeof window.quickConnect === 'function') window.quickConnect(match.connect);
       return;
     }
 
