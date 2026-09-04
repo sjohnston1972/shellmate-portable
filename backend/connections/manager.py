@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.alerts import AlertTracker
+from backend.alerts import AlertTracker, WatchTracker
 from backend.connections.base import ConnectionError_, ConnectionHandler, ConnectionParams
 from backend.connections.serial_handler import SerialHandler
 from backend.connections.ssh_handler import SSHHandler
@@ -133,6 +133,11 @@ class SessionManager:
             # Tracks anything scheduled on the device that has not happened
             # yet — a pending reload, a commit waiting to be confirmed.
             "alerts":          AlertTracker(),
+            # The user's own colour rules, the ones marked "alert", matched
+            # against this session's output (#521). Created empty; the read
+            # loop loads the rules on the first chunk and again whenever
+            # settings are saved, the way session logging is signalled.
+            "watch":           WatchTracker(),
             "params":          params,
             # Which saved connection this came from. Empty for a session
             # opened straight from the dialog, which genuinely has no profile

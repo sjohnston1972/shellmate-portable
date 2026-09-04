@@ -12,7 +12,8 @@ import sys
 import time
 
 from backend.alerts import (
-    COMMIT_CONFIRM, RELOAD, AlertTracker, _seconds_until_clock_time,
+    COMMIT_CONFIRM, RELOAD, AlertTracker, WatchTracker,
+    _seconds_until_clock_time,
 )
 
 passed = 0
@@ -255,6 +256,80 @@ def test_payload() -> None:
     check("and nothing is left behind", t2.payload()["pending"] is None)
 
 
+def test_output_watch() -> None:
+    """A colour rule marked "alert" watches the output for it (#521)."""
+    print("\n-- Output watch --")
+
+    w = WatchTracker()
+    check("nothing is watched by default", w.load(None) == 0)
+    check("and nothing matches", w.observe("%LINK-3-UPDOWN\n") == [])
+
+    armed = w.load({"enabled": True, "rules": [
+        {"pattern": r"%LINK-3-UPDOWN", "colour": "red", "alert": True,
+         "severity": "critical", "cooldown_s": 30},
+        # No alert flag: colour only, and no business interrupting anyone.
+        {"pattern": "interface", "colour": "blue"},
+    ]})
+    check("only the rules marked alert are armed", armed == 1, str(armed))
+
+    hits = w.observe("%LINK-3-UPDOWN: Interface Gi0/2, changed state to down\n")
+    check("a matching line is reported", len(hits) == 1, str(hits))
+    check("with its severity", hits and hits[0]["severity"] == "critical", str(hits))
+    check("and the line it matched",
+          hits and "Gi0/2" in hits[0]["line"], str(hits))
+
+    check("a colour-only rule raises nothing",
+          w.observe("interface GigabitEthernet0/1\n") == [])
+
+    # The reason the cooldown exists: a flap, or a chatty debug.
+    check("the same rule does not fire again inside its cooldown",
+          w.observe("%LINK-3-UPDOWN: Interface Gi0/3, changed state to up\n") == [])
+
+    # Escape sequences must not be able to hide a match. A device colouring
+    # its own log lines splits the keyword with SGR codes.
+    w2 = WatchTracker()
+    w2.load({"enabled": True, "rules": [
+        {"pattern": "err-disabled", "alert": True, "cooldown_s": 0}]})
+    coloured = "Gi0/5 is \x1b[31merr-disabled\x1b[0m (bpduguard)\n"
+    check("a match survives the device's own colour",
+          len(w2.observe(coloured)) == 1, str(w2.observe(coloured)))
+
+    # A line split across two chunks is still one line.
+    w3 = WatchTracker()
+    w3.load({"enabled": True, "rules": [
+        {"pattern": "BGP.*Down", "alert": True, "ignore_case": False}]})
+    check("half a line matches nothing yet", w3.observe("%BGP-5-ADJCHANGE: neighbour ") == [])
+    check("and matches once the rest arrives",
+          len(w3.observe("10.0.0.1 Down\n")) == 1)
+
+    # A broken pattern is skipped, not fatal — settings.json is hand-editable.
+    w4 = WatchTracker()
+    check("an unparseable pattern is skipped",
+          w4.load({"enabled": True, "rules": [
+              {"pattern": "(unclosed", "alert": True},
+              {"pattern": "reload", "alert": True}]}) == 1)
+
+    # One switch for one feature: colouring off means watching off.
+    w5 = WatchTracker()
+    check("highlighting off disarms the watch too",
+          w5.load({"enabled": False, "rules": [
+              {"pattern": "down", "alert": True}]}) == 0)
+
+    # Severity is a fixed set; anything else is the middle of the road.
+    w6 = WatchTracker()
+    w6.load({"enabled": True, "rules": [
+        {"pattern": "down", "alert": True, "severity": "catastrophic"}]})
+    check("an unknown severity falls back to warning",
+          w6.rules[0].severity == "warning", w6.rules[0].severity)
+
+    # A cooldown out of range is clamped rather than obeyed.
+    w7 = WatchTracker()
+    w7.load({"enabled": True, "rules": [
+        {"pattern": "down", "alert": True, "cooldown_s": 99999}]})
+    check("an absurd cooldown is clamped", w7.rules[0].cooldown_s == 3600.0,
+          str(w7.rules[0].cooldown_s))
+
+
 def main() -> int:
     print("=" * 52)
     print("  Alert tracking")
@@ -270,6 +345,7 @@ def main() -> int:
         test_absolute_times,
         test_bad_pattern_is_survivable,
         test_payload,
+        test_output_watch,
     ):
         try:
             test()

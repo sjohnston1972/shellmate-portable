@@ -23,7 +23,7 @@ In the order the rail lists them:
 | Terminal Appearance | Font, size, colour scheme, cursor, and a live preview |
 | ShellMate Interface | Theme, text size, density, tab width, how panels open, confirmations, window behaviour, whether the AI panel is shown — plus the file-transfer and panel-animation rows |
 | Terminal Behaviour | Scrollback, right-click paste, copy on select, screen-reader mode — plus rendering, paste protection and the destructive-command confirmation |
-| Output Colours | Regular expressions that colour terminal text |
+| Output Colours | Regular expressions that colour terminal text, and can raise an alert |
 | Device Awareness | Paging-off and alias expansion, both gated on confident identification — plus the identification timings and threshold |
 | Platform Definitions | What ShellMate knows about each kind of device |
 | SSH & Serial | Baud rate and framing for new serial connections — plus SSH timeouts, keepalive and the algorithm lists |

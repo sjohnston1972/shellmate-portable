@@ -6,6 +6,12 @@ exists.
 
 ## 1.1.3
 
+- **Output watch.** A colour rule under Settings → Output Colours can now be
+  marked **Alert**, with its own severity and cooldown. The pattern is matched
+  on the server, against every open session, so a line that matters on a tab
+  you are not looking at reaches you anyway — with the window hidden, a
+  critical one raises a notification from the tray.
+
 - An **update channel** under Stockton → Diagnostics: `stable` offers only
   full releases, `beta` also offers prereleases for people trying a build
   early, marked Beta in the update window. **What's new in this version**

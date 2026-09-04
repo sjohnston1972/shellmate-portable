@@ -534,6 +534,13 @@ SETTINGS: tuple[Setting, ...] = (
             "How loud the warning tone is.",
             "Audible over a noisy comms room, or barely there in an office.",
             minimum=0, maximum=1),
+    Setting("alerts.watch_cooldown", "Output watch cooldown", 60, "int",
+            "Least time between two alerts from the same watch rule.",
+            "A rule watching for `%LINK-3-UPDOWN` during a flap, or anything "
+            "matching a chatty `debug`, would otherwise raise an alert per "
+            "line.||Applies to a rule that has no cooldown of its own; each "
+            "rule may set one when it is written.",
+            minimum=0, maximum=3600, unit="s"),
     Setting("alerts.commit_confirm_minutes", "Junos commit-confirm default", 10, "int",
             "Assumed when `commit confirmed` is given with no number.",
             "Ten is the Junos default. Change it if your estate differs.",

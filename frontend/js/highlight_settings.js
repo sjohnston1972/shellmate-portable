@@ -9,6 +9,14 @@
  * expected is the normal outcome of writing one, and seeing it match — or not
  * — while typing is far more useful than saving and hunting for a line of
  * output that should have gone red.
+ *
+ * A rule can also *alert* (#521), which is where the row grows a severity and
+ * a cooldown. Colour is a reading aid for a screen somebody is looking at;
+ * an alert is for the tab they are not, so the matching for it happens in the
+ * backend against what the device actually said. The two switches next to the
+ * tick are the ones that decide how loud it is and how often it may repeat —
+ * a pattern matching a chatty `debug` with no cooldown is a rule people turn
+ * off within the hour.
  */
 (function () {
   'use strict';
@@ -23,6 +31,18 @@
     { pattern: '\\b(warning|notice|shutdown|disabled)\\b',
       colour: 'yellow', ignore_case: true },
   ];
+
+  /** Severities a watch rule may carry, loudest last (#521). */
+  const SEVERITIES = ['info', 'warning', 'critical'];
+
+  /**
+   * Seconds a new watch rule waits before it may alert again.
+   *
+   * Matches the shipped `alerts.watch_cooldown` default. A rule written here
+   * carries its own number so that changing the Stockton value later does not
+   * silently re-tune rules somebody has already tuned by hand.
+   */
+  const DEFAULT_COOLDOWN = 60;
 
   const PREVIEW_TEXT =
     'GigabitEthernet0/1 is up, line protocol is up (connected)\n' +
@@ -92,6 +112,58 @@
     caseLabel.appendChild(caseBox);
     caseLabel.appendChild(document.createTextNode('Aa'));
 
+    // --- The watch half of a rule (#521) -------------------------------
+    //
+    // Severity and cooldown only appear once the rule alerts. They are
+    // meaningless otherwise, and three dead controls on every row of a
+    // colour editor is how a simple list stops looking simple.
+    const watch = document.createElement('div');
+    watch.className = 'highlight-watch';
+
+    const alertLabel = document.createElement('label');
+    alertLabel.className = 'highlight-case';
+    alertLabel.title = 'Raise an alert when this matches, on whichever tab it '
+                     + 'happens — not only colour it';
+    const alertBox = document.createElement('input');
+    alertBox.type = 'checkbox';
+    alertBox.checked = Boolean(rule.alert);
+    alertLabel.appendChild(alertBox);
+    alertLabel.appendChild(document.createTextNode('Alert'));
+
+    const severity = document.createElement('select');
+    severity.className = 'highlight-severity';
+    severity.title = 'How loudly. Critical also sounds a tone and stays on '
+                   + 'screen until dismissed.';
+    [['info', 'info'], ['warning', 'warning'], ['critical', 'critical']]
+      .forEach(([value, text]) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = text;
+        severity.appendChild(opt);
+      });
+    severity.value = SEVERITIES.includes(rule.severity) ? rule.severity : 'warning';
+
+    const cooldown = document.createElement('input');
+    cooldown.type = 'number';
+    cooldown.className = 'highlight-cooldown';
+    cooldown.min = '0';
+    cooldown.max = '3600';
+    cooldown.title = 'Seconds before this rule may alert again. A flapping '
+                   + 'interface matches every few seconds; without this it '
+                   + 'alerts every few seconds.';
+    cooldown.value = Number.isFinite(Number(rule.cooldown_s))
+      ? String(rule.cooldown_s) : String(DEFAULT_COOLDOWN);
+
+    const syncWatch = () => {
+      const on = alertBox.checked;
+      severity.classList.toggle('hidden', !on);
+      cooldown.classList.toggle('hidden', !on);
+    };
+    alertBox.addEventListener('change', syncWatch);
+    syncWatch();
+
+    watch.append(alertLabel, severity, cooldown);
+
     // Opens the builder on this rule and writes the answer back. The inline
     // preview stays: it answers "does this match" at a glance, and the
     // builder answers "why not" — two different questions.
@@ -130,6 +202,7 @@
     row.appendChild(pattern);
     row.appendChild(colour);
     row.appendChild(caseLabel);
+    row.appendChild(watch);
     row.appendChild(test);
     row.appendChild(remove);
     row.appendChild(preview);
@@ -193,11 +266,23 @@
   /** Read the editor back out as a rule list, for saving. */
   function collect() {
     if (!listEl) return [];
-    return [...listEl.querySelectorAll('.highlight-rule')].map(row => ({
-      pattern:     row.querySelector('.highlight-pattern').value,
-      colour:      row.querySelector('.highlight-colour').value,
-      ignore_case: row.querySelector('.highlight-case input').checked,
-    })).filter(rule => rule.pattern.trim());
+    return [...listEl.querySelectorAll('.highlight-rule')].map(row => {
+      const cooldown = Number(row.querySelector('.highlight-cooldown').value);
+      return {
+        pattern:     row.querySelector('.highlight-pattern').value,
+        colour:      row.querySelector('.highlight-colour').value,
+        // The first .highlight-case in a row is the Aa box; the alert tick
+        // shares the class for its styling and lives inside .highlight-watch.
+        ignore_case: row.querySelector('.highlight-case input').checked,
+        alert:       row.querySelector('.highlight-watch input').checked,
+        severity:    row.querySelector('.highlight-severity').value,
+        // Clamped on the way out as well as in the backend: a number input
+        // accepts anything when the page is driven by a script, and the
+        // backend must not be the only place this is true.
+        cooldown_s:  Number.isFinite(cooldown)
+          ? Math.min(Math.max(Math.round(cooldown), 0), 3600) : DEFAULT_COOLDOWN,
+      };
+    }).filter(rule => rule.pattern.trim());
   }
 
   window.highlightRulesEditor = { render, collect, DEFAULT_RULES };

@@ -331,6 +331,22 @@
           askBeforeSending(sessionId, websocket, msg.command, msg.device);
           break;
 
+        case 'watch_hit':
+          // One of the user's colour rules was marked to alert, and the
+          // backend saw it match this session's output (#521). It is raised
+          // here rather than from the highlighter because the highlighter
+          // only runs on data reaching a visible terminal, and the tab worth
+          // interrupting somebody about is the one they are not watching.
+          if (window.shellmateAlerts && window.shellmateAlerts.watchHit) {
+            window.shellmateAlerts.watchHit({
+              sessionId,
+              pattern:  msg.pattern,
+              line:     msg.line,
+              severity: msg.severity,
+            });
+          }
+          break;
+
         case 'pending_action':
           // Something is scheduled on this device — a reload, a commit
           // waiting to be confirmed. alerts.js owns what that looks like.
@@ -1053,6 +1069,10 @@
     Object.values(_instances).forEach(({ websocket }) => {
       if (websocket && websocket.readyState === WebSocket.OPEN) {
         websocket.send(JSON.stringify({ type: 'logging_changed' }));
+        // Colour rules that alert are the same kind of decision (#521): a
+        // watch is usually written in the middle of the change it is meant
+        // to watch, so it has to arm now rather than at the next tab.
+        websocket.send(JSON.stringify({ type: 'watch_changed' }));
       }
     });
   });

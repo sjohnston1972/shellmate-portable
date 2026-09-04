@@ -850,6 +850,32 @@ def active_desktop():
     return _active_desktop
 
 
+def notify(message: str, title: str = "ShellMate") -> bool:
+    """
+    Raise a native notification through the tray icon (#521).
+
+    The one channel that reaches somebody with the window hidden, which is
+    where ShellMate spends most of a long change — a watch rule that fires
+    while the window is behind everything else has nowhere else to go.
+
+    Best-effort by design: no tray (a browser fallback, a server deployment,
+    a platform with no notification area) means False and nothing else. The
+    toast in the page is still there when the window comes back.
+    """
+    tray = getattr(_active_desktop, "_tray", None)
+    icon = getattr(tray, "_icon", None)
+    if icon is None:
+        return False
+    try:
+        # Truncated: a notification is a line, and some platforms silently
+        # drop one that is longer than they will draw.
+        icon.notify(str(message)[:200], title)
+        return True
+    except Exception as exc:
+        logger.info("Could not raise a tray notification: %s", exc)
+        return False
+
+
 def can_restart() -> bool:
     """
     Whether ShellMate can relaunch itself.

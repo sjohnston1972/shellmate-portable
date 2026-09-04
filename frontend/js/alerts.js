@@ -523,6 +523,35 @@
   }
 
   /**
+   * A watch rule matched on a session (#521).
+   *
+   * Routed through raise(), so the sound switch and the per-kind toast
+   * switches govern it exactly as they govern a pending reload — this is an
+   * interruption about a device, which is what those switches are for.
+   *
+   * `crossSession` is the point of the whole feature: the alert has to arrive
+   * while somebody is looking at a *different* tab, or at the dashboard.
+   * Without it shouldShow() would drop every hit that was not on the tab in
+   * front of them, which is every hit worth having.
+   */
+  function watchHit({ sessionId, pattern, line, severity }) {
+    const level = ['info', 'warning', 'critical'].includes(severity)
+      ? severity : 'warning';
+    raise({
+      severity: level,
+      icon:     'visibility',
+      title:    `${labelFor(sessionId)} matched a watch`,
+      // The line, not the pattern: the pattern is what was asked for and the
+      // line is the answer. The pattern goes in the tooltip.
+      body:     line || pattern || '',
+      sessionId,
+      crossSession: true,
+      sound:    true,
+      tooltip:  pattern ? `Rule: ${pattern}` : '',
+    });
+  }
+
+  /**
    * Whether this alert should be on screen right now (#164).
    *
    * Two rules, and the exception is the point of the feature:
@@ -543,7 +572,12 @@
     // worst outcome available here.
     // A toast the person asked for — an update check, say — is the same:
     // hiding it because the dashboard is in front is hiding the answer.
-    if (alert.deadline_ms || alert.severity === 'critical' || alert.global) return true;
+    // `crossSession` joins them for the same reason (#521): a watch rule
+    // exists to be seen from somewhere else. An alert about a device on a tab
+    // nobody is looking at, suppressed because nobody is looking at it, is
+    // the feature cancelling itself out.
+    if (alert.deadline_ms || alert.crossSession
+        || alert.severity === 'critical' || alert.global) return true;
 
     if (typeof window.dashboardVisible === 'function' && window.dashboardVisible()) {
       return false;
@@ -614,6 +648,10 @@
     const body = document.createElement('div');
     body.className = 'alert-toast-body';
     body.textContent = alert.body || '';
+    // What produced this, for anything that has an answer to that — a watch
+    // hit names the rule it matched. On the title attribute rather than in
+    // the toast: it is the second question, not the first.
+    if (alert.tooltip) el.title = alert.tooltip;
 
     text.append(title, body);
 
@@ -656,7 +694,7 @@
 
     // Marked so syncVisibility() can keep the stack up for it even on the
     // dashboard — the same exemption shouldShow() applies on the way in.
-    if (alert.deadline_ms || alert.severity === 'critical') {
+    if (alert.deadline_ms || alert.crossSession || alert.severity === 'critical') {
       el.dataset.urgent = '1';
     }
 
@@ -728,6 +766,7 @@
   window.shellmateAlerts = {
     raise,
     notify,
+    watchHit,
     pending: () => [...tracked.entries()].map(([sessionId, e]) => ({
       sessionId, ...e.pending, seconds_left: secondsLeft(e.pending),
     })),

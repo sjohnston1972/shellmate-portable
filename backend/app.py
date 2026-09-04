@@ -3696,6 +3696,17 @@ async def _origin_allowed(websocket: WebSocket) -> bool:
 CANCELLED_NOTE = "\r\n\x1b[33m[not sent: {command}]\x1b[0m\r\n"
 
 
+def _load_watch_rules(session: dict) -> None:
+    """
+    Arm this session's output watch from the user's colour rules (#521).
+
+    Off the event loop, like `_open_session_log`, and for the same reason: it
+    reads and deep-merges settings.json, which is a file read no terminal
+    should ever wait behind.
+    """
+    session["watch"].load(get_settings().get("highlight"))
+
+
 def _open_session_log(session: dict, session_id: str) -> None:
     """
     Decide where this session's log goes — without touching the disk.
@@ -4063,6 +4074,13 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     # is what this replaced.
                     await asyncio.to_thread(_close_session_log, session)
                     session["_log_recheck"] = True
+
+                elif msg_type == "watch_changed":
+                    # Colour rules were saved. Same round trip, same reason
+                    # (#521): a rule marked "alert" has to start watching now,
+                    # not at the next tab — it is usually written in the middle
+                    # of the change it is meant to watch.
+                    session["_watch_recheck"] = True
 
                 elif msg_type == "guardrail_answer":
                     # The answer to a held command. Confirmed, it goes now;
@@ -4460,6 +4478,32 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     ])
                 except Exception as exc:
                     logger.warning("Alert tracking failed for %s: %s", session_id, exc)
+
+                # The user's own watch rules (#521). Matched here rather than
+                # in the browser because the browser only ever sees the tab in
+                # front of somebody, and the whole point is the tab that is
+                # not. Rules are loaded once and reloaded on a settings save,
+                # for the reason session logging is: reading settings.json per
+                # chunk of output is what that pattern replaced.
+                if session.get("_watch_recheck") or session.get("_watch_loaded") is None:
+                    session.pop("_watch_recheck", None)
+                    session["_watch_loaded"] = True
+                    await asyncio.to_thread(_load_watch_rules, session)
+
+                try:
+                    for hit in session["watch"].observe(text):
+                        await websocket.send_text(json.dumps({"type": "watch_hit", **hit}))
+                        # A critical watch also goes to the notification area,
+                        # which is the only channel that reaches somebody with
+                        # the window hidden. No tray, no notification, no
+                        # error — the toast is waiting when they come back.
+                        if hit.get("severity") == "critical":
+                            await asyncio.to_thread(
+                                desktop.notify,
+                                f"{session.get('hostname') or session_id[:8]}: {hit['line']}",
+                            )
+                except Exception as exc:
+                    logger.warning("Output watch failed for %s: %s", session_id, exc)
 
                 # Name the tab after the device. Uses the shared cross-vendor
                 # prompt parser, so Junos and PAN-OS are recognised as well as

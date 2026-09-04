@@ -3072,11 +3072,41 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 
 .highlight-rule {
   display: grid;
-  grid-template-columns: 1fr 110px auto auto;
+  grid-template-columns: 1fr 110px auto auto auto auto;
   gap: 8px;
   align-items: center;
   padding: 10px 0;
   border-bottom: 1px solid var(--outline);
+}
+
+/* The watch half of a rule (#521). Severity and cooldown are hidden until
+   the rule alerts, so the row stays a colour editor for anyone not using
+   them — the widths below are what it grows to when they are. */
+.highlight-watch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.highlight-severity,
+.highlight-cooldown {
+  background: var(--surface-high);
+  border: 1px solid rgba(70,69,85,0.4);
+  border-radius: var(--radius-md);
+  padding: 5px 6px;
+  color: var(--on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  min-width: 0;
+}
+
+.highlight-severity { width: 86px; }
+.highlight-cooldown { width: 58px; }
+
+.highlight-severity:focus,
+.highlight-cooldown:focus {
+  outline: none;
+  border-color: var(--primary-container);
 }
 
 .highlight-pattern,
