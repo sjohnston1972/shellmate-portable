@@ -9870,6 +9870,21 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
 .av-tpl-notice-ok .material-symbols-outlined { font-size: var(--icon-sm); color: var(--ok); flex: 0 0 auto; }
 .av-tpl-notice-ok > div { flex: 1; min-width: 0; }
 
+.av-repo-input {
+  padding: 6px 8px;
+  min-width: 200px;
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  height: var(--control-height);
+  box-sizing: border-box;
+}
+
+.av-repo-input:focus { outline: none; border-color: var(--primary); }
+
 .av-repo-hint {
   margin: 0 0 8px;
   font-size: 12px;

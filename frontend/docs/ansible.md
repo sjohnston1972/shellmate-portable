@@ -317,10 +317,16 @@ Files still get to the runner the ordinary way: put them in its project
 directory on the container host, or keep that directory in git and pull it
 there.
 
-**Install from the runner's requirements.yml** asks the runner to install
-the collections its playbooks need. A repository usually brings its
-collections with it, and "module not found" three tasks into a run is what
-happens when nobody has run this.
+**Install collections** asks the runner to install what its playbooks need.
+A repository usually brings its collections with it in a requirements file,
+and "module not found" three tasks into a run is what happens when nobody
+has run this.
+
+Leave the box empty for `requirements.yml`, or name another file inside the
+runner's project directory — a repository that keeps its own is the usual
+reason. A file that is not there is reported as missing rather than
+quietly falling back to the default, so naming one that turns out to be
+wrong fails where you can see it.
 
 ## Reporting
 
@@ -359,7 +365,7 @@ in its project directory — likely one of yours that has not been sent
 across yet.
 
 **A module is not found.** The collection is not installed on the runner.
-Repositories → Install from the runner's requirements.yml.
+Repositories → Install collections.
 
 **A run against the estate says nothing would run.** Every connection in
 that group is serial, or has no address. Ansible has nothing to dial.

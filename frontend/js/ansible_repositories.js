@@ -200,15 +200,22 @@
   async function installCollections() {
     const button = document.getElementById('av-repo-galaxy');
     const said = document.getElementById('av-repo-galaxy-said');
+    const named = ((document.getElementById('av-repo-requirements') || {}).value
+                   || '').trim();
     if (button) button.disabled = true;
     if (said) said.textContent = 'Asking the runner to install…';
     try {
-      const result = await view.post('/api/ansible/galaxy', {});
+      // As a query parameter, not a body. The runner reads it from the
+      // query; sent as JSON it was accepted, ignored, and the default file
+      // installed while answering 200. A file that is not there now fails
+      // instead, so naming one is safe.
+      const result = await view.post('/api/ansible/galaxy'
+        + (named ? `?requirements=${encodeURIComponent(named)}` : ''), {});
       const text = (result && (result.stdout || result.detail || result.status))
         || 'The runner reported nothing further.';
       if (said) said.textContent = 'Done.';
       await window.shellmateDialog.alert({
-        title: 'Collections installed',
+        title: `Installed from ${named || 'requirements.yml'}`,
         body: String(text).slice(0, 4000),
       });
     } catch (e) {
@@ -231,12 +238,22 @@
         + "\"module not found\" three tasks into a run is what happens when "
         + "nobody has."),
       el('div', { class: 'av-row-actions' }, [
+        el('input', {
+          type: 'text', id: 'av-repo-requirements', class: 'av-repo-input',
+          placeholder: 'requirements.yml',
+          title: 'A path inside the runner’s project directory. Leave it '
+               + 'empty for requirements.yml.',
+        }),
         el('button', {
           type: 'button', class: 'btn-secondary', id: 'av-repo-galaxy',
           onclick: installCollections,
-        }, [icon('download'), "Install from the runner's requirements.yml"]),
+        }, [icon('download'), 'Install collections']),
         el('span', { id: 'av-repo-galaxy-said', class: 'av-repo-hint' }),
       ]),
+      el('p', { class: 'av-repo-hint' },
+        'A file that is not in the project directory is reported as missing '
+        + 'rather than quietly falling back to the default — so a '
+        + 'repository that keeps its own requirements file can be named here.'),
     ]);
   }
 

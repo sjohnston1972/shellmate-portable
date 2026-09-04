@@ -107,7 +107,18 @@ def service(handler=None):
         if path.startswith("/api/v1/jobs/") and request.method == "DELETE":
             return httpx.Response(200, json={"id": "abc123", "cancelled": True})
         if path == "/api/v1/galaxy/install":
-            return httpx.Response(200, json={"rc": 0, "stdout": "installed"})
+            # The name travels as a query parameter, deliberately. Sent as a
+            # JSON body it was accepted and ignored, and the runner
+            # installed its default file while answering 200 — the same
+            # silent drop that hid envvars. "Module not found three tasks
+            # in" is what the install exists to prevent, so a request for
+            # the wrong file must not look like success.
+            asked = request.url.params.get("requirements", "")
+            if asked and asked != "requirements.yml":
+                if asked != "site-requirements.yml":
+                    return httpx.Response(404, json={
+                        "detail": f"{asked} not found in the project directory."})
+            return httpx.Response(200, json={"rc": 0, "stdout": f"installed {asked}"})
         return httpx.Response(404, json={"detail": "not found"})
     return httpx.MockTransport(route)
 
@@ -239,6 +250,20 @@ def test_playbooks_and_runs() -> None:
 
     check("galaxy requirements can be installed",
           with_runner(ansible.install_requirements).get("rc") == 0)
+    check("the file asked for is the file installed",
+          "site-requirements.yml" in with_runner(
+              lambda: ansible.install_requirements("site-requirements.yml")
+          ).get("stdout", ""),
+          "the name has to travel as a query parameter; as a body it is dropped")
+
+    try:
+        with_runner(lambda: ansible.install_requirements("nope.yml"))
+        missing = "it returned instead of raising"
+    except ansible.AnsibleError as exc:
+        missing = str(exc)
+    check("a requirements file that is not there fails rather than "
+          "quietly installing the default",
+          "nope.yml" in missing, missing)
 
 
 def test_the_token_travels_when_there_is_one() -> None:
