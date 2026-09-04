@@ -35,6 +35,36 @@ Forgetting the password is not a lockout: ShellMate still starts, and you can
 still reach every device. You simply type your keys and passwords by hand for
 that session.
 
+### Taking the vault somewhere else
+
+**Settings → Credentials Vault → Export backup…** writes
+`vault-backup-<date>.smv` wherever you choose: the whole vault, encrypted with
+a passphrase you type at that moment. **Import backup…** reads one back, into
+whatever mode the vault on this machine uses — a backup made under a master
+password restores into a Windows-account vault and the other way round. You
+choose whether to keep what is already here and add the backup, or replace it
+outright.
+
+The backup file holds **every** API key and remembered device password in one
+place. Keep it as carefully as you would the vault itself; the passphrase is
+the only thing protecting it, and there is no recovery for that either.
+
+#### If the vault cannot be read on this machine
+
+Carry the stick to a second laptop, or sign in as a different Windows account,
+and a vault protected by your Windows account cannot be decrypted there — by
+design. ShellMate now says so at startup rather than behaving as though the
+vault were empty, and offers two ways on:
+
+- **Import a backup**, if you made one before moving.
+- **Start a new vault, keeping the old file aside.** The unreadable file is
+  renamed to `vault-unreadable-<date>.json` and left in the data folder,
+  never deleted: it cannot be read *here*, which is not the same as being
+  worthless — the account that wrote it can still open it.
+
+Switching to a master password before you move is still the tidier route,
+because it takes the secrets with you rather than a copy of them.
+
 ## Remembering a device password
 
 Tick **Remember these credentials in the encrypted vault** when connecting.

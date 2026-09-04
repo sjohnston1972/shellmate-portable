@@ -1480,6 +1480,27 @@ GigEth0/2     unassigned    YES unset  down     down
             <span id="vault-mode-result" class="setting-value"></span>
           </div>
 
+          <!-- Taking the vault to another machine (#565).
+               A DPAPI vault does not travel by design, and the only route off
+               a machine used to be remembering to switch to a master password
+               before moving — so a stick carried to a second laptop kept a
+               vault that could never be read there. -->
+          <h4 class="settings-subsection-title">Backup and restore</h4>
+          <p class="settings-section-hint">A backup is the whole vault under a passphrase you choose, so it can be carried to another machine or another Windows account. The file holds <strong>every</strong> API key and remembered device password — keep it as carefully as you would the vault itself.</p>
+          <div class="setting-row">
+            <button type="button" id="vault-export-backup" class="btn-secondary"
+                    data-tip="Writes vault-backup-&lt;date&gt;.smv wherever you choose, encrypted with a passphrase you type here — scrypt and AES-GCM, the same envelope a master-password vault uses.||It contains every secret ShellMate holds. There is no recovery for the passphrase, and losing the file is not the risk worth worrying about: leaving a copy of it somewhere is.">
+              <span class="material-symbols-outlined">backup</span>
+              Export backup…
+            </button>
+            <button type="button" id="vault-import-backup" class="btn-secondary"
+                    data-tip="Reads a .smv backup into this machine's vault, in whatever mode it uses — a backup made under a master password restores into a DPAPI vault and the other way round.||Merge keeps what is already here and adds what the backup has, with the backup winning where both hold the same key. Replace throws away what is here first, which is the only option when this machine cannot read the vault it already has.">
+              <span class="material-symbols-outlined">restore</span>
+              Import backup…
+            </button>
+            <span id="vault-backup-result" class="setting-value"></span>
+          </div>
+
           <!-- Credentials several connections share.
                A credential used to belong to exactly one profile, so "use the
                login I already have" could not be expressed at all — which is
@@ -2543,9 +2564,24 @@ GigEth0/2     unassigned    YES unset  down     down
         <span class="material-symbols-outlined" style="color:var(--primary)">bookmark_add</span>
         <h2 id="vault-title">Unlock your vault</h2>
       </div>
-      <p class="vault-label">
+      <p class="vault-label" id="vault-lead">
         Your API keys and saved device passwords are encrypted with a master password.
       </p>
+
+      <!-- The vault is here and this machine cannot open it (#565).
+           A DPAPI vault carried to a second laptop decrypts nowhere, and
+           until now nothing said so — every read degraded to "no value" and
+           the user found out one device at a time. Distinct from locked,
+           which a password fixes, so the password box is hidden and these
+           two ways forward take its place. -->
+      <div id="vault-recovery" class="hidden">
+        <p class="vault-recovery-why" id="vault-recovery-why"></p>
+        <div id="vault-recovery-actions">
+          <button type="button" id="vault-recovery-import" class="btn-primary">Import a backup…</button>
+          <button type="button" id="vault-recovery-restart" class="btn-secondary">Start a new vault, keeping the old file aside</button>
+        </div>
+      </div>
+
       <form id="vault-form" autocomplete="off">
         <input type="password" id="vault-password" class="setting-input setting-input-full"
                placeholder="Master password" autocomplete="current-password" />

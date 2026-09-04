@@ -952,6 +952,81 @@ async def vault_set_mode(request: VaultModeRequest) -> dict:
     return vault.status()
 
 
+class VaultBackupRequest(BaseModel):
+    """Body for POST /api/vault/backup."""
+
+    passphrase: str = ""
+
+
+class VaultRestoreRequest(BaseModel):
+    """Body for POST /api/vault/restore."""
+
+    #: The backup file's contents, read by the browser rather than uploaded.
+    text: str = ""
+    passphrase: str = ""
+    #: False merges into whatever is here; True replaces it outright.
+    replace: bool = False
+
+
+@app.post("/api/vault/backup")
+async def vault_backup(request: VaultBackupRequest) -> dict:
+    """
+    Write a passphrase-protected copy of the whole vault (#565).
+
+    Saved where the user chooses through the platform's folder dialog, and
+    into the data folder when there is no native window to raise one. The file
+    holds every secret in the installation, so it goes through the vault's own
+    atomic write and is named for what it is.
+    """
+    folder = ""
+    if desktop.has_native_window():
+        folder = await asyncio.to_thread(
+            desktop.pick_directory, "Save the vault backup to…")
+        if not folder:
+            return {"cancelled": True}
+    try:
+        target = await asyncio.to_thread(
+            vault.write_backup, folder or paths.data_dir(), request.passphrase)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if folder:
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(desktop.reveal, folder)
+    return {"path": str(target), "status": vault.status()}
+
+
+@app.post("/api/vault/restore")
+async def vault_restore(request: VaultRestoreRequest) -> dict:
+    """Merge or replace this machine's vault from a backup file (#565)."""
+    try:
+        document = json.loads(request.text or "")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="That file is not a ShellMate vault backup.") from exc
+    try:
+        result = await asyncio.to_thread(
+            vault.import_backup, document, request.passphrase, request.replace)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "status": vault.status()}
+
+
+@app.post("/api/vault/set-aside")
+async def vault_set_aside() -> dict:
+    """
+    Rename a vault this machine cannot read and start a new one (#565).
+
+    Renamed, never deleted: unreadable here is not unreadable everywhere, and
+    the account that wrote it can still open it.
+    """
+    try:
+        target = await asyncio.to_thread(vault.set_aside)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"path": str(target) if target else "", "status": vault.status()}
+
+
 class ProfileCredentialsRequest(BaseModel):
     """Body for PUT /api/profiles/{id}/credentials."""
 

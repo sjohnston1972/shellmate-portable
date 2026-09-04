@@ -21,6 +21,15 @@ exists.
   ones that did not answer. It never runs on a timer, and an open port is
   reported as an open port rather than as a healthy device.
 
+- **The vault can travel.** Settings → Credentials Vault gains **Export
+  backup…** and **Import backup…** — the whole vault under a passphrase you
+  choose, restorable into whatever mode the machine at the other end uses.
+  And when ShellMate finds a vault it cannot decrypt here — a stick carried
+  to a second laptop, or a different Windows account — it now says so at
+  startup and offers to import a backup or start a new vault, keeping the
+  old file aside, rather than quietly behaving as though the vault were
+  empty.
+
 - An **update channel** under Stockton → Diagnostics: `stable` offers only
   full releases, `beta` also offers prereleases for people trying a build
   early, marked Beta in the update window. **What's new in this version**
