@@ -1717,6 +1717,22 @@
         label: 'Keep all tabs alive', setting: 'keep_alive_all' },
     ],
     [
+      // Two entries, deliberately, because they are two different acts
+      // (#584). The first types the platform's own cancel command into the
+      // device and is the only one of the two that stops the reload; the
+      // second only stops ShellMate counting, for a reload called off some
+      // other way. One entry doing both — or one entry named for the
+      // countdown that quietly did the other — is how somebody walks away
+      // from a device that is still going to reboot.
+      { action: 'cancel-reload', icon: 'cancel',
+        label: 'Cancel pending reload…', setting: 'cancel_reload',
+        value: (tab) => _cancelCommandFor(tab),
+        disabled: (tab) => _whyNoCancel(tab) },
+      { action: 'dismiss-pending', icon: 'timer',
+        label: 'Dismiss the countdown…', setting: 'dismiss_pending',
+        when: (tab) => Boolean(tab && _pendingFor(tab.sessionId)) },
+    ],
+    [
       // Ending the session without closing the tab (#208). Closing already
       // tears the session down; what this adds is keeping the buffer and the
       // Reconnect entry — the same state a session that dropped on its own
@@ -1745,6 +1761,36 @@
     if (tab.keepAlive === false) return 'off';
     const global = ((window.shellmateSettings || {}).terminal || {}).keep_alive;
     return global ? 'on (setting)' : 'off (setting)';
+  }
+
+  /** The command Cancel pending reload would send, shown on the entry. */
+  function _cancelCommandFor(tab) {
+    const pending = tab ? _pendingFor(tab.sessionId) : null;
+    return (pending && pending.kind === 'reload') ? pending.cancelCommand : '';
+  }
+
+  /**
+   * Why Cancel pending reload cannot be clicked, or '' when it can (#584).
+   *
+   * Each reason is different and the entry says which, because "greyed out"
+   * on its own sends somebody hunting. The last one is the one that matters:
+   * a platform with no cancel command in its profile gets no command at all
+   * rather than an IOS one typed at something that is not IOS.
+   */
+  function _whyNoCancel(tab) {
+    const pending = tab ? _pendingFor(tab.sessionId) : null;
+    if (!pending) return 'Nothing is scheduled on this device.';
+    if (pending.kind !== 'reload') {
+      return `A ${pending.what.toLowerCase()} is pending here, not a reload.`;
+    }
+    if (!tab.isConnected) {
+      return 'This session is disconnected, so nothing can be sent to it.';
+    }
+    if (!pending.cancelCommand) {
+      return 'ShellMate has no cancel command for this platform and will '
+           + 'not guess one. Cancel the reload on the device.';
+    }
+    return '';
   }
 
   /** What scheme this tab is currently using, for the menu entry. */
@@ -1825,6 +1871,18 @@
           shown.textContent = value;
           button.appendChild(shown);
         }
+
+        // Present but grey, with the reason on it (#584, and the same
+        // reasoning as #262 in the shared menu): an entry that disappears
+        // when it does not apply leaves someone hunting for where it went,
+        // and "Cancel pending reload" is precisely the entry people will
+        // look for before there is anything to cancel.
+        const why = item.disabled ? item.disabled(tab) : '';
+        if (why) {
+          button.disabled = true;
+          button.title = why;
+        }
+
         _ctxMenu.appendChild(button);
       });
     });
@@ -1897,6 +1955,18 @@
           case 'scheme':    _chooseScheme(tab);       break;
           case 'keepalive':     _toggleKeepAlive([tab]);          break;
           case 'keepalive-all': _toggleKeepAlive(tabs.slice());   break;
+          // Through alerts.js, which owns the wording and the distinction
+          // between the two (#584). Both confirm before they act.
+          case 'cancel-reload':
+            if (window.shellmateAlerts) {
+              window.shellmateAlerts.cancelReload(tab.sessionId);
+            }
+            break;
+          case 'dismiss-pending':
+            if (window.shellmateAlerts) {
+              window.shellmateAlerts.dismissPending(tab.sessionId);
+            }
+            break;
           case 'disconnect':     _disconnectSessions([tab]);        break;
           case 'disconnect-all': _disconnectSessions(
                                    tabs.filter(t => t.isConnected)); break;

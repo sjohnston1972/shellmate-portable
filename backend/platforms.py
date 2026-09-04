@@ -73,10 +73,19 @@ class PlatformProfile:
     # with none of these keeps the typed-command countdown.
     reload_announce_patterns: list[str] = field(default_factory=list)
     reload_cancel_patterns: list[str] = field(default_factory=list)
-    # What to type to call a scheduled reload off (#292). Offered by the
-    # last-chance warning, so the answer to "it is about to reboot" is a
-    # button rather than remembering the command under pressure. Blank where
-    # a platform has no such command, and the button is not offered.
+    # What to type to call a scheduled reload off (#292, #584). Offered by the
+    # last-chance warning and by the tab's context menu, so the answer to "it
+    # is about to reboot" is a button rather than remembering the command
+    # under pressure.
+    #
+    # Blank where a platform has no such command, and both callers then say so
+    # rather than offering one: this is a string typed straight at a device
+    # that is counting down to a reboot, so a guess costs the seconds that
+    # were left. Filled in only from a vendor's own command reference. Several
+    # platforms below have one recorded here but no `reload_patterns` — the
+    # command is right, ShellMate simply does not yet read a scheduled reload
+    # on them, and an install that adds the patterns to platforms.json gets
+    # the cancel with them.
     reload_cancel_command: str = ""
     # Junos-style "commit confirmed": rolls itself back unless confirmed. Not
     # a reboot, so it is tracked separately and worded differently.
@@ -293,6 +302,10 @@ BUILTIN: dict[str, PlatformProfile] = {
             "reload", "write erase", "clear configure", "shutdown",
             "no shutdown", "failover active", "no failover",
         ],
+        # The ASA schedules and cancels a reload with the same words IOS
+        # does. No reload_patterns here yet, so nothing arms a countdown on
+        # an ASA — see the field's own note.
+        reload_cancel_command="reload cancel",
         config_mode_markers=["(config"],
         comment_prefix="!",
     ),
@@ -463,6 +476,8 @@ BUILTIN: dict[str, PlatformProfile] = {
         dangerous_commands=[
             "reload", "write erase", "shutdown", "no shutdown", "delete flash:",
         ],
+        # EOS keeps the IOS spelling for this, deliberately.
+        reload_cancel_command="reload cancel",
         config_mode_markers=["(config"],
         comment_prefix="!",
     ),
@@ -576,6 +591,12 @@ BUILTIN: dict[str, PlatformProfile] = {
             "execute restore", "execute disconnect-admin-session",
             "delete", "purge", "unset",
         ],
+        # No reload_cancel_command (#584). `execute reboot` on FortiOS goes
+        # now: there is no scheduled reboot in the CLI to call off, and
+        # therefore no cancel command either. `execute reboot cancel` looks
+        # like the answer and is not one — it would be typed at a firewall.
+        # The tab menu says the platform has none rather than sending it.
+        #
         # FortiOS names the object being edited in the prompt itself:
         # FGT-01 (global) #, FGT-01 (port1) #.
         config_mode_markers=["("],
@@ -780,6 +801,9 @@ BUILTIN: dict[str, PlatformProfile] = {
             'ver': 'uname -a',
         },
         dangerous_commands=["rm -rf", "mkfs", "dd if=", "shutdown", "reboot", "init 0"],
+        # `shutdown -r +10` is called off with `shutdown -c`, on every init
+        # system that has shipped this century.
+        reload_cancel_command="shutdown -c",
         config_mode_markers=[],
         comment_prefix="#",
     ),

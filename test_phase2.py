@@ -593,6 +593,18 @@ async def run():
         except Exception as e:
             fail("the card shows the pending reload", str(e))
 
+        try:
+            # Both tab-menu entries must be hideable like every other one
+            # (#584). Settings renders its toggles from this same list, so an
+            # entry missing from it is an entry nobody can switch off.
+            settings = await page.evaluate(
+                "() => window.tabMenuItems().map(i => i.setting)")
+            for name in ("cancel_reload", "dismiss_pending"):
+                assert name in settings, f"{name} not in {settings}"
+            ok("cancelling and dismissing are both switchable in Settings")
+        except Exception as e:
+            fail("the new tab-menu entries are switchable", str(e))
+
         # ------------------------------------------------------------------
         print("\n-- Console errors --")
 

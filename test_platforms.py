@@ -442,6 +442,59 @@ def test_the_platform_pack() -> None:
           f"got {sorted(NTC_PLATFORMS)}")
 
 
+def test_calling_a_reload_off() -> None:
+    """
+    The cancel command is a real one or it is nothing (#584).
+
+    This is the only field ShellMate types at a device that is already
+    counting down to a reboot, which makes a plausible guess worse here than
+    anywhere else: it burns the seconds that were left. So each entry is a
+    command from the vendor's own reference, and every other platform is
+    blank — the tab menu then greys the entry and says the platform has none,
+    which is a useful thing to be told and an invented command is not.
+    """
+    print("\n-- Calling a scheduled reload off --")
+
+    known = {
+        "ios":    "reload cancel",
+        "nxos":   "reload cancel",
+        "asa":    "reload cancel",
+        "arista": "reload cancel",
+        "junos":  "clear system reboot",
+        "huawei": "undo schedule reboot",
+        "linux":  "shutdown -c",
+    }
+    for platform, command in known.items():
+        check(f"{platform} calls a reload off with {command!r}",
+              get_profile(platform).reload_cancel_command == command,
+              f"got {get_profile(platform).reload_cancel_command!r}")
+
+    # FortiOS is the one people expect to be here. `execute reboot` goes
+    # immediately — there is no scheduled reboot to cancel, so there is no
+    # cancel command, and `execute reboot cancel` is a guess that would be
+    # typed at a firewall. PAN-OS, IOS-XR, RouterOS and AOS-CX are blank for
+    # want of a checked answer rather than a plausible one.
+    for platform in ("fortios", "panos", "iosxr", "routeros", "aoscx", GENERIC):
+        check(f"{platform} offers none rather than a guess",
+              get_profile(platform).reload_cancel_command == "",
+              f"got {get_profile(platform).reload_cancel_command!r}")
+
+    # The pairing that makes the menu entry work at all: a platform whose
+    # reloads ShellMate reads must also know how to call one off.
+    for platform, profile in load_profiles().items():
+        if not profile.reload_patterns:
+            continue
+        check(f"{platform} both reads a scheduled reload and can cancel it",
+              bool(profile.reload_cancel_command),
+              "a countdown with no way out is the entry permanently greyed")
+
+    # It survives the round trip to platforms.json, or an existing install
+    # keeps a profile without it.
+    check("the field is carried in the serialised profile",
+          get_profile("ios").as_dict().get("reload_cancel_command") == "reload cancel",
+          str(get_profile("ios").as_dict().get("reload_cancel_command")))
+
+
 def test_new_platforms_reach_an_existing_install() -> None:
     """
     A platforms.json written before the pack must gain it, not block it.
@@ -784,6 +837,7 @@ def main() -> int:
         test_profiles_and_aliases,
         test_profiles_are_editable,
         test_the_platform_pack,
+        test_calling_a_reload_off,
         test_new_platforms_reach_an_existing_install,
         test_outbound_pipeline,
         test_dangerous_command_matching,

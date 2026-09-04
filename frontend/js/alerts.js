@@ -489,16 +489,83 @@
    */
   async function _dismissFromStatus() {
     if (!statusWorst) return;
-    const what = (KIND_LABEL[statusWorst.pending.kind] || 'action').toLowerCase();
+    await dismissPending(statusWorst.sessionId);
+  }
+
+  /**
+   * Stop tracking a pending action here (#265, #584).
+   *
+   * Local, and the dialog says so in as many words. This is the honest
+   * action for a reload that was called off some other way — from another
+   * seat, or before ShellMate was watching — and it is deliberately a
+   * *different* entry from cancelling, because the two have nothing in
+   * common except that the countdown disappears.
+   */
+  async function dismissPending(sessionId) {
+    const info = describePending(sessionId);
+    if (!info) return false;
+
     const ok = await window.shellmateDialog.confirm({
-      title: `Dismiss the pending ${what}?`,
+      title: `Dismiss the pending ${info.what.toLowerCase()}?`,
       body:  'ShellMate stops tracking it here. Nothing is sent to the '
-             + 'device — anything actually scheduled on it still happens.',
+             + 'device — anything actually scheduled on it still happens. '
+             + 'Use this when it was called off some other way.',
       confirmLabel: 'Dismiss',
     });
-    if (ok && typeof window.dismissPendingAction === 'function') {
-      window.dismissPendingAction(statusWorst.sessionId);
+    if (!ok) return false;
+    if (typeof window.dismissPendingAction === 'function') {
+      window.dismissPendingAction(sessionId);
     }
+    return true;
+  }
+
+  /**
+   * Call a scheduled reload off on the device itself (#584).
+   *
+   * The distinction the whole entry exists to keep: clearing ShellMate's
+   * countdown is not cancelling the reload. Only the device can cancel it,
+   * and only by being told — so this types the command the *platform*
+   * documents, which arrived with the pending because the backend has the
+   * platform resolved and the browser has no business deciding what to type
+   * at a device. Blank there means no command is known, and then nothing is
+   * sent: a guess costs the seconds that were left.
+   *
+   * It goes out as ordinary input, through the same pipeline every keystroke
+   * takes — alias expansion and the dangerous-command guardrail still apply
+   * — and it is echoed into the session and announced afterwards. Nothing
+   * ShellMate sends is sent silently.
+   */
+  async function cancelReload(sessionId) {
+    const info = describePending(sessionId);
+    if (!info || !info.cancelCommand) return false;
+
+    const name = labelFor(sessionId);
+    const ok = await window.shellmateDialog.confirm({
+      title: `Send "${info.cancelCommand}" to ${name}?`,
+      body:  `${info.text}. The command is typed into the session and run, `
+             + 'exactly as if you had typed it, and you will see it happen. '
+             + 'The countdown clears when the device confirms the reload is '
+             + 'aborted — not when the command is sent.',
+      confirmLabel: 'Send it',
+    });
+    if (!ok) return false;
+
+    const sent = typeof window.sendCommandToSession === 'function'
+      && window.sendCommandToSession(sessionId, info.cancelCommand);
+
+    // Said out loud either way, and carefully: the claim is that the command
+    // went, which is the only thing knowable before the device answers.
+    raise({
+      severity: sent ? 'info' : 'warning',
+      icon:     sent ? 'check_circle' : 'error',
+      title:    sent ? `Sent "${info.cancelCommand}" to ${name}`
+                     : `Could not reach ${name}`,
+      body:     sent
+        ? 'The countdown clears when the device confirms it is aborted.'
+        : 'The session is not connected. Cancel it on the device.',
+      sessionId,
+    });
+    return Boolean(sent);
   }
 
   function reduceMotion() {
@@ -808,6 +875,8 @@
     notify,
     watchHit,
     describePending,
+    cancelReload,
+    dismissPending,
     pending: () => [...tracked.entries()].map(([sessionId, e]) => ({
       sessionId, ...e.pending, seconds_left: secondsLeft(e.pending),
     })),

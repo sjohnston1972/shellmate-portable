@@ -6,6 +6,16 @@ exists.
 
 ## 1.1.3
 
+- **Call a pending reload off from the tab's menu.** Right-click the tab and
+  **Cancel pending reload…** sends the platform's own cancel command — `reload
+  cancel`, `clear system reboot`, `undo schedule reboot`, whichever the device
+  uses — after asking, and you watch it run in the session like anything else
+  you type. It is greyed out with the reason when there is nothing scheduled,
+  when the tab is disconnected, or on a platform ShellMate has no cancel
+  command for; it will not guess one. **Dismiss the countdown…** sits beside it
+  for the other case, and says plainly that it stops ShellMate tracking and
+  sends the device nothing.
+
 - **A tab's hover card says what is about to happen to the device.** A pending
   reload or `commit confirmed` now shows on the card as a **Pending** row —
   "Reload in 4:12", in the countdown's own colour, with the command that

@@ -57,6 +57,37 @@ one.
 Cancelling is watched for in the same way: `reload cancel`, `SHUTDOWN
 ABORTED`, a plain `commit`. The alert clears.
 
+## Cancelling the reload, or dismissing the countdown
+
+These are two different things and ShellMate keeps them apart, because
+confusing them is how somebody walks away from a device that is still going to
+reboot. Both are on the tab's right-click menu.
+
+**Cancel pending reload…** sends the platform's own cancel command to the
+device — `reload cancel` on IOS, NX-OS, ASA and EOS, `clear system reboot` on
+Junos, `undo schedule reboot` on Huawei VRP, `shutdown -c` on a Linux shell.
+It asks first, naming the command, then types it into the session where you
+can watch it run: it goes through the same pipeline your own keystrokes do, so
+the guardrail still holds it for confirmation like any other `reload`. The
+countdown clears when the *device* says the reload is aborted, not when the
+command is sent. That is the only entry of the two that stops the reboot.
+
+The entry is greyed out when there is nothing scheduled, when the session is
+disconnected, and on a platform ShellMate has no cancel command for — hover it
+and it says which. It will not invent one. PAN-OS, IOS-XR, RouterOS and AOS-CX
+have none recorded; neither does FortiOS, where `execute reboot` goes
+immediately and there is no scheduled reboot to call off.
+
+**Dismiss the countdown…** does nothing to the device at all. It tells
+ShellMate to stop tracking, which is what you want when the reload was called
+off some other way — from another seat, or before ShellMate was watching — or
+when the time was never readable and the badge would otherwise sit there for
+six hours. Anything genuinely scheduled on the device still happens. Clicking
+the countdown in the status bar does the same thing.
+
+Both entries can be hidden under **Settings → ShellMate Interface → Tab menu**,
+like every other entry in that menu.
+
 ## The channels
 
 Three ways of being told, each switchable under **Settings → Alerts**. They

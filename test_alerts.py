@@ -256,6 +256,69 @@ def test_payload() -> None:
     check("and nothing is left behind", t2.payload()["pending"] is None)
 
 
+def test_the_cancel_command_travels_with_the_pending() -> None:
+    """
+    The way out reaches the interface, and only where it is real.
+
+    Clearing ShellMate's countdown is not cancelling the reload (#584). The
+    tab menu sends the *platform's* own command, which it can only do if the
+    platform's command is what arrived with the pending — and where a
+    platform has none the field must be empty, so the entry can say so
+    rather than typing an IOS command at something that is not IOS.
+    """
+    print("\n-- The cancel command --")
+    from backend.platforms import PlatformProfile, get_profile
+
+    expected = {
+        "ios":    "reload cancel",
+        "nxos":   "reload cancel",
+        "junos":  "clear system reboot",
+        "huawei": "undo schedule reboot",
+    }
+    for platform, command in expected.items():
+        check(f"{platform} knows how to call a reload off",
+              get_profile(platform).reload_cancel_command == command,
+              f"got {get_profile(platform).reload_cancel_command!r}")
+
+    # Every platform ShellMate reads a scheduled reload on must have one, or
+    # the menu entry is permanently disabled on a device it could have saved.
+    for platform_id in ("ios", "nxos", "junos", "huawei"):
+        profile = get_profile(platform_id)
+        check(f"{platform_id} tracks reloads and can cancel them",
+              bool(profile.reload_patterns) and bool(profile.reload_cancel_command),
+              f"patterns={len(profile.reload_patterns)}, "
+              f"cancel={profile.reload_cancel_command!r}")
+
+    t = AlertTracker(platform="ios")
+    t.observe_command("reload in 10")
+    t.observe_output("*** --- SHUTDOWN in 0:10:00 ---")
+    check("it is sent with the pending, not looked up in the browser",
+          t.payload()["pending"]["cancel_command"] == "reload cancel",
+          str(t.payload()))
+
+    # A commit confirm is not a reload and has no reload cancel command; the
+    # menu says which, rather than offering `reload cancel` for a rollback.
+    c = AlertTracker(platform="junos")
+    c.observe_command("commit confirmed 5")
+    pending = c.payload()["pending"]
+    check("a pending rollback carries no reload cancel command",
+          pending["kind"] == COMMIT_CONFIRM and "cancel_command" not in pending,
+          str(pending))
+
+    # And the case the disabled menu entry exists for: a platform that reads
+    # a reload but has no command to call it off. Reachable today only
+    # through an edited platforms.json, which is exactly why it must not
+    # fall back to somebody else's command.
+    mute = AlertTracker(platform="ios")
+    mute._profile = lambda: PlatformProfile(                 # noqa: SLF001
+        id="homegrown", name="Homegrown",
+        reload_patterns=[r"^\s*reload\s+in\s+(?P<m>\d+)\b"])
+    mute.observe_command("reload in 10")
+    check("a platform with no cancel command sends an empty one",
+          mute.payload()["pending"]["cancel_command"] == "",
+          str(mute.payload()))
+
+
 def test_output_watch() -> None:
     """A colour rule marked "alert" watches the output for it (#521)."""
     print("\n-- Output watch --")
@@ -345,6 +408,7 @@ def main() -> int:
         test_absolute_times,
         test_bad_pattern_is_survivable,
         test_payload,
+        test_the_cancel_command_travels_with_the_pending,
         test_output_watch,
     ):
         try:
