@@ -278,7 +278,7 @@ async def stream_chat(
         active_label,
         command_history,
         (extra_contexts or [])
-        + ([{"label": "Ansible", "text": "\n".join(ansible_block)}]
+        + ([{"label": "Ansible", "buffer": "\n".join(ansible_block)}]
            if ansible_block else []) or None,
         design_context=design_context,
         device_context=device_context,

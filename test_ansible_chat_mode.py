@@ -141,6 +141,29 @@ def what_it_is_told() -> None:
           "an assistant that cannot answer because the runner is down is "
           "worse than one answering without it")
 
+    # The block was built correctly and then handed over under the wrong
+    # key: build_context_prompt reads `buffer`, this passed `text`, and
+    # every Ansible message died with "'buffer'". Testing the piece in
+    # isolation proved it existed; nothing proved it fitted.
+    print("\n-- And it actually fits into a prompt --")
+    from backend.ai.prompts import build_context_prompt
+
+    try:
+        built = build_context_prompt(
+            "", "", "", [],
+            [{"label": "Ansible",
+              "buffer": "\n".join(router._ansible_context(None))}])
+        fitted = "Runner:" in built
+        why = built[:120]
+    except Exception as exc:
+        fitted, why = False, f"{type(exc).__name__}: {exc}"
+    check("the context block goes into a real prompt", fitted, why)
+
+    check("and the router hands it over under that same key",
+          chr(34) + "buffer" + chr(34) + ": " in
+          Path("backend/ai/router.py").read_text(encoding="utf-8"),
+          "the router passes a key build_context_prompt does not read")
+
 
 async def main() -> None:
     the_persona()
@@ -186,6 +209,36 @@ async def main() -> None:
                   "!!(window.ansibleBuilder && window.ansibleBuilder.canvasState)"),
               "the canvas has to travel, or the assistant cannot see the plays")
 
+        print("\n-- Controls that do not apply are disabled, not hidden --")
+        check("the persona toggle is disabled",
+              await page.is_disabled("#mode-toggle-btn"),
+              "picking Learn here would change nothing, which reads as broken")
+        check("and says why", "Ansible view" in
+              (await page.get_attribute("#mode-toggle-btn", "title") or ""),
+              await page.get_attribute("#mode-toggle-btn", "title"))
+        check("the session picker is disabled",
+              await page.is_disabled("#chat-tabs-btn"),
+              "this persona answers about the integration, not a set of tabs")
+        still_there = await page.evaluate("""
+          (() => ['mode-toggle-btn', 'chat-tabs-btn'].map((id) => {
+            const el = document.getElementById(id);
+            return !!el && !el.hidden
+                && getComputedStyle(el).display !== 'none';
+          }))()
+        """)
+        check("neither is removed or hidden, only disabled",
+              all(still_there), str(still_there)
+              + " — a control that vanishes is harder to trust than one that "
+                "explains itself")
+
+        print("\n-- The greeting is about automation, not terminals --")
+        welcome = await page.inner_text("#chat-messages .chat-welcome")
+        check("it no longer offers to read your terminals",
+              "Ask about your terminals" not in welcome, welcome[:120])
+        check("and says what it does know",
+              "runner" in welcome.lower() or "automation" in welcome.lower(),
+              welcome[:200])
+
         print("\n-- The builder no longer has its own box --")
         check("the describe-it box is gone",
               await page.query_selector("#av-bld-ask") is None,
@@ -227,6 +280,14 @@ async def main() -> None:
             "#quick-buttons-list .quick-btn", "e => e.map(x => x.textContent)")
         check("and the usual quick chats come back",
               "Summarize" in quick, str(quick))
+        check("the persona toggle works again",
+              not await page.is_disabled("#mode-toggle-btn"),
+              "a control left disabled would be worse than the bug fixed")
+        check("and so does the session picker",
+              not await page.is_disabled("#chat-tabs-btn"))
+        welcome = await page.inner_text("#chat-messages .chat-welcome")
+        check("and the greeting is about terminals again",
+              "terminal" in welcome.lower(), welcome[:120])
 
         print("\n-- Nothing threw --")
         real = [e for e in errors if "favicon" not in e.lower()]

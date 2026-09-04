@@ -9970,6 +9970,15 @@ body {
   padding: 8px 10px;
 }
 
+/* A control that does not apply right now. Dimmed and unclickable rather
+   than hidden: one that vanishes and comes back is harder to trust than one
+   that says why it is unavailable (#602). */
+.chat-pill-locked,
+button.mode-toggle-btn.chat-pill-locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Where a drop would land. Removed by accident when the builder's own
    inventory rail was deleted, which left dragging with no feedback at all
    and made a working drop look like a dead zone (#603). */

@@ -1071,7 +1071,63 @@
     document.body.classList.toggle('chat-ansible-mode', ansibleMode);
     renderQuickButtons();
     updateContextIndicator();
+    paintWelcome();
+    lockTerminalControls(ansibleMode);
     if (ansibleMode) announceMode();
+  }
+
+  /**
+   * The two controls that mean nothing in Ansible mode.
+   *
+   * Troubleshoot / Learn / Investigate are personas for reading a terminal,
+   * and this persona is not one of them — leaving the toggle live would let
+   * somebody pick Learn and get no change at all, which reads as a broken
+   * button rather than as an inapplicable one. The session picker is the
+   * same: the Ansible persona is answering about the integration, not about
+   * a chosen set of tabs.
+   *
+   * Disabled with a reason rather than hidden. A control that vanishes and
+   * comes back is harder to trust than one that says why it is unavailable.
+   */
+  function lockTerminalControls(locked) {
+    [['mode-toggle-btn', 'The persona is set by the Ansible view while it is open.'],
+     ['chat-tabs-btn', 'Ansible mode answers about the integration rather than '
+                     + 'a chosen set of sessions.']].forEach(([id, why]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = locked;
+      el.classList.toggle('chat-pill-locked', locked);
+      if (locked) {
+        if (!el.dataset.titleWas) el.dataset.titleWas = el.title || '';
+        el.title = why;
+      } else if (el.dataset.titleWas !== undefined) {
+        el.title = el.dataset.titleWas;
+        delete el.dataset.titleWas;
+      }
+    });
+  }
+
+  /** The empty transcript says what this assistant is for, here. */
+  function paintWelcome() {
+    const welcome = document.querySelector('#chat-messages .chat-welcome');
+    if (!welcome) return;
+    const lead = welcome.querySelector('p:not(.chat-welcome-hint)');
+    const hint = welcome.querySelector('.chat-welcome-hint');
+    if (!lead || !hint) return;
+    if (!welcome.dataset.leadWas) {
+      welcome.dataset.leadWas = lead.textContent;
+      welcome.dataset.hintWas = hint.textContent;
+    }
+    if (ansibleMode) {
+      lead.textContent = 'Ask about your automation.';
+      hint.textContent = 'I know how ShellMate drives your runner — the '
+        + 'inventory it builds from your estate, how a playbook reaches the '
+        + 'container, and where credentials come from. Ask for a playbook and '
+        + 'you can send it straight to the builder.';
+    } else {
+      lead.textContent = welcome.dataset.leadWas;
+      hint.textContent = welcome.dataset.hintWas;
+    }
   }
 
   /** The view decides, and gives the assistant back when it closes. */
