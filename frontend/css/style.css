@@ -10058,6 +10058,37 @@ body.tree-claimed #group-tree-title::after {
 
 textarea.av-bld-input { min-height: unset; resize: vertical; }
 
+/* The source, under the summary of what it does and folded away until
+   somebody wants it (#604). The read-back is the part worth reading first;
+   the YAML is what you check afterwards. */
+.av-bld-source {
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 10px 14px;
+  margin-bottom: 24px;
+}
+
+.av-bld-source > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  margin: 0;
+  list-style: revert;
+}
+
+.av-bld-source[open] > summary { margin-bottom: 10px; }
+
+.av-bld-source-hint {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--on-surface-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .av-bld-mono {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;

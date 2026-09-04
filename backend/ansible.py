@@ -238,7 +238,8 @@ def _transport_error(exc: Exception, cfg: "RunnerConfig") -> "AnsibleError":
 
 
 def _call(method: str, path: str, *, json_body: Any = None,
-          params: dict | None = None, text: bool = False) -> Any:
+          params: dict | None = None, text: bool = False,
+          body: bytes | None = None) -> Any:
     cfg = config()
     if not cfg.ready:
         raise NotConfigured("No Ansible runner is set up yet. "
@@ -247,8 +248,15 @@ def _call(method: str, path: str, *, json_body: Any = None,
 
     try:
         with _client(cfg) as client:
-            response = client.request(method, f"{cfg.url}{path}",
-                                      json=json_body, params=params or None)
+            # A raw body for the playbook upload, which takes the YAML
+            # itself rather than a field containing it.
+            response = client.request(
+                method, f"{cfg.url}{path}",
+                content=body if body is not None else None,
+                json=json_body if body is None else None,
+                params=params or None,
+                headers={"Content-Type": "text/plain; charset=utf-8"}
+                if body is not None else None)
     except httpx.HTTPError as exc:
         raise _transport_error(exc, cfg) from exc
     if response.status_code >= 400:
@@ -773,15 +781,55 @@ def delete_playbook(name: str) -> bool:
         return False
 
 
+def upload_playbook(name: str, text: str, overwrite: bool = False) -> dict:
+    """
+    Put a playbook on the runner over its own API (#605).
+
+    The runner grew this endpoint after the integration was built around
+    its absence, so the SSH copy remains as a fallback for a container that
+    predates it — but this is the route now. It needs no shell access to
+    the container's host and no knowledge of the host path, which is what
+    made the old one fail in a way that was about SSH rather than Ansible.
+
+    Returns the runner's own answer, which says how many plays it parsed.
+    That is a cheap sanity check worth surfacing: "2 plays" means the file
+    arrived as a playbook rather than as text that happens to be there.
+    """
+    if not name or name.startswith("/") or ".." in name:
+        raise AnsibleError("That is not a playbook name.")
+    data = _call("PUT", f"/api/v1/playbooks/{name}",
+                 params={"overwrite": "true" if overwrite else "false"},
+                 body=text.encode("utf-8"))
+    logger.info("Uploaded %s to the runner (%s)", name,
+                (data or {}).get("path", "?"))
+    return data or {}
+
+
+def supports_upload() -> bool:
+    """
+    Whether this runner accepts a playbook over its API.
+
+    Asked rather than assumed: a container built before the endpoint
+    existed answers 404 or 405, and offering an upload that cannot work is
+    worse than offering the copy that can.
+    """
+    try:
+        spec = _call("GET", "/openapi.json") or {}
+        node = (spec.get("paths") or {}).get("/api/v1/playbooks/{name}") or {}
+        return "put" in node
+    except AnsibleError:
+        return False
+
+
 def playbook_transfer_plan(name: str) -> dict:
     """
     How a playbook written here reaches the runner.
 
-    The service lists and runs playbooks; it has no endpoint that accepts
-    one. Its project directory is a bind mount from the container's host,
-    so the file goes to a path on *that host* over an SSH session ShellMate
-    already has — which is why this names a host path rather than a path
-    inside the container.
+    The fallback route, for a runner that predates the upload endpoint
+    (#605). Its project directory is a bind mount from the container's
+    host, so the file goes to a path on *that host* over an SSH session
+    ShellMate already has — which is why this names a host path rather
+    than a path inside the container.
     """
     project = ""
     try:
@@ -794,8 +842,8 @@ def playbook_transfer_plan(name: str) -> dict:
         "name": _library_path(name).name,
         "project_dir": project,
         "target": f"{project.rstrip('/')}/{_library_path(name).name}",
-        "why": ("The runner has no API for uploading a playbook, so ShellMate "
-                "copies it over an SSH session to the machine hosting the "
-                "container. The path is the one on that host, which the "
-                "container has mounted as its project directory."),
+        "why": ("This runner does not accept playbooks over its API, so "
+                "ShellMate copies the file over an SSH session to the machine "
+                "hosting the container. The path is the one on that host, "
+                "which the container has mounted as its project directory."),
     }

@@ -4291,15 +4291,50 @@ async def ansible_delete_playbook(name: str) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/ansible/library/{name}/send")
+async def ansible_upload_playbook(name: str, overwrite: bool = False) -> dict:
+    """
+    Send a playbook to the runner over its own API (#605).
+
+    The route that needs no shell access to the container's host and no
+    knowledge of the host path — which is what made the SSH copy fail in a
+    way that was about SSH rather than about Ansible, and made it
+    impossible for anybody driving a runner they cannot log in to.
+
+    The SSH copy is still there, on the route that takes a session id, for
+    a container built before this endpoint existed.
+    """
+    from backend import ansible as ansible_module
+
+    try:
+        text = await asyncio.to_thread(ansible_module.read_playbook, name)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        result = await asyncio.to_thread(
+            ansible_module.upload_playbook, name, text, overwrite)
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+    return {"sent": True, "route": "api", **result}
+
+
+@app.get("/api/ansible/upload-supported")
+async def ansible_upload_supported() -> dict:
+    """Whether this runner takes a playbook over its API, or needs the copy."""
+    from backend import ansible as ansible_module
+
+    return {"supported": await asyncio.to_thread(ansible_module.supports_upload)}
+
+
 @app.post("/api/ansible/library/{name}/send/{session_id}")
 async def ansible_send_playbook(name: str, session_id: str) -> dict:
     """
-    Copy a playbook from the library to the runner, over an SSH session.
+    Copy a playbook to the runner over an SSH session — the fallback route.
 
-    The runner can list and run playbooks but cannot accept one, and its
-    project directory is a bind mount from the container's host — so the
-    file goes to a path on that host over a session ShellMate already has.
-    Which is why this takes a session id rather than inventing a transport.
+    For a container built before the upload endpoint existed (#605). Its
+    project directory is a bind mount from the container's host, so the
+    file goes to a path on that host over a session ShellMate already has,
+    which is why this takes a session id rather than inventing a transport.
     """
     from backend import ansible as ansible_module
     from backend.connections import sftp

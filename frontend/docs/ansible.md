@@ -186,15 +186,21 @@ start.
 
 ### Getting yours to the runner
 
-The runner's API can list and run playbooks but has no endpoint that
-accepts one, and its project directory is a bind mount from the container's
-host. So **Send to the runner** copies the file to that path on the host,
-over an SSH session ShellMate already has to it: pick the session, and it
-says where the file landed.
+**Send to the runner** puts the file on the runner over its API. It reports
+where it landed and how many plays it parsed — which is worth reading, since
+"2 plays" means the file arrived as a playbook rather than as text that
+happens to be sitting there.
 
-If ShellMate has no session to the runner's host, the alternative is the
-ordinary one — put the file in the folder yourself, or keep the project
-directory in git and pull it there.
+A name already on the runner is not replaced silently. You are asked, and
+replacing cannot be undone from here.
+
+Older containers had no endpoint that accepted a playbook. Against one of
+those, ShellMate falls back to copying the file over an SSH session you
+already have to the machine hosting the container, into the path it mounts
+as its project directory — so that route needs a session to that host and
+says so. If you have neither, the ordinary alternatives remain: put the file
+in the folder yourself, or keep the project directory in git and pull it
+there.
 
 ## Running one
 

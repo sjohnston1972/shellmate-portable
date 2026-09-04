@@ -1197,14 +1197,63 @@
   }
 
   /**
-   * Copy it to the runner over an SSH session.
+   * Send it to the runner (#605).
    *
-   * Which session has to be asked, not guessed: the container runs on one
-   * machine and ShellMate may have a dozen tabs open to switches. Guessing
-   * writes a playbook onto a 2960's flash.
+   * Over the runner's own API where it has one, which needs no shell
+   * access to the container's host and no knowledge of the host path. The
+   * SSH copy remains for a container built before that endpoint existed —
+   * and it has to ask which session, never guess: the container runs on
+   * one machine and ShellMate may have a dozen tabs open to switches.
+   * Guessing writes a playbook onto a 2960's flash.
    */
   async function sendPlaybook() {
     if (!editing) return;
+    let overTheApi = false;
+    try {
+      const probe = await (await fetch('/api/ansible/upload-supported')).json();
+      overTheApi = !!probe.supported;
+    } catch (_) { overTheApi = false; }
+
+    if (overTheApi) return _sendOverApi();
+    return _copyOverSsh();
+  }
+
+  async function _sendOverApi(overwrite) {
+    const path = `/api/ansible/library/${encodeURIComponent(editing)}/send`
+               + (overwrite ? '?overwrite=true' : '');
+    try {
+      const res = await fetch(path, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        // The runner guards replacement rather than silently overwriting,
+        // so the second attempt is a decision somebody makes.
+        if (!overwrite && /already exists/i.test(data.detail || '')) {
+          const yes = await window.shellmateDialog.confirm({
+            title: `Replace ${editing} on the runner?`,
+            body: 'There is already a playbook with that name in the runner’s '
+                + 'project directory. Replacing it cannot be undone from here.',
+            confirmLabel: 'Replace it',
+            danger: true,
+          });
+          if (yes) return _sendOverApi(true);
+          return;
+        }
+        throw new Error(data.detail || `the server answered ${res.status}`);
+      }
+      // How many plays it parsed, because that says the file arrived as a
+      // playbook rather than as text that happens to be sitting there.
+      const plays = typeof data.plays === 'number'
+        ? `, ${data.plays} play${data.plays === 1 ? '' : 's'}` : '';
+      _note(`Sent to the runner as ${data.path}${plays}.`);
+      _notify('info', 'Playbook sent',
+              `${editing} is on the runner at ${data.path}${plays}.`);
+      await refreshPlaybooks();
+    } catch (e) {
+      _note(String(e.message || e), true);
+    }
+  }
+
+  async function _copyOverSsh() {
     let sessions = [];
     try {
       const all = await (await fetch('/api/sessions')).json();
@@ -1213,18 +1262,19 @@
     } catch (_) { /* handled by the empty case below */ }
 
     if (!sessions.length) {
-      _note('No open SSH session to copy it over. Connect to the machine '
-            + 'running the container first.', true);
+      _note('This runner is too old to accept a playbook over its API, so it '
+            + 'has to be copied over SSH — and there is no session open to the '
+            + 'machine running the container. Connect to it first.', true);
       return;
     }
 
     let chosen = sessions[0].session_id;
     if (window.shellmateDialog) {
       const answer = await window.shellmateDialog.form({
-        title: 'Send to the runner',
-        body: 'The service has no upload API, so this copies the playbook over '
-              + 'an SSH session you already have. Choose the session on the '
-              + 'machine running the container.',
+        title: 'Copy to the runner',
+        body: 'This runner does not accept playbooks over its API, so this '
+              + 'copies the file over an SSH session you already have. Choose '
+              + 'the session on the machine running the container.',
         fields: [{
           name: 'session', label: 'Over this session', type: 'select',
           options: sessions.map(s => ({
@@ -1232,7 +1282,7 @@
             label: `${s.display_label || s.hostname} (${s.target || s.hostname})`,
           })),
         }],
-        confirmLabel: 'Send',
+        confirmLabel: 'Copy',
       });
       if (!answer) return;
       chosen = answer.session;

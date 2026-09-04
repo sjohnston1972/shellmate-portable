@@ -459,7 +459,19 @@
 
   function paint() {
     const box = document.getElementById('av-bld-text');
-    if (box) box.value = current.text;
+    if (box) {
+      box.value = current.text;
+      // Grows to what it holds rather than sitting at a fixed height: a
+      // play with three tasks should not leave half a box empty, and a
+      // forty-line playbook should not be read through a slot (#604).
+      const lines = (current.text.match(/\n/g) || []).length + 1;
+      box.rows = Math.min(Math.max(lines, 6), 60);
+      const count = document.getElementById('av-bld-lines');
+      if (count) {
+        count.textContent = current.text
+          ? `${lines} line${lines === 1 ? '' : 's'}` : '';
+      }
+    }
     renderFound();
   }
 
@@ -570,25 +582,35 @@
       ]),
 
       el('section', { class: 'av-block' }, [
-        el('h4', { class: 'av-block-title' }, 'The playbook'),
+        el('h4', { class: 'av-block-title' }, 'What it would do'),
+        el('div', { id: 'av-bld-found' }),
+      ]),
+      el('details', { class: 'av-bld-source', id: 'av-bld-source' }, [
+        el('summary', { class: 'av-block-title' }, [
+          el('span', { text: 'The playbook' }),
+          el('span', { class: 'av-bld-source-hint', id: 'av-bld-lines' }),
+        ]),
         el('textarea', {
-          id: 'av-bld-text', rows: 14, class: 'av-bld-input av-bld-mono',
-          spellcheck: 'false',
-          placeholder: 'Nothing built yet. Add a play above, or describe what '
-                     + 'you want.',
+          id: 'av-bld-text', class: 'av-bld-input av-bld-mono',
+          spellcheck: 'false', rows: 8,
+          placeholder: 'Nothing built yet. Add a play above, or ask the '
+                     + 'assistant for one.',
           onchange: reread,
         }),
         el('div', { class: 'av-bld-actions' }, [
           el('button', { type: 'button', class: 'btn-tertiary', onclick: reread },
              [icon('refresh'), 'Read it back']),
+          el('button', {
+            type: 'button', class: 'btn-tertiary',
+            onclick: () => {
+              navigator.clipboard.writeText(
+                (document.getElementById('av-bld-text') || {}).value || '');
+              if (typeof window._showCopyToast === 'function') window._showCopyToast();
+            },
+          }, [icon('content_copy'), 'Copy']),
           el('button', { type: 'button', class: 'btn-primary', onclick: saveAsPlaybook },
              [icon('save'), 'Save as a playbook']),
         ]),
-      ]),
-
-      el('section', { class: 'av-block' }, [
-        el('h4', { class: 'av-block-title' }, 'What it would do'),
-        el('div', { id: 'av-bld-found' }),
       ]),
     ];
   }

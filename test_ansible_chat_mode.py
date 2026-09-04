@@ -99,7 +99,8 @@ def the_persona() -> None:
     # wrong here — wrong about this integration rather than about Ansible.
     for phrase, why in (
         ("ansible-playbook", "the user has no ansible-playbook to run"),
-        ("bind mount", "how a playbook actually reaches the runner"),
+        ("over the runner's own API", "how a playbook now reaches the runner"),
+        ("Older runners", "that the SSH copy is a fallback, not the route"),
         ("travels", "the container keeps no copy of the inventory"),
         ("site_1_routers", "group names are sanitised"),
         ("vault", "where credentials come from"),

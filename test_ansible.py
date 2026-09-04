@@ -447,8 +447,59 @@ def test_the_library() -> None:
     plan = ansible.playbook_transfer_plan("upgrade.yml")
     check("the transfer says where it must land",
           plan["target"].endswith("/project/upgrade.yml"), str(plan))
-    check("  and why it is a copy rather than an upload",
-          "no API for uploading" in plan["why"], plan["why"])
+    # The fallback route now, rather than the only one (#605): the runner
+    # grew an upload endpoint after the integration was built around its
+    # absence. The plan still has to name the host path, because that is
+    # the whole difficulty of the copy.
+    check("  and why the copy is a fallback",
+          "does not accept playbooks over its API" in plan["why"], plan["why"])
+    print("\n-- Uploading, which the runner now takes (#605) --")
+
+    def uploads(request):
+        if request.method == "PUT" and "/api/v1/playbooks/" in request.url.path:
+            if "overwrite=true" not in str(request.url):
+                return httpx.Response(409, json={
+                    "detail": "playbook 'x.yml' already exists; pass "
+                              "?overwrite=true to replace it"})
+            return httpx.Response(201, json={
+                "name": "x.yml", "path": "project/x.yml", "bytes": 42,
+                "plays": 2, "overwrote": True})
+        if request.url.path == "/openapi.json":
+            return httpx.Response(200, json={
+                "paths": {"/api/v1/playbooks/{name}": {"get": {}, "put": {}}}})
+        return None
+
+    check("the runner is asked whether it can take one, not assumed",
+          with_runner(ansible.supports_upload, handler=uploads) is True,
+          "offering an upload a container cannot do is worse than the copy")
+
+    sent = with_runner(lambda: ansible.upload_playbook("x.yml", "---\n", True),
+                       handler=uploads)
+    check("uploading reports where it landed",
+          sent.get("path") == "project/x.yml", str(sent))
+    check("and how many plays the runner parsed",
+          sent.get("plays") == 2,
+          "'2 plays' is what says the file arrived as a playbook rather than "
+          "as text that happens to be sitting there")
+
+    try:
+        with_runner(lambda: ansible.upload_playbook("x.yml", "---\n"),
+                    handler=uploads)
+        clash = "it overwrote without being asked"
+    except ansible.AnsibleError as exc:
+        clash = str(exc)
+    check("replacing one is refused unless asked for",
+          "already exists" in clash, clash)
+
+    for bad in ("/etc/passwd", "../escape.yml"):
+        try:
+            ansible.upload_playbook(bad, "---\n")
+            refused = ""
+        except ansible.AnsibleError as exc:
+            refused = str(exc)
+        check(f"{bad!r} is refused before anything is sent", bool(refused),
+              "a client-side check is a courtesy, but it should still be there")
+
     check("it can be deleted", ansible.delete_playbook("upgrade.yml")
           and not ansible.library())
 
