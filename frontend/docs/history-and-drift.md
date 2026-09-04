@@ -80,6 +80,35 @@ get what you expect.
 Click any result to replay that whole session — every command in order, with
 its output and timing.
 
+## Running something again
+
+The show commands you ran on this switch last month are usually the ones you
+want again. Two ways to reach them.
+
+**Ctrl+R in a terminal** opens a list of every command already run on *this
+device*, newest first and with duplicates folded together — the number beside
+one is how often it has been run. Type to narrow it.
+
+| Key | What it does |
+|---|---|
+| Enter | Puts the command at the prompt, without running it |
+| Ctrl+Enter | Runs it |
+| Up / Down | Move through the list |
+| Escape | Close |
+
+Enter is the gentler of the two on purpose. A command recalled from last month
+is a starting point to be edited far more often than it is a thing to run
+verbatim, and it arrives at the prompt where you can read it first. Either way
+it goes through the same checks as anything you type: aliases expand, and a
+destructive command still asks.
+
+**In the History panel**, a result whose device is open in a live tab gains two
+more buttons beside Copy: one puts the command at that tab's prompt, one runs
+it. Both name the tab in their tooltip, and both target the tab matching the
+*recorded* hostname — never "whichever tab is in front of you", which is how a
+recalled command would find the wrong device. When the device is not open, the
+buttons are not there.
+
 ## Clearing history
 
 **Clear history**, in the History panel's header, deletes records — scoped

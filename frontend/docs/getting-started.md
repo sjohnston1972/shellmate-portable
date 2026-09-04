@@ -138,6 +138,7 @@ whole conversation. The [AI assistant](#assistant) page explains it.
 | `Ctrl+C` | Copy if text is selected, otherwise send an interrupt |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab (`Ctrl+PageDown` / `Ctrl+PageUp` in a browser) |
 | `Ctrl+P` | Find a tab by name, hostname or group |
+| `Ctrl+R` | Recall a command already run on this device (Enter types it, Ctrl+Enter runs it) |
 | `` Ctrl+` `` | Focus the terminal |
 | `Ctrl+Shift+A` | Focus the assistant's input |
 | `Ctrl+,` | Settings |

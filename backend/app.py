@@ -651,6 +651,21 @@ async def history_clear(hostname: str = "", days: int = 0,
     return {"status": "ok", **removed}
 
 
+@app.get("/api/history/commands")
+async def history_commands(hostname: str = "", q: str = "",
+                           limit: int = 50) -> dict:
+    """
+    Distinct commands run on a device, newest first (#522).
+
+    What Ctrl+R in a terminal reads. The commands you ran on this switch last
+    month are the ones you want again, and ShellMate had them recorded with no
+    way to reach them short of searching the history panel.
+    """
+    commands = await asyncio.to_thread(
+        store.recent_commands, hostname.strip(), q.strip(), limit)
+    return {"hostname": hostname, "count": len(commands), "commands": commands}
+
+
 @app.get("/api/history/devices")
 async def history_devices() -> list[str]:
     """Every device seen, for the history filter."""

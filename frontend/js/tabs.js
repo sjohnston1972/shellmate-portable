@@ -846,6 +846,13 @@
     { keys: 'Ctrl+P', what: 'Find a tab by name',
       match: e => e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'p',
       run: _call('openTabPalette') },
+    // Ctrl+R is the browser's reload, which — unlike Ctrl+T and Ctrl+N —
+    // a page is allowed to intercept. Worth taking: it is what readline
+    // binds reverse-search to, so it is already in the fingers of everybody
+    // this recall list is for (#522).
+    { keys: 'Ctrl+R', what: 'Recall a command run on this device',
+      match: e => e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'r',
+      run: _call('openCommandRecall') },
     { keys: 'Ctrl+`', what: 'Focus the terminal',
       match: e => e.ctrlKey && e.key === '`', run: _focusTerminal },
     { keys: 'Ctrl+Shift+A', what: 'Focus the assistant',

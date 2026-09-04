@@ -12,6 +12,12 @@ exists.
   you are not looking at reaches you anyway — with the window hidden, a
   critical one raises a notification from the tray.
 
+- **Command recall.** `Ctrl+R` in a terminal lists every command already run
+  on that device, newest first and deduplicated — Enter puts one at the
+  prompt, Ctrl+Enter runs it. A history search result whose device is open
+  gains the same two buttons, aimed at the tab matching its recorded
+  hostname rather than at whichever tab is in front of you.
+
 - An **update channel** under Stockton → Diagnostics: `stable` offers only
   full releases, `beta` also offers prereleases for people trying a build
   early, marked Beta in the update window. **What's new in this version**

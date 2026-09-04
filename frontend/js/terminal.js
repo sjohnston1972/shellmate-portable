@@ -1109,6 +1109,34 @@
     return true;
   };
 
+  /**
+   * Type a command into a session and stop there (#522).
+   *
+   * The recall half of sendCommandToSession: the text arrives at the prompt
+   * with no carriage return, so nothing runs until the person at the keyboard
+   * presses Return themselves. That is the right default for a command
+   * recalled from last month — it is a starting point to be edited far more
+   * often than it is a thing to run verbatim.
+   *
+   * Sent as ordinary input, so it goes through the same pipeline every
+   * keystroke does: the alias expansion and the dangerous-command guardrail
+   * apply when the Return eventually comes, exactly as if it had been typed.
+   *
+   * Returns whether it went, so the caller can say if it did not.
+   */
+  window.insertIntoSession = (sessionId, text) => {
+    const instance = _instances[sessionId];
+    if (!instance || !instance.websocket
+        || instance.websocket.readyState !== WebSocket.OPEN) return false;
+    // Newlines stripped rather than passed on: a multi-line paste is what the
+    // paste path is for, with its pacing and its confirmation. One recalled
+    // command is one line.
+    const line = String(text).replace(/[\r\n]+/g, ' ').trim();
+    if (!line) return false;
+    instance.websocket.send(JSON.stringify({ type: 'input', data: line }));
+    return true;
+  };
+
   window.dismissPendingAction = (sessionId) => {
     const instance = _instances[sessionId];
     if (instance && instance.websocket
