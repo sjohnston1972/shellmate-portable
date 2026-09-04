@@ -1124,6 +1124,28 @@ async def run():
         errors[:] = [e for e in errors if "409 (Conflict)" not in e]
 
         try:
+            # Escape closes the topmost thing, not everything under it. One
+            # keypress taking the dialog and the panel together reads as the
+            # dialog having done something.
+            await page.evaluate(
+                "() => window._ansible.openRunDialog('phase2-check.yml', 'runner')")
+            await page.wait_for_timeout(300)
+            await page.keyboard.press("Escape")
+            await expect(page.locator("#ansible-run-overlay")).to_be_hidden()
+            await expect(page.locator("#ansible-panel")).to_be_visible()
+            ok("Escape closes the dialog and leaves the panel open")
+        except Exception as e:
+            fail("Escape closes the dialog and leaves the panel open", str(e))
+
+        try:
+            await page.keyboard.press("Escape")
+            await expect(page.locator("#ansible-panel")).to_be_hidden()
+            ok("and closes the panel next")
+        except Exception as e:
+            fail("and closes the panel next", str(e))
+
+        try:
+            await page.click("#sidebar-link-ansible")
             await page.click("#ansible-close")
             await expect(page.locator("#ansible-panel")).to_be_hidden()
             ok("the panel closes")

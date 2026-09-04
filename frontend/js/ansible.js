@@ -88,6 +88,25 @@
     document.getElementById('ansible-new')
       .addEventListener('click', () => openEditor(''));
 
+    // Escape closes the topmost thing, not everything. Three of these stack
+    // over the panel, and one keypress taking the lot away reads as the
+    // dialog having done something. shellmateDialog stops the event before
+    // it reaches here, so its own Escape cannot close the panel behind it.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const stack = ['ansible-event-overlay', 'ansible-edit-overlay',
+                     'ansible-run-overlay'];
+      for (const id of stack) {
+        const el = document.getElementById(id);
+        if (el && !el.classList.contains('hidden')) {
+          el.classList.add('hidden');
+          if (id === 'ansible-edit-overlay') editing = '';
+          return;
+        }
+      }
+      if (!overlay.classList.contains('hidden')) closeAnsible();
+    });
+
     renderHistory();
   });
 
