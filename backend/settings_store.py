@@ -562,6 +562,25 @@ def get_settings_for_ui() -> dict:
     s_out = dict(s)
     s_out["providers"] = out_providers
     s_out["providers_has_value"] = has_value
+
+    # The Ansible runner's bearer token lives in the vault like an API key,
+    # so the settings page needs the same two facts about it: that one is
+    # stored, and never what it is. Without the first, the field looks
+    # empty and somebody retypes a token they cannot read to change a
+    # timeout (#586).
+    ansible_block = dict(s_out.get("ansible") or {})
+    stored_token = ""
+    try:
+        stored_token = vault.get("ansible_token", "") or ""
+    except Exception:                                     # locked, or no vault
+        stored_token = ""
+    if not stored_token:
+        import os as _os
+
+        stored_token = _os.environ.get("ANSIBLE_RUNNER_TOKEN", "") or ""
+    ansible_block["token"] = "•" * 8 if stored_token else ""
+    ansible_block["has_token"] = bool(stored_token)
+    s_out["ansible"] = ansible_block
     s_out["env_preconfigured"] = env_preconfigured
     return s_out
 

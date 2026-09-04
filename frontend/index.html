@@ -2176,7 +2176,7 @@ GigEth0/2     unassigned    YES unset  down     down
              the key file, and it never moves. -->
         <section class="settings-section">
           <h3 class="settings-section-title">Ansible</h3>
-          <p class="settings-section-hint">ShellMate does not run Ansible. It drives an <code>ansible-runner-service</code> container over its REST API and shows what that container is doing. The service authenticates with a client certificate rather than a token, so a certificate and its key are what it needs — as paths on this machine, never as text stored here.</p>
+          <p class="settings-section-hint">ShellMate does not run Ansible. It drives a container that does, over the container's REST API, and the Ansible view shows what it is doing. The runner authenticates with a bearer token; a client certificate is only needed if a deployment puts mutual TLS in front of it. Certificates are paths on this machine, never text stored here.</p>
 
           <div class="setting-row">
             <label class="setting-label" for="setting-ansible-url"
@@ -2185,6 +2185,12 @@ GigEth0/2     unassigned    YES unset  down     down
               <input type="text" id="setting-ansible-url" class="setting-input"
                      placeholder="https://runner.example:5001" autocomplete="off" />
             </span>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-ansible-token"
+                   data-tip="The bearer token the runner requires on every call. It is the value from the container's `.env` file.||Saved into the encrypted vault, never into settings.json, and never handed back to this page. The field shows dots once a token is stored, so saving after changing a timeout leaves the token alone; clearing it and saving removes it.">Token</label>
+            <input type="password" id="setting-ansible-token" class="setting-input setting-input-full" autocomplete="off" />
           </div>
 
           <div class="setting-row setting-row-stack">

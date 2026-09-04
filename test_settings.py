@@ -383,6 +383,49 @@ def test_saving_a_scrollback() -> None:
             {"logging": {"redact_secrets": True if before is None else bool(before)}})
 
 
+def test_the_ansible_token_lives_in_the_vault() -> None:
+    """
+    The runner's bearer token behaves like an API key, not like a setting.
+
+    Three things have to hold at once, and each has bitten a secret field
+    somewhere before: it never reaches settings.json, the page is never
+    handed the real value back, and a save that did not touch it leaves it
+    alone. The last one is what makes the field usable — otherwise changing
+    a timeout means retyping a token nobody can read.
+    """
+    from backend import ansible, settings_store
+
+    settings_store.update_settings({"ansible": {"runner_url": "https://runner:8081",
+                                                "token": "s3cret-token"}})
+
+    on_disk = (paths.data_dir() / "settings.json").read_text(encoding="utf-8")
+    check("the token is not written to settings.json",
+          "s3cret-token" not in on_disk,
+          "the file carries the token in plain text")
+
+    shown = settings_store.get_settings_for_ui()["ansible"]
+    check("the page is told a token is stored", shown["has_token"] is True,
+          str(shown))
+    check("but never given it",
+          "s3cret-token" not in str(shown) and shown["token"] != "s3cret-token",
+          str(shown))
+
+    check("the runner client can still read it",
+          ansible.config().token == "s3cret-token",
+          "the token went into the vault and never came back out")
+
+    settings_store.update_settings({"ansible": {"runner_url": "https://runner:8081",
+                                               "timeout": 45}})
+    check("a save that did not mention the token keeps it",
+          ansible.config().token == "s3cret-token",
+          "changing a timeout wiped the token")
+
+    settings_store.update_settings({"ansible": {"token": ""}})
+    check("clearing it removes it rather than leaving it quietly in place",
+          not ansible.config().token,
+          "an emptied field left the old token stored")
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Settings")
@@ -400,6 +443,7 @@ def main() -> int:
         test_every_tab_menu_entry_has_its_own_setting,
         test_logging_can_be_decided_per_session,
         test_saving_a_scrollback,
+        test_the_ansible_token_lives_in_the_vault,
     ):
         try:
             test()

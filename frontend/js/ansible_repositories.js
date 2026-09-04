@@ -188,6 +188,58 @@
     ]);
   }
 
+  /**
+   * Install what the runner's playbooks need, from its requirements file.
+   *
+   * This belongs here rather than in Playbooks because it is a property of
+   * where the playbooks came from: a repository brings its collections
+   * with it in `requirements.yml`, and "the module is not found" is what
+   * happens when nobody ran this. The runner does the work; ShellMate asks
+   * and reports what came back.
+   */
+  async function installCollections() {
+    const button = document.getElementById('av-repo-galaxy');
+    const said = document.getElementById('av-repo-galaxy-said');
+    if (button) button.disabled = true;
+    if (said) said.textContent = 'Asking the runner to install…';
+    try {
+      const result = await view.post('/api/ansible/galaxy', {});
+      const text = (result && (result.stdout || result.detail || result.status))
+        || 'The runner reported nothing further.';
+      if (said) said.textContent = 'Done.';
+      await window.shellmateDialog.alert({
+        title: 'Collections installed',
+        body: String(text).slice(0, 4000),
+      });
+    } catch (e) {
+      if (said) said.textContent = '';
+      await window.shellmateDialog.alert({
+        title: 'Could not install the collections',
+        body: String(e.message || e),
+      });
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  function collectionsBlock() {
+    return el('section', { class: 'av-block' }, [
+      el('h4', { class: 'av-block-title' }, 'Collections'),
+      el('p', { class: 'av-repo-hint' },
+        "A repository usually brings its collections with it in a "
+        + "requirements.yml. The runner installs them, not ShellMate — and "
+        + "\"module not found\" three tasks into a run is what happens when "
+        + "nobody has."),
+      el('div', { class: 'av-row-actions' }, [
+        el('button', {
+          type: 'button', class: 'btn-secondary', id: 'av-repo-galaxy',
+          onclick: installCollections,
+        }, [icon('download'), "Install from the runner's requirements.yml"]),
+        el('span', { id: 'av-repo-galaxy-said', class: 'av-repo-hint' }),
+      ]),
+    ]);
+  }
+
   function render(state) {
     const body = document.getElementById('av-repositories-body');
     if (!body) return;
@@ -210,6 +262,9 @@
         el('button', {
           type: 'button', class: 'btn-secondary', onclick: () => openForm(null),
         }, [icon('add'), 'Add one'])));
+      // Still offered: the runner can have playbooks and a requirements
+      // file without anybody having written down where they came from.
+      body.appendChild(collectionsBlock());
       return;
     }
 
@@ -221,6 +276,7 @@
       ])),
       el('tbody', {}, repos.map(row)),
     ]));
+    body.appendChild(collectionsBlock());
   }
 
   view.area('repositories', {

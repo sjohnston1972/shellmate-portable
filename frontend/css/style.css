@@ -9870,6 +9870,13 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
 .av-tpl-notice-ok .material-symbols-outlined { font-size: var(--icon-sm); color: var(--ok); flex: 0 0 auto; }
 .av-tpl-notice-ok > div { flex: 1; min-width: 0; }
 
+.av-repo-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  line-height: 1.5;
+}
+
 /* ---------------------------------------------------------------------------
    Ansible view — Inventory (#586)
 

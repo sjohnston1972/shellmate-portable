@@ -853,12 +853,17 @@
     // which is why nothing here goes through the vault.
     const ans = s.ansible || {};
     _val('setting-ansible-url',     ans.runner_url  || '');
+    // Dots when one is stored, empty when not — and never the real value.
+    // Saving with the dots untouched leaves the stored token alone, so
+    // changing a timeout does not mean retyping a token nobody can read.
+    _val('setting-ansible-token',   ans.has_token ? '•'.repeat(8) : '');
+    const ansTok = document.getElementById('setting-ansible-token');
+    if (ansTok) ansTok.dataset.maskedOriginal = ans.has_token ? '•'.repeat(8) : '';
     _val('setting-ansible-cert',    ans.client_cert || '');
     _val('setting-ansible-key',     ans.client_key  || '');
     _val('setting-ansible-ca',      ans.ca_cert     || '');
     _checked('setting-ansible-verify', ans.verify_tls !== false);
-    _val('setting-ansible-project', ans.project_dir
-         || '/usr/share/ansible-runner-service/project');
+    _val('setting-ansible-project', ans.project_dir || '/runner/project');
     _val('setting-ansible-timeout', ans.timeout ?? 30);
 
     _checked('setting-logging-enabled',   !!l.enabled);
@@ -977,12 +982,15 @@
   function _collectAnsible() {
     return {
       runner_url:  _gval('setting-ansible-url').trim(),
+      // Sent only when it actually changed. Sending the mask back would
+      // store eight bullet characters as the token, and the failure would
+      // arrive as "the runner refused ShellMate" with nothing to explain it.
+      ..._tokenIfChanged(),
       client_cert: _gval('setting-ansible-cert').trim(),
       client_key:  _gval('setting-ansible-key').trim(),
       ca_cert:     _gval('setting-ansible-ca').trim(),
       verify_tls:  _gchecked('setting-ansible-verify'),
-      project_dir: _gval('setting-ansible-project').trim()
-                   || '/usr/share/ansible-runner-service/project',
+      project_dir: _gval('setting-ansible-project').trim() || '/runner/project',
       timeout:     _int('setting-ansible-timeout', 30),
     };
   }
@@ -1210,6 +1218,24 @@
    *   - if the user typed the masked placeholder → omit (no real change)
    *   - otherwise → send the new value
    */
+  /**
+   * The Ansible token, but only if it was really edited.
+   *
+   * The field shows a mask when one is stored, so an unchanged field means
+   * "leave it alone" and an emptied one means "remove it". Sending the mask
+   * back would store eight bullet characters as the token, and the failure
+   * would arrive later as the runner refusing ShellMate, with nothing on
+   * screen to connect the two.
+   */
+  function _tokenIfChanged() {
+    const el = document.getElementById('setting-ansible-token');
+    if (!el) return {};
+    const typed = (el.value || '').trim();
+    const mask = (el.dataset.maskedOriginal || '').trim();
+    if (typed === mask) return {};
+    return { token: typed };
+  }
+
   function _collectProviders() {
     const fields = [
       { id: 'setting-anthropic-key',      key: 'anthropic_api_key' },
