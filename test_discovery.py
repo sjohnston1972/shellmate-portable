@@ -21,6 +21,7 @@ Nothing in this file touches a network beyond 127.0.0.1.
 """
 
 import asyncio
+import shutil
 import socket
 import sys
 import threading
@@ -420,6 +421,159 @@ def test_the_local_subnet_is_offered() -> None:
               subnet["hosts"] <= 254, str(subnet["hosts"]))
 
 
+# ---------------------------------------------------------------------------
+# Reachability (#538)
+#
+# The whole value of this is the distinction the scan deliberately does not
+# draw: refused and timed out are one answer to a port scan and two different
+# answers to "is site 112 down". If they collapse back into one, the feature
+# says nothing the group's own tile did not.
+# ---------------------------------------------------------------------------
+
+
+def test_a_probe_says_how_it_went_not_just_whether() -> None:
+    print("\n-- One reachability probe --")
+
+    device = FakeDevice(b"SSH-2.0-Cisco-1.25\r\n")
+    try:
+        answered = asyncio.run(discovery.reachable("127.0.0.1", device.port, 2.0))
+    finally:
+        device.close()
+
+    check("an open port answers", answered["state"] == "up", str(answered))
+    check("with what the device said",
+          "Cisco" in answered["banner"], str(answered["banner"]))
+    check("and how long it took", isinstance(answered["ms"], int)
+          and answered["ms"] >= 0, str(answered["ms"]))
+
+    # Bind and close, so the port is free and the stack refuses immediately.
+    spare = socket.socket()
+    spare.bind(("127.0.0.1", 0))
+    closed = spare.getsockname()[1]
+    spare.close()
+
+    # Six seconds, not two: a refusal on loopback takes a couple of seconds
+    # on Windows, and a probe that gave up first would report the timeout and
+    # hide the very distinction under test.
+    refused = asyncio.run(discovery.reachable("127.0.0.1", closed, 6.0))
+    check("a closed port is unreachable", refused["state"] == "unreachable",
+          str(refused))
+    check("and says it was refused rather than timing out",
+          refused["why"] == "refused", str(refused["why"]))
+
+    # A subnet nothing routes to: the other half of the distinction.
+    timed_out = asyncio.run(discovery.reachable("10.255.254.9", 22, 1.0))
+    check("an address nothing answers on times out",
+          timed_out["state"] == "unreachable"
+          and timed_out["why"] in ("timeout", "no route to host",
+                                   "network is unreachable"),
+          str(timed_out))
+
+    unresolvable = asyncio.run(
+        discovery.reachable("this-name-does-not-exist.invalid", 22, 2.0))
+    check("a name that does not resolve says so",
+          unresolvable["state"] == "unreachable", str(unresolvable))
+
+
+def test_a_sweep_answers_for_a_whole_group() -> None:
+    print("\n-- A sweep over saved connections --")
+
+    device = FakeDevice(b"SSH-2.0-Cisco-1.25\r\n")
+    spare = socket.socket()
+    spare.bind(("127.0.0.1", 0))
+    closed = spare.getsockname()[1]
+    spare.close()
+
+    recorded: dict = {}
+
+    async def drive() -> dict:
+        targets = [
+            {"id": "a", "name": "core-sw-01", "address": "127.0.0.1",
+             "port": device.port, "kind": "ssh", "why": ""},
+            {"id": "b", "name": "acc-sw-01", "address": "127.0.0.1",
+             "port": closed, "kind": "ssh", "why": ""},
+            {"id": "c", "name": "console", "address": "", "port": 0,
+             "kind": "serial", "why": "a serial console is a cable, not an address"},
+        ]
+        sweep = discovery.start_sweep(
+            targets, {"concurrency": 8, "timeout": 2.0, "fetch_http": False,
+                      "max_seconds": 30},
+            on_finish=recorded.update)
+        for _ in range(60):
+            await asyncio.sleep(0.1)
+            if not sweep.state()["running"]:
+                break
+        return sweep.state()
+
+    try:
+        state = asyncio.run(drive())
+    finally:
+        device.close()
+
+    check("every member is accounted for",
+          state["total"] == 3 and state["checked"] == 3, str(state))
+    check("the one that answered is up", state["up"] == 1, str(state))
+    check("the one that did not is unreachable",
+          state["unreachable"] == 1, str(state))
+    # Reported rather than skipped: a row silently missing from the results
+    # reads as a device that was checked and said nothing.
+    check("a serial console is not probeable, and says so",
+          state["not_probeable"] == 1, str(state))
+
+    by_id = {result["id"]: result for result in state["results"]}
+    check("the name comes back with the answer",
+          by_id["a"]["name"] == "core-sw-01", str(by_id["a"]))
+    check("an open port carries the banner for the hover text",
+          "Cisco" in by_id["a"]["banner"], str(by_id["a"]))
+
+    check("only what answered is recorded as last seen",
+          list(recorded) == ["a"], str(recorded))
+
+
+def test_last_seen_is_written_once_for_the_whole_sweep() -> None:
+    """`retag_many`'s rule: one load and one save, not one per device."""
+    print("\n-- last_seen --")
+
+    import tempfile
+    from pathlib import Path
+    from backend import paths
+
+    scratch = Path(tempfile.mkdtemp(prefix="shellmate-reach-"))
+    before_data, before_file = paths.data_dir, paths.profiles_file
+    paths.data_dir = lambda: scratch                                  # type: ignore
+    paths.profiles_file = lambda: scratch / "profiles.json"           # type: ignore
+
+    from backend import profiles
+    try:
+        profiles._save([{"id": f"p{n}", "name": f"sw{n}", "hostname": f"10.9.9.{n}"}
+                        for n in range(1, 21)])
+
+        writes = []
+        original = profiles._save
+        profiles._save = lambda entries: (writes.append(1), original(entries))[1]
+        try:
+            touched = profiles.record_last_seen({f"p{n}": 1_700_000_000 for n in range(1, 21)})
+        finally:
+            profiles._save = original
+
+        check("twenty devices cost one write", writes == [1], str(writes))
+        check("and all twenty were noted", touched == 20, str(touched))
+        check("the time is on the profile",
+              profiles._load()[0]["last_seen"] == 1_700_000_000,
+              str(profiles._load()[0]))
+
+        # Absence of an entry is not evidence a device has gone: a laptop off
+        # the VPN would otherwise rewrite the whole estate as unreachable.
+        profiles.record_last_seen({"p1": 1_700_000_500})
+        kept = {p["id"]: p.get("last_seen") for p in profiles._load()}
+        check("a device that did not answer keeps its last known good time",
+              kept["p2"] == 1_700_000_000 and kept["p1"] == 1_700_000_500,
+              str(kept))
+    finally:
+        paths.data_dir, paths.profiles_file = before_data, before_file
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Network discovery")
@@ -434,7 +588,10 @@ def main() -> int:
                  test_a_sweep_is_bounded_and_can_be_stopped,
                  test_the_overall_deadline_is_honest_about_stopping_early,
                  test_results_are_ordered_the_way_addresses_read,
-                 test_the_local_subnet_is_offered):
+                 test_the_local_subnet_is_offered,
+                 test_a_probe_says_how_it_went_not_just_whether,
+                 test_a_sweep_answers_for_a_whole_group,
+                 test_last_seen_is_written_once_for_the_whole_sweep):
         try:
             test()
         except Exception as exc:

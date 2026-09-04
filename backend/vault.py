@@ -31,6 +31,7 @@ Design notes worth keeping:
 """
 
 import base64
+import datetime
 import functools
 import ctypes
 import json
@@ -54,6 +55,20 @@ VAULT_VERSION = 1
 
 MODE_DPAPI = "dpapi"
 MODE_PASSWORD = "password"
+
+# What a backup file says it is, and what it is called (#565).
+#
+# The DPAPI vault does not travel by design, and until now the only route off
+# a machine was remembering to switch to a master password *before* moving —
+# so a stick carried to a second laptop kept a vault that could never be read
+# there, and the user found out one device at a time.
+#
+# A backup is the same scrypt + AES-GCM envelope password_encrypt() already
+# provides, wrapped in something that says what it is. The extension is its
+# own so that a file holding every secret in the installation is never
+# mistaken for an ordinary export.
+BACKUP_KIND = "shellmate-vault-backup"
+BACKUP_SUFFIX = ".smv"
 
 # scrypt cost parameters. n=2**15 puts key derivation at roughly 100 ms on a
 # typical laptop: slow enough to make brute-forcing a weak passphrase costly,
@@ -279,14 +294,43 @@ class Vault:
             return False
         return self.mode() == MODE_PASSWORD
 
+    def unreadable_reason(self) -> str:
+        """
+        Why this machine cannot read the vault that is here, or "" (#565).
+
+        A DPAPI vault carried to a second laptop decrypts nowhere. The message
+        `dpapi_decrypt` raises has always been clear, but nothing surfaced it:
+        every read degraded to "no value" — which is right for a locked vault
+        and wrong for an unreadable one, because the user then discovers it
+        one device at a time.
+
+        A master-password vault is **locked**, not unreadable: the password is
+        the way in and the overlay already asks for it. Conflating the two
+        would offer a recovery path to somebody who only needs to type.
+        """
+        if not self.exists() or self._entries is not None:
+            return ""
+        if self.mode() == MODE_PASSWORD:
+            return ""
+        try:
+            self.unlock()
+            return ""
+        except VaultError as exc:
+            return str(exc)
+
     def status(self) -> dict:
         """Summary for the UI and the /api/vault/status endpoint."""
+        reason = self.unreadable_reason()
         return {
             "exists":          self.exists(),
             "mode":            self.mode(),
             "locked":          self.is_locked(),
             "dpapi_available": dpapi_available(),
             "entry_count":     len(self._entries) if self._entries is not None else None,
+            # The vault is here and this machine cannot open it. Distinct from
+            # `locked`, which a password fixes.
+            "unreadable":        bool(reason),
+            "unreadable_reason": reason,
         }
 
     # -- unlocking -----------------------------------------------------------
@@ -429,15 +473,20 @@ class Vault:
         self._atomic_write(document)
         self._entries = entries
 
-    def _atomic_write(self, document: dict) -> None:
+    def _atomic_write(self, document: dict, target=None) -> None:
         """
         Write via a temporary file and replace.
 
         A half-written vault is unrecoverable — losing power mid-write would
         otherwise cost every stored secret — so the new file is completed
         before it takes the place of the old one.
+
+        ``target`` lets a backup take the same route (#565). A backup file
+        holds every secret in the installation and deserves the same care as
+        the vault itself; a second, simpler write path here would be one that
+        had not learned this lesson.
         """
-        target = self.path
+        target = self.path if target is None else Path(target)
         temporary = None
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -454,6 +503,162 @@ class Vault:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
             raise VaultError(f"Could not write the vault: {exc}") from exc
+
+    # -- portability (#565) --------------------------------------------------
+    #
+    # The DPAPI vault does not travel by design. That is the right default —
+    # a stolen stick is inert — but it left exactly one route off a machine:
+    # remember to switch to a master password *before* moving. Nobody does,
+    # and the failure is discovered one device at a time on the new laptop.
+    #
+    # A backup is the escape hatch that does not weaken the default: the
+    # secrets leave under a passphrase the user chooses, and the vault on this
+    # machine stays tied to this machine.
+
+    @_locked
+    def export_backup(self, passphrase: str) -> dict:
+        """
+        The whole entry set, encrypted under *passphrase*.
+
+        One AEAD blob, exactly as the vault itself is stored, and for the same
+        reason: per-entry ciphertext would leak which keys exist and let
+        entries be swapped or replayed undetected.
+
+        Raises:
+            VaultError: No passphrase, or the vault cannot be read here — a
+                backup of secrets nobody can decrypt is worse than none, since
+                it looks like insurance.
+        """
+        if not passphrase:
+            raise VaultError("Choose a passphrase for the backup. It is the "
+                             "only thing protecting the file.")
+        entries = self._ensure_loaded()
+
+        # Said out loud, like the plaintext credential store is. This file
+        # holds every API key and every remembered device password in the
+        # installation, and the log is where somebody reconstructs what left
+        # the machine and when.
+        logger.warning(
+            "Exporting the whole vault — %d secret(s) — to a "
+            "passphrase-protected backup file, at the user's request",
+            len(entries))
+
+        return {
+            "kind":    BACKUP_KIND,
+            "version": VAULT_VERSION,
+            "created": datetime.datetime.now().isoformat(timespec="seconds"),
+            "entries": len(entries),
+            "payload": password_encrypt(json.dumps(entries).encode("utf-8"),
+                                        passphrase),
+        }
+
+    @_locked
+    def write_backup(self, folder, passphrase: str) -> Path:
+        """
+        Write a backup into *folder*, named for what it is.
+
+        `vault-backup-<date>.smv`, and never overwriting one already there: a
+        second export on the same day silently replacing the first is a backup
+        that is not one.
+        """
+        document = self.export_backup(passphrase)
+
+        directory = Path(folder)
+        stamp = datetime.date.today().isoformat()
+        target = directory / f"vault-backup-{stamp}{BACKUP_SUFFIX}"
+        attempt = 2
+        while target.exists():
+            target = directory / f"vault-backup-{stamp}-{attempt}{BACKUP_SUFFIX}"
+            attempt += 1
+
+        self._atomic_write(document, target)
+        logger.warning("Vault backup written to %s", target)
+        return target
+
+    @_locked
+    def import_backup(self, document: dict, passphrase: str,
+                      replace: bool = False) -> dict:
+        """
+        Restore a backup into whatever mode this machine's vault uses.
+
+        Merging by default: a second laptop usually has a key or two of its
+        own already, and replacing outright would take them with it. Replacing
+        is the explicit choice, and the only one available when the vault
+        already here cannot be read — a "merge" that silently discarded an
+        unreadable vault would be the destructive option wearing the safe
+        one's name.
+
+        Raises:
+            VaultError: Not a backup, wrong passphrase, an altered file, or a
+                vault here that cannot be written to.
+        """
+        if not isinstance(document, dict) or document.get("kind") != BACKUP_KIND:
+            raise VaultError("That is not a ShellMate vault backup.")
+
+        raw = password_decrypt(document.get("payload", {}), passphrase)
+        try:
+            incoming = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise VaultError("The backup decrypted to something unreadable.") from exc
+        if not isinstance(incoming, dict):
+            raise VaultError("The backup decrypted to something unreadable.")
+        incoming = {str(key): str(value) for key, value in incoming.items() if value}
+
+        if replace:
+            # Writing needs the password even when reading did not.
+            if self.mode() == MODE_PASSWORD and not self._password:
+                raise VaultError(
+                    "The vault here is protected by a master password that has "
+                    "not been entered, so nothing can be written to it. Unlock "
+                    "it first, or start a new vault and keep the old file aside.")
+            entries: dict[str, str] = {}
+        else:
+            try:
+                entries = dict(self._ensure_loaded())
+            except VaultError as exc:
+                raise VaultError(
+                    "This machine cannot read the vault already here, so merging "
+                    "into it would quietly lose whatever is in it. Choose to "
+                    "replace it instead — the old file is kept aside."
+                ) from exc
+
+        added = sum(1 for key in incoming if key not in entries)
+        changed = sum(1 for key, value in incoming.items()
+                      if key in entries and entries[key] != value)
+        entries.update(incoming)
+        self._write(entries)
+
+        logger.warning("Vault restored from a backup: %d entries %s",
+                       len(incoming), "replaced" if replace else "merged")
+        return {"restored": len(incoming), "added": added, "changed": changed,
+                "total": len(entries), "replaced": bool(replace)}
+
+    @_locked
+    def set_aside(self) -> Path | None:
+        """
+        Move an unreadable vault out of the way and start a new one (#565).
+
+        Renamed rather than deleted, always. The file cannot be read *here*,
+        which is not the same as being worthless: the machine or the account
+        that wrote it can still open it, and somebody who deleted it would
+        find that out afterwards.
+        """
+        if not self.exists():
+            self._entries = {}
+            return None
+
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        target = self.path.with_name(f"vault-unreadable-{stamp}.json")
+        try:
+            os.replace(self.path, target)
+        except OSError as exc:
+            raise VaultError(f"Could not set the vault aside: {exc}") from exc
+
+        self._entries = {}
+        self._password = None
+        logger.warning("Vault set aside as %s; a new one will be created on the "
+                       "next write", target.name)
+        return target
 
     # -- changing mode -------------------------------------------------------
 

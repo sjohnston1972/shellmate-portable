@@ -4215,6 +4215,33 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
   color: var(--error);
 }
 
+/* The two ways forward when the vault here cannot be read (#565). Stacked
+   rather than side by side: they are not a yes/no pair — one keeps the
+   secrets and one starts again, and reading both before choosing matters. */
+#vault-recovery {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.vault-recovery-why {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--on-surface-dim);
+  background: var(--warn-tint);
+  border: 1px solid var(--warn-edge);
+  border-radius: var(--radius-md);
+}
+
+#vault-recovery-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* Checkbox + label on one line, used for "remember these credentials". */
 .checkbox-row {
   display: flex;
@@ -7154,6 +7181,26 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
   color: var(--on-surface-dim);
 }
 
+/* Importing an estate from a spreadsheet (#535). The file button sits above
+   the paste box rather than beside it, because the two are alternatives and
+   a row of controls would read as "do both". */
+.csv-import-row {
+  margin: 0 0 12px;
+}
+
+.csv-import-row .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.csv-import-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--on-surface-dim);
+}
+
 /* A choice between two outcomes, each with its own sentence — deleting a
    group keeps its connections or takes them too (#360). Radios rather than
    a checkbox: neither outcome is a modifier on the other, and the safe one
@@ -8395,6 +8442,24 @@ body {
   background: var(--ok);
   border-color: var(--ok);
   box-shadow: 0 0 0 2px var(--ok-glow), 0 0 7px 1px var(--ok-glow);
+}
+
+/* The third state: answered a reachability check, but nothing is open (#538).
+   A ring rather than a filled dot, so it reads as one step short of live —
+   the device is there, you are not on it. Both colours come from the status
+   tokens for the reason the live dot's do: a green picked against the dark
+   theme is invisible on the light one. */
+.tree-leaf-dot.tree-leaf-reachable {
+  background: var(--ok-tint);
+  border-color: var(--ok);
+}
+
+/* Did not answer. Deliberately not the same weight as an error banner — a
+   site being down is information, and it is the hover text that says whether
+   the port was refused or the probe timed out. */
+.tree-leaf-dot.tree-leaf-unreachable {
+  background: var(--error-tint);
+  border-color: var(--error);
 }
 
 /* A group with something open in it (#198). The same vocabulary as the dot,

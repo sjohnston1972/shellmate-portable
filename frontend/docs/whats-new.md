@@ -6,6 +6,30 @@ exists.
 
 ## 1.1.3
 
+- **Import and export the estate as CSV.** Right-click the group tree's
+  background for **Import connections…** — paste rows from a spreadsheet or
+  choose a file — and **Export all as CSV…**; any group's own menu exports
+  that group and everything nested under it. A preview says how many rows
+  are new, how many are already saved, and names each one it could not read
+  before anything is written. A file carrying a `password` column is refused
+  outright rather than having the column quietly dropped.
+
+- **Check reachability** on a group, a connection, or a selection of them.
+  Every member is probed on its own port; the dot in the tree gains a third
+  state, the hover text says `port 22 open, SSH-2.0-Cisco-1.25, 38 ms` or
+  `port 22 refused`, and a summary says "47 of 50 reachable" and names the
+  ones that did not answer. It never runs on a timer, and an open port is
+  reported as an open port rather than as a healthy device.
+
+- **The vault can travel.** Settings → Credentials Vault gains **Export
+  backup…** and **Import backup…** — the whole vault under a passphrase you
+  choose, restorable into whatever mode the machine at the other end uses.
+  And when ShellMate finds a vault it cannot decrypt here — a stick carried
+  to a second laptop, or a different Windows account — it now says so at
+  startup and offers to import a backup or start a new vault, keeping the
+  old file aside, rather than quietly behaving as though the vault were
+  empty.
+
 - **Output watch.** A colour rule under Settings → Output Colours can now be
   marked **Alert**, with its own severity and cooldown. The pattern is matched
   on the server, against every open session, so a line that matters on a tab

@@ -971,6 +971,81 @@ async def vault_set_mode(request: VaultModeRequest) -> dict:
     return vault.status()
 
 
+class VaultBackupRequest(BaseModel):
+    """Body for POST /api/vault/backup."""
+
+    passphrase: str = ""
+
+
+class VaultRestoreRequest(BaseModel):
+    """Body for POST /api/vault/restore."""
+
+    #: The backup file's contents, read by the browser rather than uploaded.
+    text: str = ""
+    passphrase: str = ""
+    #: False merges into whatever is here; True replaces it outright.
+    replace: bool = False
+
+
+@app.post("/api/vault/backup")
+async def vault_backup(request: VaultBackupRequest) -> dict:
+    """
+    Write a passphrase-protected copy of the whole vault (#565).
+
+    Saved where the user chooses through the platform's folder dialog, and
+    into the data folder when there is no native window to raise one. The file
+    holds every secret in the installation, so it goes through the vault's own
+    atomic write and is named for what it is.
+    """
+    folder = ""
+    if desktop.has_native_window():
+        folder = await asyncio.to_thread(
+            desktop.pick_directory, "Save the vault backup to…")
+        if not folder:
+            return {"cancelled": True}
+    try:
+        target = await asyncio.to_thread(
+            vault.write_backup, folder or paths.data_dir(), request.passphrase)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if folder:
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(desktop.reveal, folder)
+    return {"path": str(target), "status": vault.status()}
+
+
+@app.post("/api/vault/restore")
+async def vault_restore(request: VaultRestoreRequest) -> dict:
+    """Merge or replace this machine's vault from a backup file (#565)."""
+    try:
+        document = json.loads(request.text or "")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="That file is not a ShellMate vault backup.") from exc
+    try:
+        result = await asyncio.to_thread(
+            vault.import_backup, document, request.passphrase, request.replace)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {**result, "status": vault.status()}
+
+
+@app.post("/api/vault/set-aside")
+async def vault_set_aside() -> dict:
+    """
+    Rename a vault this machine cannot read and start a new one (#565).
+
+    Renamed, never deleted: unreadable here is not unreadable everywhere, and
+    the account that wrote it can still open it.
+    """
+    try:
+        target = await asyncio.to_thread(vault.set_aside)
+    except VaultError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"path": str(target) if target else "", "status": vault.status()}
+
+
 class ProfileCredentialsRequest(BaseModel):
     """Body for PUT /api/profiles/{id}/credentials."""
 
@@ -1679,6 +1754,68 @@ async def discovery_save(request: DiscoverySaveRequest) -> dict:
     return result
 
 
+class ReachabilityRequest(BaseModel):
+    """Body for POST /api/reachability."""
+
+    #: A group, and everything nested under it.
+    group: str = ""
+    #: Or a hand-made selection, which wins where both are given.
+    profile_ids: list[str] = []
+
+
+def _reach_target(profile: dict) -> dict:
+    """One saved connection as something the prober can take."""
+    kind = (profile.get("connection_type") or "ssh").lower()
+    address = "" if kind == "serial" else (profile.get("hostname") or "").strip()
+    return {
+        "id":      profile.get("id", ""),
+        "name":    profile.get("name") or address or profile.get("serial_port", ""),
+        "address": address,
+        "port":    int(profile.get("port") or (23 if kind == "telnet" else 22)),
+        "kind":    kind,
+        "why":     "a serial console is a cable, not an address" if kind == "serial" else "",
+    }
+
+
+@app.post("/api/reachability")
+async def start_reachability(request: ReachabilityRequest) -> dict:
+    """
+    Check whether a group, or a selection, answers on its own ports (#538).
+
+    An explicit action and never a timer: two hundred sites probed on a
+    schedule is traffic somebody's IDS will report. It reuses the discovery
+    scan's concurrency, timeout and overall deadline, so a sweep cannot be
+    harsher than a scan by accident, and it says "port open" rather than
+    "healthy" — a device with a dead control plane still answers a TCP probe.
+    """
+    def _targets() -> list[dict]:
+        if request.profile_ids:
+            wanted = set(request.profile_ids)
+            chosen = [p for p in profiles_module.get_profiles() if p.get("id") in wanted]
+        elif request.group:
+            chosen = profiles_module.profiles_tagged(request.group, include_nested=True)
+        else:
+            chosen = []
+        return [_reach_target(profile) for profile in chosen]
+
+    targets = await asyncio.to_thread(_targets)
+    if not targets:
+        raise HTTPException(status_code=400,
+                            detail="There are no connections to check.")
+    sweep = discovery.start_sweep(targets, _discovery_settings(),
+                                  on_finish=profiles_module.record_last_seen)
+    return sweep.state()
+
+
+@app.get("/api/reachability/{sweep_id}")
+async def reachability_progress(sweep_id: str) -> dict:
+    """Progress and results so far. Results appear as they arrive."""
+    sweep = discovery.get_sweep(sweep_id)
+    if sweep is None:
+        raise HTTPException(status_code=404, detail="That check is no longer held.")
+    return sweep.state()
+
+
 # ---------------------------------------------------------------------------
 # Feedback (#370)
 # ---------------------------------------------------------------------------
@@ -2349,6 +2486,78 @@ async def create_profile(request: SaveProfileRequest) -> dict:
             logger.debug("Could not name the new profile after the device: %s", exc)
 
     return profile
+
+
+class ProfileImportRequest(BaseModel):
+    """Body for POST /api/profiles/import."""
+
+    #: The CSV itself — pasted from a spreadsheet or read from a file.
+    text: str = ""
+    #: False previews, True writes. The same parse either way, so the counts
+    #: shown before cannot disagree with what happens after.
+    apply: bool = False
+
+
+class ProfileExportRequest(BaseModel):
+    """Body for POST /api/profiles/export."""
+
+    #: One group and everything nested under it. Empty means the estate.
+    group: str = ""
+
+
+@app.post("/api/profiles/import")
+async def import_profiles(request: ProfileImportRequest) -> dict:
+    """
+    Read an estate out of a CSV (#535), previewing it or saving it.
+
+    A file carrying a password column is refused outright rather than having
+    the column stripped — see profiles.import_csv.
+    """
+    try:
+        return await asyncio.to_thread(
+            profiles_module.import_csv, request.text, request.apply)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/profiles/export.csv")
+async def export_profiles_csv(group: str = "") -> Response:
+    """The estate, or one group, as CSV. Never carries a secret."""
+    text = await asyncio.to_thread(profiles_module.export_csv, group)
+    stem = "shellmate-" + (re.sub(r"[^a-z0-9._-]+", "-", group.lower()) or "connections")
+    return Response(
+        content=text, media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{stem}.csv"'})
+
+
+@app.post("/api/profiles/export")
+async def save_profiles_csv(request: ProfileExportRequest) -> dict:
+    """
+    Save the CSV where the user chooses, through the platform's own folder
+    dialog — the shape POST /api/logs/{filename}/save established, because in
+    the native window a browser download does nothing anybody can see.
+
+    Answers 409 without a native window, and the page falls back to fetching
+    /api/profiles/export.csv as a blob.
+    """
+    if not desktop.has_native_window():
+        raise HTTPException(status_code=409, detail="No native window; use the browser download.")
+    folder = await asyncio.to_thread(desktop.pick_directory, "Export connections to…")
+    if not folder:
+        return {"cancelled": True}
+
+    text = await asyncio.to_thread(profiles_module.export_csv, request.group)
+    stem = "shellmate-" + (re.sub(r"[^a-z0-9._-]+", "-", request.group.lower()) or "connections")
+    target = Path(folder) / f"{stem}.csv"
+    try:
+        # utf-8-sig: Excel reads a plain UTF-8 CSV as the system code page and
+        # mangles every non-ASCII device name in the estate.
+        await asyncio.to_thread(target.write_text, text, "utf-8-sig")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not write the file: {exc}") from exc
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(desktop.reveal, str(Path(folder)))
+    return {"path": str(target)}
 
 
 @app.delete("/api/profiles/untagged")

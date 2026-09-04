@@ -223,6 +223,8 @@ curl "http://127.0.0.1:8765/api/history/search?hostname=core-sw-01&q=interface"
 | `GET` | `/api/profiles` | Saved connections |
 | `POST` | `/api/profiles` | Save one — secrets are stripped, whatever you pass |
 | `DELETE` | `/api/profiles/{id}` | Delete one, and forget its password |
+| `POST` | `/api/profiles/import` | Read a CSV — `apply: false` previews, `true` writes. A `password` column is refused |
+| `GET` | `/api/profiles/export.csv` | The estate, or `?group=` and its subtree, as CSV. Never carries a secret |
 | `GET` | `/api/profiles/tags` | Every tag in use, with a count |
 | `PUT` | `/api/profiles/{id}/tags` | Replace a connection's tags |
 | `GET` | `/api/groups` | Every group on the dashboard |
@@ -246,6 +248,8 @@ curl "http://127.0.0.1:8765/api/history/search?hostname=core-sw-01&q=interface"
 | `POST` | `/api/discovery/scans/{id}/cancel` | Stop a sweep |
 | `DELETE` | `/api/discovery/scans/{id}` | Discard a finished one |
 | `POST` | `/api/discovery/save` | Save discovered devices as connections |
+| `POST` | `/api/reachability` | Probe a `group`, or `profile_ids`, on their own ports — returns at once |
+| `GET` | `/api/reachability/{id}` | Progress and results so far |
 
 ### Files and logs
 

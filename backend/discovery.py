@@ -540,3 +540,230 @@ async def _reverse_dns(address: str, timeout: float) -> str:
         return await asyncio.wait_for(asyncio.to_thread(_lookup), timeout)
     except asyncio.TimeoutError:
         return ""
+
+
+# ---------------------------------------------------------------------------
+# Reachability — is the site up, without opening fifty sessions (#538)
+#
+# The group menu offered Connect all and Disconnect all, so the only way to
+# learn whether a site was reachable was to log into all of it. This is the
+# morning-after-a-change question, and "is the WAN to site 112 down or is it
+# me", answered from the dashboard without a session.
+#
+# Three constraints, all of them the same ones the scan has:
+#
+# **Explicit only, never on a timer.** Two hundred sites probed on a schedule
+# is traffic somebody's IDS will report, and a background sweep nobody asked
+# for is exactly what "no ICMP, no privileges" was avoiding.
+#
+# **The scan's own concurrency and timeout.** One set of numbers, tuned once
+# in Stockton, so a sweep cannot be gentler or harsher than the scan by
+# accident.
+#
+# **"Port open", never "healthy".** A device with an open port and a dead
+# control plane answers this probe. The hover text says which port answered
+# and what it said, and stops there.
+# ---------------------------------------------------------------------------
+
+#: Live and recently finished sweeps, by id. In memory only, like the scans.
+_sweeps: dict[str, "Sweep"] = {}
+
+
+def _unreachable(why: str, started: float) -> dict:
+    return {"state": "unreachable", "why": why, "ms": _ms(started), "banner": ""}
+
+
+def _ms(started: float) -> int:
+    return round((time.perf_counter() - started) * 1000)
+
+
+def _why(exc: OSError) -> str:
+    """Why a connection did not open, in words rather than an errno."""
+    if isinstance(exc, socket.gaierror):
+        return "name did not resolve"
+    return ((getattr(exc, "strerror", "") or str(exc) or "unreachable")
+            .strip().lower()[:60])
+
+
+async def reachable(address: str, port: int, timeout: float) -> dict:
+    """
+    One TCP probe: whether the port answered, how long it took, what it said.
+
+    Deliberately distinguishes refused from timed out, which `_connect()` does
+    not. To the scan they are both "nothing here"; here they are the two
+    different answers somebody is asking for — refused is a device that is up
+    with the service off, and a timeout is a device or a path that is not
+    there at all.
+    """
+    started = time.perf_counter()
+    writer = None
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(address, port), timeout=timeout)
+    except ConnectionRefusedError:
+        return _unreachable("refused", started)
+    # TimeoutError is an OSError in 3.11+, so it has to be caught first or
+    # every timeout would be reported by its strerror instead.
+    except (asyncio.TimeoutError, TimeoutError):
+        return _unreachable("timeout", started)
+    except OSError as exc:
+        return _unreachable(_why(exc), started)
+    except ValueError:
+        return _unreachable("not an address", started)
+
+    # Measured at the handshake, before the banner read: how long the device
+    # took to answer is the number worth showing, and waiting on a banner it
+    # may never send would inflate every reading.
+    took = _ms(started)
+
+    # Read whatever the far end says first, whatever the port number. A saved
+    # connection is SSH or telnet, both of which speak first — and it is as
+    # likely to be on 2022 as on 22, so keying this on SSH_PORTS would leave
+    # the hover text blank for exactly the estates that renumber. The read is
+    # short and separately bounded: a port that accepts and stays silent must
+    # not hold a concurrency slot for the whole per-probe budget.
+    banner = ""
+    try:
+        data = await asyncio.wait_for(reader.read(256), timeout=min(timeout, 1.5))
+        banner = data.decode("utf-8", errors="replace").strip()[:80]
+    except (OSError, asyncio.TimeoutError):
+        pass
+
+    try:
+        writer.close()
+        await asyncio.wait_for(writer.wait_closed(), timeout=1.0)
+    except (OSError, asyncio.TimeoutError):
+        pass
+
+    return {"state": "up", "why": "", "ms": took, "banner": banner}
+
+
+class Sweep:
+    """One reachability check over a list of saved connections."""
+
+    def __init__(self, targets: list[dict], settings: dict):
+        self.id = str(uuid.uuid4())
+        self.targets = targets
+        self.settings = settings
+
+        self.started = time.time()
+        self.finished: float | None = None
+        self.checked = 0
+        self.current = ""
+        self.results: list[dict] = []
+        self.cancelled = False
+        #: The task running it, held so asyncio's weak reference cannot let
+        #: the sweep be collected halfway through.
+        self.task = None
+
+    @property
+    def running(self) -> bool:
+        return self.finished is None and not self.cancelled
+
+    def state(self) -> dict:
+        """Everything the tree needs to paint itself and say how it went."""
+        counted: dict[str, int] = {}
+        for result in self.results:
+            counted[result["state"]] = counted.get(result["state"], 0) + 1
+        return {
+            "id":            self.id,
+            "running":       self.running,
+            "cancelled":     self.cancelled,
+            "total":         len(self.targets),
+            "checked":       self.checked,
+            "up":            counted.get("up", 0),
+            "unreachable":   counted.get("unreachable", 0),
+            "not_probeable": counted.get("not-probeable", 0),
+            "unknown":       counted.get("unknown", 0),
+            "current":       self.current,
+            "elapsed":       round((self.finished or time.time()) - self.started, 1),
+            "results":       list(self.results),
+        }
+
+
+def start_sweep(targets: list[dict], settings: dict, on_finish=None) -> Sweep:
+    """
+    Register a reachability sweep and start it. Returns immediately.
+
+    ``targets`` are ``{id, name, address, port, kind}``; an empty address is a
+    connection there is nothing to probe. ``on_finish`` is handed
+    ``{profile_id: timestamp}`` for everything that answered, off the event
+    loop — the callback rather than a direct call so this module stays a
+    prober and knows nothing about where profiles are kept.
+    """
+    sweep = Sweep(targets, settings)
+    _sweeps[sweep.id] = sweep
+    _forget_old_sweeps()
+
+    # The task is held on the sweep. asyncio keeps only a weak reference to a
+    # running task, so a bare create_task() can be collected mid-sweep and the
+    # progress simply stops advancing with nothing to see.
+    sweep.task = asyncio.create_task(_run_sweep(sweep, on_finish))
+    logger.info("Reachability sweep %s started over %d connection(s)",
+                sweep.id[:8], len(targets))
+    return sweep
+
+
+def get_sweep(sweep_id: str) -> Sweep | None:
+    return _sweeps.get(sweep_id)
+
+
+def _forget_old_sweeps() -> None:
+    done = sorted((s for s in _sweeps.values() if not s.running),
+                  key=lambda s: s.finished or 0)
+    for sweep in done[:-_KEEP_FINISHED] if len(done) > _KEEP_FINISHED else []:
+        _sweeps.pop(sweep.id, None)
+
+
+async def _run_sweep(sweep: Sweep, on_finish=None) -> None:
+    """Probe every member, bounded by the scan's own concurrency and deadline."""
+    limit = asyncio.Semaphore(max(1, int(sweep.settings["concurrency"])))
+    deadline = sweep.started + float(sweep.settings["max_seconds"])
+    timeout = float(sweep.settings["timeout"])
+
+    async def one(target: dict) -> None:
+        async with limit:
+            if not (target.get("address") or "").strip():
+                # A serial console is a cable, not an address. Reported rather
+                # than skipped: a row silently missing from the results reads
+                # as a device that was checked and said nothing.
+                outcome = {"state": "not-probeable", "banner": "", "ms": 0,
+                           "why": target.get("why") or "nothing to probe"}
+            elif sweep.cancelled or time.time() > deadline:
+                outcome = {"state": "unknown", "why": "not checked",
+                           "ms": 0, "banner": ""}
+            else:
+                sweep.current = target["address"]
+                try:
+                    outcome = await reachable(
+                        target["address"], int(target.get("port") or 22), timeout)
+                except Exception as exc:
+                    # One malformed target must not end the sweep, for the
+                    # same reason a scan of a hand-typed range must not.
+                    logger.debug("Reachability probe of %s failed: %s",
+                                 target.get("address"), exc)
+                    outcome = {"state": "unreachable", "why": "could not be probed",
+                               "ms": 0, "banner": ""}
+            sweep.checked += 1
+            sweep.results.append({**target, **outcome})
+
+    await asyncio.gather(*(one(target) for target in sweep.targets))
+
+    if not sweep.cancelled:
+        sweep.finished = time.time()
+    sweep.current = ""
+
+    # When each one was last known to be there, written once for the lot.
+    when = sweep.finished or time.time()
+    seen = {result["id"]: when for result in sweep.results
+            if result["state"] == "up" and result.get("id")}
+    if seen and on_finish is not None:
+        try:
+            await asyncio.to_thread(on_finish, seen)
+        except Exception as exc:
+            # Recording last_seen is a nicety; failing at it must not lose the
+            # answer somebody is waiting for.
+            logger.debug("Could not record last_seen: %s", exc)
+
+    logger.info("Reachability sweep %s finished: %d of %d answered",
+                sweep.id[:8], sweep.state()["up"], len(sweep.targets))

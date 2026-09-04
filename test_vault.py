@@ -11,6 +11,7 @@ Runs against a temporary data directory, so the real vault is never touched.
     python test_vault.py
 """
 
+import base64
 import json
 import shutil
 import sys
@@ -424,6 +425,169 @@ def test_locked_vault_degrades_gracefully() -> None:
         shutil.rmtree(directory, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# Portability (#565)
+#
+# The DPAPI vault does not travel by design, and the only route off a machine
+# used to be remembering to switch to a master password *before* moving. What
+# has to hold here: the backup carries every secret and none of them in the
+# clear, restoring cannot silently discard what is already on the machine, and
+# a vault this machine cannot read reports itself as unreadable rather than
+# quietly behaving as an empty one.
+# ---------------------------------------------------------------------------
+
+
+def test_backup_round_trip() -> None:
+    print("\n-- A backup that travels --")
+
+    source, folder = fresh_vault()
+    source.unlock()
+    source.set_mode(MODE_PASSWORD, "master-pw")
+    source.set_many({"profile:1:password": SECRET, "api:anthropic": "sk-test-key"})
+
+    document = source.export_backup("a good backup passphrase")
+    check("the backup says what it is",
+          document["kind"] == "shellmate-vault-backup", str(document.get("kind")))
+    check("and carries no plaintext at all",
+          SECRET not in json.dumps(document), "the secret is in the document")
+
+    written = source.write_backup(folder, "a good backup passphrase")
+    check("named for what it is",
+          written.name.startswith("vault-backup-") and written.suffix == ".smv",
+          written.name)
+    check("nothing readable on disk either",
+          SECRET not in written.read_text(encoding="utf-8"))
+    # The vault's own atomic write, not a second simpler one that had not
+    # learned the lesson: a half-written file holding every secret is worse
+    # than no file.
+    check("and no half-written temporary is left behind",
+          not [p for p in folder.iterdir() if p.name.startswith(".vault.")],
+          str([p.name for p in folder.iterdir()]))
+
+    again = source.write_backup(folder, "a good backup passphrase")
+    check("a second export the same day does not overwrite the first",
+          again != written and written.exists(),
+          f"{written.name} then {again.name}")
+
+    # A different machine, in a different mode, with a key of its own.
+    target, _ = fresh_vault()
+    target.unlock()
+    target.set_mode(MODE_PASSWORD, "another-master")
+    target.set_many({"local-only": "kept"})
+
+    check("a wrong passphrase is refused",
+          _raises(lambda: target.import_backup(document, "not it"), "incorrect"))
+    check("and so is a file that is not a backup",
+          _raises(lambda: target.import_backup({"hello": "world"}, "x"),
+                  "not a shellmate vault backup"))
+
+    result = target.import_backup(document, "a good backup passphrase")
+    check("a merge brings the backup in", result["restored"] == 2, str(result))
+    check("and keeps what was already here",
+          target.get("local-only") == "kept" and target.get("profile:1:password") == SECRET,
+          str(sorted(target.keys())))
+
+    # It landed in this machine's mode, not the one it was exported from.
+    stored = json.loads(target.path.read_text(encoding="utf-8"))
+    check("restored into whatever mode this machine uses",
+          stored["mode"] == MODE_PASSWORD, str(stored.get("mode")))
+    check("and is still encrypted on disk",
+          SECRET not in target.path.read_text(encoding="utf-8"))
+
+    replaced = target.import_backup(document, "a good backup passphrase", replace=True)
+    check("replacing keeps only what the backup held",
+          replaced["replaced"] is True and target.get("local-only") == "",
+          str(sorted(target.keys())))
+
+
+def test_an_unreadable_vault_says_so() -> None:
+    """
+    The failure this exists for: a stick moved to a second laptop.
+
+    Every read degraded to "no value", which is right for a locked vault and
+    wrong for one that cannot be opened at all — the user found out one device
+    at a time.
+    """
+    print("\n-- A vault this machine cannot read --")
+
+    instance, directory = fresh_vault()
+    # A DPAPI blob this machine did not write. Windows refuses it; elsewhere
+    # DPAPI is unavailable — both are "cannot be read here".
+    instance.path.write_text(json.dumps({
+        "version": 1, "mode": MODE_DPAPI,
+        "payload": base64.b64encode(b"not a blob this account produced").decode(),
+    }), encoding="utf-8")
+
+    status = instance.status()
+    check("the status says it is unreadable", status["unreadable"] is True, str(status))
+    check("with the reason, so the overlay can show it",
+          bool(status["unreadable_reason"]), str(status))
+    check("and it is not reported as merely locked",
+          status["locked"] is False, str(status))
+    # Reading still degrades rather than raising: a vault nobody can open must
+    # never stop somebody reaching a device.
+    check("reading it still degrades to no value",
+          instance.get("anything") == "", instance.get("anything"))
+
+    aside = instance.set_aside()
+    check("setting it aside renames rather than deletes",
+          aside is not None and aside.exists() and not instance.path.exists(),
+          str(aside))
+    check("the kept file says what it is",
+          aside.name.startswith("vault-unreadable-"), aside.name)
+    check("and the vault is readable again, empty",
+          instance.status()["unreadable"] is False and instance.keys() == [],
+          str(instance.status()))
+
+    shutil.rmtree(directory, ignore_errors=True)
+
+
+def test_a_locked_vault_is_not_an_unreadable_one() -> None:
+    """Conflating the two would offer a recovery path to somebody who only
+    needs to type their password — and the recovery path starts a new vault."""
+    print("\n-- Locked is not unreadable --")
+
+    instance, directory = fresh_vault()
+    instance.unlock()
+    instance.set_mode(MODE_PASSWORD, "master-pw")
+    instance.set("api:anthropic", SECRET)
+    instance.lock()
+
+    status = instance.status()
+    check("a master-password vault reports itself locked",
+          status["locked"] is True, str(status))
+    check("and never unreadable", status["unreadable"] is False, str(status))
+
+    instance.unlock("master-pw")
+    check("unlocking clears both", instance.status()["locked"] is False
+          and instance.status()["unreadable"] is False, str(instance.status()))
+
+    shutil.rmtree(directory, ignore_errors=True)
+
+
+def test_a_backup_of_a_vault_that_cannot_be_read_is_refused() -> None:
+    """A backup of secrets nobody can decrypt looks like insurance and is not."""
+    print("\n-- No backup of what cannot be opened --")
+
+    instance, directory = fresh_vault()
+    instance.path.write_text(json.dumps({
+        "version": 1, "mode": MODE_DPAPI,
+        "payload": base64.b64encode(b"foreign").decode(),
+    }), encoding="utf-8")
+
+    check("exporting without a passphrase is refused",
+          _raises(lambda: instance.export_backup(""), "passphrase"))
+    # The message differs by platform — Windows says the blob belongs to
+    # another account, elsewhere DPAPI is simply unavailable — but both are
+    # "this cannot be opened here", and neither may produce a backup.
+    refused = (_raises(lambda: instance.export_backup("anything"), "cannot be read")
+               or _raises(lambda: instance.export_backup("anything"),
+                          "only available on windows"))
+    check("and so is exporting a vault that cannot be decrypted here", refused)
+
+    shutil.rmtree(directory, ignore_errors=True)
+
+
 def _raises(fn, fragment: str) -> bool:
     """True if fn raises VaultError whose message contains *fragment*."""
     try:
@@ -452,6 +616,10 @@ def main() -> int:
         test_plaintext_credentials,
         test_api_never_leaks_secrets,
         test_locked_vault_degrades_gracefully,
+        test_backup_round_trip,
+        test_an_unreadable_vault_says_so,
+        test_a_locked_vault_is_not_an_unreadable_one,
+        test_a_backup_of_a_vault_that_cannot_be_read_is_refused,
     ):
         try:
             test()
