@@ -673,6 +673,29 @@ async def run():
             fail("the toggles are left as they were found", str(e))
 
         # ------------------------------------------------------------------
+        # Per-session logging (#534)
+        #
+        # The chip is only meaningful with a session writing to a file, which
+        # needs a device. What can be held here is the shape: it is absent
+        # until something says otherwise, and the file it points at can be
+        # opened from one place rather than three.
+        # ------------------------------------------------------------------
+        print("\n-- Logging one session --")
+
+        try:
+            await expect(page.locator("#status-logging-wrap")).to_be_hidden()
+            ok("nothing claims to be logging before anything is")
+        except Exception as e:
+            fail("nothing claims to be logging before anything is", str(e))
+
+        try:
+            has = await page.evaluate("() => typeof window.viewLogFile")
+            assert has == "function", has
+            ok("one log file can be opened by name")
+        except Exception as e:
+            fail("one log file can be opened by name", str(e))
+
+        # ------------------------------------------------------------------
         print("\n-- Console errors --")
 
         ignored = {"favicon"}

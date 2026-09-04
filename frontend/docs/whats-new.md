@@ -14,6 +14,15 @@ exists.
   nothing else, which is `| include` for output that has already gone past.
   Click a line to take the terminal to it, or copy the lot.
 
+- **Log one session, from its own tab menu — and save the scrollback of one
+  that was not logged.** **Log this session** starts or stops a file for that
+  tab alone, immediately, and says whether it is on for this tab or simply
+  following the global switch; the status bar shows a **Logging** chip while
+  something is being written, and clicking it opens the file. For the tab
+  nobody thought to log, **Save scrollback as…** writes what the terminal is
+  still holding — masked by the same *Obscure passwords and secrets* setting,
+  and it works on a disconnected tab too.
+
 - **A connection can type its own first four commands.** Expand **On-connect
   commands** in the connection dialog and give it `enable`, `terminal
   monitor`, a screen width — whatever you type on that device every time. They

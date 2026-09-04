@@ -266,6 +266,33 @@ you chose, which may well be backed up. One switch, one promise.
 Separate from the history database, and off by default: plain text files, one
 per session, under **Settings → Session Logging**.
 
+### Logging one session
+
+The switch in Settings covers every open tab. **Log this session**, on a
+tab's right-click menu, is that decision for one tab: it says `on`, `off`, or
+`on (setting)` when it is simply following the global switch, and it takes
+effect immediately rather than at the next tab — "I want a record of this"
+usually arrives ten minutes into a change, not at connect.
+
+While a session is being written to a file, the status bar shows a **Logging**
+chip; click it to read the file. **Open this log** on the tab menu does the
+same, and the tab's hover card names the file.
+
+A log holds what the session prints *from the moment logging starts*. What is
+already on screen is not in it — that is what the next section is for.
+
+### Saving what is already on screen
+
+**Save scrollback as…**, on the same menu, writes everything the terminal is
+still holding to a file: the change you have just finished, on the tab nobody
+thought to log. It works on a disconnected tab too, because the buffer is
+still there and a session that has just dropped is exactly when somebody
+wants a copy of what it said.
+
+It is masked by the same **Obscure passwords and secrets** setting below, and
+the masking happens in ShellMate rather than in the browser, so the file that
+lands on disk is the same either way.
+
 ### Credentials in anything that leaves the machine
 
 Devices echo. A password typed at a login prompt can end up in a file whose

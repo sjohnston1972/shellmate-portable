@@ -4048,6 +4048,60 @@ async def save_log_copy(filename: str) -> dict:
     return {"path": str(target)}
 
 
+class ScrollbackSaveRequest(BaseModel):
+    """Body for POST /api/scrollback/save."""
+    filename: str = "scrollback.log"
+    text: str = ""
+
+
+@app.post("/api/scrollback/save")
+async def save_scrollback(request: ScrollbackSaveRequest) -> dict:
+    """
+    Save what a terminal is holding to a file the user chooses (#534).
+
+    The tab nobody thought to log is the case this exists for: the change is
+    done, the evidence is on screen, and turning logging on now would record
+    only what happens next.
+
+    Redacted by the same one switch that covers session logs and captured
+    configurations. This writes device output to a file whose whole purpose
+    is to be handed to somebody else, which is exactly what that promise is
+    about — and redacting here rather than in the browser is what keeps it
+    true on both paths below.
+
+    Where there is a native window the platform's folder dialog runs, as it
+    does for a log copy (#578). Where there is not, the prepared text comes
+    back for the browser to download: a 409 with nothing in it would have
+    left the page to save the raw text it happens to be holding, which is the
+    one thing redaction is for.
+    """
+    text = request.text
+    if get_settings().get("logging", {}).get("redact_secrets", True):
+        text = await asyncio.to_thread(redact, text)
+
+    # Windows forbids <>:"/\|?* in filenames, and a detected IPv6 target
+    # carries colons — the same substitution the log writer makes.
+    name = re.sub(r'[<>:"/\\|?*]', "-", request.filename.strip()) or "scrollback"
+    if not name.endswith(".log"):
+        name += ".log"
+
+    if not desktop.has_native_window():
+        return {"filename": name, "text": text}
+
+    folder = await asyncio.to_thread(desktop.pick_directory, "Save the scrollback to…")
+    if not folder:
+        return {"cancelled": True}
+    target = Path(folder) / name
+    try:
+        await asyncio.to_thread(target.write_text, text, "utf-8", "replace")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Could not save the file: {exc}") from exc
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(desktop.reveal, str(Path(folder)))
+    return {"path": str(target)}
+
+
 @app.get("/api/logs/{filename}")
 async def download_log(filename: str) -> FileResponse:
     """
@@ -4169,7 +4223,12 @@ def _open_session_log(session: dict, session_id: str) -> None:
     line actually written should cost a file.
     """
     settings = get_settings()
-    if not settings.get("logging", {}).get("enabled"):
+    # The tab's own answer wins over the global switch (#534); None means it
+    # has not given one and follows the setting, exactly as keep_alive does.
+    override = session.get("log_override")
+    enabled = (bool(settings.get("logging", {}).get("enabled"))
+               if override is None else bool(override))
+    if not enabled:
         session["_log_path"] = None
         return
 
@@ -4517,13 +4576,39 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     # sent to the device — only the tracking ends.
                     await note_pending([session["alerts"].clear()])
 
-                elif msg_type == "logging_changed":
-                    # Sent by the browser when session logging is saved. One
+                elif msg_type in ("logging_changed", "logging"):
+                    # "logging_changed": the browser saved the setting. One
                     # round trip on a deliberate action, rather than reading
                     # settings.json for every chunk of device output — which
                     # is what this replaced.
+                    #
+                    # "logging": this tab's own answer (#534), the same shape
+                    # as keep_alive. Absent means "follow the setting"; True
+                    # and False are this tab's, which is the point — "start
+                    # logging this one now", ten minutes into a change on the
+                    # core, should not turn logging on for eleven other tabs.
+                    # A message with no `enabled` key only asks for the state,
+                    # so a reattached socket can learn it without wiping the
+                    # override the session is already carrying.
+                    if msg_type == "logging" and "enabled" in msg:
+                        wanted = msg.get("enabled")
+                        session["log_override"] = (
+                            None if wanted is None else bool(wanted))
                     await asyncio.to_thread(_close_session_log, session)
-                    session["_log_recheck"] = True
+                    # Decided now rather than at the next chunk of output, so
+                    # the answer sent back is the real one: a tab logging to
+                    # nothing while its menu says "on" is the failure this
+                    # whole feature is about noticing.
+                    await asyncio.to_thread(_open_session_log, session, session_id)
+                    session["_log_checked"] = True
+                    session.pop("_log_recheck", None)
+                    log_path = session.get("_log_path")
+                    await websocket.send_text(json.dumps({
+                        "type": "logging_state",
+                        "enabled": log_path is not None,
+                        "filename": log_path.name if log_path is not None else "",
+                        "override": session.get("log_override"),
+                    }))
 
                 elif msg_type == "watch_changed":
                     # Colour rules were saved. Same round trip, same reason

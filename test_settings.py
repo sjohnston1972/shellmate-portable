@@ -293,6 +293,96 @@ def test_every_tab_menu_entry_has_its_own_setting() -> None:
           f"no case for: {', '.join(unhandled)}")
 
 
+def test_logging_can_be_decided_per_session() -> None:
+    """
+    One tab's own answer, beside the global switch (#534).
+
+    Logging was one switch for every open session, so "start logging this
+    one now" — ten minutes into a change on the core — meant starting a file
+    for eleven other tabs as well. The override is resolved in the same place
+    the global is, because two places deciding one thing is how a tab ends up
+    saying "logging" while nothing is being written.
+    """
+    print("\n-- Logging, per session --")
+    from backend.app import _open_session_log
+
+    before = settings_store.get_settings().get("logging", {}).get("enabled")
+    try:
+        settings_store.update_settings({"logging": {"enabled": False}})
+
+        session: dict = {"hostname": "core-sw"}
+        _open_session_log(session, "abcd1234efgh")
+        check("with the setting off and no override, nothing is written",
+              session["_log_path"] is None, repr(session.get("_log_path")))
+
+        session["log_override"] = True
+        _open_session_log(session, "abcd1234efgh")
+        path = session["_log_path"]
+        check("this tab can say yes on its own",
+              path is not None and path.name == "abcd1234-core-sw.log",
+              repr(path))
+        check("into the log folder, like any other session log",
+              path is not None and path.parent == settings_store.log_directory(),
+              repr(path))
+
+        settings_store.update_settings({"logging": {"enabled": True}})
+        session["log_override"] = False
+        _open_session_log(session, "abcd1234efgh")
+        check("and it can say no while the setting says yes",
+              session["_log_path"] is None, repr(session.get("_log_path")))
+
+        session["log_override"] = None
+        _open_session_log(session, "abcd1234efgh")
+        check("no answer of its own follows the setting",
+              session["_log_path"] is not None)
+    finally:
+        settings_store.update_settings({"logging": {"enabled": bool(before)}})
+
+
+def test_saving_a_scrollback() -> None:
+    """
+    What is already on screen, written to a file (#534).
+
+    The half that matters is the redaction. This writes device output to a
+    file whose whole purpose is to be handed to somebody else, so it goes
+    through the one switch that covers session logs and captured
+    configurations — and it is done on the server, because the browser is
+    holding the raw text and must not be the thing that saves it.
+    """
+    print("\n-- Saving a scrollback --")
+    from fastapi.testclient import TestClient
+
+    from backend.app import app
+
+    client = TestClient(app, base_url="http://127.0.0.1")
+    typed = "core-sw#show run\n username neteng password 7 05080F1C2243\n"
+
+    before = settings_store.get_settings().get("logging", {}).get("redact_secrets")
+    try:
+        settings_store.update_settings({"logging": {"redact_secrets": True}})
+        # No native window in a test, so the prepared text comes back for the
+        # browser to save rather than a folder dialog being raised.
+        answer = client.post("/api/scrollback/save",
+                             json={"filename": 'core sw:1', "text": typed})
+        check("it answers", answer.status_code == 200, answer.text)
+        body = answer.json()
+        check("with a name a filesystem will accept",
+              body.get("filename") == "core sw-1.log", repr(body.get("filename")))
+        check("and the secret masked",
+              "05080F1C2243" not in body.get("text", ""), body.get("text"))
+        check("while the line itself is kept",
+              "username neteng" in body.get("text", ""), body.get("text"))
+
+        settings_store.update_settings({"logging": {"redact_secrets": False}})
+        raw = client.post("/api/scrollback/save",
+                          json={"filename": "core-sw", "text": typed}).json()
+        check("switched off, it is the text as it was",
+              "05080F1C2243" in raw.get("text", ""), raw.get("text"))
+    finally:
+        settings_store.update_settings(
+            {"logging": {"redact_secrets": True if before is None else bool(before)}})
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Settings")
@@ -308,6 +398,8 @@ def main() -> int:
         test_browsing_names_the_folder_that_is_missing,
         test_creating_a_missing_folder,
         test_every_tab_menu_entry_has_its_own_setting,
+        test_logging_can_be_decided_per_session,
+        test_saving_a_scrollback,
     ):
         try:
             test()

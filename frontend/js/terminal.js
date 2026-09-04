@@ -356,6 +356,22 @@
           }
           break;
 
+        case 'logging_state':
+          // Whether this session is being written to a file, and which one
+          // (#534). The answer comes from the backend rather than from the
+          // setting, because the tab's own override and the global switch
+          // both feed into it — and a chip that says "logging" while nothing
+          // is being written is worse than no chip at all.
+          window.dispatchEvent(new CustomEvent('shellmate:logging-state', {
+            detail: {
+              sessionId,
+              enabled:  !!msg.enabled,
+              filename: msg.filename || '',
+              override: msg.override === undefined ? null : msg.override,
+            }
+          }));
+          break;
+
         case 'pending_action':
           // Something is scheduled on this device — a reload, a commit
           // waiting to be confirmed. alerts.js owns what that looks like.
@@ -694,6 +710,11 @@
           cols: terminal.cols,
           rows: terminal.rows,
         }));
+        // Ask whether this session is being logged (#534). With no `enabled`
+        // key it only asks — the override lives on the session, so a socket
+        // that dropped and came back must learn the answer rather than
+        // assert one and wipe what the tab had chosen.
+        websocket.send(JSON.stringify({ type: 'logging' }));
       } catch (_) {}
       // Back. The count restarts so a later drop gets its full allowance,
       // and the tab stops saying "reattaching".

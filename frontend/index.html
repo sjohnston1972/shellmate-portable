@@ -388,6 +388,15 @@
               aria-label="Copy recent output">
         <span class="material-symbols-outlined">content_copy</span>
       </button>
+      <!-- Only while this session is actually being written to a file (#534),
+           so it is information rather than furniture. Wrapped with its
+           separator, like the usage reading, so hiding it leaves no bare
+           pipe behind. -->
+      <span id="status-logging-wrap" class="hidden"><span class="status-sep">|</span><button
+              type="button" id="status-logging" class="status-btn"
+              title="This session is being written to a file. Click to read it."
+              aria-label="Open this session's log"><span
+              class="material-symbols-outlined">description</span> Logging</button></span>
       <span class="status-sep">|</span>
       <span id="status-tabs">Tabs: 0</span>
       <span class="status-sep">|</span>
