@@ -1483,6 +1483,211 @@
     connectSpinner.classList.toggle('hidden', !loading);
   }
 
+  // -------------------------------------------------------------------------
+  // Quick connect — a typed target rather than a saved one (#533)
+  // -------------------------------------------------------------------------
+
+  /** A bare IPv4 address: unambiguous enough to offer connecting to. */
+  const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+
+  /** A serial port, either spelling. */
+  const SERIAL_RE = /^(?:COM\d+|\/dev\/tty\S+)$/i;
+
+  /**
+   * Read a typed target: `admin@10.1.20.5:2022`, `telnet 10.1.1.1 2003`,
+   * `COM5 115200`, or a bare address.
+   *
+   * Returns null for anything that is not *unambiguously* a target, and that
+   * restraint is the whole design. The palette is a tab finder first; if
+   * every half-typed word offered "Connect to sw" the connect row would be
+   * on screen permanently and mean nothing. So something has to say so — a
+   * transport word, a username, a port, a COM port, or an IP address.
+   *
+   * IPv6 is not parsed. A raw `::1` is colons all the way down and cannot be
+   * told from host:port without brackets nobody types into a search box; the
+   * connection dialog takes one perfectly well.
+   */
+  function parseTarget(text) {
+    const raw = String(text || '').trim();
+    if (!raw || raw.length > 200) return null;
+
+    let parts = raw.split(/\s+/);
+    let type = '';
+    const lead = parts[0].toLowerCase();
+    if (lead === 'ssh' || lead === 'telnet' || lead === 'serial') {
+      type = lead;
+      parts = parts.slice(1);
+    }
+    if (!parts.length || !parts[0]) return null;
+
+    // `-p 2022`, the way ssh spells it.
+    let port = 0;
+    const flag = parts.indexOf('-p');
+    if (flag >= 0 && parts[flag + 1]) {
+      port = parseInt(parts[flag + 1], 10) || 0;
+      parts.splice(flag, 2);
+    }
+    if (!parts.length) return null;
+
+    let host = parts[0];
+
+    // Serial, by explicit word or by the shape of the port name. The second
+    // word is the baud rate — `COM5 115200` is how a console is described
+    // out loud, so it is what people type.
+    if (type === 'serial' || SERIAL_RE.test(host)) {
+      const baud = parseInt(parts[1], 10);
+      return {
+        connection_type: 'serial',
+        serial_port: host,
+        baud_rate: (Number.isFinite(baud) && baud > 0) ? baud : 9600,
+        label: host,
+        explicit: true,
+      };
+    }
+
+    // `telnet 10.1.1.1 2003` — a terminal server port, and the commonest
+    // reason anybody types a port at all.
+    if (!port && parts[1] && /^\d{1,5}$/.test(parts[1])) {
+      port = parseInt(parts[1], 10);
+    }
+
+    let username = '';
+    const at = host.lastIndexOf('@');
+    if (at > 0) {
+      username = host.slice(0, at);
+      host = host.slice(at + 1);
+    }
+
+    // Exactly one colon, or it is an IPv6 address rather than host:port.
+    if (!port && host.split(':').length === 2) {
+      const [name, tail] = host.split(':');
+      if (/^\d{1,5}$/.test(tail)) {
+        host = name;
+        port = parseInt(tail, 10);
+      }
+    }
+
+    if (!host || /[\s\/\\]/.test(host)) return null;
+    if (port < 0 || port > 65535) return null;
+
+    // The gate. Without one of these, this is a search term.
+    const named = Boolean(type) || Boolean(username) || Boolean(port)
+                  || IPV4_RE.test(host);
+    if (!named) return null;
+
+    const kind = type === 'telnet' ? 'telnet' : 'ssh';
+    return {
+      connection_type: kind,
+      hostname: host,
+      port: port || DEFAULT_PORTS[kind],
+      username,
+      label: host,
+      explicit: Boolean(type),
+    };
+  }
+
+  /** How the target will be dialled, in one line, for the palette row. */
+  function describeTarget(target) {
+    if (!target) return '';
+    if (target.connection_type === 'serial') {
+      return `Serial · ${target.serial_port} · ${target.baud_rate} baud`;
+    }
+    const who = target.username ? `${target.username}@` : '';
+    return `${target.connection_type.toUpperCase()} · ${who}${target.hostname}:${target.port}`;
+  }
+
+  /**
+   * A saved connection for this target, if there is one.
+   *
+   * A saved profile wins, always. It carries the credentials, the group, the
+   * key and the jump host; connecting ad hoc to an address somebody has
+   * already set up properly would ask for a password they saved months ago.
+   */
+  function _savedForTarget(target) {
+    if (!target) return null;
+    const wanted = String(target.hostname || target.serial_port || '').toLowerCase();
+    return profileCache.find(p => {
+      if ((p.connection_type || 'ssh') !== target.connection_type) return false;
+      if (target.connection_type === 'serial') {
+        return String(p.serial_port || '').toLowerCase() === wanted;
+      }
+      if (String(p.hostname || '').toLowerCase() !== wanted) return false;
+      const savedPort = Number(p.port || DEFAULT_PORTS[p.connection_type] || 22);
+      if (savedPort !== Number(target.port)) return false;
+      // A username typed at the palette has to match, or two accounts on one
+      // device resolve to whichever profile happens to be first.
+      return !target.username
+        || String(p.username || '').toLowerCase() === target.username.toLowerCase();
+    }) || null;
+  }
+
+  /**
+   * Open a typed target (#533).
+   *
+   * The dialog appears only when there is something left to ask. A saved
+   * profile goes through openProfile(), which switches to an existing tab,
+   * connects when everything is saved, and falls back to the dialog when it
+   * is not. Telnet and serial need nothing beyond the address, so they
+   * connect. SSH needs a password, so it lands on the dialog with the
+   * password field focused and everything else filled in.
+   */
+  async function quickConnect(target) {
+    if (!target) return false;
+
+    const saved = _savedForTarget(target);
+    if (saved) {
+      await openProfile(saved, null);
+      return true;
+    }
+
+    const prefill = {
+      id: '',
+      name: '',
+      tags: [],
+      connection_type: target.connection_type,
+      hostname: target.hostname || '',
+      port: target.port || 0,
+      username: target.username || '',
+      serial_port: target.serial_port || '',
+      baud_rate: target.baud_rate || 9600,
+    };
+
+    if (target.connection_type !== 'ssh') {
+      try {
+        const { response, data } = await postSession({
+          connection_type: target.connection_type,
+          hostname:        target.hostname || '',
+          port:            target.port || 0,
+          username:        '',
+          display_label:   '',
+          serial_port:     target.serial_port || '',
+          baud_rate:       target.baud_rate || 9600,
+        });
+        if (response.ok) {
+          if (typeof window.createTab === 'function') window.createTab(data);
+          return true;
+        }
+        // Failed with the details already known: the dialog is where the
+        // message belongs, next to the fields that would fix it.
+        showConnectionDialog(prefill);
+        showError(data.detail || `Server error ${response.status}`);
+        return true;
+      } catch (err) {
+        showConnectionDialog(prefill);
+        showError(err.message || 'Could not connect.');
+        return true;
+      }
+    }
+
+    showConnectionDialog(prefill);
+    return true;
+  }
+
+  window.savedProfileForTarget = _savedForTarget;
+  window.parseConnectTarget = parseTarget;
+  window.describeConnectTarget = describeTarget;
+  window.quickConnect = quickConnect;
+
   window.showConnectionDialog  = showConnectionDialog;
   window.hideConnectionDialog  = hideConnectionDialog;
   window.renderWelcomeProfiles = renderWelcomeProfiles;

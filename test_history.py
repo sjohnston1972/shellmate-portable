@@ -395,6 +395,62 @@ def test_end_to_end_recording() -> None:
         shutil.rmtree(directory, ignore_errors=True)
 
 
+def test_command_recall() -> None:
+    """Ctrl+R's list: distinct commands per device, newest first (#522)."""
+    print("\n-- Command recall --")
+    instance, directory = fresh_store()
+    try:
+        record(instance, "s1", {"hostname": "glasgow-core", "display_label": "glasgow-core"},
+               IOS_SESSION)
+        record(instance, "s2", {"hostname": "srx-edge", "display_label": "srx-edge"},
+               JUNOS_SESSION)
+        # The same command again, on the same device and later, so the
+        # deduplication and the ordering both have something to do.
+        record(instance, "s3", {"hostname": "glasgow-core", "display_label": "glasgow-core"},
+               "glasgow-core#show ip interface brief\r\n"
+               "Interface              IP-Address      OK? Status\r\n"
+               "glasgow-core#show version\r\n"
+               "Cisco IOS Software, Version 15.2\r\n"
+               "glasgow-core#")
+
+        recalled = instance.recent_commands(hostname="glasgow-core")
+        commands = [entry["command"] for entry in recalled]
+        check("commands come back for the device", commands, str(recalled))
+        check("and only for that device",
+              all(entry["hostname"] == "glasgow-core" for entry in recalled),
+              str(recalled))
+        check("nothing from the other device is in the list",
+              "show chassis hardware" not in commands, str(commands))
+
+        check("a repeated command appears once",
+              commands.count("show ip interface brief") == 1, str(commands))
+        repeated = next(e for e in recalled if e["command"] == "show ip interface brief")
+        check("with a count of how often it ran", repeated["times"] == 2, str(repeated))
+
+        ran_at = [entry["ran_at"] for entry in recalled]
+        check("newest first", ran_at == sorted(ran_at, reverse=True), str(ran_at))
+
+        # The type-ahead filter, applied in SQL so the limit means something.
+        filtered = instance.recent_commands(hostname="glasgow-core", query="interface")
+        check("filtering narrows the list",
+              filtered and all("interface" in e["command"] for e in filtered),
+              str(filtered))
+        check("a filter matching nothing returns nothing",
+              instance.recent_commands(hostname="glasgow-core", query="zzznope") == [])
+
+        # A session whose device never announced a name gets everything.
+        everywhere = [e["command"] for e in instance.recent_commands()]
+        check("no hostname means every device",
+              "show chassis hardware" in everywhere and "show version" in everywhere,
+              str(everywhere))
+
+        check("a device with nothing recorded is empty, not an error",
+              instance.recent_commands(hostname="never-seen") == [])
+    finally:
+        instance.close()
+        shutil.rmtree(directory, ignore_errors=True)
+
+
 def main() -> int:
     print("=" * 52)
     print("  Session history and config drift tests")
@@ -407,6 +463,7 @@ def main() -> int:
         test_fts_query_escaping,
         test_session_listing_and_deletion,
         test_large_output_truncated,
+        test_command_recall,
         test_snapshots_and_diff,
         test_end_to_end_recording,
     ):

@@ -415,6 +415,86 @@ async def run():
             fail("Error bubble renders", str(e))
 
         # ------------------------------------------------------------------
+        # Quick connect (#533). Parsing is the risky half: the palette is a
+        # tab finder first, so a search term read as an address would offer
+        # to dial half a word, and an address read as a search term is the
+        # feature not existing. Both directions are asserted.
+        print("\n-- Quick connect parsing --")
+
+        parse_cases = [
+            # (typed, expected fields or None for "this is not a target")
+            ("10.1.20.5", {"connection_type": "ssh", "hostname": "10.1.20.5",
+                           "port": 22, "username": ""}),
+            ("admin@10.1.20.5:2022", {"connection_type": "ssh",
+                                      "hostname": "10.1.20.5", "port": 2022,
+                                      "username": "admin"}),
+            ("telnet 10.1.1.1 2003", {"connection_type": "telnet",
+                                      "hostname": "10.1.1.1", "port": 2003}),
+            ("telnet 10.1.1.1", {"connection_type": "telnet",
+                                 "hostname": "10.1.1.1", "port": 23}),
+            ("ssh core-sw -p 2200", {"connection_type": "ssh",
+                                     "hostname": "core-sw", "port": 2200}),
+            ("COM5 115200", {"connection_type": "serial",
+                             "serial_port": "COM5", "baud_rate": 115200}),
+            ("COM5", {"connection_type": "serial", "serial_port": "COM5",
+                      "baud_rate": 9600}),
+            # Not targets: the palette is a tab finder, and these are words.
+            ("glasgow", None),
+            ("core", None),
+            ("", None),
+            ("edge switch", None),
+        ]
+
+        for typed, expected in parse_cases:
+            try:
+                got = await page.evaluate(
+                    "text => window.parseConnectTarget(text)", typed)
+                if expected is None:
+                    assert got is None, f"{typed!r} was read as {got}"
+                else:
+                    assert got is not None, f"{typed!r} was not read as a target"
+                    for field, value in expected.items():
+                        assert got.get(field) == value, (
+                            f"{typed!r} -> {field}={got.get(field)!r}, "
+                            f"expected {value!r}")
+                ok(f"parses {typed!r}" if expected else f"ignores {typed!r}")
+            except Exception as e:
+                ok_name = f"parses {typed!r}" if expected else f"ignores {typed!r}"
+                fail(ok_name, str(e))
+
+        try:
+            described = await page.evaluate(
+                "() => window.describeConnectTarget("
+                "window.parseConnectTarget('admin@10.1.20.5:2022'))")
+            assert "10.1.20.5:2022" in described and "admin@" in described, described
+            ok("says exactly what will be dialled")
+        except Exception as e:
+            fail("says exactly what will be dialled", str(e))
+
+        try:
+            # The row itself, in the palette, from a typed address.
+            await page.evaluate("() => window.openTabPalette()")
+            await page.fill("#tab-palette input", "10.9.9.9")
+            await page.wait_for_timeout(100)
+            row = page.locator("#tab-palette .tab-palette-connect")
+            await expect(row).to_be_visible()
+            text = await row.inner_text()
+            assert "10.9.9.9" in text, text
+            ok("the palette offers a connect row for a typed address")
+        except Exception as e:
+            fail("the palette offers a connect row for a typed address", str(e))
+
+        try:
+            await page.fill("#tab-palette input", "glasgow")
+            await page.wait_for_timeout(100)
+            count = await page.locator("#tab-palette .tab-palette-connect").count()
+            assert count == 0, "a search term offered a connection"
+            await page.keyboard.press("Escape")
+            ok("but not for an ordinary search term")
+        except Exception as e:
+            fail("but not for an ordinary search term", str(e))
+
+        # ------------------------------------------------------------------
         print("\n-- Console errors --")
 
         ignored = {"favicon"}

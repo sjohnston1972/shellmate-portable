@@ -764,6 +764,76 @@ class SessionStore:
             session["commands"] = [dict(c) for c in commands]
             return session
 
+    def recent_commands(self, hostname: str = "", query: str = "",
+                        limit: int = 50) -> list[dict]:
+        """
+        Distinct commands run on a device, newest first (#522).
+
+        The recall list. Every serious terminal has per-host history and
+        ShellMate had the data with no way to reach it: the show commands you
+        ran on this switch last month are the ones you want again.
+
+        Deduplicated, because the point is a list of *commands* rather than a
+        list of occurrences — `show ip int brief` run forty times is one line
+        with a count beside it, not forty identical rows.
+
+        Args:
+            hostname: Restrict to one device. Empty means every device, which
+                      is what a session whose hostname is not yet known gets.
+            query:    Substring of the command. Matched here rather than in
+                      the browser so the limit applies to what matched.
+            limit:    Most commands returned.
+
+        Returns:
+            ``{command, ran_at, times, hostname}`` — ran_at being the most
+            recent run, which is what the ordering is on.
+        """
+        # Reads share the one connection with the writer, so they take the
+        # same lock. check_same_thread=False disables Python's guard; it does
+        # not make the connection safe. These run on asyncio worker threads
+        # while the terminal loop is committing from its own.
+        with self._lock:
+            connection = self.connect()
+            # Over `command` only — never `output`. Scanning output on a
+            # type-ahead is what #459 measured at 700 ms while holding the
+            # lock every live session's writes wait on.
+            sql = """
+                SELECT c.command                  AS command,
+                       MAX(c.ran_at)              AS ran_at,
+                       COUNT(*)                   AS times,
+                       MAX(s.hostname)            AS hostname
+                FROM commands c
+                JOIN sessions s ON s.id = c.session_id
+                WHERE c.command != ''
+            """
+            params: list[Any] = []
+            if hostname:
+                sql += " AND s.hostname = ?"
+                params.append(hostname)
+            if query:
+                sql += " AND c.command LIKE ?"
+                params.append(f"%{query}%")
+            sql += " GROUP BY c.command ORDER BY ran_at DESC LIMIT ?"
+            params.append(min(max(limit, 1), 500))
+
+            try:
+                rows = connection.execute(sql, params).fetchall()
+            except sqlite3.Error as exc:
+                # Recall is a convenience. A database that cannot answer must
+                # not be an error anybody sees at a prompt.
+                logger.warning("Command recall failed: %s", exc)
+                return []
+
+            return [
+                {
+                    "command":  row["command"],
+                    "ran_at":   row["ran_at"],
+                    "times":    row["times"],
+                    "hostname": row["hostname"] or "",
+                }
+                for row in rows
+            ]
+
     def known_hostnames(self) -> list[str]:
         """Every device seen, for the history filter."""
         # Reads share the one connection with the writer, so they take the

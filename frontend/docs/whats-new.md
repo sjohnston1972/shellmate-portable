@@ -6,6 +6,23 @@ exists.
 
 ## 1.1.3
 
+- **Output watch.** A colour rule under Settings → Output Colours can now be
+  marked **Alert**, with its own severity and cooldown. The pattern is matched
+  on the server, against every open session, so a line that matters on a tab
+  you are not looking at reaches you anyway — with the window hidden, a
+  critical one raises a notification from the tray.
+
+- **Command recall.** `Ctrl+R` in a terminal lists every command already run
+  on that device, newest first and deduplicated — Enter puts one at the
+  prompt, Ctrl+Enter runs it. A history search result whose device is open
+  gains the same two buttons, aimed at the tab matching its recorded
+  hostname rather than at whichever tab is in front of you.
+
+- **Quick connect.** `Ctrl+P` now takes an address as well as a tab name:
+  `10.1.20.5`, `admin@host:2022`, `telnet host 2003` or `COM5 115200`. The
+  first row shows exactly what will be dialled, a saved connection for the
+  same address wins and opens with its own credentials, and an address
+  already in your clipboard is filled in for you.
 - **The assistant can see what changed.** The configuration diff from the
   connect-time drift check now travels with your questions, and an **Explain**
   button in the diff window asks what the changes do and whether they could

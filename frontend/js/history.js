@@ -332,6 +332,9 @@
       // search result — it is why they went looking (#273). stopPropagation,
       // or the row's own click would open the replay behind the copy.
       head.appendChild(_copyButton('Copy the command', hit.command));
+      // And, when this device is open in front of you, the two things
+      // actually wanted from a search result (#522).
+      _recallButtons(head, hit);
       row.appendChild(head);
 
       if (hit.snippet) {
@@ -344,6 +347,94 @@
 
       row.addEventListener('click', () => openReplay(hit.session_id));
       resultsEl.appendChild(row);
+    });
+  }
+
+  /**
+   * The live tab for a recorded device, if one is open (#522).
+   *
+   * Matched on hostname, never on "whichever tab is active". Sending a
+   * command from a search result into the wrong device is the one failure
+   * this feature could produce, and "the tab in front of you" is exactly how
+   * that happens — the result you are reading is about last Tuesday's session
+   * on a switch you may not even be connected to now.
+   *
+   * A tab's `hostname` is rewritten with whatever the device calls itself, so
+   * it is the field a recorded hostname matches; `address` is the fallback
+   * for a session that never announced a name.
+   */
+  function _liveTabFor(hostname) {
+    const wanted = String(hostname || '').trim().toLowerCase();
+    if (!wanted) return null;
+    const tabs = typeof window.getOpenTabs === 'function' ? window.getOpenTabs() : [];
+    return tabs.find(t => t.isConnected && (
+      String(t.hostname || '').toLowerCase() === wanted
+      || String(t.address || '').toLowerCase() === wanted)) || null;
+  }
+
+  /**
+   * "Send to <tab>" and "Put at the prompt", on a result whose device is open.
+   *
+   * Absent rather than disabled when nothing matches: a greyed-out Send on
+   * every row of a search across an estate is noise, and the answer to "why
+   * is it grey" is a paragraph.
+   *
+   * The button names the tab it will reach, because that is the only thing
+   * standing between a recalled `reload` and the wrong switch.
+   */
+  function _recallButtons(head, hit) {
+    const tab = _liveTabFor(hit.hostname || hit.label);
+    if (!tab) return;
+    const name = tab.label || tab.hostname || 'this tab';
+
+    const insert = document.createElement('button');
+    insert.type = 'button';
+    insert.className = 'history-copy';
+    insert.title = `Put it at the prompt on ${name}, without running it`;
+    insert.innerHTML = '<span class="material-symbols-outlined">content_paste</span>';
+    insert.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _recall(tab, hit.command, false);
+    });
+
+    const send = document.createElement('button');
+    send.type = 'button';
+    send.className = 'history-copy history-send';
+    send.title = `Run it on ${name}`;
+    send.innerHTML = '<span class="material-symbols-outlined">send</span>';
+    send.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _recall(tab, hit.command, true);
+    });
+
+    head.appendChild(insert);
+    head.appendChild(send);
+  }
+
+  /**
+   * Put a recalled command into a session, and say what happened.
+   *
+   * Running one switches to its tab first. A command sent to a device you
+   * cannot see is the thing ShellMate refuses to do everywhere else, and the
+   * output is the reason anybody pressed the button.
+   */
+  function _recall(tab, command, run) {
+    const to = run ? window.sendCommandToSession : window.insertIntoSession;
+    const sent = typeof to === 'function' && to(tab.sessionId, command);
+    const name = tab.label || tab.hostname || 'the tab';
+
+    if (sent && typeof window.switchToTabBySessionId === 'function') {
+      closeHistory();
+      window.switchToTabBySessionId(tab.sessionId);
+    }
+
+    if (!window.shellmateAlerts) return;
+    window.shellmateAlerts.notify({
+      severity: sent ? 'info' : 'warning',
+      icon:     sent ? (run ? 'send' : 'content_paste') : 'error',
+      title:    sent ? (run ? `Sent to ${name}` : `At the prompt on ${name}`)
+                     : `Could not reach ${name}`,
+      body:     command,
     });
   }
 

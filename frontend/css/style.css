@@ -1597,6 +1597,15 @@ body.chat-popped #chat-pane:not(.popped-out) { display: none; }
   white-space: nowrap;
 }
 .tab-palette-empty { padding: 12px; color: var(--on-surface-muted); font-size: 13px; }
+/* Quick connect (#533). The one row that opens a session rather than moving
+   between them, so it reads as the action it is. */
+.tab-palette-connect .tab-palette-name { color: var(--primary); }
+.tab-palette-connect .tab-palette-dot { background: var(--primary); }
+/* Command recall (#522) lists device commands, which are read as code. */
+.tab-palette-command {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
 
 /* ------------------------------------------------------------------------
    Keyboard focus and forced colours (#428)
@@ -3111,11 +3120,41 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 
 .highlight-rule {
   display: grid;
-  grid-template-columns: 1fr 110px auto auto;
+  grid-template-columns: 1fr 110px auto auto auto auto;
   gap: 8px;
   align-items: center;
   padding: 10px 0;
   border-bottom: 1px solid var(--outline);
+}
+
+/* The watch half of a rule (#521). Severity and cooldown are hidden until
+   the rule alerts, so the row stays a colour editor for anyone not using
+   them — the widths below are what it grows to when they are. */
+.highlight-watch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.highlight-severity,
+.highlight-cooldown {
+  background: var(--surface-high);
+  border: 1px solid rgba(70,69,85,0.4);
+  border-radius: var(--radius-md);
+  padding: 5px 6px;
+  color: var(--on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  min-width: 0;
+}
+
+.highlight-severity { width: 86px; }
+.highlight-cooldown { width: 58px; }
+
+.highlight-severity:focus,
+.highlight-cooldown:focus {
+  outline: none;
+  border-color: var(--primary-container);
 }
 
 .highlight-pattern,
@@ -3771,6 +3810,9 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 
 .history-row:hover .history-copy { opacity: 1; }
 .history-copy:hover { color: var(--on-surface); }
+/* Recall (#522). Send is the one that reaches a live device, so it is the
+   one that reads as an action rather than a utility. */
+.history-send:hover { color: var(--primary); }
 .history-copy .material-symbols-outlined { font-size: 15px; }
 
 .history-snippet { position: relative; }

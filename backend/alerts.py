@@ -23,6 +23,12 @@ with the device rather than drifting against it.
 The typed command opens the alert; the device's answer refines it. Where only
 the first is available the alert says a reload was *requested* and shows no
 countdown, because a confident wrong timer is worse than an honest vague one.
+
+`WatchTracker` at the foot of the file is the third producer and the simplest:
+the user's own colour rules, the ones marked "alert", matched against what the
+device says. It lives here rather than beside the highlighter because the
+highlighter runs in the browser on the way to the screen, and a screen nobody
+is looking at is exactly the case this is for (#521).
 """
 
 import logging
@@ -31,6 +37,7 @@ import time
 from dataclasses import dataclass, field
 
 from backend import platforms as platforms_module
+from backend.session import ansi
 
 from backend.advanced import get as advanced
 
@@ -396,3 +403,173 @@ class AlertTracker:
             pending["cancel_command"] = getattr(
                 profile, "reload_cancel_command", "") if profile else ""
         return {"type": "pending_action", "pending": pending}
+
+
+# ---------------------------------------------------------------------------
+# Output watch — the colour rules that also raise an alert (#521)
+# ---------------------------------------------------------------------------
+#
+# A highlight rule is a regex and a colour, applied in the browser on the way
+# to the screen. That is the whole of it, which means a `%LINK-3-UPDOWN` on a
+# background tab is coloured on a screen nobody is watching. `terminal monitor`
+# on four devices during a change means watching four panes for one line.
+#
+# Marking a rule "alert" makes the same pattern a watch: matched here, against
+# what the device actually said, so a hit reaches somebody looking at another
+# tab — or at another application.
+#
+# Two things make this safe to run over every chunk of every session:
+#
+# **It matches cleaned text.** The stream is escape sequences and cursor
+# movement, not lines; a coloured interface name arrives with SGR codes buried
+# inside the word, so a regex over raw bytes misses it and occasionally matches
+# something that was never on screen. `ansi.clean()` first, and only whole
+# lines — the tail of a chunk is held back until its newline arrives.
+#
+# **Every rule has a cooldown.** A chatty `debug` prints the same keyword
+# hundreds of times a second, and an alert channel that can be made to fire
+# hundreds of times a second is one people switch off for good.
+
+WATCH_SEVERITIES = ("info", "warning", "critical")
+DEFAULT_WATCH_SEVERITY = "warning"
+
+# A run this long with no newline is not a line — it is a device drawing
+# something, or a binary file being catted. Matched once and dropped rather
+# than accumulated, so a session that never sends a newline cannot grow the
+# held-back tail without bound.
+MAX_PARTIAL_LINE = 4096
+
+# What travels to the interface. A watch hit quotes the line it matched, and a
+# line of `show tech-support` is not a notification.
+MAX_HIT_LINE = 300
+
+# Most hits reported from one chunk of output. Rules already hold themselves
+# off by cooldown; this bounds the pathological case of fifty rules all
+# matching the same burst.
+MAX_HITS_PER_CHUNK = 5
+
+
+@dataclass
+class WatchRule:
+    """One highlight rule that was marked to alert."""
+
+    pattern: str
+    regex: re.Pattern
+    severity: str = DEFAULT_WATCH_SEVERITY
+    cooldown_s: float = 60.0
+    #: Monotonic, so a clock change cannot silence a rule for hours.
+    last_fired: float = float("-inf")
+
+
+@dataclass
+class WatchTracker:
+    """
+    What one session is watching its output for.
+
+    One per session, owned by that session's reader, so no locking — the same
+    contract AlertTracker has.
+    """
+
+    rules: list[WatchRule] = field(default_factory=list)
+    #: The tail of the last chunk, waiting for its newline.
+    partial: str = ""
+
+    def load(self, highlight: dict | None) -> int:
+        """
+        Rebuild the watch list from the `highlight` settings block.
+
+        Returns how many rules are now armed. Gated on the same "Enable
+        highlighting" switch the colours use: one switch for one feature is
+        something people can rely on, and two would leave somebody who turned
+        colouring off to quieten a session still being interrupted by it.
+        """
+        self.rules = []
+        self.partial = ""
+
+        config = highlight or {}
+        if not config.get("enabled", True):
+            return 0
+
+        default_cooldown = float(advanced("alerts.watch_cooldown"))
+
+        for rule in config.get("rules") or []:
+            if not isinstance(rule, dict) or not rule.get("alert"):
+                continue
+            pattern = str(rule.get("pattern") or "").strip()
+            if not pattern:
+                continue
+            flags = 0 if rule.get("ignore_case") is False else re.IGNORECASE
+            try:
+                regex = re.compile(pattern, flags)
+            except re.error as exc:
+                # The same forgiveness the highlighter shows a bad pattern.
+                # One unparseable rule must not stop the others watching.
+                logger.warning("Ignoring invalid watch pattern %r: %s", pattern, exc)
+                continue
+
+            severity = str(rule.get("severity") or DEFAULT_WATCH_SEVERITY)
+            if severity not in WATCH_SEVERITIES:
+                severity = DEFAULT_WATCH_SEVERITY
+            try:
+                cooldown = float(rule.get("cooldown_s", default_cooldown))
+            except (TypeError, ValueError):
+                cooldown = default_cooldown
+
+            self.rules.append(WatchRule(
+                pattern=pattern,
+                regex=regex,
+                severity=severity,
+                # Bounded here as well as in Stockton: this value arrives from
+                # settings.json, which people are told they may edit by hand.
+                cooldown_s=max(0.0, min(cooldown, 3600.0)),
+            ))
+
+        return len(self.rules)
+
+    def observe(self, text: str) -> list[dict]:
+        """
+        Look at a chunk of device output and report what matched.
+
+        Returns one entry per rule that fired — never more than one per rule
+        per chunk, whatever the cooldown says, because a single `show
+        interfaces` holds fifty matching lines and fifty toasts for one
+        command is the failure this is meant to avoid.
+        """
+        if not self.rules or not text:
+            return []
+
+        combined = self.partial + ansi.clean(text)
+        lines = combined.split("\n")
+        # The last element has no newline yet: it is either a line still
+        # arriving, or a device that never sends one.
+        self.partial = lines.pop()
+        if len(self.partial) > MAX_PARTIAL_LINE:
+            lines.append(self.partial)
+            self.partial = ""
+
+        hits: list[dict] = []
+        fired: set[int] = set()
+        now = time.monotonic()
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            for index, rule in enumerate(self.rules):
+                if index in fired:
+                    continue
+                if now - rule.last_fired < rule.cooldown_s:
+                    continue
+                if not rule.regex.search(stripped):
+                    continue
+                rule.last_fired = now
+                fired.add(index)
+                hits.append({
+                    "pattern":  rule.pattern,
+                    "severity": rule.severity,
+                    "line":     stripped[:MAX_HIT_LINE],
+                })
+                if len(hits) >= MAX_HITS_PER_CHUNK:
+                    return hits
+
+        return hits
