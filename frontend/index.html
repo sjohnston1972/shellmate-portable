@@ -2576,14 +2576,16 @@ GigEth0/2     unassigned    YES unset  down     down
       <div id="replay-meta"></div>
       <!-- Timed playback (#415): the session as it happened, at a chosen speed. -->
       <div id="replay-controls">
-        <button type="button" id="replay-play" class="btn-secondary" title="Play the session back with its original timing">
+        <button type="button" id="replay-play" class="btn-tertiary" title="Play the session back with its original timing">
           <span class="material-symbols-outlined">replay</span> Play
         </button>
         <button type="button" id="replay-pause" class="btn-tertiary" disabled
                 title="Pause the playback (Space)">
           <span class="material-symbols-outlined">pending</span> Pause
         </button>
-        <button type="button" id="replay-stop" class="btn-tertiary" disabled>Stop</button>
+        <button type="button" id="replay-stop" class="btn-tertiary" disabled title="Stop the playback">
+          <span class="material-symbols-outlined">cancel</span> Stop
+        </button>
         <label for="replay-speed" class="replay-speed-label">Speed</label>
         <select id="replay-speed" class="setting-input">
           <option value="1">1×</option>
