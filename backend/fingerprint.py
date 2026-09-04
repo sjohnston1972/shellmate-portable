@@ -73,6 +73,28 @@ class Fingerprint:
 # Version extraction
 # ---------------------------------------------------------------------------
 
+def version_from(text: str, platform_id: str = "") -> str:
+    """
+    A version string out of ``text``, or "" (#536).
+
+    The same patterns identification uses, exposed so a `show version` run
+    for the inventory does not need a second copy of them. A platform id
+    narrows it, which matters where two vendors' banners look alike.
+    """
+    if not text:
+        return ""
+    body = clean(text)
+    for pattern_platform, pattern in VERSION_PATTERNS:
+        if platform_id and pattern_platform != platform_id:
+            continue
+        found = pattern.search(body)
+        if found:
+            return found.group(1).strip()
+    if platform_id:                      # nothing for that platform; try them all
+        return version_from(body)
+    return ""
+
+
 # Ordered: the first pattern that matches wins, so the most specific come first.
 VERSION_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("ios",   re.compile(r"Cisco IOS.*?Version\s+([\w.()]+)", re.IGNORECASE)),

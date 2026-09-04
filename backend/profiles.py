@@ -1193,7 +1193,62 @@ def record_detected_hostname(target: str, port: int, username: str, detected: st
 
 
 
+#: What a connection remembers about the device behind it (#536). Facts,
+#: not settings: every one is something the device said about itself, so
+#: they are overwritten by whatever it says next and never merged with a
+#: user's own edits. `last_connected` is ShellMate's own observation.
+INVENTORY_FIELDS = ("version", "model", "serial", "last_seen_platform", "last_connected")
+
+
 @_synchronised
+def record_inventory(target: str, port: int, username: str, facts: dict) -> bool:
+    """
+    Note what the device said it is, against the profile used to reach it.
+
+    Matched by target rather than by name, for the reason
+    `record_detected_hostname()` gives: the name is rewritten when the
+    device says what it is called, and matching on something that changes
+    by itself would stop finding the profile it just renamed.
+
+    Empty values are ignored rather than written, so a `show inventory` a
+    device does not support cannot erase a serial number learned last week.
+
+    Returns:
+        True if a profile was updated.
+    """
+    if not target:
+        return False
+    clean = {k: str(v).strip() for k, v in (facts or {}).items()
+             if k in INVENTORY_FIELDS and str(v or "").strip()}
+    if not clean:
+        return False
+
+    profiles = _load()
+    changed = False
+    for profile in profiles:
+        if profile.get("hostname") != target:
+            continue
+        if int(profile.get("port") or 0) != int(port or 0):
+            continue
+        if username and profile.get("username") not in ("", username):
+            continue
+        for key, value in clean.items():
+            if profile.get(key) != value:
+                profile[key] = value
+                changed = True
+
+    if changed:
+        _save(profiles)
+    return changed
+
+
+def record_connected(target: str, port: int, username: str, when: str = "") -> bool:
+    """When this connection was last opened (#536)."""
+    import datetime as _dt
+    stamp = when or _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    return record_inventory(target, port, username, {"last_connected": stamp})
+
+
 def remember_platform(target: str, port: int, username: str, platform: str) -> bool:
     """
     Note what the user said a device is, against the profile used to reach it.
@@ -1347,7 +1402,11 @@ def _delete_where(predicate) -> int:
 #: The columns, in the order they are written and assumed when a file has no
 #: header row. `credential` is the *name* of a shared credential, never a value.
 CSV_COLUMNS = ("name", "hostname", "port", "type", "username", "groups",
-               "platform", "credential")
+               "platform", "credential",
+               # What the devices said about themselves (#536). Exported so a
+               # "what version is everywhere" spreadsheet is one click; never
+               # imported, because only the device may state them.
+               "version", "model", "serial", "last_connected")
 
 #: What a header cell may be called. Generous on purpose: the file usually
 #: comes out of a monitoring tool or somebody's own spreadsheet, and refusing
@@ -1641,6 +1700,11 @@ def export_csv(group: str = "") -> str:
             ",".join(tags),
             profile.get("platform", ""),
             names.get(profile.get("credential_ref") or "", ""),
+            # What the device said about itself (#536).
+            profile.get("version", ""),
+            profile.get("model", ""),
+            profile.get("serial", ""),
+            profile.get("last_connected", ""),
         )])
 
     return out.getvalue()

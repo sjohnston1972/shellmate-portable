@@ -463,8 +463,30 @@
   /** Whether one connection answers the current search. */
   function _profileMatches(profile) {
     if (!query) return true;
+    // What the devices said about themselves is searchable too (#536), so a
+    // model number or a release finds every device carrying it.
     return (profile.name || '').toLowerCase().includes(query)
-        || (profile.hostname || '').toLowerCase().includes(query);
+        || (profile.hostname || '').toLowerCase().includes(query)
+        || (profile.model || '').toLowerCase().includes(query)
+        || (profile.version || '').toLowerCase().includes(query)
+        || (profile.serial || '').toLowerCase().includes(query);
+  }
+
+  /** "WS-C3850-48P · 15.2(7)E3 · FCW2140L0GH", for a tooltip. */
+  function _inventoryLine(profile) {
+    return [profile.model, profile.version, profile.serial].filter(Boolean).join(' · ');
+  }
+
+  /** "Last opened 3 days ago", or "" when it never was. */
+  function _lastConnected(profile) {
+    if (!profile.last_connected) return '';
+    const when = Date.parse(profile.last_connected);
+    if (Number.isNaN(when)) return '';
+    const days = Math.floor((Date.now() - when) / 86400000);
+    if (days <= 0) return 'Last opened today';
+    if (days === 1) return 'Last opened yesterday';
+    if (days < 30) return `Last opened ${days} days ago`;
+    return `Last opened ${new Date(when).toLocaleDateString()}`;
   }
 
   function _matches(node) {
@@ -1069,7 +1091,11 @@
     leaf.type = 'button';
     leaf.className = 'tree-leaf';
     leaf.style.setProperty('--depth', String(node.depth + 1));
+    const inventory = _inventoryLine(profile);
+    const lastSeen = _lastConnected(profile);
     leaf.title = (profile.hostname ? profile.hostname + '\n' : '')
+      + (inventory ? inventory + '\n' : '')
+      + (lastSeen ? lastSeen + '\n' : '')
       + 'Ctrl+click to select several; a drag or a right-click then acts on all of them.';
 
     // Whether this device is open right now (#166). The same test the group

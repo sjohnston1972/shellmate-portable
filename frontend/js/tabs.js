@@ -217,6 +217,11 @@
       // Empty for a session opened straight from the dialog, which genuinely
       // has no profile.
       profileId:        sessionData.profile_id || '',
+      // Copied from the saved connection when there is one (#536); the
+      // hover card shows them without a fetch.
+      model:            sessionData.model || '',
+      version:          sessionData.version || '',
+      serial:           sessionData.serial || '',
       label,
       // When this tab was opened. The array order answers the same question
       // until somebody drags or sorts, at which point it no longer does.
@@ -3065,6 +3070,9 @@
       username:     tab.username || '',
       isConnected:  !!tab.isConnected,
       group:        _tagCache.get(sessionId) || '',
+      // Model, release and serial, remembered against the saved connection
+      // (#536) rather than only for as long as the tab is open.
+      inventory:    [tab.model, tab.version, tab.serial].filter(Boolean).join(' · '),
       keepAlive:    !!(tab.keepAlive || tab.keep_alive),
       logging:      !!(tab.logging || tab.logEnabled),
       profileId:    tab.profileId || '',

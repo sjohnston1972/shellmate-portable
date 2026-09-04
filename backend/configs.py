@@ -149,6 +149,11 @@ def capture_config(session: dict) -> dict:
     channel = (handler.open_secondary_channel()
                if isinstance(handler, SSHHandler) else None)
 
+    # Only the second channel collects inventory (#536): the live-session
+    # fallback types into the user's own terminal, and two extra commands
+    # there would be two more things they did not run.
+    inventory: dict = {}
+
     if channel is not None:
         via = "second channel"
         try:
@@ -160,6 +165,17 @@ def capture_config(session: dict) -> dict:
 
             channel.send((commands["show_run"] + "\n").encode())
             raw = _read_until_idle(channel)
+
+            # What the device is, while the channel is open (#536). Two
+            # read-only commands, on the same channel the configuration
+            # came down, and only where the platform names them: a version
+            # command and the inventory alias. Failures are ignored — an
+            # inventory is a nicety, the configuration is the job.
+            try:
+                inventory = _collect_inventory(channel, profile)
+            except Exception as exc:                     # pragma: no cover
+                logger.debug("No inventory from %s: %s", session.get("hostname", "?"), exc)
+                inventory = {}
         finally:
             try:
                 channel.close()
@@ -181,6 +197,8 @@ def capture_config(session: dict) -> dict:
 
     hostname = session.get("hostname") or ""
     result = store.add_snapshot(hostname, config, session.get("session_id", ""))
+    if inventory:
+        result["inventory"] = inventory
     result["platform"] = platform
     result["line_count"] = config.count("\n") + 1
     # How it was captured, so the interface can say when it went through the
@@ -206,6 +224,63 @@ def capture_config(session: dict) -> dict:
         f"; saved to {result['archive']['path']}" if result["archive"].get("written") else "",
     )
     return result
+
+
+#: Where a parsed row keeps each fact, newest name first. ntc-templates
+#: is not consistent across vendors — a serial is SERIAL on IOS, SERIAL_NUM
+#: on some others — so each fact lists the columns that have carried it.
+_INVENTORY_COLUMNS = {
+    "version": ("version", "os_version", "sw_version"),
+    "model":   ("model", "hardware", "pid", "platform", "chassis"),
+    "serial":  ("serial", "serial_num", "sn", "serial_number"),
+}
+
+
+def _first_value(rows, names) -> str:
+    """The first non-empty value under any of *names*, across *rows*."""
+    for row in rows or []:
+        for name in names:
+            value = row.get(name) or row.get(name.upper())
+            if isinstance(value, list):
+                value = value[0] if value else ""
+            if value and str(value).strip():
+                return str(value).strip()
+    return ""
+
+
+def _collect_inventory(channel, profile) -> dict:
+    """
+    Version, model and serial, from the platform's own commands (#536).
+
+    Read-only and best effort. Where a template exists the rows answer;
+    where one does not, the version pattern that identified the device in
+    the first place is tried against the raw text, so a platform with thin
+    templates still yields a version rather than nothing.
+    """
+    from backend.session import parsed as parsed_module
+    from backend import fingerprint as fingerprint_module
+
+    facts: dict[str, str] = {}
+    for command in (profile.version_command, (profile.aliases or {}).get("inv", "")):
+        if not command:
+            continue
+        channel.send((command + "\n").encode())
+        raw = clean(_read_until_idle(channel, timeout=8.0))
+        if not raw.strip():
+            continue
+        rows = parsed_module.parse(profile.id, command, raw) or []
+        for fact, names in _INVENTORY_COLUMNS.items():
+            if not facts.get(fact):
+                found = _first_value(rows, names)
+                if found:
+                    facts[fact] = found
+        if not facts.get("version"):
+            guessed = fingerprint_module.version_from(raw, profile.id)
+            if guessed:
+                facts["version"] = guessed
+    if facts:
+        facts["last_seen_platform"] = profile.id
+    return facts
 
 
 def _tidy_config(raw: str, command: str) -> str:

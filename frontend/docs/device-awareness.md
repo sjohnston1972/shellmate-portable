@@ -233,3 +233,22 @@ tab, as before.
 Devices found by a network scan arrive with their platform already recorded,
 from the SSH banner the scan read — so this works on them from the first
 connection without anybody setting anything.
+
+## It remembers what the device said
+
+Alongside what you told it, a saved connection keeps what the device said
+about itself: its **release**, its **model**, its **serial number**, and
+when you **last opened** it. The release and model are known the moment the
+device is identified. The serial arrives with the configuration capture, on
+the second channel that capture already opens, from the platform's own
+version and inventory commands — read-only, and never on the fallback that
+types into your session.
+
+That turns the connection list into an inventory. The tree search matches
+them, so typing a model number lists every device carrying it and a release
+lists everything still on it. The hover cards show them. The CSV export
+carries them, which is how "what version is everywhere" becomes one file.
+
+They are facts, not settings: whatever the device says next replaces them,
+an empty answer never erases what was known, and the import deliberately
+has no column for them — only a device may state what it is.

@@ -828,6 +828,16 @@ async def session_drift(session_id: str) -> dict:
         # Kept on the session so the assistant can be told what changed
         # without capturing the configuration a second time (#549).
         session["drift"] = report
+        # And what the capture learned about the device (#536): kept against
+        # the saved connection, so the estate answers "which version is
+        # where" without opening anything.
+        facts = (report.get("capture") or {}).get("inventory") or report.get("inventory") or {}
+        if facts:
+            await asyncio.to_thread(
+                profiles_module.record_inventory,
+                session.get("address") or session.get("hostname") or "",
+                int(session.get("port") or 0), session.get("username") or "", facts,
+            )
         return report
     except (OSError, ConnectionError_) as exc:
         # The device dropped the session while the capture ran; that is a
@@ -876,6 +886,20 @@ async def set_session_platform(session_id: str, request: IdentifyRequest) -> dic
     )
 
     session["fingerprint"] = summary
+
+    # Version and model are known the moment the device is identified;
+    # keep them against the saved connection (#536) rather than losing
+    # them with the tab.
+    try:
+        facts = {k: str((summary.get("device") or {}).get(k) or "")
+                 for k in ("version", "model")}
+        if any(facts.values()):
+            await asyncio.to_thread(
+                profiles_module.record_inventory,
+                session.get("address") or "", int(session.get("port") or 0),
+                session.get("username") or "", facts)
+    except Exception as exc:
+        logger.debug("Could not record what the device is: %s", exc)
     session["pipeline"].platform = summary["platform"]
     session["alerts"].platform = summary["platform"]
     # Onboarding is now moot; stop it overwriting a decision the user made.
@@ -4431,6 +4455,20 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
             remembered=remembered,
         )
         session["fingerprint"] = summary
+
+        # Version and model are known the moment the device is identified;
+        # keep them against the saved connection (#536) rather than losing
+        # them with the tab.
+        try:
+            facts = {k: str((summary.get("device") or {}).get(k) or "")
+                     for k in ("version", "model")}
+            if any(facts.values()):
+                await asyncio.to_thread(
+                    profiles_module.record_inventory,
+                    session.get("address") or "", int(session.get("port") or 0),
+                    session.get("username") or "", facts)
+        except Exception as exc:
+            logger.debug("Could not record what the device is: %s", exc)
         session["pipeline"].platform = summary["platform"]
         # Which patterns a pending reload is recognised by depends on the
         # platform, so the tracker is idle until the device is identified.

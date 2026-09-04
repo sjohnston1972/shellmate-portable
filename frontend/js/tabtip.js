@@ -100,6 +100,10 @@
       : 'Disconnected' + (info.uptime ? ` after ${info.uptime}` : ''),
       info.isConnected ? 'tab-tip-state-up' : 'tab-tip-state-down');
 
+    // What this device is, from the saved connection (#536): it survives
+    // the tab, so it is here even before this session has asked.
+    if (info.inventory) add('Hardware', info.inventory);
+
     const groups = groupsFor(info.group);
     if (groups) {
       const [k, v] = row('Groups', groups);

@@ -69,6 +69,11 @@ exists.
   the feedback outbox — with what to do about anything amber or red. The two
   network checks are opt-in, per press. The same checks go into the support
   bundle as `checks.txt`.
+- **A saved connection remembers what the device is**: its release, model,
+  serial number and when you last opened it, learned from the device itself
+  as it connects and captures. Search the tree for a model number or a
+  release to list everything carrying it, see them on the hover cards, and
+  take them out in the CSV export.
 - Session history can be searched **between two dates**, with optional
   times, instead of only the last day, week, month or quarter.
 - Session playback shows where it has reached: a draggable bar with the

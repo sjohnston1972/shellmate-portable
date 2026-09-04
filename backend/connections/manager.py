@@ -169,6 +169,15 @@ class SessionManager:
         self._sessions[session_id] = session
         logger.info("Session created: %s (%s %s)", session_id, params.connection_type, params.target())
 
+        # When this saved connection was last opened (#536). Best effort: a
+        # profile file that will not write must never stop somebody reaching
+        # a device.
+        try:
+            from backend.profiles import record_connected
+            record_connected(session["address"], params.port, params.username or "")
+        except Exception as exc:                          # pragma: no cover
+            logger.debug("Could not record the connection time: %s", exc)
+
         # Every session is recorded, with nothing to switch on. Failing to
         # record must never stop someone connecting to a device.
         try:
