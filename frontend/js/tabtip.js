@@ -117,6 +117,12 @@
       add('Device', [device.name || device.platform, device.version].filter(Boolean).join(' ') + sure);
     }
 
+    // The key the device proved itself with (#528). Here rather than in a
+    // panel because this is the card that answers "what am I actually
+    // connected to", and the fingerprint is the only part of that answer
+    // nothing on the network can forge.
+    if (info.hostKey) add('Host key', info.hostKey);
+
     const flags = [];
     if (info.keepAlive) flags.push('keep-alive');
     if (info.logging) flags.push('logging');

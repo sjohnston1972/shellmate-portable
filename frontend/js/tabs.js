@@ -239,6 +239,10 @@
       // apart. Hostname alone does not.
       port:             sessionData.port || 0,
       username:         sessionData.username || '',
+      // The key this device proved itself with (#528). A public fingerprint,
+      // shown on the hover card so "which device is this really" has an
+      // answer without opening a panel.
+      hostKey:          sessionData.host_key || '',
       terminalInstance: termData.terminal,
       fitAddon:         termData.fitAddon,
       // Read through to terminal.js each time rather than copied once: the
@@ -3073,6 +3077,7 @@
       // Model, release and serial, remembered against the saved connection
       // (#536) rather than only for as long as the tab is open.
       inventory:    [tab.model, tab.version, tab.serial].filter(Boolean).join(' · '),
+      hostKey:      tab.hostKey || '',
       keepAlive:    !!(tab.keepAlive || tab.keep_alive),
       logging:      !!(tab.logging || tab.logEnabled),
       profileId:    tab.profileId || '',

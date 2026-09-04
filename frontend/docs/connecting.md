@@ -63,6 +63,14 @@ Three things worth knowing:
 The same happens on a reconnect, and when a connection is opened straight
 from a tile.
 
+### When the device's key has changed
+
+The other thing that stops a connection to ask. ShellMate records the host key
+of every device the first time it reaches it, and warns when one changes —
+both fingerprints are shown, nothing is sent to the device, and the connection
+only continues if you say the new key is the device. See *Known hosts* on the
+[SSH keys](#ssh-keys) page for what it means and how to clear an entry.
+
 ### Jump hosts
 
 Fill in **Jump host** to reach a device through a bastion. This is the same

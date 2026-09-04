@@ -46,7 +46,8 @@ from backend import auth, config_archive, desktop, paths
 from backend import groups as groups_module
 from backend import schemes as schemes_module
 from backend.configs import capture_config, diff_snapshots, drift_report
-from backend.connections.base import ConnectionError_, ConnectionParams, InteractiveRequired
+from backend.connections.base import (ConnectionError_, ConnectionParams,
+                                      HostKeyChanged, InteractiveRequired)
 from backend.connections import sftp
 from backend.connections.manager import SessionManager
 from backend.connections.serial_handler import available_ports
@@ -424,6 +425,10 @@ class CreateSessionRequest(BaseModel):
     # Answers to a keyboard-interactive challenge from a previous attempt
     # (#406). Never stored; the vault does not want a one-time code.
     interactive_answers: list[str] = []
+    # The user's answer to "this device's host key has changed" (#528). Only
+    # ever True on the retry that follows the 409, and only because somebody
+    # read two fingerprints and said the new one is the device.
+    trust_new_host_key: bool = False
 
     def to_params(self) -> ConnectionParams:
         """Convert to the transport-layer parameter object."""
@@ -540,6 +545,16 @@ async def create_session(request: CreateSessionRequest) -> dict:
         # Every transport blocks while connecting, so run it off the event loop.
         session = await asyncio.to_thread(session_manager.create_session, params,
                                           request.profile_id)
+    except HostKeyChanged as exc:
+        # Not a failure either: the device is not the one we trusted (#528).
+        # 409 with both fingerprints; the interface asks, and the retry
+        # carries `trust_new_host_key`. Never accepted here — a tool that
+        # decides this on the user's behalf is quieter than PuTTY on the one
+        # warning every engineer has been saved by.
+        logger.warning("Host key changed for %s: %s is now %s",
+                       exc.hostname, exc.old_fingerprint, exc.new_fingerprint)
+        raise HTTPException(status_code=409,
+                            detail={"host_key": exc.as_dict()}) from exc
     except InteractiveRequired as exc:
         # Not a failure: the device wants an answer only the user has (#406).
         # 409 with the prompts; the interface asks and posts again with
@@ -3555,6 +3570,30 @@ async def key_delete(request: KeyPathRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"removed": removed}
+
+
+@app.get("/api/keys/known-hosts")
+async def list_known_hosts() -> dict:
+    """The host keys ShellMate has decided to trust (#528)."""
+    rows = await asyncio.to_thread(ssh_keys.known_hosts)
+    return {"hosts": rows, "file": str(ssh_keys.known_hosts_path())}
+
+
+class ForgetHostRequest(BaseModel):
+    """Body for POST /api/keys/known-hosts/forget."""
+    host: str = ""
+
+
+@app.post("/api/keys/known-hosts/forget")
+async def forget_known_host(request: ForgetHostRequest) -> dict:
+    """
+    Forget one host's keys, so the next connection is a first connection.
+
+    The way back from having trusted the wrong thing, and the way to clear an
+    entry for a device that has been decommissioned.
+    """
+    removed = await asyncio.to_thread(ssh_keys.forget_host, request.host)
+    return {"status": "ok", "removed": removed}
 
 
 class CertificateRequest(BaseModel):

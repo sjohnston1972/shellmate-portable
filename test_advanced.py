@@ -210,9 +210,21 @@ def test_the_settings_reach_the_code() -> None:
 
     import backend.connections.ssh_handler as ssh
 
+    # The policy is no longer a paramiko object handed over wholesale (#528):
+    # ShellMate makes the decision itself, so the setting is checked by the
+    # decision refusing an unknown key rather than by the class it returns.
+    import paramiko
+
+    from backend.connections.base import ConnectionError_
+
     advanced.update({"ssh.host_key_policy": "reject"})
-    check("the host key policy is honoured",
-          type(ssh._host_key_policy()).__name__ == "RejectPolicy")
+    refused = None
+    try:
+        ssh._verify_host_key("no-such-host.invalid", 22, paramiko.ECDSAKey.generate())
+    except ConnectionError_ as exc:
+        refused = exc
+    check("the host key policy is honoured", refused is not None
+          and "reject unknown keys" in str(refused), repr(refused))
     advanced.reset(key="ssh.host_key_policy")
 
     advanced.update({"ssh.kex_algorithms": "diffie-hellman-group1-sha1"})

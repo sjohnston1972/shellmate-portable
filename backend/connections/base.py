@@ -89,6 +89,14 @@ class ConnectionParams:
     # saved anywhere — scrubbed with the other secrets.
     interactive_answers: list = field(default_factory=list)
 
+    # The user's answer to "this device's host key has changed" (#528).
+    # Not a credential and never stored: it belongs to one connection
+    # attempt, the one made straight after somebody read two fingerprints
+    # and said the new one is the device. Set by the API layer from the
+    # retry, and by nothing else — a default of True would turn the warning
+    # back into the silence it replaced.
+    trust_new_host_key: bool = False
+
     def effective_username(self) -> str:
         """
         The account to authenticate as.
@@ -157,6 +165,42 @@ class InteractiveRequired(Exception):
     def as_dict(self) -> dict:
         return {"title": self.title, "instructions": self.instructions,
                 "prompts": [dict(p) for p in self.prompts]}
+
+
+class HostKeyChanged(Exception):
+    """
+    The device presented a host key that is not the one we trusted (#528).
+
+    Trust on first use, warn on change: an unknown host is remembered
+    without asking, because prompting for every one would be unusable on the
+    lab estate ShellMate is built for — but a host whose key has *changed* is
+    the case that carries information. It is an RMA, a re-image, two devices
+    answering one address through a mis-cabled console server, or somebody in
+    the middle. Only the user can tell which, so the attempt stops here and
+    the question is put to them; the retry carries ``trust_new_host_key``.
+
+    Both fingerprints travel, because "the key changed" is not an answerable
+    statement and "SHA256:abc... became SHA256:xyz..." is — it can be read
+    out to whoever has physical access to the device.
+    """
+
+    def __init__(self, hostname: str, port: int, key_type: str,
+                 old_fingerprint: str, new_fingerprint: str) -> None:
+        self.hostname = hostname or ""
+        self.port = int(port or 0)
+        self.key_type = key_type or ""
+        self.old_fingerprint = old_fingerprint or ""
+        self.new_fingerprint = new_fingerprint or ""
+        super().__init__(
+            f"The host key for {self.hostname} has changed: it was "
+            f"{self.old_fingerprint}, and it is now {self.new_fingerprint}."
+        )
+
+    def as_dict(self) -> dict:
+        return {"hostname": self.hostname, "port": self.port,
+                "key_type": self.key_type,
+                "old_fingerprint": self.old_fingerprint,
+                "new_fingerprint": self.new_fingerprint}
 
 
 class ConnectionError_(Exception):

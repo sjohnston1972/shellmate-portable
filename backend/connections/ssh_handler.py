@@ -25,7 +25,10 @@ from pathlib import Path
 import paramiko
 
 from backend.connections.base import (ConnectionError_, ConnectionHandler,
-                                      ConnectionParams, InteractiveRequired)
+                                      ConnectionParams, HostKeyChanged,
+                                      InteractiveRequired)
+
+from backend import keys as keys_module
 
 from backend.advanced import get as advanced
 
@@ -92,64 +95,111 @@ def load_private_key(path: str, passphrase: str = "") -> paramiko.PKey:
     )
 
 
-def _host_key_policy():
+def _verify_host_key(hostname: str, port: int, key, trust_new: bool = False) -> str:
     """
-    What to do about a host key ShellMate has not seen before.
+    The one host-key decision, shared by every path that opens a transport
+    (#528).
 
-    Auto-add by default: network devices legitimately change keys after an RMA
-    or an image upgrade, and blocking on an unknown-host prompt would make the
-    tool unusable on the estate it is built for. A site where every key is
-    already known can choose to reject instead.
+    Trust on first use, warn on change. An unknown host is remembered without
+    asking — prompting for every one is unusable on a lab estate, and the
+    prompt nobody can answer is the prompt everybody clicks through. A host
+    whose key has *changed* stops the connection and becomes a question, with
+    both fingerprints, because only the user can tell an RMA from a machine
+    in the middle.
+
+    ``ssh.host_key_policy`` still applies to a first sighting: a managed
+    estate where every key is already known can refuse one that is not.
+
+    Returns the fingerprint of the key that was accepted, for the interface
+    to show.
+
+    Raises:
+        HostKeyChanged: The stored key for this host and algorithm is not the
+            one presented, and the user has not said to trust the new one.
+        ConnectionError_: The host is unknown and the policy is to reject.
     """
-    import paramiko
+    if key is None or not hasattr(key, "get_name"):
+        return ""                                # a transport with no key to check
+
+    fingerprint = keys_module.host_fingerprint(key)
+    name = keys_module.host_entry_name(hostname, port)
+
+    # Compared per algorithm. A device that offered Ed25519 last week and RSA
+    # today has not changed its key — it has offered a different one of the
+    # keys it holds — and raising the alarm for that would teach people to
+    # click through the warning that matters.
+    stored = keys_module.known_host_key(hostname, port, key.get_name())
+    if stored is None:
+        stored = keys_module.system_host_key(hostname, port, key.get_name())
+
+    if stored is not None:
+        if stored == key:
+            return fingerprint
+        if not trust_new:
+            raise HostKeyChanged(hostname, port, key.get_name(),
+                                 keys_module.host_fingerprint(stored), fingerprint)
+        # Logged at warning level, always. Trusting a changed key is the one
+        # decision here that somebody may have to account for afterwards, and
+        # the log is where they will look.
+        logger.warning("The %s host key for %s changed from %s to %s, and was "
+                       "trusted at the user's explicit request",
+                       key.get_name(), name,
+                       keys_module.host_fingerprint(stored), fingerprint)
+        keys_module.remember_host(hostname, port, key)
+        return fingerprint
 
     choice = str(advanced("ssh.host_key_policy"))
-    if choice == "reject":
-        return paramiko.RejectPolicy()
+    if choice == "reject" and not trust_new:
+        raise ConnectionError_(
+            f"{hostname} presented a host key that is not known ({fingerprint}), "
+            "and the host-key policy is set to reject unknown keys.")
     if choice == "warn":
-        return paramiko.WarningPolicy()
-    return paramiko.AutoAddPolicy()
+        logger.warning("%s presented an unknown host key: %s", name, fingerprint)
+
+    keys_module.remember_host(hostname, port, key)
+    return fingerprint
 
 
-def _check_host_key(transport, hostname: str, port: int) -> None:
+class _TrustOnFirstUse:
     """
-    Apply the host-key policy to a transport we drove ourselves (#472).
+    ShellMate's answer to paramiko's "I have never seen this host".
+
+    paramiko only calls a missing-host-key policy from
+    ``SSHClient.connect()``, and only with the name it built itself — which
+    is why this carries the address and port it was created for rather than
+    re-deriving them from that name. Everything it does is
+    :func:`_verify_host_key`, so the password path and the two hand-driven
+    ones cannot drift apart.
+    """
+
+    def __init__(self, hostname: str, port: int, trust_new: bool = False) -> None:
+        self.hostname = hostname
+        self.port = port
+        self.trust_new = trust_new
+        self.fingerprint = ""
+
+    def missing_host_key(self, client, hostname, key) -> None:
+        self.fingerprint = _verify_host_key(
+            self.hostname, self.port, key, self.trust_new)
+
+
+def _check_host_key(transport, hostname: str, port: int,
+                    trust_new: bool = False) -> str:
+    """
+    Apply the host-key check to a transport we drove ourselves (#472, #528).
 
     `SSHClient.connect()` is the only place paramiko compares the server's
     key with known_hosts and consults the policy. The no-credential and
     keyboard-interactive paths build a Transport by hand and never call
     connect(), so `ssh.host_key_policy = reject` protected the password
-    path and silently not these two. Same comparison, same policy, before
-    any authentication.
+    path and silently not these two. Same comparison, same store, same
+    warning on a changed key, before any authentication.
     """
-    import paramiko
-
     try:
         key = transport.get_remote_server_key()
     except Exception:
         key = None
-    if key is None or not hasattr(key, "get_name"):
-        return                                   # a transport with no key to check
-    client = paramiko.SSHClient()
-    client._transport = transport                # the policies log through it
-    try:
-        client.load_system_host_keys()
-    except Exception:
-        pass
-    name = hostname if port == 22 else f"[{hostname}]:{port}"
-    known = client.get_host_keys().lookup(name)
-    if known is not None and known.get(key.get_name()) is not None:
-        if known[key.get_name()] != key:
-            raise ConnectionError_(
-                f"The host key for {hostname} has changed since it was last seen. "
-                "If the device was replaced or re-imaged, update its entry in known_hosts.")
-        return
-    try:
-        _host_key_policy().missing_host_key(client, name, key)
-    except paramiko.SSHException as exc:
-        raise ConnectionError_(
-            f"{hostname} presented a host key that is not in known_hosts, and the "
-            "host-key policy is set to reject unknown keys.") from exc
+    return _verify_host_key(hostname, port, key, trust_new)
 
 
 def _algorithm_overrides() -> dict:
@@ -290,6 +340,13 @@ class SSHHandler(ConnectionHandler):
     _jump_client: paramiko.SSHClient | None = field(default=None, init=False, repr=False)
     _channel: paramiko.Channel | None = field(default=None, init=False, repr=False)
 
+    #: The SHA-256 fingerprint of the key this device proved itself with
+    #: (#528), for the tab's hover card. Empty when the system known_hosts
+    #: already held it, since paramiko then matches it without telling us
+    #: which key it matched. Not a secret — a host key's public half is
+    #: what every client on the network sees.
+    host_key_fingerprint: str = field(default="", init=False)
+
     # ------------------------------------------------------------------
     # Connection
     # ------------------------------------------------------------------
@@ -326,7 +383,8 @@ class SSHHandler(ConnectionHandler):
             transport = paramiko.Transport(raw, disabled_algorithms=(
                 disabled or {}).get("disabled_algorithms"))
             transport.start_client(timeout=advanced("ssh.banner_timeout"))
-            _check_host_key(transport, params.hostname, params.port)
+            self.host_key_fingerprint = _check_host_key(
+                transport, params.hostname, params.port, params.trust_new_host_key)
 
             # auth_none returns the methods still required. An empty list is
             # the device saying "come in".
@@ -358,6 +416,15 @@ class SSHHandler(ConnectionHandler):
             logger.info("Connected to %s with no authentication; the device "
                         "will do its own asking", params.target())
             return True
+        except HostKeyChanged:
+            # Never a reason to fall back and try again. The device is not
+            # the one we trusted, and the next path would open a second
+            # connection to it before anybody had been asked (#528).
+            try:
+                transport.close()
+            except Exception:
+                pass
+            raise
         except Exception as exc:
             logger.info("Unauthenticated login to %s did not work (%s); "
                         "falling back", params.target(), exc)
@@ -415,7 +482,8 @@ class SSHHandler(ConnectionHandler):
             transport = paramiko.Transport(raw, disabled_algorithms=(
                 disabled or {}).get("disabled_algorithms"))
             transport.start_client(timeout=advanced("ssh.banner_timeout"))
-            _check_host_key(transport, params.hostname, params.port)
+            self.host_key_fingerprint = _check_host_key(
+                transport, params.hostname, params.port, params.trust_new_host_key)
             transport.auth_interactive(username, handler)
         except paramiko.AuthenticationException as exc:
             if transport is not None:
@@ -429,6 +497,16 @@ class SSHHandler(ConnectionHandler):
                 f"{params.hostname} refused the answers given for {username}."
                 + (" Check the code and try again." if params.interactive_answers else "")
             ) from exc
+        except HostKeyChanged:
+            # Already phrased as a question for the user; close the transport
+            # and let it travel. Without this clause the `SSHException` one
+            # below would not catch it either, and the socket would leak.
+            if transport is not None:
+                try:
+                    transport.close()
+                except Exception:
+                    pass
+            raise
         except (paramiko.SSHException, OSError) as exc:
             if transport is not None:
                 try:
@@ -441,7 +519,8 @@ class SSHHandler(ConnectionHandler):
         # path — is_connected, disconnect, the second channel — works as it
         # does for a password login.
         self._client = paramiko.SSHClient()
-        self._client.set_missing_host_key_policy(_host_key_policy())
+        self._client.set_missing_host_key_policy(
+            _TrustOnFirstUse(params.hostname, params.port, params.trust_new_host_key))
         self._client._transport = transport
         keepalive = advanced("ssh.keepalive_seconds")
         if keepalive:
@@ -463,18 +542,26 @@ class SSHHandler(ConnectionHandler):
             sock = self._open_jump_channel() if params.jump_host else None
 
             self._client = paramiko.SSHClient()
-            try:
-                # Without this, nothing is ever "known" and a reject policy
-                # refuses every device (#472).
-                self._client.load_system_host_keys()
-            except Exception:
-                pass
-            # AutoAddPolicy is deliberate: this is an interactive terminal
-            # where the user is choosing what to connect to, and network gear
-            # legitimately changes host keys after an RMA or an image upgrade.
-            # Blocking on an unknown-host prompt would make the tool unusable.
-            # A managed estate can tighten this under Stockton.
-            self._client.set_missing_host_key_policy(_host_key_policy())
+            if not params.trust_new_host_key:
+                try:
+                    # Without this, nothing is ever "known" and a reject policy
+                    # refuses every device (#472). Skipped only when the user
+                    # has just said to trust a new key: paramiko compares
+                    # against this store itself and raises before our own
+                    # policy is ever consulted, so leaving it loaded would make
+                    # their answer unanswerable (#528).
+                    self._client.load_system_host_keys()
+                except Exception:
+                    pass
+            # Trust on first use, warn on change (#528). This is an
+            # interactive terminal where the user chooses what to connect to,
+            # and network gear legitimately changes host keys after an RMA or
+            # an image upgrade — so an unknown key is remembered rather than
+            # blocked on, and it is the *change* that becomes a question. A
+            # managed estate can refuse unknown keys outright under Stockton.
+            policy = _TrustOnFirstUse(params.hostname, params.port,
+                                      params.trust_new_host_key)
+            self._client.set_missing_host_key_policy(policy)
 
             logger.info("Connecting to %s as %s", params.target(), username)
 
@@ -580,7 +667,28 @@ class SSHHandler(ConnectionHandler):
             # b"" immediately when idle, which is indistinguishable from the
             # channel having been closed.
             self._channel.settimeout(advanced("ssh.read_timeout"))
+            # Empty when the system known_hosts already knew this device, in
+            # which case paramiko matched it and never called the policy.
+            self.host_key_fingerprint = policy.fingerprint or self.host_key_fingerprint
 
+        except HostKeyChanged:
+            # A question for the user, not a failure — but the bastion session
+            # opened for this attempt still has to be closed, or every refused
+            # answer leaves one behind (#341, #473).
+            self.disconnect()
+            raise
+        except paramiko.BadHostKeyException as exc:
+            # paramiko's own comparison, against the *system* known_hosts,
+            # which it consults before the policy. Same event, same question:
+            # translated rather than reported as a generic SSH error, which is
+            # what the `except paramiko.SSHException` below would have made of
+            # it (BadHostKeyException is one).
+            self.disconnect()
+            raise HostKeyChanged(
+                params.hostname, params.port,
+                exc.key.get_name() if exc.key is not None else "",
+                keys_module.host_fingerprint(exc.expected_key),
+                keys_module.host_fingerprint(exc.key)) from exc
         except ConnectionError_:
             # Raised with the failure already phrased — jump auth refused, the
             # bastion declining a channel, a bad key path — but possibly
@@ -651,10 +759,11 @@ class SSHHandler(ConnectionHandler):
         logger.info("Opening jump host %s:%s", params.jump_host, params.jump_port)
 
         self._jump_client = paramiko.SSHClient()
-        try:
-            self._jump_client.load_system_host_keys()      # see #472
-        except Exception:
-            pass
+        if not params.trust_new_host_key:
+            try:
+                self._jump_client.load_system_host_keys()  # see #472, #528
+            except Exception:
+                pass
         # The same settings as the target connection, rather than three
         # hardcoded values.
         #
@@ -669,7 +778,9 @@ class SSHHandler(ConnectionHandler):
         # and the algorithm overrides exist for kit modern paramiko will not
         # otherwise negotiate with — a bastion is as likely to be old as
         # anything behind it.
-        self._jump_client.set_missing_host_key_policy(_host_key_policy())
+        self._jump_client.set_missing_host_key_policy(
+            _TrustOnFirstUse(params.jump_host, params.jump_port,
+                             params.trust_new_host_key))
 
         discover_keys = bool(advanced("ssh.look_for_keys"))
         if params.jump_password and not params.jump_private_key_path:
@@ -700,6 +811,14 @@ class SSHHandler(ConnectionHandler):
                     offered_keys=discover_keys,
                     still_connected=bool(transport and transport.is_active()))
             ) from exc
+        except paramiko.BadHostKeyException as exc:
+            # The bastion is the machine most worth checking: every session
+            # goes through it, and it is the one an attacker would rather be.
+            raise HostKeyChanged(
+                params.jump_host, params.jump_port,
+                exc.key.get_name() if exc.key is not None else "",
+                keys_module.host_fingerprint(exc.expected_key),
+                keys_module.host_fingerprint(exc.key)) from exc
         except (paramiko.SSHException, OSError) as exc:
             raise ConnectionError_(f"Could not reach jump host {params.jump_host}: {exc}") from exc
 

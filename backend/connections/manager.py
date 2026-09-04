@@ -295,6 +295,13 @@ class SessionManager:
             "display_label":   session["display_label"],
             "target":          session["target"],
             "connected_at":    session["connected_at"],
+            # What the device proved itself with (#528). A public key's
+            # fingerprint, so there is nothing here to protect — and it is
+            # the thing somebody reads out to whoever is standing next to
+            # the device. Empty for serial, telnet, and for an SSH host the
+            # system known_hosts already matched.
+            "host_key":        getattr(session.get("handler"),
+                                       "host_key_fingerprint", ""),
             "is_connected":    SessionManager._still_connected(session),
         }
 

@@ -652,13 +652,21 @@
   const failedRecently = new Set();
 
   /**
-   * POST /api/sessions, answering a keyboard-interactive challenge (#406).
+   * POST /api/sessions, answering whatever the connection stops to ask.
    *
-   * A 409 carrying `interactive` means the device asked something only the
-   * user can answer — a one-time code, a second factor. This puts the
-   * prompts up as a small form and posts again with the answers, up to
-   * three rounds, so every caller gets MFA for free. Resolves to
-   * `{ response, data }` exactly as a plain fetch would.
+   * Two things arrive as a 409 rather than as a failure, and both are
+   * questions only the person at the keyboard can answer:
+   *
+   *   `interactive` — the device wants a one-time code or a second factor
+   *     (#406). The prompts go up as a small form and the attempt is made
+   *     again with the answers.
+   *   `host_key` — the device is not the one we trusted (#528). Both
+   *     fingerprints go up, and only an explicit "trust the new key" makes
+   *     the attempt again.
+   *
+   * Three rounds, so a device that asks both gets both. Resolves to
+   * `{ response, data }` exactly as a plain fetch would, which is what gives
+   * every caller — tile, dialog, palette — the same handling for free.
    */
   async function postSession(payload) {
     let body = Object.assign({}, payload);
@@ -669,10 +677,22 @@
         body:    JSON.stringify(body),
       });
       const data = await response.json().catch(() => ({}));
-      const ask = response.status === 409 && data.detail && data.detail.interactive;
-      if (!ask) return { response, data };
+      const detail = (response.status === 409 && data.detail) || null;
 
-      const answers = await askInteractive(data.detail.interactive, body.hostname);
+      if (detail && detail.host_key) {
+        const trusted = await askHostKey(detail.host_key);
+        if (!trusted) {
+          return { response: { ok: false, status: 409 },
+                   data: { detail: 'Cancelled: the host key had changed, so '
+                                 + 'nothing was sent to the device.' } };
+        }
+        body = Object.assign({}, body, { trust_new_host_key: true });
+        continue;
+      }
+
+      if (!(detail && detail.interactive)) return { response, data };
+
+      const answers = await askInteractive(detail.interactive, body.hostname);
       if (answers === null) {
         return { response: { ok: false, status: 409 },
                  data: { detail: 'Cancelled: the device was still asking.' } };
@@ -681,6 +701,40 @@
     }
     return { response: { ok: false, status: 409 },
              data: { detail: 'The device kept asking after three attempts.' } };
+  }
+
+  /**
+   * The one warning every engineer has been saved by at least once (#528).
+   *
+   * Deliberately a dialog and not a toast: the connection has stopped,
+   * nothing has been sent to the device, no password has been offered, and
+   * the only way past is an answer. Both fingerprints are shown in full
+   * because "the key changed" is not something anybody can act on, and
+   * "SHA256:… became SHA256:…" is — it can be read out to whoever is
+   * standing next to the device.
+   *
+   * Trusting is offered plainly rather than grudgingly: an RMA or a re-image
+   * changes the key, and on the estate ShellMate is built for that is the
+   * likely answer. It is still the button styled as the destructive one.
+   */
+  async function askHostKey(info) {
+    const where = info.port && info.port !== 22
+      ? `${info.hostname}:${info.port}` : (info.hostname || 'this device');
+    return Boolean(await window.shellmateDialog.confirm({
+      title: `The host key for ${where} has changed`,
+      body:  'This is what you would expect after the device was replaced, '
+             + 're-imaged or upgraded. It is also what a machine sitting '
+             + 'between you and the device looks like. Nothing has been sent '
+             + 'to it, and no password has been offered.',
+      list: [
+        { text: info.old_fingerprint || 'unknown', detail: 'the key we trusted' },
+        { text: info.new_fingerprint || 'unknown', detail: 'what it offered just now' },
+      ],
+      note: info.key_type ? `Key type: ${info.key_type}` : '',
+      confirmLabel: 'Trust the new key',
+      cancelLabel:  'Cancel',
+      danger: true,
+    }));
   }
 
   /** Put the device's prompts to the user; null if they cancel. */

@@ -6,6 +6,16 @@ exists.
 
 ## 1.1.3
 
+- **ShellMate remembers device host keys, and says when one changes.** The
+  first connection to a device records the key it answered with; a later
+  connection answering with a *different* key stops and asks, naming the old
+  and the new fingerprint, with nothing sent to the device until you decide.
+  That is the warning PuTTY raises after an RMA — or after somebody has got
+  between you and the switch. Unknown hosts are still trusted on sight, so a
+  lab that is re-imaged weekly is not forty questions. **Keys → Known hosts**
+  lists what is trusted, with **Forget**; the tab's hover card shows the
+  fingerprint of the key in use.
+
 - **Import and export the estate as CSV.** Right-click the group tree's
   background for **Import connections…** — paste rows from a spreadsheet or
   choose a file — and **Export all as CSV…**; any group's own menu exports

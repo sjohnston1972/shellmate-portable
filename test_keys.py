@@ -330,6 +330,254 @@ def test_import_and_delete() -> None:
           not Path(imported.public_path).exists())
 
 
+# ---------------------------------------------------------------------------
+# Host keys — trust on first use, warn on change (#528)
+#
+# The half of SSH identity that was missing. The default policy auto-added an
+# unknown key and nothing ever wrote it down, so a key that *changed* was
+# never noticed — and a changed key is the one event here that carries
+# information. These tests drive a real paramiko server and swap its host key
+# under the client, which is what an RMA, a re-image and a man in the middle
+# all look like from this side.
+# ---------------------------------------------------------------------------
+
+
+def _device_server(host_key_holder):
+    """
+    A password-only SSH server whose host key can be swapped between
+    connections. Returns (port, listener).
+    """
+    import socket
+    import threading
+
+    import paramiko
+
+    class Device(paramiko.ServerInterface):
+        def get_allowed_auths(self, username):
+            return "password"
+
+        def check_auth_password(self, username, password):
+            return (paramiko.AUTH_SUCCESSFUL if password == "letmein"
+                    else paramiko.AUTH_FAILED)
+
+        def check_channel_request(self, kind, chanid):
+            return (paramiko.OPEN_SUCCEEDED if kind == "session"
+                    else paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED)
+
+        def check_channel_pty_request(self, *args, **kwargs):
+            return True
+
+        def check_channel_shell_request(self, channel):
+            return True
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    port = listener.getsockname()[1]
+    keep: list = []
+
+    def run():
+        while True:
+            try:
+                sock, _ = listener.accept()
+            except OSError:
+                return
+            transport = paramiko.Transport(sock)
+            transport.add_server_key(host_key_holder[0])
+            try:
+                transport.start_server(server=Device())
+            except Exception:
+                continue
+            keep.append((transport, transport.accept(10)))
+
+    threading.Thread(target=run, daemon=True).start()
+    return port, listener
+
+
+def test_the_host_key_store() -> None:
+    print("\n-- The host key store --")
+    import paramiko
+
+    from backend.connections import ssh_handler
+
+    # OpenSSH's spelling, because an entry filed under the wrong name is an
+    # entry nothing ever looks up — and every connection to a device on 2222
+    # would look like a first connection.
+    check("port 22 is spelled bare", keys.host_entry_name("sw1", 22) == "sw1")
+    check("  and any other port is bracketed",
+          keys.host_entry_name("sw1", 2222) == "[sw1]:2222")
+
+    key_a = paramiko.RSAKey.generate(2048)
+    key_b = paramiko.RSAKey.generate(2048)
+    fp_a = keys.host_fingerprint(key_a)
+
+    check("a fingerprint is spelled the way ssh-keygen spells one",
+          fp_a.startswith("SHA256:") and "=" not in fp_a, fp_a)
+    check("  and two keys do not share one", fp_a != keys.host_fingerprint(key_b))
+
+    check("nothing is known before anything connects",
+          keys.known_host_key("sw-store", 22) is None)
+
+    keys.remember_host("sw-store", 22, key_a)
+    check("a remembered key reads back", keys.known_host_key("sw-store", 22) == key_a)
+    check("  and is listed for the panel",
+          any(row["host"] == "sw-store" and row["fingerprint"] == fp_a
+              for row in keys.known_hosts()))
+
+    # The whole point of trust-on-first-use: a device already known is not
+    # asked about again, and the same key is silence.
+    check("the same key again is not an event",
+          ssh_handler._verify_host_key("sw-store", 22, key_a) == fp_a)
+
+    changed = None
+    try:
+        ssh_handler._verify_host_key("sw-store", 22, key_b)
+    except Exception as exc:
+        changed = exc
+    check("a different key stops the connection",
+          type(changed).__name__ == "HostKeyChanged", repr(changed))
+    if changed is not None and hasattr(changed, "as_dict"):
+        payload = changed.as_dict()
+        check("  carrying both fingerprints, so it can be read out",
+              payload["old_fingerprint"] == fp_a
+              and payload["new_fingerprint"] == keys.host_fingerprint(key_b),
+              str(payload))
+        check("  and the store is untouched until somebody answers",
+              keys.known_host_key("sw-store", 22) == key_a)
+
+    check("trusting the new key replaces the old one",
+          ssh_handler._verify_host_key("sw-store", 22, key_b, trust_new=True)
+          == keys.host_fingerprint(key_b))
+    check("  and the store now holds it",
+          keys.known_host_key("sw-store", 22) == key_b)
+
+    # A different algorithm from the same device is not a changed key. Raising
+    # the alarm for that is how somebody learns to click through the warning
+    # that matters.
+    other_type = paramiko.ECDSAKey.generate()
+    check("another algorithm from the same host is not a change",
+          bool(ssh_handler._verify_host_key("sw-store", 22, other_type)))
+
+    check("forgetting a host is the way back", keys.forget_host("sw-store"))
+    check("  and it is then unknown again",
+          keys.known_host_key("sw-store", 22) is None)
+    check("forgetting something unknown is not an error",
+          keys.forget_host("sw-store") is False)
+
+
+def test_a_changed_key_reaches_the_user() -> None:
+    print("\n-- A changed host key, end to end --")
+    import paramiko
+
+    from backend.connections.base import ConnectionParams, HostKeyChanged
+    from backend.connections.ssh_handler import SSHHandler
+
+    key_a = paramiko.RSAKey.generate(2048)
+    key_b = paramiko.RSAKey.generate(2048)
+    holder = [key_a]
+    port, listener = _device_server(holder)
+
+    def params(**extra):
+        return ConnectionParams(hostname="127.0.0.1", port=port,
+                                username="neteng", password="letmein", **extra)
+
+    try:
+        first = SSHHandler(params=params())
+        first.connect()
+        check("the first connection is trusted without asking", first.is_connected)
+        check("  and the key is remembered",
+              keys.known_host_key("127.0.0.1", port) == key_a)
+        check("  and the session can say what it connected to",
+              first.host_key_fingerprint == keys.host_fingerprint(key_a),
+              first.host_key_fingerprint)
+        first.disconnect()
+
+        holder[0] = key_b                       # the device is re-imaged, or is not the device
+        second = SSHHandler(params=params())
+        raised = None
+        try:
+            second.connect()
+        except HostKeyChanged as exc:
+            raised = exc
+        except Exception as exc:
+            check("a changed key stops the connection", False,
+                  f"{type(exc).__name__}: {exc}")
+        check("a changed key stops the connection", raised is not None)
+        if raised is not None:
+            check("  naming both fingerprints",
+                  raised.old_fingerprint == keys.host_fingerprint(key_a)
+                  and raised.new_fingerprint == keys.host_fingerprint(key_b),
+                  f"{raised.old_fingerprint} -> {raised.new_fingerprint}")
+        check("  and no session was left open", not second.is_connected)
+        check("  and nothing was written to the store",
+              keys.known_host_key("127.0.0.1", port) == key_a)
+
+        third = SSHHandler(params=params(trust_new_host_key=True))
+        third.connect()
+        check("answering 'trust the new key' connects", third.is_connected)
+        check("  and the new key replaces the old one",
+              keys.known_host_key("127.0.0.1", port) == key_b)
+        third.disconnect()
+    finally:
+        listener.close()
+        keys.forget_host(keys.host_entry_name("127.0.0.1", port))
+
+
+def test_the_api_asks_rather_than_deciding() -> None:
+    print("\n-- The API --")
+    import paramiko
+    from fastapi.testclient import TestClient
+
+    from backend.app import app
+
+    key_a = paramiko.RSAKey.generate(2048)
+    key_b = paramiko.RSAKey.generate(2048)
+    holder = [key_a]
+    port, listener = _device_server(holder)
+    client = TestClient(app, base_url="http://127.0.0.1")
+
+    body = {"connection_type": "ssh", "hostname": "127.0.0.1", "port": port,
+            "username": "neteng", "password": "letmein", "display_label": "hk"}
+    try:
+        first = client.post("/api/sessions", json=body)
+        check("the first connection succeeds", first.status_code == 200,
+              f"got {first.status_code} {first.text[:160]}")
+        if first.status_code == 200:
+            client.delete(f"/api/sessions/{first.json()['session_id']}")
+
+        holder[0] = key_b
+        second = client.post("/api/sessions", json=body)
+        check("a changed key answers 409, not 200 and not 400",
+              second.status_code == 409, f"got {second.status_code} {second.text[:160]}")
+        detail = second.json().get("detail", {}) if second.status_code == 409 else {}
+        changed = detail.get("host_key") or {}
+        check("  with both fingerprints for the dialog",
+              changed.get("old_fingerprint") == keys.host_fingerprint(key_a)
+              and changed.get("new_fingerprint") == keys.host_fingerprint(key_b),
+              str(changed))
+
+        third = client.post("/api/sessions", json={**body, "trust_new_host_key": True})
+        check("and the retry that trusts it connects", third.status_code == 200,
+              f"got {third.status_code} {third.text[:160]}")
+        if third.status_code == 200:
+            client.delete(f"/api/sessions/{third.json()['session_id']}")
+
+        listed = client.get("/api/keys/known-hosts")
+        check("the panel can list what is trusted", listed.status_code == 200)
+        hosts = listed.json().get("hosts", []) if listed.status_code == 200 else []
+        name = keys.host_entry_name("127.0.0.1", port)
+        check("  including this device", any(h["host"] == name for h in hosts))
+
+        forgotten = client.post("/api/keys/known-hosts/forget", json={"host": name})
+        check("and Forget removes it",
+              forgotten.status_code == 200 and forgotten.json().get("removed") is True,
+              forgotten.text[:120])
+    finally:
+        listener.close()
+        keys.forget_host(keys.host_entry_name("127.0.0.1", port))
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  SSH keys")
@@ -345,6 +593,9 @@ def main() -> int:
         test_paths_from_the_browser_are_not_trusted,
         test_the_manual_covers_keys,
         test_import_and_delete,
+        test_the_host_key_store,
+        test_a_changed_key_reaches_the_user,
+        test_the_api_asks_rather_than_deciding,
     ):
         try:
             test()
