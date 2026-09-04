@@ -219,11 +219,28 @@ than pretending it stopped something.
 
 Two ways to get to a playbook, and the order is the argument.
 
-**Blocks** come first. Pick tasks from a short list — gather facts, run
-show commands, push configuration lines, back up, save — fill in the
-fields, and ShellMate assembles the YAML with the right modules for the
-platform you chose. Nothing leaves the machine, nothing needs an API key,
-and the same input gives the same playbook every time.
+The canvas is the playbook, drawn as the thing it is: a playbook holding
+plays, each play holding tasks, and tasks notifying handlers. Each level
+carries its own **+ add**, so where you click is where the thing lands.
+
+**Drag from the group tree on the left.** That tree is ShellMate's own
+directory of the estate and it stays on screen while the Ansible view is
+open, so there is no second list of the same sites to keep in step. Drag a
+site, a subgroup or a single device onto the playbook to add a play for it,
+or onto an existing play to change what that play targets. Dropping onto a
+play that already targets something extends the pattern rather than
+replacing it — Ansible reads a comma-separated list as a union.
+
+A whole site works as a target even though nothing is tagged with the site
+itself: the generated inventory declares it as a group of the groups
+beneath it, which is Ansible's own way of saying so. A serial console
+cannot be a target and says why, because it has no address to dial.
+
+**Tasks** come from a short list — gather facts, run show commands, push
+configuration lines, back up, save — and ShellMate assembles the YAML with
+the right modules for the platform you chose. Nothing leaves the machine,
+nothing needs an API key, and the same input gives the same playbook every
+time.
 
 **Or describe it.** With an AI provider configured, write what you want in
 a sentence and get a draft. It uses whichever model the chat panel is set

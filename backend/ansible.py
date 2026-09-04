@@ -606,6 +606,10 @@ def inventory_from_estate(group: str = "") -> dict:
             continue
         entry = hostvars.setdefault(address, {
             "shellmate_name": name,
+            # The connection this came from, so something dragged out of the
+            # group tree — which carries profile ids, not addresses — can be
+            # resolved to a host without a second round trip (#601).
+            "shellmate_id": profile.get("id", ""),
             "ansible_host": address,
             "ansible_port": int(profile.get("port") or 22),
         })
@@ -628,10 +632,33 @@ def inventory_from_estate(group: str = "") -> dict:
                 if address not in groups[key]:
                     groups[key].append(address)
 
+    # A site is a group too (#601). `site-1/routers` and `site-1/switches`
+    # hold the hosts; nothing is tagged `site-1` itself, so without this the
+    # site is not a group Ansible knows and cannot be targeted — which is
+    # exactly what somebody dragging a whole site out of the tree means to
+    # do. Ansible's own answer is a group of groups, so that is what this
+    # emits rather than copying the hosts upward: copying would duplicate
+    # every host under every ancestor and make the inventory lie about how
+    # many there are.
+    children: dict[str, list[str]] = {}
+    for tag, key in sorted(original.items(), key=lambda pair: pair[1]):
+        parts = key.split("/")
+        for depth in range(1, len(parts)):
+            parent = ansible_group_name("/".join(parts[:depth]))
+            if not parent or parent == tag:
+                continue
+            children.setdefault(parent, [])
+            if tag not in children[parent]:
+                children[parent].append(tag)
+            original.setdefault(parent, "/".join(parts[:depth]))
+
     return {
         "groups": {k: sorted(v) for k, v in sorted(groups.items())},
-        # Ansible's name → ShellMate's. Show the second, send the first.
-        "group_names": {k: original.get(k, k) for k in sorted(groups)},
+        # Parent -> the groups beneath it, as Ansible's [parent:children].
+        "children": {k: sorted(v) for k, v in sorted(children.items())},
+        # Ansible's name to ShellMate's. Show the second, send the first.
+        "group_names": {k: original.get(k, k)
+                        for k in sorted(set(groups) | set(children))},
         "hostvars": hostvars,
         "hosts": sorted(hostvars),
         "skipped": skipped,
@@ -658,6 +685,12 @@ def inventory_as_ini(inventory: dict) -> str:
                              for k, v in sorted((hostvars.get(host) or {}).items())
                              if not (k == "ansible_host" and v == host))
             lines.append(f"{host} {pairs}".rstrip())
+        lines.append("")
+    # Groups of groups, so a whole site is targetable without every
+    # host being listed twice.
+    for parent, kids in (inventory.get("children") or {}).items():
+        lines.append(f"[{parent}:children]")
+        lines.extend(kids)
         lines.append("")
     return "\n".join(lines)
 

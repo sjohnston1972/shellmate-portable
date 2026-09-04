@@ -116,32 +116,17 @@ async def main() -> None:
               "add play" in (await page.inner_text("#av-bld-canvas")).lower(),
               await page.inner_text("#av-bld-canvas"))
 
-        print("\n-- Inventory is the real estate, beside the canvas --")
-        check("the rail exists",
-              await page.query_selector("#av-bld-rail") is not None)
-        check("it is outside the playbook box",
-              await page.query_selector(".av-node-playbook #av-bld-rail") is None,
-              "drawing inventory inside the playbook implies it owns the groups")
-        check("it renders the shared estate tree, not a bespoke list",
-              await page.query_selector("#av-bld-rail .av-est-tree") is not None,
-              "the builder must not carry a second inventory implementation")
-        check("there is one estate module, shared",
-              await page.evaluate("!!window.ansibleEstate"),
-              "no shared source — two areas would each fetch and could disagree")
-
-        groups = await page.eval_on_selector_all(
-            "#av-bld-rail .av-est-group .av-est-label", "e => e.map(x => x.textContent)")
-        check("groups appear by the name ShellMate uses",
-              any("site" in g.lower() for g in groups), str(groups))
-        check("and are draggable",
-              await page.get_attribute("#av-bld-rail .av-est-group", "draggable") == "true",
-              "the whole point is dragging them onto a play")
-
-        hosts = await page.eval_on_selector_all(
-            "#av-bld-rail .av-est-host .av-est-label", "e => e.map(x => x.textContent)")
-        check("individual connections are offered too",
-              len(hosts) > 0,
-              "a play targeting one host is legitimate and has to be reachable")
+        print("\n-- There is no second inventory --")
+        check("the builder has no rail of its own",
+              await page.query_selector("#av-bld-rail") is None,
+              "a second list of the estate is a second thing to keep in step")
+        check("but it says where the estate is",
+              "tree on the left" in (await page.inner_text("#av-builder-body")),
+              "a drop zone nobody knows to drag into is not a feature")
+        check("the resolver is available",
+              await page.evaluate("!!(window.ansibleEstate "
+                                  "&& window.ansibleEstate.resolveDrop)"),
+              "nothing would be able to read a drag from the tree")
 
         print("\n-- Adding a play --")
         await page.evaluate("""
@@ -200,27 +185,58 @@ async def main() -> None:
         check("and the read-back agrees with it",
               "ios_config" in found or "cli_config" in found, found[:200])
 
-        print("\n-- Dragging a group onto a play --")
+        print("\n-- Dragging out of ShellMate's own tree --")
+        await page.evaluate("document.getElementById('group-tree')"
+                            ".classList.remove('hidden')")
+        chip = await page.query_selector('#group-tree .tree-chip[data-key="site-1"]')
+        check("the tree has the site to drag", chip is not None,
+              "the real directory is what this drags out of")
+
         before = await page.inner_text(".av-node-play")
         moved = await page.evaluate("""
           (() => {
-            const item = document.querySelector('#av-bld-rail .av-est-group');
+            const chip = document.querySelector(
+              '#group-tree .tree-chip[data-key="site-1"]');
             const play = document.querySelector('.av-node-play');
-            if (!item || !play) return 'missing';
+            if (!chip || !play) return 'missing';
             const dt = new DataTransfer();
-            item.dispatchEvent(new DragEvent('dragstart',
+            chip.dispatchEvent(new DragEvent('dragstart',
               { dataTransfer: dt, bubbles: true }));
+            const carried = dt.getData('application/x-shellmate-group');
+            play.dispatchEvent(new DragEvent('dragover',
+              { dataTransfer: dt, bubbles: true, cancelable: true }));
             play.dispatchEvent(new DragEvent('drop',
               { dataTransfer: dt, bubbles: true, cancelable: true }));
-            return dt.getData('application/x-shellmate-target') || 'no payload';
+            return carried || 'no payload';
           })()
         """)
-        check("the drag carries a typed payload",
-              moved not in ("missing", "no payload"), str(moved))
+        check("the tree publishes the group it is dragging",
+              moved == "site-1", str(moved))
         await page.wait_for_timeout(600)
         after = await page.inner_text(".av-node-play")
-        check("and the play it was dropped on changed what it targets",
-              after != before, f"before {before[:80]!r} after {after[:80]!r}")
+        check("and the play changed what it targets",
+              after != before, f"before {before[:70]!r} after {after[:70]!r}")
+        check("to the name Ansible will use, not ShellMate's",
+              "site_1" in after,
+              f"it read {after[:120]!r} — a play must target the sanitised name")
+        check("and a whole site is targetable, not only its subgroups",
+              "site_1_routers" not in after,
+              "dropping a site should target the site, which Ansible knows as "
+              "a group of groups")
+
+        print("\n-- A serial console cannot be a target --")
+        refused = await page.evaluate("""
+          (() => {
+            const dt = new DataTransfer();
+            dt.setData('application/x-shellmate-profile', 'not-a-real-id');
+            const got = window.ansibleEstate.resolveDrop(
+              { dataTransfer: dt });
+            return got && !got.target ? got.why : 'it produced a target';
+          })()
+        """)
+        check("dragging one says why rather than doing nothing",
+              "serial" in str(refused).lower() or "address" in str(refused).lower(),
+              str(refused))
 
         print("\n-- Nothing threw --")
         real = [e for e in errors if "favicon" not in e.lower()]

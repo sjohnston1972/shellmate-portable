@@ -229,7 +229,11 @@
     return el('div', {
       class: 'av-node av-node-play',
       ondragover: (event) => {
-        if (!window.ansibleEstate) return;
+        if (!window.ansibleEstate
+            || !window.ansibleEstate.isEstateDrag(event)) return;
+        // Copy, not move: dragging a site onto a play points the play at it
+        // and leaves the site exactly where it was in the tree.
+        event.dataTransfer.dropEffect = 'copy';
         event.preventDefault();
         event.stopPropagation();
         event.currentTarget.classList.add('av-node-over');
@@ -237,11 +241,13 @@
       ondragleave: (event) => event.currentTarget.classList.remove('av-node-over'),
       ondrop: (event) => {
         event.currentTarget.classList.remove('av-node-over');
-        const picked = window.ansibleEstate.dropped(event);
+        const picked = window.ansibleEstate.resolveDrop(event);
         if (!picked) return;
         event.preventDefault();
         event.stopPropagation();
+        if (!picked.target) { refuse(picked.why); return; }
         retarget(play, picked);
+        if (picked.partial) refuse(picked.partial);
       },
     }, [
       el('div', { class: 'av-node-row av-node-head' }, [
@@ -274,18 +280,21 @@
     host.appendChild(el('div', {
       class: 'av-node av-node-playbook',
       ondragover: (event) => {
-        if (window.ansibleEstate) {
-          event.preventDefault();
-          event.currentTarget.classList.add('av-node-over');
-        }
+        if (!window.ansibleEstate
+            || !window.ansibleEstate.isEstateDrag(event)) return;
+        event.dataTransfer.dropEffect = 'copy';
+        event.preventDefault();
+        event.currentTarget.classList.add('av-node-over');
       },
       ondragleave: (event) => event.currentTarget.classList.remove('av-node-over'),
       ondrop: (event) => {
         event.currentTarget.classList.remove('av-node-over');
-        const picked = window.ansibleEstate.dropped(event);
+        const picked = window.ansibleEstate.resolveDrop(event);
         if (!picked) return;
         event.preventDefault();
+        if (!picked.target) { refuse(picked.why); return; }
         addPlayFor(picked);
+        if (picked.partial) refuse(picked.partial);
       },
     }, [
       el('div', { class: 'av-node-row av-node-head' }, [
@@ -307,32 +316,23 @@
     else { current = { text: '', found: null, source: '', error: '' }; paint(); }
   }
 
-  /**
-   * The estate, beside the canvas, from the one place that knows it (#601).
-   *
-   * Click an item to add a play targeting it; drag one onto a play to
-   * change what that play targets, or onto the playbook to make a new one.
-   * Groups, subgroups and single connections all work, because all three
-   * are legitimate targets.
-   */
-  function rail() {
-    const host = document.getElementById('av-bld-rail');
-    if (!host || !window.ansibleEstate) return;
-    window.ansibleEstate.render(host, window.ansibleEstate.known(), {
-      draggable: true,
-      note: 'Click to add a play. Drag onto a play to retarget it.',
-      onPick: (picked) => addPlayFor(picked),
-    });
-  }
-
-  /** A new play aimed at whatever was picked. */
+  /** A new play aimed at whatever was dragged in. */
   function addPlayFor(picked) {
     const play = newPlay(picked.target);
-    play.name = picked.kind === 'host'
-      ? `Configure ${picked.label}`
-      : `Configure ${picked.label}`;
+    play.name = `Configure ${picked.label}`;
     plays.push(play);
     renderCanvas();
+  }
+
+  /**
+   * Say why something dragged in cannot be a target.
+   *
+   * A drag that lands and does nothing reads as a broken drop zone. A
+   * serial console genuinely cannot be one, and being told that is better
+   * than watching a gesture fail silently.
+   */
+  function refuse(why) {
+    window.shellmateDialog.alert({ title: 'Nothing to target', body: why });
   }
 
   /**
@@ -593,7 +593,6 @@
 
     return [
       el('div', { class: 'av-bld-shell' }, [
-        el('aside', { id: 'av-bld-rail', class: 'av-rail' }),
         el('div', { class: 'av-bld-main' }, [
           el('div', { class: 'av-bld-row' }, [
             el('div', { class: 'av-bld-field' }, [
@@ -604,6 +603,13 @@
               }, families),
             ]),
           ]),
+          // Where the estate comes from, said once. The directory is the
+          // tree on the left — the one already on screen — rather than a
+          // list of the same things repeated here (#601).
+          el('p', { class: 'av-bld-why' },
+             'Drag a site, a subgroup or a device from the tree on the left '
+             + 'onto the playbook to add a play for it, or onto a play to '
+             + 'change what that play targets.'),
           el('div', { id: 'av-bld-canvas' }),
         ]),
       ]),
@@ -683,7 +689,6 @@
     clear(body);
     layout().forEach(node => body.appendChild(node));
     body.dataset.built = '1';
-    rail();
     renderCanvas();
   }
 
