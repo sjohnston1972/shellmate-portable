@@ -936,7 +936,11 @@ async def run():
         print("\n-- Ansible panel --")
 
         try:
-            await page.click("#sidebar-link-ansible")
+            # The sidebar link now opens the Ansible *view* (#586); this
+            # suite still covers the side panel it is replacing, so it
+            # opens that directly. These checks move to the view when the
+            # Playbooks area lands and the panel is retired.
+            await page.evaluate("window.openAnsible()")
             await expect(page.locator("#ansible-panel")).to_be_visible()
             ok("the Ansible panel opens from the sidebar")
         except Exception as e:
@@ -1148,7 +1152,11 @@ async def run():
             fail("and closes the panel next", str(e))
 
         try:
-            await page.click("#sidebar-link-ansible")
+            # The sidebar link now opens the Ansible *view* (#586); this
+            # suite still covers the side panel it is replacing, so it
+            # opens that directly. These checks move to the view when the
+            # Playbooks area lands and the panel is retired.
+            await page.evaluate("window.openAnsible()")
             await page.click("#ansible-close")
             await expect(page.locator("#ansible-panel")).to_be_hidden()
             ok("the panel closes")

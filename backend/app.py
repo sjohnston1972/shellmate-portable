@@ -4002,6 +4002,11 @@ class PlaybookRunRequest(BaseModel):
     #: A path on the runner, when the source is "runner". Empty is its own
     #: default inventory.
     inventory_path: str = ""
+    # What credentials and defaults the run carries (#586). An environment
+    # supplies anything the caller left blank; key names become values only
+    # at the moment the run starts.
+    environment_id: str = ""
+    keys: list[str] = []
 
 
 class PlaybookSaveRequest(BaseModel):
@@ -4065,12 +4070,50 @@ async def ansible_run(request: PlaybookRunRequest) -> dict:
     and the run is pointed at exactly what was intended.
     """
     from backend import ansible as ansible_module
+    from backend import ansible_keys as key_store
+    from backend import ansible_library as library
+
+    # An environment fills in whatever the caller left blank (#586), so
+    # "run it against production" is one choice rather than six fields
+    # typed the same way every time. force_check only ever turns checking
+    # on: an environment can insist a run is a dry run, and no request
+    # body can talk it out of that.
+    fields = request.model_dump()
+    if request.environment_id:
+        chosen = await asyncio.to_thread(library.environment, request.environment_id)
+        if chosen is None:
+            raise HTTPException(status_code=404, detail="No such environment.")
+        for name in ("limit", "group", "inventory_path", "inventory_source"):
+            if not fields.get(name):
+                fields[name] = chosen.get(name) or fields.get(name)
+        merged = dict(chosen.get("variables") or {})
+        merged.update(fields.get("extra_vars") or {})
+        fields["extra_vars"] = merged
+        fields["check"] = bool(fields.get("check")) or bool(chosen.get("force_check"))
+        fields["forks"] = fields.get("forks") or chosen.get("forks")
+        fields["verbosity"] = fields.get("verbosity") or chosen.get("verbosity") or 0
+
+    # A key name becomes a value here and nowhere earlier. One the vault
+    # cannot read stops the run by name: Ansible's failure for a blank
+    # credential is several screens away from the cause.
+    envvars: dict = {}
+    if request.keys:
+        envvars, extra, unreadable = await asyncio.to_thread(
+            key_store.resolve, request.keys)
+        if unreadable:
+            raise HTTPException(
+                status_code=400,
+                detail="No readable value for: " + ", ".join(unreadable)
+                       + ". Unlock the vault, or set them again.")
+        merged = dict(fields.get("extra_vars") or {})
+        merged.update(extra)
+        fields["extra_vars"] = merged
 
     content = ""
     skipped: list[dict] = []
-    if request.inventory_source == "estate":
+    if fields["inventory_source"] == "estate":
         inventory = await asyncio.to_thread(
-            ansible_module.inventory_from_estate, request.group)
+            ansible_module.inventory_from_estate, fields["group"])
         if not inventory["hosts"]:
             raise HTTPException(
                 status_code=400,
@@ -4080,15 +4123,17 @@ async def ansible_run(request: PlaybookRunRequest) -> dict:
         skipped = inventory["skipped"]
     try:
         started = await asyncio.to_thread(
-            ansible_module.start, request.playbook,
-            extra_vars=request.extra_vars, limit=request.limit,
-            check=request.check, tags=request.tags, skip_tags=request.skip_tags,
-            verbosity=request.verbosity, forks=request.forks,
-            inventory=request.inventory_path if request.inventory_source == "runner" else "",
+            ansible_module.start, fields["playbook"],
+            extra_vars=fields["extra_vars"], limit=fields["limit"],
+            check=fields["check"], tags=fields["tags"],
+            skip_tags=fields["skip_tags"], verbosity=fields["verbosity"],
+            forks=fields["forks"], envvars=envvars,
+            inventory=fields["inventory_path"] if fields["inventory_source"] == "runner" else "",
             inventory_content=content)
     except Exception as exc:
         raise _ansible_error(exc) from exc
     started["skipped"] = skipped
+    started["check"] = bool(fields["check"])
     return started
 
 
@@ -4247,6 +4292,227 @@ async def ansible_send_playbook(name: str, session_id: str) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     logger.info("Playbook %s copied to %s", plan["name"], plan["target"])
     return {"sent": True, **plan}
+
+
+# REST — The Ansible library (#586)
+#
+# What ShellMate keeps beside the runner so an automation is repeatable:
+# templates with holes in them, named environments, and where a set of
+# playbooks came from. All of it is in the data folder, so it travels with
+# the executable and survives the container being rebuilt.
+# ---------------------------------------------------------------------------
+
+class TemplateRequest(BaseModel):
+    """Body for POST /api/ansible/templates."""
+
+    id: str = ""
+    name: str
+    description: str = ""
+    body: str
+    variables: list[dict] = []
+    platform: str = ""
+    writes: bool = True
+
+
+class TemplateFillRequest(BaseModel):
+    """Body for POST /api/ansible/templates/{id}/render."""
+
+    values: dict = {}
+    save_as: str = ""
+
+
+class EnvironmentRequest(BaseModel):
+    """Body for POST /api/ansible/environments."""
+
+    id: str = ""
+    name: str
+    description: str = ""
+    variables: dict = {}
+    inventory_source: str = "estate"
+    group: str = ""
+    inventory_path: str = ""
+    limit: str = ""
+    force_check: bool = False
+    forks: int | None = None
+    verbosity: int = 0
+
+
+class RepositoryRequest(BaseModel):
+    """Body for POST /api/ansible/repositories."""
+
+    id: str = ""
+    name: str
+    url: str
+    branch: str = "main"
+    path: str = ""
+    revision: str = ""
+    notes: str = ""
+
+
+@app.get("/api/ansible/library")
+async def ansible_library_all() -> dict:
+    """Everything the library holds, for the view's first paint."""
+    from backend import ansible_library as library
+
+    return {
+        "templates": await asyncio.to_thread(library.templates),
+        "environments": await asyncio.to_thread(library.environments),
+        "repositories": await asyncio.to_thread(library.repositories),
+    }
+
+
+@app.post("/api/ansible/templates")
+async def ansible_save_template(request: TemplateRequest) -> dict:
+    """Create or update a template. Refuses a hole nothing describes."""
+    from backend import ansible_library as library
+
+    try:
+        return await asyncio.to_thread(library.save_template, request.model_dump())
+    except library.LibraryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/ansible/templates/{entry_id}")
+async def ansible_delete_template(entry_id: str) -> dict:
+    from backend import ansible_library as library
+
+    return {"deleted": await asyncio.to_thread(library.delete_template, entry_id)}
+
+
+@app.post("/api/ansible/templates/{entry_id}/render")
+async def ansible_render_template(entry_id: str, request: TemplateFillRequest) -> dict:
+    """
+    Fill a template in, and optionally keep the result as a playbook.
+
+    Rendering without saving is the preview: a template is only worth
+    trusting if you can see what it produced before it runs.
+    """
+    from backend import ansible as ansible_module
+    from backend import ansible_library as library
+
+    template = next((t for t in await asyncio.to_thread(library.templates)
+                     if t.get("id") == entry_id), None)
+    if template is None:
+        raise HTTPException(status_code=404, detail="No such template.")
+    try:
+        text = await asyncio.to_thread(library.render_template, template, request.values)
+    except library.LibraryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    out = {"text": text, "template": template["name"]}
+    if request.save_as:
+        try:
+            saved = await asyncio.to_thread(
+                ansible_module.save_playbook, request.save_as, text)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        out["saved"] = saved
+        out["transfer"] = ansible_module.playbook_transfer_plan(saved["name"])
+    return out
+
+
+@app.post("/api/ansible/environments")
+async def ansible_save_environment(request: EnvironmentRequest) -> dict:
+    from backend import ansible_library as library
+
+    try:
+        return await asyncio.to_thread(library.save_environment, request.model_dump())
+    except library.LibraryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/ansible/environments/{entry_id}")
+async def ansible_delete_environment(entry_id: str) -> dict:
+    from backend import ansible_library as library
+
+    return {"deleted": await asyncio.to_thread(library.delete_environment, entry_id)}
+
+
+@app.post("/api/ansible/repositories")
+async def ansible_save_repository(request: RepositoryRequest) -> dict:
+    from backend import ansible_library as library
+
+    try:
+        return await asyncio.to_thread(library.save_repository, request.model_dump())
+    except library.LibraryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/ansible/repositories/{entry_id}")
+async def ansible_delete_repository(entry_id: str) -> dict:
+    from backend import ansible_library as library
+
+    return {"deleted": await asyncio.to_thread(library.delete_repository, entry_id)}
+
+
+class AnsibleKeyRequest(BaseModel):
+    """Body for POST /api/ansible/keys."""
+
+    id: str = ""
+    name: str
+    kind: str = "generic"
+    delivery: str = "env"
+    target: str = ""
+    description: str = ""
+    value: str = ""
+
+
+@app.get("/api/ansible/keys")
+async def ansible_keys() -> dict:
+    """
+    The keys, with no values in them.
+
+    ``readable`` per key says whether the vault can currently produce the
+    value. There is deliberately no endpoint that returns one: the only way
+    a value leaves ShellMate is with a run that needs it.
+    """
+    from backend import ansible_keys as store
+
+    return {"keys": await asyncio.to_thread(store.keys),
+            "kinds": store.KINDS, "delivery": list(store.DELIVERY)}
+
+
+@app.post("/api/ansible/keys")
+async def ansible_save_key(request: AnsibleKeyRequest) -> dict:
+    from backend import ansible_keys as store
+
+    try:
+        return await asyncio.to_thread(store.save_key, request.model_dump())
+    except store.KeyError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/ansible/keys/{entry_id}")
+async def ansible_delete_key(entry_id: str) -> dict:
+    from backend import ansible_keys as store
+
+    return {"deleted": await asyncio.to_thread(store.delete_key, entry_id)}
+
+
+@app.get("/api/ansible/overview")
+async def ansible_overview() -> dict:
+    """
+    What the dashboard shows: the runner, the library, and recent runs.
+
+    One call rather than five, because the dashboard is the first thing the
+    view paints and five round trips is what makes a panel feel slow. The
+    runner being unreachable is reported, not raised: the library half is
+    still worth showing.
+    """
+    from backend import ansible as ansible_module
+    from backend import ansible_library as library
+
+    runner = await asyncio.to_thread(ansible_module.ping)
+    out = {"runner": runner, "library": await asyncio.to_thread(library.counts),
+           "playbooks": {"library": len(await asyncio.to_thread(ansible_module.library))},
+           "jobs": [], "error": ""}
+    if runner.get("reachable"):
+        try:
+            jobs = await asyncio.to_thread(ansible_module.jobs)
+            out["jobs"] = jobs[:10]
+            out["playbooks"]["runner"] = runner.get("playbooks", 0)
+        except Exception as exc:
+            out["error"] = str(exc)
+    return out
 
 
 # REST — Session logs

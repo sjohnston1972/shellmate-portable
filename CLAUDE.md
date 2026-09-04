@@ -83,6 +83,8 @@ shellmate/
 │   ├── advanced.py              # Stockton. The settings that were constants in the source
 │   ├── alerts.py                # Things that will happen to a device unless somebody intervenes
 │   ├── ansible.py               # Driving Ansible from ShellMate, through a runner service (#585)
+│   ├── ansible_keys.py          # The secrets an automation needs, and where they go (#586)
+│   ├── ansible_library.py       # What ShellMate keeps for Ansible, beside the runner (#586)
 │   ├── app.py                   # FastAPI application for ShellMate
 │   ├── auth.py                  # Optional authentication, for the deployments that need it
 │   ├── branding.py              # One source for the application icon
@@ -156,6 +158,15 @@ shellmate/
 │       ├── ai_panel.js          # Provider testing, model discovery, and hiding the AI panel
 │       ├── alerts.js            # Telling someone that something is about to happen to a device
 │       ├── ansible.js           # Driving an Ansible runner, and watching it work (#585)
+│       ├── ansible_builder.js   # Describe a change, get a playbook — with the assistant if one is…
+│       ├── ansible_dashboard.js # The Ansible view's first screen (#586)
+│       ├── ansible_environments.js # Named settings a run inherits, so production is one choice not…
+│       ├── ansible_inventory.js # What a run is pointed at, from the estate or from the runner…
+│       ├── ansible_keys.js      # Credentials a run needs, held in the vault and sent only with a…
+│       ├── ansible_playbooks.js # The runner's own playbooks and the ones written here, and the run…
+│       ├── ansible_repositories.js # Where a set of playbooks came from, and how it gets to the runner…
+│       ├── ansible_templates.js # Parameterised plays: the holes, the form that fills them, and…
+│       ├── ansible_view.js      # The Ansible view: which area is showing, and nothing else (#586)
 │       ├── broadcast.js         # Send commands to several devices at once
 │       ├── chat.js              # AI chat panel for ShellMate
 │       ├── chat_context.js      # Choose which sessions the assistant can see

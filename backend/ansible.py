@@ -225,34 +225,37 @@ def ping() -> dict:
     """Whether the runner answers, and what it is. Never raises."""
     cfg = config()
     if not cfg.ready:
-        return {"reachable": False, "configured": False,
+        return {"reachable": False, "configured": False, "url": cfg.url,
                 "detail": ", ".join(cfg.missing())}
     gaps = cfg.missing()
     if gaps:
-        return {"reachable": False, "configured": True, "detail": ", ".join(gaps)}
+        return {"reachable": False, "configured": True, "url": cfg.url,
+                "detail": ", ".join(gaps)}
     # /health needs no token by design, so it separates two failures that
     # look alike from the outside: a runner that cannot be reached, and one
     # that can be reached but will not talk to us.
     try:
         health = _call("GET", "/health") or {}
     except AnsibleError as exc:
-        return {"reachable": False, "configured": True, "detail": str(exc)}
+        return {"reachable": False, "configured": True, "url": cfg.url,
+                "detail": str(exc)}
     try:
         books = list_playbooks()
     except AnsibleError as exc:
         if exc.code in (401, 403):
             return {"reachable": True, "configured": True, "authenticated": False,
-                    "ansible_core": health.get("ansible_core", ""),
+                    "url": cfg.url, "ansible_core": health.get("ansible_core", ""),
                     "detail": ("The runner is there but will not accept ShellMate: "
                                "check the token under Settings → Ansible.")}
-        return {"reachable": False, "configured": True, "detail": str(exc)}
+        return {"reachable": False, "configured": True, "url": cfg.url,
+                "detail": str(exc)}
     core = health.get("ansible_core", "")
     return {
-        "reachable": True, "configured": True,
+        "reachable": True, "configured": True, "url": cfg.url,
         "playbooks": len(books),
         "ansible_core": core,
         "ansible_runner": health.get("ansible_runner", ""),
-        "authenticated": bool(cfg.token),
+        "authenticated": True,   # the listing came back, so we were let in
         "detail": (f"{len(books)} playbook(s), ansible-core {core}" if core
                    else f"{len(books)} playbook(s)"),
     }
@@ -280,7 +283,8 @@ def read_remote_playbook(name: str) -> str:
 def start(playbook: str, *, extra_vars: dict | None = None,
           limit: list[str] | str = "", check: bool = False, tags: str = "",
           skip_tags: str = "", inventory: str = "", inventory_content: str = "",
-          verbosity: int = 0, forks: int | None = None) -> dict:
+          verbosity: int = 0, forks: int | None = None,
+          envvars: dict | None = None) -> dict:
     """
     Start a run. Returns ``{"id", "playbook", "status", "inventory"}``.
 
@@ -309,6 +313,11 @@ def start(playbook: str, *, extra_vars: dict | None = None,
         body["verbosity"] = int(verbosity)
     if forks:
         body["forks"] = int(forks)
+    # Credentials a collection expects in the environment rather than as a
+    # play variable (#586). Sent only when a run asked for them, so the
+    # ordinary run carries no secret at all.
+    if envvars:
+        body["envvars"] = {str(k): str(v) for k, v in envvars.items()}
     # Never a name ShellMate made up: ansible-runner treats an unresolvable
     # inventory string as inline content, so a constructed name could be
     # written over the runner's own inventory. Content is sent as content.

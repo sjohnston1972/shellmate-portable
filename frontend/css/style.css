@@ -9274,3 +9274,335 @@ body {
   word-break: break-word;
   user-select: text;
 }
+
+
+/* ---------------------------------------------------------------------------
+   The Ansible view (#586)
+
+   A third layer in #pane-stage, over the dashboard and the terminals. It
+   takes the whole pane rather than a drawer's worth of it, because what is
+   being worked on is a library and a live run, not a setting.
+
+   Every measurement here is one the rest of ShellMate already uses: the tab
+   bar's height for the header, the control height for the rows, the same
+   radii and the same tertiary button. A view that invents its own scale
+   reads as a different application bolted on, which is what this must not
+   be.
+--------------------------------------------------------------------------- */
+#ansible-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: var(--bedrock);
+  overflow: hidden;
+}
+
+#ansible-stage[hidden] { display: none; }
+
+#av-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  height: var(--tab-bar-height);
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--outline);
+  background: var(--panel);
+}
+
+#av-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+#av-header .av-mark {
+  font-size: var(--icon-md);
+  color: var(--primary);
+}
+
+.av-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The runner's state, said once at the top rather than in every area.
+   Three states, not two: not set up, unreachable, and reachable but
+   refusing us are different problems with different fixes, and a single
+   "disconnected" sends people to a firewall when the answer is a token. */
+.av-pill {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.av-pill-ok      { background: var(--ok-tint);    color: var(--ok);    border-color: var(--ok-edge); }
+.av-pill-warn    { background: var(--warn-tint);  color: var(--warn);  border-color: var(--warn-edge); }
+.av-pill-bad     { background: var(--error-tint); color: var(--error); border-color: var(--error); }
+.av-pill-unknown { background: var(--surface-high); color: var(--on-surface-dim); border-color: var(--outline); }
+
+.av-runner-detail {
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+#av-nav {
+  display: flex;
+  gap: 2px;
+  padding: 0 12px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--outline);
+  background: var(--panel);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.av-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--on-surface-dim);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.av-tab .material-symbols-outlined { font-size: var(--icon-sm); }
+.av-tab:hover { color: var(--on-surface); }
+
+.av-tab[aria-current="page"] {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+
+#av-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.av-area {
+  padding: 20px 24px 32px;
+  max-width: 1100px;
+}
+
+.av-area[hidden] { display: none; }
+
+.av-area-head { margin-bottom: 16px; }
+
+.av-area-head h3 {
+  margin: 0 0 2px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.av-area-head p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+/* An empty area says what would be here and how to get one, rather than
+   leaving a blank rectangle that reads as a failure to load. */
+.av-empty {
+  padding: 28px 20px;
+  border: 1px dashed var(--outline);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  color: var(--on-surface-dim);
+  font-size: 13px;
+}
+
+/* Repeated things: same edges, same inner padding, one to the next. */
+.av-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.av-card {
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 14px 16px;
+}
+
+.av-card h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.av-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.av-figure {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--on-surface);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.av-row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ---------------------------------------------------------------------------
+   Ansible view — Dashboard (#586)
+--------------------------------------------------------------------------- */
+
+.av-block { margin-bottom: 24px; }
+
+.av-block-title {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-surface-dim);
+}
+
+/* A count you can act on. A figure with no destination is decoration. */
+.av-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.av-tile:hover {
+  border-color: var(--primary-edge);
+  background: var(--surface-high);
+}
+
+.av-tile-label {
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.av-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.av-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--on-surface-muted);
+  padding: 0 10px 6px 0;
+  border-bottom: 1px solid var(--outline);
+}
+
+.av-table td {
+  padding: 8px 10px 8px 0;
+  border-bottom: 1px solid var(--outline);
+  color: var(--on-surface);
+  vertical-align: middle;
+}
+
+.av-table tr:last-child td { border-bottom: none; }
+
+.av-job-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.av-when {
+  color: var(--on-surface-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Something the reader has to act on before the rest of the screen is
+   useful. Not a card: a card says "one of several", and this is not. */
+.av-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  border: 1px solid var(--outline);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--on-surface);
+  background: var(--surface);
+}
+
+.av-notice .material-symbols-outlined { font-size: var(--icon-sm); flex: 0 0 auto; }
+.av-notice > div { flex: 1; min-width: 0; }
+.av-notice button { flex: 0 0 auto; }
+
+.av-notice-info { border-left-color: var(--primary); background: var(--primary-tint); }
+.av-notice-info .material-symbols-outlined { color: var(--primary); }
+.av-notice-warn { border-left-color: var(--warn);    background: var(--warn-tint); }
+.av-notice-warn .material-symbols-outlined { color: var(--warn); }
+.av-notice-bad  { border-left-color: var(--error);   background: var(--error-tint); }
+.av-notice-bad .material-symbols-outlined { color: var(--error); }
+
+/* ---------------------------------------------------------------------------
+   Ansible view — Playbooks (#586)
+--------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Ansible view — Builder (#586)
+--------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Ansible view — Templates (#586)
+--------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Ansible view — Inventory (#586)
+--------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Ansible view — Environments (#586)
+--------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Ansible view — Keys (#586)
+--------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------
+   Ansible view — Repositories (#586)
+--------------------------------------------------------------------------- */
+

@@ -263,6 +263,182 @@
              in front (#228) — the two ship as one state, not two defaults
              that happen to line up. -->
         <div id="terminals-container" class="behind-dashboard"></div>
+
+        <!-- ================================================================
+             The Ansible view (#586).
+
+             Not a side panel. Ansible is a place you go and work for a
+             while — a dashboard, a library, a run you watch — and a
+             400-pixel drawer over a terminal is the wrong shape for that.
+             So it is a third layer in #pane-stage, a peer of the dashboard
+             and the terminals: it takes the whole pane, the sessions carry
+             on behind it, and leaving returns you to exactly what you were
+             looking at.
+
+             Every area is a <section data-av-area>. ansible_view.js owns
+             which one is showing and nothing else; each area's own script
+             fills its body and asks to be told when it becomes visible.
+             That seam is why the areas could be built separately without
+             eight scripts fighting over one panel.
+        ================================================================ -->
+        <div id="ansible-stage" hidden>
+          <header id="av-header">
+            <span class="material-symbols-outlined av-mark">automation</span>
+            <h2>Ansible</h2>
+            <span id="av-runner-pill" class="av-pill av-pill-unknown">Checking…</span>
+            <span id="av-runner-detail" class="av-runner-detail"></span>
+            <div class="av-header-actions">
+              <button type="button" id="av-refresh" class="btn-tertiary"
+                      title="Ask the runner and re-read the library">
+                <span class="material-symbols-outlined">refresh</span>
+                Refresh
+              </button>
+              <button type="button" id="av-settings" class="btn-tertiary"
+                      title="Runner address, token and certificates">
+                <span class="material-symbols-outlined">settings</span>
+                Settings
+              </button>
+              <button type="button" id="av-close" class="icon-btn" aria-label="Leave the Ansible view"
+                      title="Back to where you were">
+                <span class="material-symbols-outlined">close</span>
+              </button>
+            </div>
+          </header>
+
+          <nav id="av-nav" aria-label="Ansible sections">
+            <button type="button" class="av-tab" data-av-go="dashboard"
+                    title="What the runner is doing and what you have">
+              <span class="material-symbols-outlined">dashboard</span>
+              <span class="av-tab-label">Dashboard</span>
+            </button>
+            <button type="button" class="av-tab" data-av-go="playbooks"
+                    title="The runner's own, and the ones you wrote here">
+              <span class="material-symbols-outlined">description</span>
+              <span class="av-tab-label">Playbooks</span>
+            </button>
+            <button type="button" class="av-tab" data-av-go="builder"
+                    title="Build a playbook from a description">
+              <span class="material-symbols-outlined">smart_toy</span>
+              <span class="av-tab-label">Builder</span>
+            </button>
+            <button type="button" class="av-tab" data-av-go="templates"
+                    title="A parameterised play, filled in each time">
+              <span class="material-symbols-outlined">list_alt</span>
+              <span class="av-tab-label">Templates</span>
+            </button>
+            <button type="button" class="av-tab" data-av-go="inventory"
+                    title="What a run is pointed at">
+              <span class="material-symbols-outlined">lan</span>
+              <span class="av-tab-label">Inventory</span>
+            </button>
+            <button type="button" class="av-tab" data-av-go="environments"
+                    title="Named settings a run inherits">
+              <span class="material-symbols-outlined">tune</span>
+              <span class="av-tab-label">Environments</span>
+            </button>
+            <button type="button" class="av-tab" data-av-go="keys"
+                    title="Credentials a run needs, held in the vault">
+              <span class="material-symbols-outlined">key</span>
+              <span class="av-tab-label">Keys</span>
+            </button>
+            <button type="button" class="av-tab" data-av-go="repositories"
+                    title="Where a set of playbooks came from">
+              <span class="material-symbols-outlined">folder</span>
+              <span class="av-tab-label">Repositories</span>
+            </button>
+          </nav>
+
+          <div id="av-body">
+          <!-- ===== Dashboard ===== -->
+          <section class="av-area" id="av-dashboard" data-av-area="dashboard" hidden>
+            <header class="av-area-head">
+              <h3>Dashboard</h3>
+              <p>What the runner is doing and what you have.</p>
+            </header>
+            <div class="av-area-body" id="av-dashboard-body">
+              <p class="av-empty">Nothing here yet.</p>
+            </div>
+          </section>
+
+          <!-- ===== Playbooks ===== -->
+          <section class="av-area" id="av-playbooks" data-av-area="playbooks" hidden>
+            <header class="av-area-head">
+              <h3>Playbooks</h3>
+              <p>The runner's own, and the ones you wrote here.</p>
+            </header>
+            <div class="av-area-body" id="av-playbooks-body">
+              <p class="av-empty">Nothing here yet.</p>
+            </div>
+          </section>
+
+          <!-- ===== Builder ===== -->
+          <section class="av-area" id="av-builder" data-av-area="builder" hidden>
+            <header class="av-area-head">
+              <h3>Builder</h3>
+              <p>Build a playbook from a description.</p>
+            </header>
+            <div class="av-area-body" id="av-builder-body">
+              <p class="av-empty">Nothing here yet.</p>
+            </div>
+          </section>
+
+          <!-- ===== Templates ===== -->
+          <section class="av-area" id="av-templates" data-av-area="templates" hidden>
+            <header class="av-area-head">
+              <h3>Templates</h3>
+              <p>A parameterised play, filled in each time.</p>
+            </header>
+            <div class="av-area-body" id="av-templates-body">
+              <p class="av-empty">Nothing here yet.</p>
+            </div>
+          </section>
+
+          <!-- ===== Inventory ===== -->
+          <section class="av-area" id="av-inventory" data-av-area="inventory" hidden>
+            <header class="av-area-head">
+              <h3>Inventory</h3>
+              <p>What a run is pointed at.</p>
+            </header>
+            <div class="av-area-body" id="av-inventory-body">
+              <p class="av-empty">Nothing here yet.</p>
+            </div>
+          </section>
+
+          <!-- ===== Environments ===== -->
+          <section class="av-area" id="av-environments" data-av-area="environments" hidden>
+            <header class="av-area-head">
+              <h3>Environments</h3>
+              <p>Named settings a run inherits.</p>
+            </header>
+            <div class="av-area-body" id="av-environments-body">
+              <p class="av-empty">Nothing here yet.</p>
+            </div>
+          </section>
+
+          <!-- ===== Keys ===== -->
+          <section class="av-area" id="av-keys" data-av-area="keys" hidden>
+            <header class="av-area-head">
+              <h3>Keys</h3>
+              <p>Credentials a run needs, held in the vault.</p>
+            </header>
+            <div class="av-area-body" id="av-keys-body">
+              <p class="av-empty">Nothing here yet.</p>
+            </div>
+          </section>
+
+          <!-- ===== Repositories ===== -->
+          <section class="av-area" id="av-repositories" data-av-area="repositories" hidden>
+            <header class="av-area-head">
+              <h3>Repositories</h3>
+              <p>Where a set of playbooks came from.</p>
+            </header>
+            <div class="av-area-body" id="av-repositories-body">
+              <p class="av-empty">Nothing here yet.</p>
+            </div>
+          </section>
+          </div>
+        </div>
+
         </div><!-- #pane-stage -->
       </main>
 
@@ -3393,6 +3569,15 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/jira.js"></script>
   <script src="/static/js/feedback.js"></script>
   <script src="/static/js/ansible.js"></script>
+  <script src="/static/js/ansible_view.js"></script>
+  <script src="/static/js/ansible_dashboard.js"></script>
+  <script src="/static/js/ansible_playbooks.js"></script>
+  <script src="/static/js/ansible_builder.js"></script>
+  <script src="/static/js/ansible_templates.js"></script>
+  <script src="/static/js/ansible_inventory.js"></script>
+  <script src="/static/js/ansible_environments.js"></script>
+  <script src="/static/js/ansible_keys.js"></script>
+  <script src="/static/js/ansible_repositories.js"></script>
   <script>
     // ----------------------------------------------------------------
     // Paste confirmation modal (#523)
