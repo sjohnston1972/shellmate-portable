@@ -23,6 +23,7 @@ startup that stalls on a DNS lookup would be a regression on every site that
 matters.
 """
 
+import re
 import json
 import subprocess
 from datetime import datetime
@@ -117,7 +118,41 @@ def parse(version: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
+def parse_full(version: str) -> tuple[tuple[int, ...], tuple]:
+    """
+    ``"v1.2.0-beta.1"`` → ``((1, 2, 0), ((1, "beta"), (0, 1)))``; a release
+    has an empty prerelease part. Ordering follows semantic versioning:
+    a prerelease sorts before the release it precedes, and prerelease
+    identifiers compare numerically when numeric and textually otherwise,
+    numeric first. Needed by the beta channel (#567): ``parse()`` stops at
+    the first non-digit, so ``1.2.0-beta.1`` used to equal ``1.2.0``.
+    """
+    text = (version or "").strip().lstrip("vV")
+    text = text.split("+", 1)[0]                     # build metadata never orders
+    core, _, pre = text.partition("-")
+    numbers = parse(core)
+    if not numbers or not pre:
+        return numbers, ()
+    key = []
+    for piece in re.split(r"[.-]", pre):
+        if not piece:
+            continue
+        key.append((0, int(piece)) if piece.isdigit() else (1, piece.lower()))
+    return numbers, tuple(key)
+
+
+def sort_key(version: str) -> tuple:
+    """A key that orders versions correctly, prereleases included."""
+    numbers, pre = parse_full(version)
+    # A release outranks any prerelease of the same numbers.
+    return (numbers, 1 if not pre else 0, pre)
+
+
+def is_prerelease(version: str) -> bool:
+    return bool(parse_full(version)[1])
+
+
 def is_newer(candidate: str, current: str = VERSION) -> bool:
     """Whether ``candidate`` is a later release than ``current``."""
-    a, b = parse(candidate), parse(current)
-    return bool(a) and bool(b) and a > b
+    a, b = parse_full(candidate), parse_full(current)
+    return bool(a[0]) and bool(b[0]) and sort_key(candidate) > sort_key(current)

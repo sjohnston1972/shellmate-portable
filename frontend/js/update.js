@@ -40,6 +40,14 @@
     });
     setTimeout(announceIfNew, 4000);
     setTimeout(startupCheck, 8000);
+    // What's new, on demand (#567): the modal used to show once and then
+    // only the manual carried the notes.
+    const again = document.getElementById('diag-whats-new');
+    if (again) again.addEventListener('click', async () => {
+      let info;
+      try { info = await (await fetch('/api/system/info')).json(); } catch (_) { return; }
+      if (info && info.version) openWhatsNew(info.version, '');
+    });
   });
 
   function toast(spec) {
@@ -107,6 +115,7 @@
     const head = el('div', 'update-head');
     head.append(el('span', 'material-symbols-outlined update-icon', 'download'),
                 el('h2', 'update-title', `ShellMate ${info.latest} is available`));
+    if (info.prerelease) head.appendChild(el('span', 'update-badge', 'Beta'));   // #567
     box.appendChild(head);
 
     const meta = [];
@@ -319,7 +328,7 @@
     head.append(el('span', 'material-symbols-outlined update-icon', 'bolt'),
                 el('h2', 'update-title', `Welcome to ShellMate ${version}`));
     box.appendChild(head);
-    box.appendChild(el('div', 'update-meta', `Updated from ${seen}. Here is what changed.`));
+    box.appendChild(el('div', 'update-meta', seen ? `Updated from ${seen}. Here is what changed.` : 'What changed in this version.'));
     const body = el('div', 'update-notes');
     if (window.shellmateMarkdown && notes) body.innerHTML = window.shellmateMarkdown.render(notes).html;
     else body.textContent = 'The manual\'s What\'s new page lists what changed.';
@@ -348,4 +357,5 @@
 
   window.checkForUpdates = checkNow;
   window.openUpdateModal = openModal;
+  window.openWhatsNew = (version) => openWhatsNew(version, '');
 })();

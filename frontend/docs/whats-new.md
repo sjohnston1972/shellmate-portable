@@ -6,6 +6,11 @@ exists.
 
 ## 1.1.3
 
+- An **update channel** under Stockton → Diagnostics: `stable` offers only
+  full releases, `beta` also offers prereleases for people trying a build
+  early, marked Beta in the update window. **What's new in this version**
+  under Diagnostics reopens these notes on demand.
+
 - A licence key now tells the licence service where it is installed: the
   machine name, your user name, the operating system and the ShellMate
   version, when the key is entered, removed, and at each refresh. The

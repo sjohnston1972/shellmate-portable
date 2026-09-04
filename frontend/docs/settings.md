@@ -203,6 +203,14 @@ no internet. The check can be switched off under Stockton → Diagnostics for
 an air-gapped site; **Updates** in the sidebar, **Check for updates** in the
 tray menu and the button under Diagnostics run it on demand.
 
+**Update channel**, under Stockton → Diagnostics, decides which releases
+the check may offer. `stable`, the default, offers only full releases.
+`beta` also offers prereleases, tagged like `v1.2.0-beta.1`, for the few
+people trying a build before it goes to everyone; the window marks such a
+version **Beta**. The download, the checksum and the swap are the same on
+both channels. **What's new in this version**, beside the check button,
+reopens the notes for the copy you are running.
+
 A newer version opens ShellMate's own window: the version, when it was
 published, its size, the release notes, and **Update now**, **Later** (asks
 again tomorrow) or **Skip this version**. Update now downloads the

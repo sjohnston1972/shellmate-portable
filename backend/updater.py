@@ -37,6 +37,7 @@ from backend import licence, paths
 logger = logging.getLogger(__name__)
 
 RELEASES_API = "https://api.github.com/repos/{repo}/releases/latest"
+RELEASES_LIST_API = "https://api.github.com/repos/{repo}/releases?per_page=30"
 ASSET_NAME = "ShellMate-Portable.exe"
 CHECKSUM_NAME = "ShellMate-Portable.exe.sha256"
 
@@ -76,23 +77,51 @@ def _set(**changes) -> None:
 
 
 # ---------------------------------------------------------------- release
-def latest_release(repo: str) -> dict:
-    """The latest release's version, notes, size, and asset URLs."""
+def channel() -> str:
+    """The update channel in force: ``stable`` or ``beta`` (#567)."""
+    try:
+        from backend.advanced import get as advanced
+        return "beta" if str(advanced("diag.update_channel")) == "beta" else "stable"
+    except Exception:
+        return "stable"
+
+
+def latest_release(repo: str, which: str | None = None, timeout: float = 10.0) -> dict:
+    """
+    The latest release's version, notes, size, and asset URLs.
+
+    On the stable channel that is GitHub's own "latest": the newest
+    non-prerelease. On the beta channel the release list is read and the
+    highest version wins, prereleases included (#567).
+    """
     import httpx
 
-    with httpx.Client(timeout=10.0, follow_redirects=True) as client:
-        resp = client.get(RELEASES_API.format(repo=repo), headers={
-            "Accept": "application/vnd.github+json", "User-Agent": "ShellMate-updater"})
+    from backend import version as app_version
+
+    which = which or channel()
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "ShellMate-updater"}
+    with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+        if which == "beta":
+            resp = client.get(RELEASES_LIST_API.format(repo=repo), headers=headers)
+        else:
+            resp = client.get(RELEASES_API.format(repo=repo), headers=headers)
     if resp.status_code == 404:
         return {"version": "", "note": "No release has been published yet."}
     if resp.status_code != 200:
         raise RuntimeError(f"GitHub answered {resp.status_code}.")
     data = resp.json()
+    if which == "beta":
+        candidates = [r for r in (data or []) if isinstance(r, dict) and not r.get("draft")]
+        if not candidates:
+            return {"version": "", "note": "No release has been published yet."}
+        data = max(candidates, key=lambda r: app_version.sort_key(str(r.get("tag_name") or "")))
     assets = {a.get("name"): a for a in data.get("assets") or []}
     exe = assets.get(ASSET_NAME) or {}
     sha = assets.get(CHECKSUM_NAME) or {}
     return {
         "version": str(data.get("tag_name") or "").lstrip("vV"),
+        "prerelease": bool(data.get("prerelease")),
+        "channel": which,
         "published": data.get("published_at", ""),
         "url": data.get("html_url", ""),
         "notes": data.get("body") or "",

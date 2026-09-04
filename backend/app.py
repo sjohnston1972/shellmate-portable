@@ -2406,41 +2406,36 @@ async def update_check() -> dict:
     when `diag.update_check` is switched on. Nothing leaves the machine but
     the version number in the User-Agent, and on an air-gapped site the
     answer is "could not reach GitHub", not a stall: six seconds, then give
-    up. There is no download and no self-replacement; the reply carries the
-    release page's address and a person decides.
+    up. The lookup is the updater's own, so the check and the download
+    agree on what "latest" means on the chosen channel (#567).
     """
     current = app_version.build_info()["version"]
-    url = f"https://api.github.com/repos/{app_version.RELEASES_REPO}/releases/latest"
     try:
-        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers={
-                "Accept":     "application/vnd.github+json",
-                "User-Agent": f"ShellMate/{current}",
-            })
+        release = await asyncio.to_thread(
+            updater.latest_release, app_version.RELEASES_REPO, None, 6.0)
     except httpx.HTTPError as exc:
         return {"current": current,
                 "error": f"Could not reach GitHub ({exc.__class__.__name__})."}
-    if resp.status_code == 404:
+    except Exception as exc:
+        return {"current": current, "error": str(exc)}
+    if not release.get("version"):
         return {"current": current, "latest": "", "newer": False,
-                "note": "No release has been published yet."}
-    if resp.status_code != 200:
-        return {"current": current, "error": f"GitHub answered {resp.status_code}."}
-    data = resp.json()
-    latest = str(data.get("tag_name") or data.get("name") or "")
-    assets = {a.get("name"): a for a in data.get("assets") or []}
-    exe = assets.get(updater.ASSET_NAME) or {}
+                "channel": release.get("channel", updater.channel()),
+                "note": release.get("note") or "No release has been published yet."}
     lic = licence_module.status()
     return {
         "current":   current,
-        "latest":    latest.lstrip("vV"),
-        "newer":     app_version.is_newer(latest, current),
-        "url":       data.get("html_url", ""),
-        "published": data.get("published_at", ""),
+        "latest":    release["version"],
+        "newer":     app_version.is_newer(release["version"], current),
+        "prerelease": release.get("prerelease", False),
+        "channel":   release.get("channel", "stable"),
+        "url":       release.get("url", ""),
+        "published": release.get("published", ""),
         # For the in-app modal (#442): the notes, the size, and whether the
         # download may be started from here (#448).
-        "notes":     data.get("body") or "",
-        "size":      int(exe.get("size") or 0),
-        "has_checksum": updater.CHECKSUM_NAME in assets,
+        "notes":     release.get("notes", ""),
+        "size":      release.get("size", 0),
+        "has_checksum": bool(release.get("checksum_url")),
         "licence":   {"valid": lic["valid"], "state": lic["state"], "detail": lic["detail"]},
     }
 

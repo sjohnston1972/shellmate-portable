@@ -48,6 +48,17 @@ GOOD_SHA = hashlib.sha256(EXE_BYTES).hexdigest()
 def fake_transport(sha: str | None, size: int | None = None):
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
+        if "/releases?" in url:
+            stable = {"tag_name": "v9.9.9", "html_url": "https://example.test/rel", "body": "notes",
+                      "published_at": "2026-09-03T00:00:00Z", "prerelease": False, "draft": False,
+                      "assets": [{"name": "ShellMate-Portable.exe", "size": len(EXE_BYTES),
+                                  "browser_download_url": "https://example.test/dl/ShellMate-Portable.exe"},
+                                 {"name": "ShellMate-Portable.exe.sha256", "size": 80,
+                                  "browser_download_url": "https://example.test/dl/ShellMate-Portable.exe.sha256"}]}
+            beta = dict(stable, tag_name="v10.0.0-beta.2", prerelease=True)
+            older_beta = dict(stable, tag_name="v10.0.0-beta.1", prerelease=True)
+            draft = dict(stable, tag_name="v11.0.0", draft=True)
+            return httpx.Response(200, json=[older_beta, draft, stable, beta])
         if url.endswith("/releases/latest"):
             assets = [{"name": "ShellMate-Portable.exe", "size": size if size is not None else len(EXE_BYTES),
                        "browser_download_url": "https://example.test/dl/ShellMate-Portable.exe"}]
@@ -136,6 +147,31 @@ def test_download() -> None:
         updater.licence.has_feature = real_feature
 
 
+def test_channels_and_versions() -> None:
+    print("\n-- Channels and prerelease versions (#567) --")
+    from backend import version as v
+    check("a prerelease sorts before its release", v.is_newer("1.2.0", "1.2.0-beta.1") and not v.is_newer("1.2.0-beta.1", "1.2.0"))
+    check("betas order numerically", v.is_newer("1.2.0-beta.2", "1.2.0-beta.1") and not v.is_newer("1.2.0-beta.10", "1.2.0-beta.11"))
+    check("rc comes after beta", v.is_newer("1.2.0-rc.1", "1.2.0-beta.9"))
+    check("a prerelease of the next version is newer than this release", v.is_newer("1.2.0-beta.1", "1.1.3"))
+    check("plain numbers still compare as before", v.is_newer("v1.10.0", "1.9.9") and v.parse("v1.2.3") == (1, 2, 3))
+    check("build metadata never orders", not v.is_newer("1.2.0+build.7", "1.2.0"))
+    check("is_prerelease says which is which", v.is_prerelease("1.2.0-beta.1") and not v.is_prerelease("1.2.0"))
+
+    real_client = httpx.Client
+    httpx.Client = PatchedClient
+    try:
+        PatchedClient.transport = fake_transport(GOOD_SHA)
+        stable = updater.latest_release("x/y", "stable")
+        beta = updater.latest_release("x/y", "beta")
+        check("stable answers GitHub's latest", stable["version"] == "9.9.9" and not stable["prerelease"], str(stable)[:120])
+        check("beta answers the highest version, prereleases included, drafts excluded",
+              beta["version"] == "10.0.0-beta.2" and beta["prerelease"] and beta["channel"] == "beta", str(beta)[:120])
+        check("the default channel is stable", updater.channel() == "stable")
+    finally:
+        httpx.Client = real_client
+
+
 def test_helper_and_apply() -> None:
     print("\n-- The swap --")
     script = updater.helper_script(Path(r"C:\x\ShellMate-Portable.exe"), Path(r"C:\x\new.exe"), 8765, 4242)
@@ -194,7 +230,7 @@ def main() -> int:
     print("=" * 52)
     print("  Updater")
     print("=" * 52)
-    for test in (test_download, test_helper_and_apply):
+    for test in (test_download, test_channels_and_versions, test_helper_and_apply):
         try:
             test()
         except Exception as exc:

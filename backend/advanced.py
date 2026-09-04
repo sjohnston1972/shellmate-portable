@@ -752,6 +752,15 @@ SETTINGS: tuple[Setting, ...] = (
             "that cannot reach GitHub simply logs that and carries on. Switch "
             "it off on an air-gapped site to save the attempt. Nothing is "
             "downloaded without pressing Update now."),
+    Setting("diag.update_channel", "Update channel", "stable", "choice",
+            "Which releases the update check may offer.",
+            "`stable` offers only full releases, which is right for every seat "
+            "that just wants the tool to work.||`beta` also offers prereleases "
+            "(tags such as v1.2.0-beta.1) for the few people trying a build "
+            "before it goes to everyone (#567). The download, the checksum "
+            "and the swap are the same either way; only what counts as "
+            "\"newer\" changes.",
+            choices=("stable", "beta")),
     Setting("diag.http_access_log", "Log every HTTP request", False, "bool",
             "Records each call the interface makes to its own API.",
             "Useful when something in the interface is not reaching the "

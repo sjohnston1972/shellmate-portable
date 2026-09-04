@@ -1690,6 +1690,14 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 .tab-tip-state-down { color: var(--error, #f38ba8); }
 
 /* The update / what's-new modal (#442, #445). */
+/* A prerelease offered on the beta channel says so (#567). */
+.update-badge {
+  display: inline-block; margin-left: 10px; padding: 2px 8px;
+  border-radius: var(--radius-full); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  background: var(--primary-container); color: #fff; vertical-align: middle;
+}
+
 #update-overlay { z-index: 9300; display: flex; align-items: center; justify-content: center; }
 .update-box {
   width: min(620px, 92vw);
