@@ -4139,6 +4139,14 @@ async def ansible_run(request: PlaybookRunRequest) -> dict:
     if fields["inventory_source"] == "estate":
         inventory = await asyncio.to_thread(
             ansible_module.inventory_from_estate, fields["group"])
+        # Two different failures, two different fixes: a group that does not
+        # exist is a spelling problem, a group with nothing reachable in it
+        # is a device problem. Reporting the second for the first sends
+        # somebody to their switches over a typo.
+        if not inventory.get("group_known", True):
+            raise HTTPException(
+                status_code=404,
+                detail=f"There is no group called {fields['group']!r}.")
         if not inventory["hosts"]:
             raise HTTPException(
                 status_code=400,

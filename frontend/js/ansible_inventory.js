@@ -232,6 +232,23 @@
     }
     if (!inventory) return;
 
+    // A group that does not exist is not an empty group. Both produce nought
+    // hosts, and "0 hosts would be included" sends somebody to look at their
+    // devices when the answer is that nothing answers to that name at all.
+    if (inventory.group_known === false) {
+      body.appendChild(el('div', { class: 'av-notice av-notice-warn' }, [
+        icon('error'),
+        el('div', {}, [
+          el('strong', { text: `There is no group called “${inventory.group}”. ` }),
+          'Nothing is tagged with it and no group of that name exists, so this '
+          + 'is a name to check rather than an estate to fix — an empty '
+          + 'result here would have looked exactly like a group whose devices '
+          + 'are all serial consoles.',
+        ]),
+      ]));
+      return;
+    }
+
     const hosts = inventory.hosts || [];
     const hostvars = inventory.hostvars || {};
     const skipped = inventory.skipped || [];

@@ -576,6 +576,37 @@ ANSIBLE_NETWORK_OS = {
 }
 
 
+def _group_exists(key: str) -> bool:
+    """
+    Whether anything answers to this group name.
+
+    A group is real if it was made — it is in the group store — or if any
+    connection is tagged with it or with something beneath it. Both count,
+    because the estate has always allowed a tag to be a group nobody
+    formally created.
+    """
+    from backend import groups as groups_module
+    from backend import profiles as profiles_module
+
+    prefix = f"{key}/"
+    try:
+        for stored in groups_module.list_groups():
+            name = (stored.get("key") or "").lower()
+            if name == key or name.startswith(prefix):
+                return True
+    except Exception:                                     # pragma: no cover
+        pass
+    try:
+        for profile in profiles_module._load():
+            for tag in profiles_module.normalise_tags(profile.get("tags")):
+                tag = tag.lower()
+                if tag == key or tag.startswith(prefix):
+                    return True
+    except Exception:                                     # pragma: no cover
+        pass
+    return False
+
+
 def inventory_from_estate(group: str = "") -> dict:
     """
     ShellMate's own connections and groups, shaped as an Ansible inventory.
@@ -593,6 +624,20 @@ def inventory_from_estate(group: str = "") -> dict:
 
     wanted = (group or "").strip().lower()
     prefix = f"{wanted}/"
+
+    # Whether that group exists at all, asked before anything is counted.
+    #
+    # Without this, a mistyped name returned a perfectly well-formed empty
+    # inventory — 0 hosts, 0 groups, 0 skipped — which is byte for byte what
+    # a real group full of serial consoles returns. The preview then said
+    # "nothing would run" and the run dialog said "no connection in that
+    # group has an address to reach", both sending somebody to look at
+    # their devices when the answer was a typo. A verdict about a group is
+    # not deliverable until the group is known to exist.
+    known = True
+    if wanted:
+        known = _group_exists(wanted)
+
     groups: dict[str, list[str]] = {}
     original: dict[str, str] = {}
     hostvars: dict[str, dict] = {}
@@ -670,6 +715,12 @@ def inventory_from_estate(group: str = "") -> dict:
         "hostvars": hostvars,
         "hosts": sorted(hostvars),
         "skipped": skipped,
+        # False only when a group was named and nothing answers to it. The
+        # difference between "this group is empty" and "there is no such
+        # group" is the difference between checking your devices and
+        # checking your spelling.
+        "group_known": known,
+        "group": group or "",
     }
 
 

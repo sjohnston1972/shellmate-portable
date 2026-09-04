@@ -453,6 +453,54 @@ def test_the_library() -> None:
     # the whole difficulty of the copy.
     check("  and why the copy is a fallback",
           "does not accept playbooks over its API" in plan["why"], plan["why"])
+    print("\n-- A group that does not exist is not an empty group --")
+    from backend import groups as groups_module
+    from backend import profiles as profiles_module
+
+    groups_module.create_group("site-9", "green")
+    groups_module.create_group("site-9/switches", "green")
+    profiles_module.save_profile({"name": "S9-S1", "hostname": "10.9.0.1",
+                                  "connection_type": "ssh", "platform": "ios",
+                                  "tags": ["site-9/switches"]})
+    # A real group holding only something Ansible cannot dial: nought hosts,
+    # and legitimately so.
+    groups_module.create_group("site-9/consoles", "green")
+    profiles_module.save_profile({"name": "S9-C1", "hostname": "",
+                                  "connection_type": "serial",
+                                  "tags": ["site-9/consoles"]})
+
+    real = ansible.inventory_from_estate("site-9/switches")
+    check("a real group is known", real["group_known"] is True,
+          str(real["group_known"]))
+    check("and has its hosts", len(real["hosts"]) == 1, str(real["hosts"]))
+
+    empty_but_real = ansible.inventory_from_estate("site-9/consoles")
+    check("a group with nothing dialable is still known",
+          empty_but_real["group_known"] is True,
+          "an empty group is not a missing one")
+    check("and says what it left out",
+          len(empty_but_real["skipped"]) == 1, str(empty_but_real["skipped"]))
+
+    typo = ansible.inventory_from_estate("site-9/swithces")
+    check("a mistyped group is reported as unknown",
+          typo["group_known"] is False,
+          "0 hosts for a typo is byte-for-byte what a group full of serial "
+          "consoles returns, and sends somebody to their devices instead of "
+          "their spelling")
+    check("and it carries the name that was asked for",
+          typo["group"] == "site-9/swithces", str(typo.get("group")))
+
+    check("no group named at all is not 'unknown'",
+          ansible.inventory_from_estate("")["group_known"] is True,
+          "asking for everything cannot be a spelling mistake")
+
+    profiles_module.save_profile({"name": "Ad-hoc", "hostname": "10.9.0.2",
+                                  "connection_type": "ssh",
+                                  "tags": ["improvised"]})
+    check("a bare tag counts as a group",
+          ansible.inventory_from_estate("improvised")["group_known"] is True,
+          "tagging has always been enough to make a group")
+
     print("\n-- Uploading, which the runner now takes (#605) --")
 
     def uploads(request):
