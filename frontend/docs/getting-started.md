@@ -149,6 +149,9 @@ whole conversation. The [AI assistant](#assistant) page explains it.
 **Shift+right-click** in a terminal opens its menu — copy, paste, select all,
 find, copy the screen or the scrollback, clear. A plain right-click pastes,
 unless *Right-click Paste* is off in Settings, in which case it opens the menu.
+A paste of more than one line asks first, and that question is editable: fix a
+line, strip the comments, or send the block a line at a time waiting for the
+device's prompt — see [Connecting](#connecting).
 The **copy** icon in the status bar copies the most recent output of the
 active terminal; how many lines is in Stockton under Terminal Behaviour.
 

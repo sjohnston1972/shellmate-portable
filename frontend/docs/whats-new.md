@@ -6,6 +6,19 @@ exists.
 
 ## 1.1.3
 
+- **A paste can be edited before it goes, and sent a line at a time.** The
+  paste question is now a working copy of the block rather than a preview cut
+  off at 400 characters: edit the line that came out of the wiki wrong, strip
+  the blank lines and `!` comments, and choose the pace. **Wait for the
+  prompt** sends one line and waits for the device to come back before the
+  next — the thing sixty lines of ACL into a 2960 over a console cable
+  actually needs, and it works on serial, telnet and unidentified devices
+  where Apply configuration cannot go. A `reload` in the block is still held
+  for confirmation, and the batch waits for the answer. Start typing and it
+  stops; if the device stops answering it stops too, and says where — "line 12
+  sent, no prompt seen" — rather than firing the rest at a device that comes
+  back half a minute later.
+
 - **Ctrl+F does regular expressions, and can show you only the matching
   lines.** Three toggles on the find bar — match case, whole word, and `.*`
   for a regular expression — so `Gi1/0/2[0-9]` and `\berr-disabled\b` are

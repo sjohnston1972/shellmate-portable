@@ -4347,7 +4347,10 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
   color: var(--on-surface-dim);
 }
 
-#paste-preview {
+/* The paste is editable (#523), so this is a textarea rather than a <pre>.
+   It keeps the monospace and the framing of the preview it replaced: what is
+   about to reach a device should look like what a device shows. */
+#paste-text {
   background: var(--bedrock);
   border: 1px solid var(--outline);
   border-radius: var(--radius-md);
@@ -4355,11 +4358,92 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   color: var(--on-surface);
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 160px;
-  overflow-y: auto;
   line-height: 1.5;
+  min-height: 150px;
+  max-height: 40vh;
+  resize: vertical;
+  white-space: pre;
+  overflow: auto;
+  width: 100%;
+}
+
+#paste-text:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* Read-only while the lines are going out: what is on screen is the record
+   of what was sent, and it must not drift from it half way through. */
+#paste-overlay.paste-sending #paste-text {
+  opacity: 0.7;
+}
+
+#paste-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.paste-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+#paste-modes {
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+#paste-modes legend {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--on-surface-dim);
+  padding: 0 4px;
+}
+
+.paste-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--on-surface);
+  cursor: pointer;
+}
+
+.paste-mode input[type="number"] {
+  width: 66px;
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+/* Disabled rather than hidden: the choice that was made stays readable while
+   the paste runs, because it is half the explanation of what is happening. */
+#paste-overlay.paste-sending #paste-modes,
+#paste-overlay.paste-sending #paste-meta {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+#paste-progress {
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  margin: 0;
 }
 
 #paste-actions {

@@ -2794,8 +2794,37 @@ GigEth0/2     unassigned    YES unset  down     down
         <span class="material-symbols-outlined" style="color:var(--primary)">content_paste</span>
         <h2 id="paste-title">Confirm Paste</h2>
       </div>
-      <p class="paste-label">You are about to send this to the terminal:</p>
-      <pre id="paste-preview"></pre>
+      <p class="paste-label">This is what will be sent to the terminal. Edit it
+        here first if you need to — nothing has gone to the device yet.</p>
+      <textarea id="paste-text" spellcheck="false" autocomplete="off"
+                aria-label="What will be sent to the terminal"></textarea>
+      <div id="paste-meta">
+        <span id="paste-count"></span>
+        <label class="paste-check" for="paste-strip">
+          <input type="checkbox" id="paste-strip" />
+          Strip blank lines and comments
+        </label>
+      </div>
+      <fieldset id="paste-modes">
+        <legend>How to send it</legend>
+        <label class="paste-mode">
+          <input type="radio" name="paste-mode" id="paste-mode-block" value="block" />
+          <span>All at once</span>
+        </label>
+        <label class="paste-mode">
+          <input type="radio" name="paste-mode" id="paste-mode-lines" value="lines" />
+          <span>As lines,
+            <input type="number" id="paste-delay" min="0" max="10000" step="50" />
+            ms apart</span>
+        </label>
+        <label class="paste-mode">
+          <input type="radio" name="paste-mode" id="paste-mode-prompt" value="prompt" />
+          <span>A line at a time, waiting for the device's prompt — giving up on
+            the rest after
+            <input type="number" id="paste-timeout" min="1" max="300" /> s</span>
+        </label>
+      </fieldset>
+      <p id="paste-progress" class="hidden"></p>
       <div id="paste-actions">
         <button id="paste-cancel" class="btn-secondary">Cancel</button>
         <button id="paste-confirm" class="btn-primary">
@@ -3000,45 +3029,191 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/feedback.js"></script>
   <script>
     // ----------------------------------------------------------------
-    // Paste confirmation modal
+    // Paste confirmation modal (#523)
+    //
+    // It used to be a read-only preview cut off at 400 characters, which
+    // answered "is this roughly what I copied?" and nothing else. The thing
+    // people actually want at that moment is to fix the one line that came
+    // out of the wiki with a smart quote in it, and to decide how fast sixty
+    // lines should reach a 2960 over a console cable — so the preview is a
+    // textarea, and the pacing is a choice made here rather than a setting
+    // somebody had to find first.
     // ----------------------------------------------------------------
     (function () {
       const overlay  = document.getElementById('paste-overlay');
-      const preview  = document.getElementById('paste-preview');
+      const box      = document.getElementById('paste-text');
+      const count    = document.getElementById('paste-count');
+      const strip    = document.getElementById('paste-strip');
+      const delay    = document.getElementById('paste-delay');
+      const timeout  = document.getElementById('paste-timeout');
+      const progress = document.getElementById('paste-progress');
       const btnOk    = document.getElementById('paste-confirm');
       const btnNo    = document.getElementById('paste-cancel');
       let _pendingCb = null;
+      let _sessionId = null;
+      let _sending   = false;
+      let _beforeStrip = '';
 
-      function show(text, onConfirm) {
-        // Truncate long pastes in the preview
-        const MAX = 400;
-        preview.textContent = text.length > MAX ? text.slice(0, MAX) + '\n…' : text;
+      /** Lines as the device will see them: a trailing newline is not a line. */
+      function lineCount(text) {
+        if (!text) return 0;
+        return text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').length;
+      }
+
+      function chosen() {
+        const picked = overlay.querySelector('input[name="paste-mode"]:checked');
+        return picked ? picked.value : 'block';
+      }
+
+      function refresh() {
+        const lines = lineCount(box.value);
+        const chars = box.value.length;
+        count.textContent = `${lines} line${lines === 1 ? '' : 's'}, `
+                          + `${chars} character${chars === 1 ? '' : 's'}`;
+      }
+
+      function show(text, opts, onConfirm) {
+        opts = opts || {};
+        box.value = text;
+        box.readOnly = false;
+        strip.checked = false;
+        _beforeStrip = '';
+        _sending = false;
+        _sessionId = opts.sessionId || null;
         _pendingCb = onConfirm;
+
+        const mode = ['block', 'lines', 'prompt'].indexOf(opts.mode) >= 0
+          ? opts.mode : 'block';
+        const radio = overlay.querySelector(
+          'input[name="paste-mode"][value="' + mode + '"]');
+        if (radio) radio.checked = true;
+        delay.value   = Number(opts.delayMs) || 200;
+        timeout.value = Number(opts.timeoutS) || 10;
+
+        overlay.classList.remove('paste-sending');
+        progress.classList.add('hidden');
+        progress.textContent = '';
+        btnOk.classList.remove('hidden');
+        btnNo.textContent = 'Cancel';
+        refresh();
         overlay.classList.remove('hidden');
-        btnOk.focus();
+        // The textarea, not the Send button: the reason it is editable is
+        // that the first thing to do here is usually read it.
+        box.focus();
+        box.setSelectionRange(box.value.length, box.value.length);
       }
 
       function hide() {
         overlay.classList.add('hidden');
+        overlay.classList.remove('paste-sending');
         _pendingCb = null;
+        _sending = false;
       }
 
-      btnOk.addEventListener('click', () => {
-        if (_pendingCb) _pendingCb();
+      /**
+       * A line-paced paste takes as long as the device does, so the dialog
+       * stays and says where it has got to — and gives the one way to stop
+       * that does not involve typing into a live session.
+       */
+      function sending(total) {
+        _sending = true;
+        _pendingCb = null;
+        overlay.classList.add('paste-sending');
+        box.readOnly = true;
+        progress.classList.remove('hidden');
+        progress.textContent = `Sending 0 of ${total} lines…`;
+        btnOk.classList.add('hidden');
+        btnNo.textContent = 'Stop';
+        btnNo.focus();
+      }
+
+      strip.addEventListener('change', () => {
+        // One level of undo rather than a filter applied invisibly at send
+        // time: what is in the box is what will be sent, which is the whole
+        // premise of showing it.
+        if (strip.checked) {
+          _beforeStrip = box.value;
+          box.value = box.value.replace(/\r\n?/g, '\n').split('\n')
+            .filter(line => line.trim() && !/^\s*[!#]/.test(line))
+            .join('\n');
+        } else if (_beforeStrip) {
+          box.value = _beforeStrip;
+        }
+        refresh();
+      });
+
+      box.addEventListener('input', () => {
+        // An edit after stripping means the snapshot is no longer what the
+        // user is looking at, so unticking must not throw their edit away.
+        if (strip.checked) _beforeStrip = '';
+        refresh();
+      });
+
+      // Picking a pace by typing into its box is the obvious gesture; making
+      // somebody also click the radio beside it is not.
+      delay.addEventListener('focus', () => {
+        document.getElementById('paste-mode-lines').checked = true;
+      });
+      timeout.addEventListener('focus', () => {
+        document.getElementById('paste-mode-prompt').checked = true;
+      });
+
+      function confirm() {
+        if (_sending || !_pendingCb) return;
+        const choice = {
+          mode:     chosen(),
+          delayMs:  Number(delay.value) || 0,
+          timeoutS: Number(timeout.value) || 10,
+        };
+        const send = _pendingCb;
+        const text = box.value;
+        if (!text) { hide(); return; }
+        if (choice.mode === 'block') {
+          hide();
+          send(text, choice);
+          return;
+        }
+        sending(lineCount(text));
+        send(text, choice);
+      }
+
+      btnOk.addEventListener('click', confirm);
+
+      btnNo.addEventListener('click', () => {
+        if (_sending && _sessionId && window.stopPasteInSession) {
+          window.stopPasteInSession(_sessionId);
+        }
         hide();
       });
 
-      btnNo.addEventListener('click', hide);
-
       overlay.addEventListener('click', (e) => {
+        // Closing mid-paste detaches from it rather than stopping it: the
+        // batch belongs to the session, and Stop is the button that stops.
         if (e.target === overlay) hide();
       });
 
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !overlay.classList.contains('hidden')) hide();
-        if (e.key === 'Enter' && !overlay.classList.contains('hidden')) {
+        if (overlay.classList.contains('hidden')) return;
+        if (e.key === 'Escape') { hide(); return; }
+        // Enter types a newline now that the box is editable — a paste being
+        // edited is exactly where a stray Return would be worst. Ctrl+Enter
+        // sends, the way it does in the assistant.
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
           e.preventDefault();
-          if (_pendingCb) _pendingCb();
+          confirm();
+        }
+      });
+
+      // How far the server has got with a batch this dialog started (#523).
+      window.addEventListener('shellmate:paste-batch', (e) => {
+        const info = e.detail || {};
+        if (!_sending || info.sessionId !== _sessionId) return;
+        if (info.state === 'progress') {
+          progress.textContent =
+            `Sending ${info.sent} of ${info.total} lines…`;
+        } else if (info.state === 'done') {
+          // The report is the toast's job — it has to survive this dialog
+          // closing, and it has to arrive even when nobody is looking here.
           hide();
         }
       });

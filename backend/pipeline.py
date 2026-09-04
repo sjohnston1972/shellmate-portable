@@ -12,8 +12,12 @@ through an ordered chain before it reaches the device:
     keystrokes -> line assembly -> alias expansion -> guardrails -> device
 
 Alias expansion and the dangerous-command guardrail both run here. Paste
-pacing is done in the frontend (`terminal.js`), before the bytes reach the
-socket, which is the only place it can actually slow a paste down.
+pacing is split, because the two kinds of pacing answer different questions.
+Chunking a paste by *bytes* is done in the frontend (`terminal.js`), before
+the bytes reach the socket, which is the only place a stream can be slowed
+down. Pacing it by *lines* is :class:`PasteBatch`, below: a line at a time,
+waiting for the device to come back to its prompt — which only this side can
+see — with every line going through the pipeline like any other.
 
 Two things make this less trivial than it looks.
 
@@ -29,6 +33,7 @@ a stale line would send something the user never typed.
 """
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 from backend.platforms import GENERIC, matches_dangerous, resolve_alias
@@ -270,3 +275,166 @@ class OutboundPipeline:
     def current_line(self) -> str:
         """What the user appears to have typed so far."""
         return self._line
+
+
+# ---------------------------------------------------------------------------
+# A pasted block, sent a line at a time
+# ---------------------------------------------------------------------------
+
+#: Below this, a line-paced paste is indistinguishable from an unpaced one:
+#: every line falls due on the same tick and the whole block arrives at once,
+#: which is the single outcome pacing exists to prevent. The byte-chunked path
+#: in the browser floors its delay for the same reason.
+MIN_LINE_DELAY = 0.01
+
+
+@dataclass
+class PasteBatch:
+    """
+    A pasted block, sent one line at a time, at a pace the device can take.
+
+    Byte chunking — in the browser, before the bytes reach the socket — is the
+    right knob for a serial input buffer that drops characters. It is the
+    wrong one for sixty lines of ACL: what each line there needs is not a gap
+    in milliseconds but *the device back at its prompt*, and only this side
+    can see that.
+
+    Owns the decision of what to send next and nothing else. The session's
+    read loop owns the sending, because that is where the pipeline and the
+    socket are — the same division as
+    :class:`~backend.onboard.OnConnectScript`, and for the same reason.
+
+    Two modes, one machine:
+
+    - **wait_for_prompt** — a line goes out only when the device is idle at a
+      bare prompt with nothing half-typed, and never before the device has
+      said *something* since the last line. Without that second half the batch
+      races its own output: ``idle_at_prompt`` is recomputed only when output
+      arrives, so for the moment after a line is sent it still describes the
+      prompt before it, and the whole block would go out at once into a device
+      that had answered none of it.
+    - **timed** — a line every ``delay`` seconds, for the places where there
+      is no prompt worth waiting for: a boot loader, a terminal server, a
+      device part-way through a dialogue.
+
+    A stall is a *result*, not an error. The line it stopped at is the one
+    thing the person whose session this is needs afterwards, so it is carried
+    in the summary rather than left to be inferred from a count.
+    """
+
+    lines: list[str]
+    wait_for_prompt: bool = True
+    #: Seconds between lines in timed mode.
+    delay: float = 0.2
+    #: Seconds to wait for a prompt before giving up on the rest.
+    timeout: float = 10.0
+
+    sent: int = field(default=0, init=False)
+    _index: int = field(default=0, init=False)
+    _done: bool = field(default=False, init=False)
+    _reason: str = field(default="", init=False)
+    _stalled_at: int = field(default=0, init=False)
+
+    #: Whether the device has said anything since the last line went out.
+    #: True to begin with, because the first line is sent at a prompt the
+    #: device printed itself.
+    _saw_output: bool = field(default=True, init=False)
+    _last_progress: float = field(default_factory=time.monotonic, init=False)
+
+    @property
+    def done(self) -> bool:
+        return self._done
+
+    @property
+    def total(self) -> int:
+        return len(self.lines)
+
+    @property
+    def remaining(self) -> int:
+        return max(0, len(self.lines) - self._index)
+
+    def finish(self, reason: str = "") -> None:
+        """Stop, with a reason the interface can state."""
+        if not self._done:
+            self._done = True
+            self._reason = reason
+            if reason and self.remaining:
+                self._stalled_at = self.sent
+
+    def abort(self, reason: str) -> None:
+        """Stop because of something outside the batch — a keystroke."""
+        self.finish(reason)
+
+    def observe(self, text: str) -> None:
+        """The device said something. See ``_saw_output``."""
+        if text:
+            self._saw_output = True
+
+    def hold(self, now: float | None = None) -> None:
+        """
+        Pause the clock while somebody is being asked a question.
+
+        A line held at the guardrail is waiting on a human, and a human is
+        slower than any device timeout. Without this the batch would time out
+        behind its own confirmation dialog and report a stall that never
+        happened.
+        """
+        self._last_progress = time.monotonic() if now is None else now
+
+    def wait_for_device(self, now: float | None = None) -> None:
+        """Something else was typed into the session; wait for the answer."""
+        self._saw_output = False
+        self.hold(now)
+
+    def resume(self, now: float | None = None) -> None:
+        """Nothing reached the device after all — carry on without waiting."""
+        self._saw_output = True
+        self.hold(now)
+
+    def next_line(self, at_prompt: bool, now: float | None = None) -> str | None:
+        """
+        The next line to send, or None if it is not time.
+
+        Args:
+            at_prompt: The device is idle at a bare prompt with nothing
+                half-typed. The caller resolves that, because it is the only
+                thing holding both the transcript and the pipeline.
+        """
+        if self._done:
+            return None
+        clock = time.monotonic() if now is None else now
+
+        if self._index >= len(self.lines):
+            self.finish("")
+            return None
+
+        if self.wait_for_prompt:
+            if not (at_prompt and self._saw_output):
+                if clock - self._last_progress > self.timeout:
+                    self.finish("no-prompt")
+                return None
+        elif clock - self._last_progress < max(self.delay, MIN_LINE_DELAY):
+            return None
+
+        line = self.lines[self._index]
+        self._index += 1
+        self.sent += 1
+        self._last_progress = clock
+        self._saw_output = False
+        return line
+
+    def summary(self) -> dict:
+        """
+        What went out, what did not, and where it stopped.
+
+        ``stalled_at`` is the number of the line that was sent and never
+        answered — "line 12 sent, no prompt seen" — rather than a bare count,
+        because the next thing anybody does is go and look at line 12.
+        """
+        return {
+            "sent":       self.sent,
+            "total":      len(self.lines),
+            "remaining":  self.remaining,
+            "stalled_at": self._stalled_at,
+            "reason":     self._reason,
+        }

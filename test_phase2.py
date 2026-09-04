@@ -797,6 +797,133 @@ async def run():
         except Exception as e:
             fail("one log file can be opened by name", str(e))
 
+        # The paste dialog (#523). It used to be a read-only preview cut off
+        # at 400 characters; what people want at that moment is to fix a line
+        # and to choose how fast the block reaches the device.
+        print("\n-- The paste dialog --")
+
+        block = "\n".join(["! a comment", "interface Gi0/1", "",
+                           " description uplink", "exit"])
+        try:
+            await page.evaluate(
+                """text => {
+                     window.__pasted = null;
+                     window._showPasteModal(text,
+                       { sessionId: 'test-session', mode: 'prompt',
+                         delayMs: 250, timeoutS: 12 },
+                       (sent, choice) => { window.__pasted = { sent, choice }; });
+                   }""", block)
+            await expect(page.locator("#paste-overlay")).to_be_visible()
+            await expect(page.locator("#paste-text")).to_be_visible()
+            ok("the paste is shown in an editable box")
+        except Exception as e:
+            fail("the paste is shown in an editable box", str(e))
+
+        try:
+            value = await page.input_value("#paste-text")
+            assert value == block, repr(value[:80])
+            assert not await page.get_attribute("#paste-text", "readonly")
+            ok("with the whole block in it, not a truncated preview")
+        except Exception as e:
+            fail("with the whole block in it, not a truncated preview", str(e))
+
+        try:
+            count = await page.inner_text("#paste-count")
+            assert "5 lines" in count, count
+            ok("and a line count")
+        except Exception as e:
+            fail("and a line count", str(e))
+
+        try:
+            checked = await page.evaluate(
+                "() => document.getElementById('paste-mode-prompt').checked")
+            assert checked, "the dialog did not open on the configured mode"
+            assert await page.input_value("#paste-delay") == "250"
+            assert await page.input_value("#paste-timeout") == "12"
+            ok("the pacing options start where the settings say")
+        except Exception as e:
+            fail("the pacing options start where the settings say", str(e))
+
+        try:
+            await page.check("#paste-strip")
+            stripped = await page.input_value("#paste-text")
+            assert stripped == "interface Gi0/1\n description uplink\nexit", repr(stripped)
+            assert "3 lines" in await page.inner_text("#paste-count")
+            ok("stripping takes blank lines and comments, and says so")
+        except Exception as e:
+            fail("stripping takes blank lines and comments, and says so", str(e))
+
+        try:
+            await page.uncheck("#paste-strip")
+            assert await page.input_value("#paste-text") == block
+            ok("and unticking it puts them back")
+        except Exception as e:
+            fail("and unticking it puts them back", str(e))
+
+        try:
+            # The edit is the point of the box: what is sent is what is in it.
+            await page.fill("#paste-text", "interface Gi0/2\nshutdown")
+            await page.check("#paste-mode-lines")
+            await page.fill("#paste-delay", "300")
+            await page.click("#paste-confirm")
+            await page.wait_for_timeout(200)
+            got = await page.evaluate("() => window.__pasted")
+            assert got, "the confirm callback was never called"
+            assert got["sent"] == "interface Gi0/2\nshutdown", repr(got["sent"])
+            assert got["choice"]["mode"] == "lines", str(got["choice"])
+            assert got["choice"]["delayMs"] == 300, str(got["choice"])
+            ok("Send hands over the edited text and the chosen pacing")
+        except Exception as e:
+            fail("Send hands over the edited text and the chosen pacing", str(e))
+
+        try:
+            # A line-paced batch keeps the dialog, because it takes as long as
+            # the device does — and Stop has to be reachable without typing
+            # into the session.
+            await expect(page.locator("#paste-overlay")).to_be_visible()
+            await expect(page.locator("#paste-progress")).to_be_visible()
+            assert await page.inner_text("#paste-cancel") == "Stop"
+            await page.evaluate(
+                """() => window.dispatchEvent(new CustomEvent(
+                     'shellmate:paste-batch',
+                     { detail: { sessionId: 'test-session', state: 'progress',
+                                 sent: 1, total: 2 } }))""")
+            assert "1 of 2" in await page.inner_text("#paste-progress")
+            ok("the dialog stays and reports how far the batch has got")
+        except Exception as e:
+            fail("the dialog stays and reports how far the batch has got", str(e))
+
+        try:
+            await page.evaluate(
+                """() => window.dispatchEvent(new CustomEvent(
+                     'shellmate:paste-batch',
+                     { detail: { sessionId: 'test-session', state: 'done',
+                                 sent: 2, total: 2, remaining: 0 } }))""")
+            await expect(page.locator("#paste-overlay")).to_be_hidden()
+            ok("and closes when the batch is done")
+        except Exception as e:
+            fail("and closes when the batch is done", str(e))
+
+        try:
+            # Enter has to type a newline now: a paste being edited is the
+            # worst possible place for a stray Return to send.
+            await page.evaluate(
+                """() => { window.__pasted = null;
+                           window._showPasteModal('one\\ntwo', {},
+                             (sent) => { window.__pasted = sent; }); }""")
+            await page.click("#paste-text")
+            await page.keyboard.press("End")
+            await page.keyboard.press("Enter")
+            assert await page.evaluate("() => window.__pasted") is None, \
+                "Enter sent the paste instead of typing a newline"
+            await page.keyboard.press("Control+Enter")
+            await page.wait_for_timeout(100)
+            assert await page.evaluate("() => window.__pasted") is not None, \
+                "Ctrl+Enter did not send"
+            ok("Enter types a newline; Ctrl+Enter sends")
+        except Exception as e:
+            fail("Enter types a newline; Ctrl+Enter sends", str(e))
+
         # ------------------------------------------------------------------
         print("\n-- Console errors --")
 

@@ -122,6 +122,11 @@ class SessionManager:
             # a key that sometimes exists is a KeyError waiting for the one
             # device that behaves differently.
             "live_capture":    None,
+            # A pasted block being sent a line at a time (#523). Declared for
+            # the reason live_capture is: the read loop tests it on every
+            # pass, and a key that sometimes exists is a KeyError waiting for
+            # the one session that behaves differently.
+            "paste_batch":     None,
             # Per-tab keep-alive (#138). None means "follow the setting"; a
             # bool is this tab's own answer. Declared rather than created on
             # demand, for the same reason live_capture is.

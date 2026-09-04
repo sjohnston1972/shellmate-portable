@@ -383,6 +383,28 @@ SETTINGS: tuple[Setting, ...] = (
             "paste arrives just as fast as it did unsplit, which is the one "
             "outcome chunking exists to prevent, so it is floored at 1ms.",
             minimum=0, maximum=2000, unit="ms"),
+    Setting("terminal.paste_mode", "How a confirmed paste is sent", "block", "choice",
+            "What the paste dialog opens on: one block, a line at a time, or "
+            "a line per prompt.",
+            "Chunking by bytes suits a serial buffer that drops characters. A "
+            "sixty-line ACL needs something else: the device back at its "
+            "prompt before the next line, which is what \"prompt\" waits "
+            "for.||Whatever this is set to, the dialog still lets you change "
+            "it for the paste in front of you.",
+            choices=("block", "lines", "prompt")),
+    Setting("terminal.paste_line_delay", "Delay between pasted lines", 200, "int",
+            "In line mode, how long to wait before sending the next line.",
+            "Only used when the paste is sent as lines rather than waiting "
+            "for a prompt — a boot loader or a terminal server, where there "
+            "is no prompt worth waiting for.",
+            minimum=0, maximum=10000, unit="ms"),
+    Setting("terminal.paste_prompt_timeout", "Give up waiting for a prompt", 10, "int",
+            "In prompt mode, how long one line may wait for the device to "
+            "come back before the rest is abandoned.",
+            "The rest of the block is *not* fired at the device when it "
+            "finally answers thirty seconds later, into whatever you have "
+            "started doing. ShellMate stops and says which line it stopped "
+            "at.", minimum=1, maximum=300, unit="s"),
 
     Setting("terminal.confirm_dangerous", "Confirm destructive commands you type", True, "bool",
             "Holds `reload`, `write erase` and the like until you say yes.",

@@ -333,9 +333,17 @@ and `onboard.as_chosen()` is the way out, not a higher score.
 `pipeline.py` is the chokepoint every keystroke passes through on its way out.
 It assembles keystrokes into lines and can rewrite one before it reaches the
 device. Alias expansion, the dangerous-command guardrail and the hold-and-
-confirm it raises all live there; paste pacing is the frontend's, in
-`terminal.js`, because the pacing has to happen before the bytes reach the
-socket.
+confirm it raises all live there.
+
+Paste pacing is split between the two sides, because the two kinds answer
+different questions. Chunking a paste by **bytes** is the frontend's, in
+`terminal.js`: it slows a stream down, and that has to happen before the bytes
+reach the socket. Pacing it by **lines** is `pipeline.PasteBatch`, driven from
+the session's read loop, because what a sixty-line ACL needs is not a gap in
+milliseconds but the device back at its prompt — and `idle_at_prompt` is only
+visible on this side. Every line still goes through `pipeline.process`, so a
+`reload` in a pasted block is held exactly as a typed one is, and the batch
+waits for the answer rather than sending the next line past it.
 
 Two rules for anything that writes into a live session:
 
