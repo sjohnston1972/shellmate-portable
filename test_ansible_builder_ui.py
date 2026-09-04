@@ -72,6 +72,23 @@ def _serve() -> None:
 
 
 async def main() -> None:
+    # A real estate to drag out of. Two groups, one nested, and a serial
+    # connection that has no address — so the rail has something to show
+    # and something to say is missing.
+    from backend import groups, profiles
+
+    for name in ("site-1", "site-1/routers", "site-1/switches"):
+        groups.create_group(name, "green")
+    profiles.save_profile({"name": "S1-R1", "hostname": "192.168.20.33",
+                           "connection_type": "ssh", "platform": "ios",
+                           "tags": ["site-1/routers"]})
+    profiles.save_profile({"name": "S1-S1", "hostname": "192.168.20.34",
+                           "connection_type": "ssh", "platform": "ios",
+                           "tags": ["site-1/switches"]})
+    profiles.save_profile({"name": "Console", "hostname": "", "port": 9600,
+                           "connection_type": "serial",
+                           "tags": ["site-1/switches"]})
+
     threading.Thread(target=_serve, daemon=True).start()
     time.sleep(2.0)
 
@@ -99,15 +116,32 @@ async def main() -> None:
               "add play" in (await page.inner_text("#av-bld-canvas")).lower(),
               await page.inner_text("#av-bld-canvas"))
 
-        print("\n-- Inventory sits beside it, not inside it --")
+        print("\n-- Inventory is the real estate, beside the canvas --")
         check("the rail exists",
               await page.query_selector("#av-bld-rail") is not None)
-        rail = await page.inner_text("#av-bld-rail")
-        check("it says groups are managed elsewhere",
-              "managed separately" in rail.lower(), rail[:200])
-        check("the rail is outside the playbook box",
+        check("it is outside the playbook box",
               await page.query_selector(".av-node-playbook #av-bld-rail") is None,
               "drawing inventory inside the playbook implies it owns the groups")
+        check("it renders the shared estate tree, not a bespoke list",
+              await page.query_selector("#av-bld-rail .av-est-tree") is not None,
+              "the builder must not carry a second inventory implementation")
+        check("there is one estate module, shared",
+              await page.evaluate("!!window.ansibleEstate"),
+              "no shared source — two areas would each fetch and could disagree")
+
+        groups = await page.eval_on_selector_all(
+            "#av-bld-rail .av-est-group .av-est-label", "e => e.map(x => x.textContent)")
+        check("groups appear by the name ShellMate uses",
+              any("site" in g.lower() for g in groups), str(groups))
+        check("and are draggable",
+              await page.get_attribute("#av-bld-rail .av-est-group", "draggable") == "true",
+              "the whole point is dragging them onto a play")
+
+        hosts = await page.eval_on_selector_all(
+            "#av-bld-rail .av-est-host .av-est-label", "e => e.map(x => x.textContent)")
+        check("individual connections are offered too",
+              len(hosts) > 0,
+              "a play targeting one host is legitimate and has to be reachable")
 
         print("\n-- Adding a play --")
         await page.evaluate("""
@@ -165,6 +199,28 @@ async def main() -> None:
         found = await page.inner_text("#av-bld-found")
         check("and the read-back agrees with it",
               "ios_config" in found or "cli_config" in found, found[:200])
+
+        print("\n-- Dragging a group onto a play --")
+        before = await page.inner_text(".av-node-play")
+        moved = await page.evaluate("""
+          (() => {
+            const item = document.querySelector('#av-bld-rail .av-est-group');
+            const play = document.querySelector('.av-node-play');
+            if (!item || !play) return 'missing';
+            const dt = new DataTransfer();
+            item.dispatchEvent(new DragEvent('dragstart',
+              { dataTransfer: dt, bubbles: true }));
+            play.dispatchEvent(new DragEvent('drop',
+              { dataTransfer: dt, bubbles: true, cancelable: true }));
+            return dt.getData('application/x-shellmate-target') || 'no payload';
+          })()
+        """)
+        check("the drag carries a typed payload",
+              moved not in ("missing", "no payload"), str(moved))
+        await page.wait_for_timeout(600)
+        after = await page.inner_text(".av-node-play")
+        check("and the play it was dropped on changed what it targets",
+              after != before, f"before {before[:80]!r} after {after[:80]!r}")
 
         print("\n-- Nothing threw --")
         real = [e for e in errors if "favicon" not in e.lower()]

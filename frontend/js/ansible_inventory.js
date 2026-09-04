@@ -49,6 +49,12 @@
     try {
       inventory = await view.json('/api/ansible/inventory'
         + (selectedGroup ? `?group=${encodeURIComponent(selectedGroup)}` : ''));
+      // The whole estate goes to the shared source, so the builder's tree
+      // and this table are one fetch and one answer rather than two that
+      // can disagree (#601). A filtered read is this area's own business.
+      if (!selectedGroup && window.ansibleEstate) {
+        window.ansibleEstate.adopt(inventory);
+      }
     } catch (e) {
       inventory = null;
       loadError = e.message || String(e);

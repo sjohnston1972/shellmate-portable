@@ -586,6 +586,7 @@ def inventory_from_estate(group: str = "") -> dict:
     wanted = (group or "").strip().lower()
     prefix = f"{wanted}/"
     groups: dict[str, list[str]] = {}
+    original: dict[str, str] = {}
     hostvars: dict[str, dict] = {}
     skipped: list[dict] = []
 
@@ -619,11 +620,18 @@ def inventory_from_estate(group: str = "") -> dict:
             key = ansible_group_name(tag)
             if key:
                 groups.setdefault(key, [])
+                # What ShellMate calls it, kept beside what Ansible will.
+                # An interface that can only show `site_1_routers` is asking
+                # somebody to recognise their own estate through a mangling
+                # ShellMate performed (#601).
+                original.setdefault(key, tag)
                 if address not in groups[key]:
                     groups[key].append(address)
 
     return {
         "groups": {k: sorted(v) for k, v in sorted(groups.items())},
+        # Ansible's name → ShellMate's. Show the second, send the first.
+        "group_names": {k: original.get(k, k) for k in sorted(groups)},
         "hostvars": hostvars,
         "hosts": sorted(hostvars),
         "skipped": skipped,

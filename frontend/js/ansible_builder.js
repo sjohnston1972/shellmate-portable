@@ -226,7 +226,24 @@
     }
     children.push(addButton('+ add handler', () => addTask(play, true)));
 
-    return el('div', { class: 'av-node av-node-play' }, [
+    return el('div', {
+      class: 'av-node av-node-play',
+      ondragover: (event) => {
+        if (!window.ansibleEstate) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.classList.add('av-node-over');
+      },
+      ondragleave: (event) => event.currentTarget.classList.remove('av-node-over'),
+      ondrop: (event) => {
+        event.currentTarget.classList.remove('av-node-over');
+        const picked = window.ansibleEstate.dropped(event);
+        if (!picked) return;
+        event.preventDefault();
+        event.stopPropagation();
+        retarget(play, picked);
+      },
+    }, [
       el('div', { class: 'av-node-row av-node-head' }, [
         el('button', {
           type: 'button', class: 'av-node-title av-node-button',
@@ -254,7 +271,23 @@
       if (await editPlay(play)) { plays.push(play); renderCanvas(); }
     }));
 
-    host.appendChild(el('div', { class: 'av-node av-node-playbook' }, [
+    host.appendChild(el('div', {
+      class: 'av-node av-node-playbook',
+      ondragover: (event) => {
+        if (window.ansibleEstate) {
+          event.preventDefault();
+          event.currentTarget.classList.add('av-node-over');
+        }
+      },
+      ondragleave: (event) => event.currentTarget.classList.remove('av-node-over'),
+      ondrop: (event) => {
+        event.currentTarget.classList.remove('av-node-over');
+        const picked = window.ansibleEstate.dropped(event);
+        if (!picked) return;
+        event.preventDefault();
+        addPlayFor(picked);
+      },
+    }, [
       el('div', { class: 'av-node-row av-node-head' }, [
         el('span', { class: 'av-node-title av-node-playbook-title' }, 'PLAYBOOK'),
         el('button', {
@@ -274,37 +307,49 @@
     else { current = { text: '', found: null, source: '', error: '' }; paint(); }
   }
 
+  /**
+   * The estate, beside the canvas, from the one place that knows it (#601).
+   *
+   * Click an item to add a play targeting it; drag one onto a play to
+   * change what that play targets, or onto the playbook to make a new one.
+   * Groups, subgroups and single connections all work, because all three
+   * are legitimate targets.
+   */
   function rail() {
     const host = document.getElementById('av-bld-rail');
-    if (!host) return;
-    clear(host);
-    host.appendChild(el('h4', { class: 'av-rail-title', text: 'Inventory' }));
-
-    if (!estateGroups.length) {
-      host.appendChild(el('p', { class: 'av-rail-note' },
-        'No groups yet. A play can still target a host pattern.'));
-    }
-    estateGroups.forEach(name => {
-      host.appendChild(el('button', {
-        type: 'button', class: 'av-rail-chip',
-        title: `Add a play targeting ${name}`,
-        onclick: () => {
-          const play = newPlay(name);
-          play.name = `Configure ${name}`;
-          plays.push(play);
-          renderCanvas();
-        },
-      }, name));
+    if (!host || !window.ansibleEstate) return;
+    window.ansibleEstate.render(host, window.ansibleEstate.known(), {
+      draggable: true,
+      note: 'Click to add a play. Drag onto a play to retarget it.',
+      onPick: (picked) => addPlayFor(picked),
     });
+  }
 
-    host.appendChild(el('button', {
-      type: 'button', class: 'av-rail-add',
-      title: 'Groups are managed on the dashboard, with the connections',
-      onclick: () => view.close(),
-    }, '+ group'));
+  /** A new play aimed at whatever was picked. */
+  function addPlayFor(picked) {
+    const play = newPlay(picked.target);
+    play.name = picked.kind === 'host'
+      ? `Configure ${picked.label}`
+      : `Configure ${picked.label}`;
+    plays.push(play);
+    renderCanvas();
+  }
 
-    host.appendChild(el('p', { class: 'av-rail-note' },
-      'Managed separately, referenced by plays.'));
+  /**
+   * Retarget a play from a drop.
+   *
+   * Extends rather than replaces when the play already targets something
+   * else, because replacing loses a choice somebody made without saying
+   * so. Ansible reads a comma-separated pattern as a union, which is what
+   * dragging a second group onto a play evidently means.
+   */
+  function retarget(play, picked) {
+    const already = (play.hosts || '').split(',')
+      .map(x => x.trim()).filter(Boolean);
+    if (already.includes(picked.target)) return;
+    if (!already.length || already.join(',') === 'all') play.hosts = picked.target;
+    else play.hosts = already.concat(picked.target).join(',');
+    renderCanvas();
   }
 
   // -- The playbook ---------------------------------------------------------
@@ -612,12 +657,10 @@
   }
 
   async function loadGroups() {
-    try {
-      const data = await view.json('/api/ansible/inventory');
-      estateGroups = Object.keys((data && data.groups) || {}).sort();
-    } catch (e) {
-      estateGroups = [];
-    }
+    if (!window.ansibleEstate) { estateGroups = []; return; }
+    const data = await window.ansibleEstate.load();
+    // The names a person would recognise, for the hint on the play form.
+    estateGroups = Object.values((data && data.group_names) || {}).sort();
   }
 
   async function render() {

@@ -160,9 +160,10 @@ shellmate/
 │       ├── ai_panel.js          # Provider testing, model discovery, and hiding the AI panel
 │       ├── alerts.js            # Telling someone that something is about to happen to a device
 │       ├── ansible.js           # Driving an Ansible runner, and watching it work (#585)
-│       ├── ansible_builder.js   # Getting to a first playbook without writing YAML (#586)
+│       ├── ansible_builder.js   # A playbook, drawn as the thing it is (#586, #600)
 │       ├── ansible_dashboard.js # The Ansible view's first screen (#586)
 │       ├── ansible_environments.js # Named settings a run inherits, so production is one choice not…
+│       ├── ansible_estate.js    # One source for the estate, shared by the areas that need it (#601)
 │       ├── ansible_inventory.js # What a run is pointed at, from the estate or from the runner…
 │       ├── ansible_keys.js      # Credentials a run needs, held in the vault and sent only with a…
 │       ├── ansible_playbooks.js # Where the Playbooks area actually lives (#586)
