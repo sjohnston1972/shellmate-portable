@@ -83,6 +83,7 @@ shellmate/
 │   ├── advanced.py              # Stockton. The settings that were constants in the source
 │   ├── alerts.py                # Things that will happen to a device unless somebody intervenes
 │   ├── ansible.py               # Driving Ansible from ShellMate, through a runner service (#585)
+│   ├── ansible_builder.py       # Getting to a first playbook without writing YAML (#586)
 │   ├── ansible_keys.py          # The secrets an automation needs, and where they go (#586)
 │   ├── ansible_library.py       # What ShellMate keeps for Ansible, beside the runner (#586)
 │   ├── app.py                   # FastAPI application for ShellMate
@@ -158,7 +159,7 @@ shellmate/
 │       ├── ai_panel.js          # Provider testing, model discovery, and hiding the AI panel
 │       ├── alerts.js            # Telling someone that something is about to happen to a device
 │       ├── ansible.js           # Driving an Ansible runner, and watching it work (#585)
-│       ├── ansible_builder.js   # Describe a change, get a playbook — with the assistant if one is…
+│       ├── ansible_builder.js   # Getting to a first playbook without writing YAML (#586)
 │       ├── ansible_dashboard.js # The Ansible view's first screen (#586)
 │       ├── ansible_environments.js # Named settings a run inherits, so production is one choice not…
 │       ├── ansible_inventory.js # What a run is pointed at, from the estate or from the runner…

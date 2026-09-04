@@ -9586,6 +9586,115 @@ body {
    Ansible view — Builder (#586)
 --------------------------------------------------------------------------- */
 
+.av-bld-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.av-bld-field { display: flex; flex-direction: column; gap: 4px; }
+
+.av-bld-field label {
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.av-bld-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  font-family: inherit;
+  font-size: 13px;
+  min-height: var(--control-height);
+  box-sizing: border-box;
+}
+
+.av-bld-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+textarea.av-bld-input { min-height: unset; resize: vertical; }
+
+.av-bld-mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+.av-bld-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.av-bld-check input { margin-top: 2px; flex: 0 0 auto; }
+
+.av-bld-blocks { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+
+/* A task in the play being assembled. The left edge carries whether it
+   writes, so a play with one configuration task in it is readable as a
+   shape before a word of it is read. */
+.av-bld-block {
+  border: 1px solid var(--outline);
+  border-left: 3px solid var(--ok-edge);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 12px 14px;
+}
+
+.av-bld-block.av-bld-writes { border-left-color: var(--warn); }
+
+.av-bld-block-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.av-bld-block-head strong { font-size: 13px; color: var(--on-surface); }
+.av-bld-block-head .material-symbols-outlined { font-size: var(--icon-sm); }
+.av-bld-block .av-bld-block-head .material-symbols-outlined { color: var(--ok); }
+.av-bld-writes .av-bld-block-head > .material-symbols-outlined { color: var(--warn); }
+
+.av-bld-block-actions { margin-left: auto; }
+
+.av-bld-why {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  line-height: 1.5;
+}
+
+.av-bld-adders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.av-bld-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.av-bld-module {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--on-surface-dim);
+}
+
 /* ---------------------------------------------------------------------------
    Ansible view — Templates (#586)
 --------------------------------------------------------------------------- */

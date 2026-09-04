@@ -224,7 +224,7 @@
     try {
       const [overview, library, keys] = await Promise.all([
         json('/api/ansible/overview').catch(e => ({ _error: String(e.message || e) })),
-        json('/api/ansible/library').catch(() => ({ templates: [], environments: [], repositories: [] })),
+        json('/api/ansible/catalogue').catch(() => ({ templates: [], environments: [], repositories: [] })),
         json('/api/ansible/keys').catch(() => ({ keys: [] })),
       ]);
       if (overview && overview._error) state.error = overview._error;

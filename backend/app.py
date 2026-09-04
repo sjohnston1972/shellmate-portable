@@ -4349,9 +4349,16 @@ class RepositoryRequest(BaseModel):
     notes: str = ""
 
 
-@app.get("/api/ansible/library")
-async def ansible_library_all() -> dict:
-    """Everything the library holds, for the view's first paint."""
+@app.get("/api/ansible/catalogue")
+async def ansible_catalogue() -> dict:
+    """
+    Templates, environments and repositories together, for the first paint.
+
+    Named a catalogue rather than a library because ``library`` already
+    means the playbooks somebody wrote here, and two things called the same
+    thing in one API is how a caller ends up reading the wrong shape and
+    blaming its own parsing.
+    """
     from backend import ansible_library as library
 
     return {
@@ -4486,6 +4493,115 @@ async def ansible_delete_key(entry_id: str) -> dict:
     from backend import ansible_keys as store
 
     return {"deleted": await asyncio.to_thread(store.delete_key, entry_id)}
+
+
+class PlaybookBuildRequest(BaseModel):
+    """Body for POST /api/ansible/build — assemble from blocks."""
+
+    name: str = ""
+    hosts: str = "all"
+    family: str = "generic"
+    gather_facts: bool = False
+    blocks: list[dict] = []
+    save_as: str = ""
+
+
+class PlaybookDraftRequest(BaseModel):
+    """Body for POST /api/ansible/draft — ask the assistant."""
+
+    description: str
+    hosts: str = "all"
+    family: str = "generic"
+    context: str = ""
+    session_id: str = ""
+    backend: str = ""
+    model: str = ""
+
+
+class PlaybookInspectRequest(BaseModel):
+    """Body for POST /api/ansible/inspect — say what a playbook does."""
+
+    text: str
+
+
+@app.get("/api/ansible/builder")
+async def ansible_builder_vocabulary() -> dict:
+    """The blocks and platforms the builder offers, for the form."""
+    from backend import ansible_builder as builder
+
+    return {"blocks": builder.BLOCKS,
+            "families": await asyncio.to_thread(builder.families)}
+
+
+@app.post("/api/ansible/build")
+async def ansible_build(request: PlaybookBuildRequest) -> dict:
+    """
+    Assemble a playbook from blocks, and optionally keep it.
+
+    Nothing here reaches a network or a model, so the same input gives the
+    same playbook every time. That is what makes this the default path and
+    the assistant the other one.
+    """
+    from backend import ansible as ansible_module
+    from backend import ansible_builder as builder
+
+    try:
+        built = await asyncio.to_thread(builder.build, request.model_dump())
+    except builder.BuilderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if request.save_as:
+        try:
+            saved = await asyncio.to_thread(
+                ansible_module.save_playbook, request.save_as, built["text"])
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        built["saved"] = saved
+        built["transfer"] = ansible_module.playbook_transfer_plan(saved["name"])
+    return built
+
+
+@app.post("/api/ansible/inspect")
+async def ansible_inspect(request: PlaybookInspectRequest) -> dict:
+    """What a playbook would do, read off the text without running it."""
+    from backend import ansible_builder as builder
+
+    return await asyncio.to_thread(builder.inspect, request.text)
+
+
+@app.post("/api/ansible/draft")
+async def ansible_draft(request: PlaybookDraftRequest) -> dict:
+    """
+    Ask the assistant for a playbook.
+
+    Never saved from here. What comes back is a draft with an inspection
+    attached, and it takes a second, deliberate action to keep it — because
+    a model will write something plausible and wrong with exactly as much
+    confidence as something right, and the only defence is that a person
+    read it.
+    """
+    from backend import ansible_builder as builder
+
+    fields = request.model_dump()
+    # Terminal output the user chose to include as context. Pulled here
+    # rather than sent up from the browser so it goes through the one door
+    # out — redaction happens on the way to any AI call, not per caller.
+    if request.session_id and not request.context:
+        from backend.session import outbound
+
+        session = session_manager.get_session(request.session_id)
+        if session:
+            fields["context"] = outbound.session_text(session, 200)
+
+    chosen = (request.backend or DEFAULT_AI_BACKEND).strip()
+    try:
+        return await builder.draft(fields, chosen, request.model or None)
+    except builder.BuilderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Ansible playbook draft failed")
+        raise HTTPException(
+            status_code=502,
+            detail=f"The assistant could not be reached: {exc}") from exc
 
 
 @app.get("/api/ansible/overview")

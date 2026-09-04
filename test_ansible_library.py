@@ -306,11 +306,43 @@ def keys() -> None:
           ansible_keys.delete_key(renamed["id"]) is False)
 
 
+def routes() -> None:
+    """
+    No two routes share a method and a path.
+
+    Nothing enforces this. Declaring two routes on one method and path is
+    not an error: FastAPI serves whichever was registered first and leaves
+    the other unreachable, silently. With eight new Ansible routes going in
+    beside a set that already used similar names, the odds of landing on
+    one were good enough to spend a check on — and the failure it prevents
+    is a caller quietly receiving the wrong shape and doubting its own
+    parsing.
+    """
+    print("\n-- No route is shadowed by another --")
+    from backend.app import app
+
+    seen: dict[tuple, str] = {}
+    clashes: list[str] = []
+    for route in app.routes:
+        for method in getattr(route, "methods", None) or []:
+            if method in ("HEAD", "OPTIONS"):
+                continue
+            key = (method, getattr(route, "path", ""))
+            name = getattr(route, "name", "?")
+            if key in seen:
+                clashes.append(f"{method} {key[1]}: {seen[key]} then {name}")
+            else:
+                seen[key] = name
+    check("no two routes share a method and a path", not clashes,
+          "; ".join(clashes))
+
+
 if __name__ == "__main__":
     templates()
     environments()
     repositories()
     keys()
+    routes()
 
     print("\n" + "=" * 52)
     print(f"  {passed} passed  |  {len(failed)} failed")
