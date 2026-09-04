@@ -480,10 +480,24 @@ OLLAMA_MODEL=qwen2.5:14b
 # Default AI backend: "claude" or "ollama"
 DEFAULT_AI_BACKEND=ollama
 
+# Ansible runner (optional — the address and certificates live in Settings).
+# A fallback for a headless install; Settings puts the token in the vault.
+ANSIBLE_RUNNER_TOKEN=
+
+# Jira, for Conclude Session (optional)
+JIRA_URL=
+JIRA_USER_EMAIL=
+JIRA_API_TOKEN=
+JIRA_PROJECT_KEY=
+
 # Serial port defaults (Windows)
 DEFAULT_SERIAL_PORT=COM3
 DEFAULT_BAUD_RATE=9600
 ```
+
+Every one of these is read by `backend/config.py` or `backend/ansible.py`.
+A variable the code reads and this block does not mention is a variable
+nobody knows exists; the drift is silent in that direction only.
 
 ## Build phases
 
