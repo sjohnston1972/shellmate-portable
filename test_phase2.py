@@ -51,7 +51,15 @@ from backend.settings_store import update_settings  # noqa: E402
 # The pane under test has to exist for any of this to mean anything.
 update_settings({"ai": {"panel_enabled": True}})
 
-PORT = 8766
+def _free_port() -> int:
+    """A port nothing else holds: several suites run side by side."""
+    import socket as _socket
+    with _socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+PORT = _free_port()
 BASE = f"http://127.0.0.1:{PORT}"
 
 _server = uvicorn.Server(uvicorn.Config(

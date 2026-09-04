@@ -184,7 +184,15 @@ def start_device() -> tuple[int, OneChannelServer]:
 
 DEVICE_PORT, device = start_device()
 
-WEB_PORT = 8907
+def _free_port() -> int:
+    """A port nothing else holds: several suites run side by side."""
+    import socket as _socket
+    with _socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+WEB_PORT = _free_port()
 server = uvicorn.Server(uvicorn.Config(
     app, host="127.0.0.1", port=WEB_PORT, log_level="error"))
 threading.Thread(target=server.run, daemon=True).start()

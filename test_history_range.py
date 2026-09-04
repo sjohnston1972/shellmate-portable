@@ -29,7 +29,15 @@ from backend.app import app  # noqa: E402
 from backend.store import store  # noqa: E402
 from backend.session.transcript import CommandRecord  # noqa: E402
 
-PORT = 8770
+def _free_port() -> int:
+    """A port nothing else holds: several suites run side by side."""
+    import socket as _socket
+    with _socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+PORT = _free_port()
 BASE = f"http://127.0.0.1:{PORT}"
 
 try:
