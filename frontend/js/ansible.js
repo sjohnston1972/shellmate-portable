@@ -176,25 +176,11 @@
       .trim().toLowerCase();
     const match = (name) => !term || name.toLowerCase().includes(term);
 
-    // On the runner.
-    const runnerList = document.getElementById('ansible-runner-list');
-    runnerList.innerHTML = '';
-    const names = (playbooks.runner || []).filter(match);
-    if (playbooks.error) {
-      // The runner's own words. "playbook file not found" is worth more than
-      // "the runner answered 404", which is why the backend keeps them.
-      const note = document.createElement('div');
-      note.className = 'ansible-empty ansible-empty-error';
-      note.textContent = `The runner did not answer: ${playbooks.error}`;
-      runnerList.appendChild(note);
-    } else if (!names.length) {
-      runnerList.appendChild(_empty(
-        term ? 'Nothing on the runner matches that.'
-             : 'The runner holds no playbooks.'));
-    }
-    names.forEach(name => runnerList.appendChild(_runnerRow(name)));
-
-    // In ShellMate.
+    // Only ShellMate's own (#606). The runner's list is still fetched, but
+    // it is now how a row knows whether it has been sent rather than a
+    // second set to browse — two lists meant every message had to say which
+    // one it meant, and a playbook could appear because somebody dropped a
+    // file into a directory on another machine.
     const libList = document.getElementById('ansible-library-list');
     libList.innerHTML = '';
     const mine = (playbooks.library || []).filter(f => match(f.name));
@@ -246,14 +232,6 @@
     return row;
   }
 
-  function _runnerRow(name) {
-    const row = _row('automation', name, 'On the runner', 'Runner', 'runner');
-    const run = _button('Run', 'bolt', 'btn-secondary');
-    run.addEventListener('click', () => openRunDialog(name, 'runner'));
-    row.appendChild(run);
-    return row;
-  }
-
   function _libraryRow(file) {
     const when = file.modified
       ? new Date(file.modified * 1000).toLocaleString() : '';
@@ -265,14 +243,27 @@
     edit.addEventListener('click', () => openEditor(file.name));
     row.appendChild(edit);
 
-    // Runnable only once the runner holds a file by that name — the service
-    // runs what is in its project directory, not what is in ours. Offering
-    // Run on something the runner has never seen produces a 502 with the
-    // runner saying "not found", three clicks after the useful moment.
+    // Runnable only once the runner holds a file by that name — it runs
+    // what is in its project directory, not what is in ours. Offering Run
+    // on something it has never seen produces a 502 saying "not found",
+    // three clicks after the useful moment.
+    //
+    // But absence is not an answer either: a row with no Run button and no
+    // reason reads as broken. So the row says it has not been sent, and
+    // offers to send it (#606).
     if ((playbooks.runner || []).includes(file.name)) {
       const run = _button('Run', 'bolt', 'btn-secondary');
       run.addEventListener('click', () => openRunDialog(file.name, 'library'));
       row.appendChild(run);
+    } else {
+      const send = _button('Send to the runner', 'upload', 'btn-secondary');
+      send.title = 'The runner does not have this yet, so it cannot run it.';
+      send.addEventListener('click', async () => {
+        editing = file.name;
+        await sendPlaybook();
+        editing = '';
+      });
+      row.appendChild(send);
     }
     return row;
   }

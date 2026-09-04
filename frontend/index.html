@@ -330,7 +330,7 @@
             <button type="button" class="av-tab" data-av-go="builder"
                     title="Build a playbook from a description">
               <span class="material-symbols-outlined">smart_toy</span>
-              <span class="av-tab-label">Builder</span>
+              <span class="av-tab-label">Playbook builder</span>
             </button>
             <button type="button" class="av-tab" data-av-go="templates"
                     title="A parameterised play, filled in each time">
@@ -382,16 +382,10 @@
       <!-- ===== The two playbook lists ===== -->
       <section class="settings-section">
         <h3 class="settings-section-title">Playbooks</h3>
-        <p class="settings-section-hint">Two lists, kept apart on purpose. <strong>On the runner</strong> is what the container can actually run. <strong>In ShellMate</strong> is what has been written here — the service has no endpoint that accepts a playbook, so one of those reaches the runner by being copied over an SSH session you already have to the machine hosting it.</p>
+        <p class="settings-section-hint">The playbooks written here. ShellMate sends them to the runner, which runs what is in its own project directory — so a playbook has to get there before it can run, and each row says whether it has.</p>
 
         <div class="ansible-list-head">
-          <span class="setting-label">On the runner</span>
           <input type="search" id="ansible-search" placeholder="Search…" />
-        </div>
-        <div id="ansible-runner-list"></div>
-
-        <div class="ansible-list-head">
-          <span class="setting-label">In ShellMate</span>
           <button type="button" id="ansible-new" class="btn-secondary">
             <span class="material-symbols-outlined">add</span>
             New playbook
@@ -436,7 +430,7 @@
           <!-- ===== Builder ===== -->
           <section class="av-area" id="av-builder" data-av-area="builder" hidden>
             <header class="av-area-head">
-              <h3>Builder</h3>
+              <h3>Playbook builder</h3>
               <p>Build a playbook from a description.</p>
             </header>
             <div class="av-area-body" id="av-builder-body">

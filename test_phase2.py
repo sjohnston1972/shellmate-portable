@@ -969,13 +969,15 @@ async def run():
             fail("an unconfigured runner reads as not set up, and says what is missing", str(e))
 
         try:
-            # Both lists render even though the runner is unreachable — the
-            # library has to stay usable while the container is down.
-            await expect(page.locator("#ansible-runner-list")).to_be_visible()
+            # The library renders even though the runner is unreachable: it
+            # has to stay usable while the container is down. There is only
+            # one list now (#606) — the runner's own was a second set to
+            # browse, so every message had to say which it meant.
             await expect(page.locator("#ansible-library-list")).to_be_visible()
-            ok("both playbook lists render with the runner unreachable")
+            assert await page.query_selector("#ansible-runner-list") is None,                 "the runner's own list is back"
+            ok("the library renders with the runner unreachable, and is the only list")
         except Exception as e:
-            fail("both playbook lists render with the runner unreachable", str(e))
+            fail("the library renders with the runner unreachable, and is the only list", str(e))
 
         print("\n-- The playbook library --")
 
