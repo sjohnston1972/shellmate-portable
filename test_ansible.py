@@ -248,6 +248,26 @@ def test_playbooks_and_runs() -> None:
     check("stopping a run it can no longer stop is not an error",
           late["cancelled"] is False and "no longer" in late["detail"], str(late))
 
+    # Found against the real container: the runner answers a cancel for an
+    # already-finished job with success, so passing that through claimed to
+    # have stopped a run that failed a minute earlier. Stop must never say
+    # it stopped something that was not running.
+    def finished(request):
+        if request.url.path == "/api/v1/jobs/abc123":
+            return httpx.Response(200, json={
+                "id": "abc123", "status": "failed", "rc": 1,
+                "playbook": "p.yml", "started": "2026-09-04T10:00:00+00:00"})
+        if request.method == "DELETE":
+            return httpx.Response(200, json={"id": "abc123", "cancelled": True})
+        return None
+
+    done = with_runner(lambda: ansible.cancel("abc123"), handler=finished)
+    check("stopping a run that already finished says so",
+          done["cancelled"] is False and "already finished" in done["detail"],
+          str(done))
+    check("and names the state it finished in",
+          "failed" in done["detail"], str(done))
+
     check("galaxy requirements can be installed",
           with_runner(ansible.install_requirements).get("rc") == 0)
     check("the file asked for is the file installed",

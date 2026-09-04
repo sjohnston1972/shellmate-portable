@@ -413,12 +413,34 @@ def status(job_id: str) -> dict:
 
 def cancel(job_id: str) -> dict:
     """
-    Ask the runner to stop a run.
+    Ask the runner to stop a run, and say what actually happened.
 
-    The service can only cancel a run its own process started, and answers
-    404 otherwise — a run that finished, or one from before a restart.
-    That is an outcome, not an error.
+    The state is read first, because the runner answers a cancel for an
+    already-finished job with success. Passing that through made ShellMate
+    report "Cancellation requested" for a run that had failed a minute
+    earlier — claiming to have stopped something that was never running,
+    which is the one thing Stop must not do. Found against the real
+    container, not the mock.
+
+    A 404 is the other shape of the same outcome: the service can only
+    cancel a run its own process started, so a run from before a restart is
+    gone rather than stoppable. Both are outcomes, not errors.
     """
+    already = ""
+    try:
+        current = status(job_id)
+        if current.get("status") in FINISHED_STATES:
+            already = current.get("status", "")
+    except AnsibleError:
+        # If the state cannot be read, ask anyway and report what comes
+        # back — refusing to try because the check failed would be worse.
+        already = ""
+
+    if already:
+        return {"cancelled": False, "status": already,
+                "detail": f"That run had already finished ({already}); "
+                          "nothing was stopped."}
+
     try:
         data = _call("DELETE", f"/api/v1/jobs/{job_id}") or {}
     except AnsibleError as exc:
@@ -426,8 +448,21 @@ def cancel(job_id: str) -> dict:
             return {"cancelled": False,
                     "detail": "That run is no longer one the runner can stop."}
         raise
+
+    # It can still have finished between the two calls. Cheap to re-read,
+    # and the alternative is a message that is wrong exactly when a run
+    # ends at the moment somebody reaches for Stop.
+    landed = ""
+    try:
+        landed = status(job_id).get("status", "")
+    except AnsibleError:
+        landed = ""
+    if landed in FINISHED_STATES and landed not in ("canceled", "cancelled"):
+        return {"cancelled": False, "status": landed,
+                "detail": f"The run finished ({landed}) before it could be "
+                          "stopped."}
     return {"cancelled": bool(data.get("cancelled", True)),
-            "detail": "Cancellation requested."}
+            "status": landed, "detail": "Cancellation requested."}
 
 
 def events(job_id: str, since: int = 0) -> dict:
