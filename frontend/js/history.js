@@ -345,13 +345,62 @@
     const host = document.getElementById('replay-player');
     const play = document.getElementById('replay-play');
     const stop = document.getElementById('replay-stop');
+    const pause = document.getElementById('replay-pause');
     const speed = document.getElementById('replay-speed');
+    const seek = document.getElementById('replay-seek');
     if (!host || !play) return;
     _stopPlayer();
     host.classList.add('hidden');
+    const progress = document.getElementById('replay-progress');
+    if (progress) progress.classList.add('hidden');
     play.onclick = () => _startPlayer(session, host, Number(speed.value) || 4);
     stop.onclick = _stopPlayer;
+    if (pause) pause.onclick = _togglePause;
+    // Dragging the bar jumps: the commands up to that point are written at
+    // once and playing continues from there (#573).
+    if (seek) seek.oninput = () => { if (_player) _player.seekTo = Number(seek.value); };
+    // Speed can change mid-playback; the loop reads it each wait.
+    if (speed) speed.onchange = () => { if (_player) _player.speed = Number(speed.value) || 4; };
     play.disabled = !session.commands || !session.commands.length;
+  }
+
+  /** Pause or resume, from the button or the Space key (#573). */
+  function _togglePause() {
+    if (!_player) return;
+    _player.paused = !_player.paused;
+    const pause = document.getElementById('replay-pause');
+    if (pause) {
+      pause.innerHTML = _player.paused
+        ? '<span class="material-symbols-outlined">replay</span> Resume'
+        : '<span class="material-symbols-outlined">pending</span> Pause';
+    }
+  }
+
+  function _formatClock(seconds) {
+    const s = Math.max(0, Math.round(seconds));
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  /**
+   * How long the recording runs: the gaps between commands, capped the same
+   * way the player caps them, plus how long each command took.
+   */
+  function _recordingSpan(commands) {
+    const marks = [];
+    let total = 0;
+    let previousEnd = null;
+    for (const entry of commands) {
+      const ranAt = Number(entry.ran_at) || 0;
+      const took = (Number(entry.duration_ms) || 0) / 1000;
+      if (previousEnd !== null && ranAt) {
+        total += Math.min(Math.max(0, ranAt - previousEnd), 60);
+      }
+      marks.push(total);                      // when this command starts
+      total += took;
+      previousEnd = ranAt + took;
+    }
+    return { marks, total };
   }
 
   function _stopPlayer() {
@@ -362,6 +411,11 @@
     }
     const stop = document.getElementById('replay-stop');
     if (stop) stop.disabled = true;
+    const pause = document.getElementById('replay-pause');
+    if (pause) {
+      pause.disabled = true;
+      pause.innerHTML = '<span class="material-symbols-outlined">pending</span> Pause';
+    }
   }
 
   async function _startPlayer(session, host, speed) {
@@ -381,37 +435,102 @@
     if (fit) term.loadAddon(fit);
     term.open(host);
     if (fit) { try { fit.fit(); } catch (_) { /* hidden */ } }
-    const player = { term, cancelled: false };
+    const commands = session.commands || [];
+    const player = { term, cancelled: false, paused: false, speed, seekTo: null };
     _player = player;
     document.getElementById('replay-stop').disabled = false;
+    const pause = document.getElementById('replay-pause');
+    if (pause) pause.disabled = false;
 
-    const wait = (ms) => new Promise(r => setTimeout(r, Math.max(0, ms / speed)));
+    // The bar, the step and the clock (#573).
+    const { marks, total } = _recordingSpan(commands);
+    const progress = document.getElementById('replay-progress');
+    const seek = document.getElementById('replay-seek');
+    const stepEl = document.getElementById('replay-step');
+    const clockEl = document.getElementById('replay-clock');
+    if (progress) progress.classList.remove('hidden');
+    if (seek) { seek.max = String(Math.max(0, commands.length - 1)); seek.value = '0'; }
+
+    const show = (index, elapsed) => {
+      const entry = commands[index];
+      if (seek && document.activeElement !== seek) seek.value = String(index);
+      if (stepEl) {
+        stepEl.textContent = entry
+          ? `${index + 1} of ${commands.length} · ${entry.command || ''}`
+          : `${commands.length} of ${commands.length}`;
+      }
+      if (clockEl) clockEl.textContent = `${_formatClock(elapsed)} / ${_formatClock(total)}`;
+    };
+
+    // One wait, honouring pause, a speed change and a seek — all of which
+    // can arrive while a slice is on screen.
+    const wait = async (ms) => {
+      const step = 60;
+      let left = ms;
+      while (left > 0) {
+        if (player.cancelled || player.seekTo !== null) return;
+        if (player.paused) { await new Promise(r => setTimeout(r, step)); continue; }
+        const slice = Math.min(step, left / (player.speed || 1));
+        await new Promise(r => setTimeout(r, Math.max(0, slice)));
+        left -= slice * (player.speed || 1);
+      }
+    };
+
+    let index = 0;
     let previousEnd = null;
-    for (const entry of session.commands) {
+    while (index < commands.length) {
       if (player.cancelled) return;
+
+      // A drag: write everything up to the chosen command at once, then
+      // carry on playing from it.
+      if (player.seekTo !== null) {
+        const target = Math.min(Math.max(0, player.seekTo), commands.length - 1);
+        player.seekTo = null;
+        term.reset();
+        for (let i = 0; i < target; i++) {
+          const past = commands[i];
+          term.write((past.prompt || '') + past.command + '\r\n');
+          const text = past.output || '';
+          term.write(text.endsWith('\n') ? text : text + '\r\n');
+        }
+        index = target;
+        previousEnd = null;
+        show(index, marks[index] || 0);
+        continue;
+      }
+
+      const entry = commands[index];
       const ranAt = Number(entry.ran_at) || 0;
       const took = Number(entry.duration_ms) || 0;
       if (previousEnd !== null && ranAt) {
         // The pause between the previous command finishing and this one.
         await wait(Math.min(Math.max(0, (ranAt - previousEnd) * 1000), 60000));
+        if (player.cancelled) return;
+        if (player.seekTo !== null) continue;
       }
-      if (player.cancelled) return;
+      show(index, marks[index] || 0);
       term.write((entry.prompt || '') + entry.command + '\r\n');
       // The output over the time it originally took, in a few slices so a
       // long command visibly streams rather than lands at once.
       const output = entry.output || '';
       const slices = Math.min(20, Math.max(1, Math.ceil(output.length / 400)));
       const size = Math.ceil(output.length / slices);
+      let jumped = false;
       for (let i = 0; i < slices; i++) {
         if (player.cancelled) return;
         term.write(output.slice(i * size, (i + 1) * size));
         await wait(took / slices);
+        if (player.seekTo !== null) { jumped = true; break; }
       }
+      if (jumped) continue;
       if (output && !output.endsWith('\n')) term.write('\r\n');
       previousEnd = ranAt + took / 1000;
+      index += 1;
     }
+    show(commands.length, total);
     term.write('\r\n\x1b[2m— end of recording —\x1b[0m\r\n');
     document.getElementById('replay-stop').disabled = true;
+    if (pause) pause.disabled = true;
   }
 
   async function openReplay(sessionId) {
@@ -510,6 +629,20 @@
     if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
     return `${(seconds / 3600).toFixed(1)}h`;
   }
+
+  // Space pauses, the arrows step a command at a time — but not while
+  // somebody is typing in the search box (#573).
+  document.addEventListener('keydown', (e) => {
+    if (!_player || replayOverlay.classList.contains('hidden')) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' && e.target.type !== 'range') return;
+    if (tag === 'TEXTAREA' || tag === 'SELECT') return;
+    const seek = document.getElementById('replay-seek');
+    const at = seek ? Number(seek.value) : 0;
+    if (e.key === ' ') { e.preventDefault(); _togglePause(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); _player.seekTo = at + 1; }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); _player.seekTo = Math.max(0, at - 1); }
+  });
 
   window.openHistory = openHistory;
 })();

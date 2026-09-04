@@ -2516,6 +2516,10 @@ GigEth0/2     unassigned    YES unset  down     down
         <button type="button" id="replay-play" class="btn-secondary" title="Play the session back with its original timing">
           <span class="material-symbols-outlined">replay</span> Play
         </button>
+        <button type="button" id="replay-pause" class="btn-tertiary" disabled
+                title="Pause the playback (Space)">
+          <span class="material-symbols-outlined">pending</span> Pause
+        </button>
         <button type="button" id="replay-stop" class="btn-tertiary" disabled>Stop</button>
         <label for="replay-speed" class="replay-speed-label">Speed</label>
         <select id="replay-speed" class="setting-input">
@@ -2524,6 +2528,16 @@ GigEth0/2     unassigned    YES unset  down     down
           <option value="16">16×</option>
           <option value="1000">Instant</option>
         </select>
+      </div>
+      <!-- Where the playback has reached (#573): a draggable bar, the
+           command it is on and the elapsed time of the recording. -->
+      <div id="replay-progress" class="hidden">
+        <input type="range" id="replay-seek" min="0" max="0" value="0" step="1"
+               aria-label="Position in the recording" />
+        <div id="replay-position">
+          <span id="replay-step">—</span>
+          <span id="replay-clock" class="replay-clock">0:00 / 0:00</span>
+        </div>
       </div>
       <div id="replay-player" class="hidden"></div>
       <div class="panel-body">

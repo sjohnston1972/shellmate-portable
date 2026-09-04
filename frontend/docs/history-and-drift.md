@@ -43,8 +43,15 @@ Open any recorded session from History and press **Play**. The commands run
 into a terminal in the panel with their original timing — the pause between
 one command and the next, and the time each one's output took to arrive —
 so a change window reads back the way it happened. **Speed** is 1×, 4×,
-16× or instant; **Stop** ends it. The listing beneath is unchanged and
+16× or instant, and it can be changed mid-playback; **Pause** holds it
+where it is and **Stop** ends it. The listing beneath is unchanged and
 still there to copy from.
+
+The bar under the controls shows where the playback has reached: the
+command it is on, "12 of 41", and the elapsed time against the length of
+the recording. Drag it to jump — everything up to that command is written
+at once and playing carries on from there. Space pauses and resumes, and
+the left and right arrows step a command at a time.
 
 Nothing extra is recorded for this. It is the same command history, played
 rather than listed, which also means it shows what the transcript captured:

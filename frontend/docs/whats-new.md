@@ -6,6 +6,9 @@ exists.
 
 ## 1.1.3
 
+- Session playback shows where it has reached: a draggable bar with the
+  command number and the elapsed time, a Pause button, Space to pause and
+  the arrow keys to step. The speed can be changed while it plays.
 - An **update channel** under Stockton → Diagnostics: `stable` offers only
   full releases, `beta` also offers prereleases for people trying a build
   early, marked Beta in the update window. **What's new in this version**

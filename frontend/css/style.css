@@ -1765,6 +1765,19 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 
 /* Timed replay (#415) */
 #replay-controls { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+
+/* Where the playback has reached (#573). */
+#replay-progress { margin: 2px 0 8px; }
+#replay-seek {
+  width: 100%; margin: 0; accent-color: var(--primary);
+  cursor: pointer; height: 18px;
+}
+#replay-position {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: 12px; color: var(--on-surface-dim); margin-top: 2px;
+}
+#replay-step { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.replay-clock { font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .replay-speed-label { font-size: 12px; color: var(--on-surface-muted); }
 #replay-player { height: 40vh; min-height: 200px; background: #1e1e2e; border-radius: var(--radius-sm);
   padding: 4px; margin-bottom: 8px; }
