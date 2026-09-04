@@ -285,6 +285,17 @@
           <header id="av-header">
             <span class="material-symbols-outlined av-mark">automation</span>
             <h2>Ansible</h2>
+            <!-- The TLS indicator. Its own light rather than a word inside
+                 the pill, because "can I use this" and "is anyone checking
+                 who is on the other end" are different questions and the
+                 second one stays true while the first goes wrong. Click it
+                 for the certificate ShellMate is actually talking to. -->
+            <button type="button" id="av-tls-led" class="av-led av-led-grey"
+                    aria-label="Connection security"
+                    title="Checking the connection…">
+              <span class="av-led-dot" aria-hidden="true"></span>
+              <span class="av-led-label">Checking…</span>
+            </button>
             <span id="av-runner-pill" class="av-pill av-pill-unknown">Checking…</span>
             <span id="av-runner-detail" class="av-runner-detail"></span>
             <div class="av-header-actions">
@@ -3557,6 +3568,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/feedback.js"></script>
   <script src="/static/js/ansible.js"></script>
   <script src="/static/js/ansible_view.js"></script>
+  <script src="/static/js/ansible_tls.js"></script>
   <script src="/static/js/ansible_dashboard.js"></script>
   <script src="/static/js/ansible_playbooks.js"></script>
   <script src="/static/js/ansible_builder.js"></script>

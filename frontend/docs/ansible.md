@@ -93,6 +93,40 @@ address added, not to turn verification off.
 > says why — the connection is encrypted, but nothing is checking who is on
 > the other end.
 
+### The security light
+
+The Ansible view's header carries a light beside the runner pill, and they
+answer different questions on purpose. The pill says whether the runner can
+be used. The light says whether anything is checking who is on the other
+end — because those fail independently, and the case worth catching is the
+one where the pill is green.
+
+| Light | What it means |
+|---|---|
+| Grey — Not set up | No runner address yet. Nothing has failed |
+| Red — Unreachable | Nothing answered |
+| Red — Certificate expired | It stopped being valid; the date is in the message |
+| Red — Certificate not trusted | Something answered and ShellMate would not trust it |
+| Amber — Not encrypted | Plain HTTP. It works, and everything crosses in the clear |
+| Amber — Not verified | Encrypted, but Verify TLS is off. Nothing is checking |
+| Amber — Certificate expiring | Working today, and inside 30 days of stopping |
+| Amber — Token refused | The connection is sound; the token is not |
+| Green — Secure | Encrypted, verified, and the runner accepted us |
+
+When two things are wrong at once the worse one wins. An expired
+certificate causes a refused token as often as not, and reporting the token
+would send you hunting through a `.env` file for what is actually a date.
+
+**Click the light** for the certificate ShellMate is talking to: who it was
+issued to, when it expires, which names and addresses it covers, the TLS
+version, and its SHA-256 fingerprint. Compare that fingerprint against the
+one the container prints at startup. That comparison is the only thing that
+makes a self-signed certificate trustworthy, and it is a comparison
+ShellMate cannot make for you — it shows you what it sees and stops there.
+
+The check runs every 30 seconds while the view is open and every 5 minutes
+when it is not, and stops entirely while the window is hidden.
+
 Mutual TLS is supported and not required. If a deployment puts a client
 certificate in front of the runner, give ShellMate the pair; otherwise
 leave those fields empty.

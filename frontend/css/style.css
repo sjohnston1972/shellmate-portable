@@ -9360,6 +9360,131 @@ body {
   flex: 1;
 }
 
+/* The TLS indicator (#586).
+
+   A light rather than another word in the pill, because reachability and
+   security fail independently and the dangerous case is the one where
+   reachability is green. The dot carries the state and the word beside it
+   names it — colour alone is not a label, and a red dot and an amber dot
+   are the same dot to a good number of people. */
+.av-led {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 7px;
+  background: none;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-full);
+  color: var(--on-surface-dim);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.av-led:hover { border-color: var(--on-surface-muted); color: var(--on-surface); }
+
+.av-led-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--on-surface-muted);
+}
+
+.av-led-ok    { color: var(--ok);    border-color: var(--ok-edge); }
+.av-led-ok    .av-led-dot { background: var(--ok); box-shadow: 0 0 6px var(--ok-tint); }
+.av-led-warn  { color: var(--warn);  border-color: var(--warn-edge); }
+.av-led-warn  .av-led-dot { background: var(--warn); }
+.av-led-bad   { color: var(--error); border-color: var(--error); }
+.av-led-bad   .av-led-dot { background: var(--error); }
+.av-led-grey  .av-led-dot { background: var(--on-surface-muted); }
+
+/* Only the good state gets a pulse. A failing light that also moves reads
+   as activity, and this one means the opposite. */
+@media (prefers-reduced-motion: no-preference) {
+  .av-led-ok .av-led-dot { animation: av-led-breathe 3.2s ease-in-out infinite; }
+}
+
+@keyframes av-led-breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* What is behind the light, when somebody asks. */
+.av-tls-detail { font-size: 13px; color: var(--on-surface); }
+
+.av-tls-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.av-tls-verdict .material-symbols-outlined { font-size: var(--icon-sm); }
+.av-tls-ok   .material-symbols-outlined { color: var(--ok); }
+.av-tls-warn .material-symbols-outlined { color: var(--warn); }
+.av-tls-bad  .material-symbols-outlined { color: var(--error); }
+.av-tls-grey .material-symbols-outlined { color: var(--on-surface-muted); }
+
+.av-tls-rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 0 0 14px;
+}
+
+.av-tls-rows dt {
+  color: var(--on-surface-dim);
+  font-size: 12px;
+}
+
+.av-tls-rows dd {
+  margin: 0;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.av-tls-print {
+  border-top: 1px solid var(--outline);
+  padding-top: 12px;
+}
+
+.av-tls-print h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--on-surface-dim);
+}
+
+/* Grouped in fours and allowed to wrap: this is read against another copy
+   by eye, and an unbroken 64-character run is where that goes wrong. */
+.av-tls-hex {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--on-surface);
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  word-break: break-all;
+}
+
+.av-tls-note {
+  margin: 8px 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--on-surface-dim);
+}
+
 #av-nav {
   display: flex;
   gap: 2px;

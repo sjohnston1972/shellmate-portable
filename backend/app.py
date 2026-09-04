@@ -4629,6 +4629,21 @@ async def ansible_draft(request: PlaybookDraftRequest) -> dict:
             detail=f"The assistant could not be reached: {exc}") from exc
 
 
+@app.get("/api/ansible/health")
+async def ansible_health() -> dict:
+    """
+    One reading for the TLS indicator: up, encrypted, and checked by what.
+
+    Its own endpoint rather than part of the overview because it runs on a
+    timer and the overview does not: the overview asks the runner for its
+    playbooks and its jobs, which is far too much to repeat every half
+    minute for a coloured dot.
+    """
+    from backend import ansible_health as health
+
+    return await asyncio.to_thread(health.probe)
+
+
 @app.get("/api/ansible/overview")
 async def ansible_overview() -> dict:
     """
