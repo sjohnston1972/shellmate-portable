@@ -1647,6 +1647,21 @@ mark.search-hit {
   padding: 0 1px;
 }
 mark.search-hit.search-current { outline: 2px solid var(--primary); }
+
+/* The Settings search's own count and rail chips (#520). */
+#settings-search-count {
+  font-size: 11px; color: var(--on-surface-muted); white-space: nowrap;
+  padding-left: 8px; flex-shrink: 0; font-variant-numeric: tabular-nums;
+}
+.settings-nav-item .settings-nav-count {
+  margin-left: auto; font-size: 10px; padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--primary-container); color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+/* Dimmed, not removed: a rail that empties as you type loses the one thing
+   it is for, which is knowing where you are. */
+.settings-nav-item.settings-nav-dim { opacity: 0.45; }
 .docs-search-wrap { display: flex; align-items: center; gap: 6px; }
 .docs-search-count { font-size: 11px; color: var(--on-surface-muted); white-space: nowrap; }
 .docs-nav-count {
@@ -5198,6 +5213,9 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 .settings-search-wrap {
   padding: 10px 24px;
   border-bottom: 1px solid var(--outline);
+  /* The box and its count sit on one line (#520). */
+  display: flex;
+  align-items: center;
 }
 
 #settings-search,

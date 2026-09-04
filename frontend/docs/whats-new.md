@@ -69,6 +69,10 @@ exists.
   the feedback outbox — with what to do about anything amber or red. The two
   network checks are opt-in, per press. The same checks go into the support
   bundle as `checks.txt`.
+- **Searching Settings highlights every hit**, not just the row: the label,
+  the description, the tooltip and the section heading. The count beside the
+  box says how many and where, Enter steps through them, and the rail keeps
+  every section listed with a count rather than emptying as you type.
 - **A saved connection remembers what the device is**: its release, model,
   serial number and when you last opened it, learned from the device itself
   as it connects and captures. Search the tree for a model number or a

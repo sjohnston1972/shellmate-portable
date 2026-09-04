@@ -72,6 +72,10 @@
   ];
 
   let panel, nav, search, sections = [];
+  // The search's own state (#520): where the count is written, and
+  // which hit is current.
+  let countEl = null;
+  let hitIndex = -1;
   let active = 0;
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -136,10 +140,18 @@
       search.placeholder = 'Search settings…';
       search.autocomplete = 'off';
       search.addEventListener('input', applySearch);
-    search.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); search.value = ''; applySearch(); }
-    });
+      search.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); search.value = ''; applySearch(); }
+        // Enter walks the hits, as the manual's search does (#520), so a
+        // word that appears in nine places can be visited rather than
+        // hunted for by scrolling.
+        else if (e.key === 'Enter') { e.preventDefault(); stepHit(e.shiftKey ? -1 : 1); }
+      });
       searchWrap.appendChild(search);
+
+      countEl = document.createElement('span');
+      countEl.id = 'settings-search-count';
+      searchWrap.appendChild(countEl);
 
       body.parentNode.insertBefore(searchWrap, body);
       body.parentNode.insertBefore(wrap, body);
@@ -216,8 +228,10 @@
     nav.querySelectorAll('.settings-nav-item').forEach(i => i.classList.remove('active'));
 
     sections.forEach(section => {
-      const title = (section.querySelector('.settings-section-title') || {}).textContent || '';
+      const titleEl = section.querySelector('.settings-section-title');
+      const title = (titleEl || {}).textContent || '';
       const titleMatches = title.toLowerCase().includes(query);
+      if (titleMatches && titleEl) mark(titleEl, query);
 
       // A row is anything with a label or a hint; treat each as a unit so a
       // control never appears without the text explaining it.
@@ -242,12 +256,68 @@
       });
 
       section.classList.toggle('hidden', !anyVisible && !titleMatches);
+      section.dataset.hits = String(section.querySelectorAll('mark.search-hit').length);
     });
 
     showExtras(query);
+    _afterSearch(query);
   }
 
-  /** Wrap the query in <mark> inside a row's visible text (#436). */
+  /**
+   * The count beside the box, the hit counts in the rail, and the first hit
+   * selected (#520).
+   *
+   * The rail keeps every section listed with a count rather than dropping
+   * the ones that do not match: a rail that empties as you type loses the
+   * one thing it is for, which is knowing where you are.
+   */
+  function _afterSearch(query) {
+    hitIndex = -1;
+    const marks = panel.querySelectorAll('mark.search-hit');
+    if (countEl) {
+      const sectionsWithHits = [...sections].filter(s => Number(s.dataset.hits || 0) > 0).length;
+      countEl.textContent = !query ? ''
+        : marks.length ? `${marks.length} in ${sectionsWithHits} section${sectionsWithHits === 1 ? '' : 's'}`
+        : 'no matches';
+    }
+    nav.querySelectorAll('.settings-nav-item').forEach((item) => {
+      const section = sections[Number(item.dataset.index)];
+      const hits = section ? Number(section.dataset.hits || 0) : 0;
+      item.classList.toggle('settings-nav-dim', !!query && !hits);
+      let chip = item.querySelector('.settings-nav-count');
+      if (query && hits) {
+        if (!chip) {
+          chip = document.createElement('span');
+          chip.className = 'settings-nav-count';
+          item.appendChild(chip);
+        }
+        chip.textContent = String(hits);
+      } else if (chip) {
+        chip.remove();
+      }
+    });
+    if (marks.length) stepHit(1);
+  }
+
+  /** Move to the next or previous hit, scrolling it into view (#520). */
+  function stepHit(delta) {
+    const marks = [...panel.querySelectorAll('mark.search-hit')];
+    if (!marks.length) return;
+    marks.forEach(m => m.classList.remove('search-current'));
+    hitIndex = (hitIndex + delta + marks.length) % marks.length;
+    const current = marks[hitIndex];
+    current.classList.add('search-current');
+    current.scrollIntoView({ block: 'center' });
+    if (countEl) countEl.textContent = `${hitIndex + 1} of ${marks.length}`;
+  }
+
+  /**
+   * Wrap the query in <mark> inside a row's visible text (#436, #520).
+   *
+   * Every occurrence, not the first: a word can appear in the label, its
+   * description and the heading above it, and marking one of the three
+   * leaves the eye hunting for the others.
+   */
   function mark(row, query) {
     const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT, {
       acceptNode: (n) => {
@@ -279,6 +349,12 @@
   function unmark() {
     panel.querySelectorAll('mark.search-hit').forEach(m => m.replaceWith(document.createTextNode(m.textContent)));
     panel.querySelectorAll('.settings-search-strong').forEach(el => el.classList.remove('settings-search-strong'));
+    panel.normalize();                      // rejoin the split text nodes
+    hitIndex = -1;
+    if (countEl) countEl.textContent = '';
+    nav.querySelectorAll('.settings-nav-count').forEach(c => c.remove());
+    nav.querySelectorAll('.settings-nav-dim').forEach(i => i.classList.remove('settings-nav-dim'));
+    sections.forEach(s => { delete s.dataset.hits; });
   }
 
   /**

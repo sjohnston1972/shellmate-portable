@@ -14,6 +14,19 @@ Everything is stored in `settings.json` in your data folder, and nothing
 sensitive goes in it — API keys are diverted into the vault before the file is
 written.
 
+## Finding a setting
+
+The box above the rail searches every section at once, so a control can be
+found without knowing which category it was filed under. Every occurrence
+of what you typed is highlighted — in the label, the description, the
+tooltip that explains the consequence, and the section heading — and the
+count beside the box says how many there are and in how many sections.
+**Enter** moves to the next one and scrolls it into view; **Shift+Enter**
+goes back; **Escape** clears the search.
+
+The rail keeps every section listed while you search, with a count against
+the ones that match and the rest dimmed, so you can still see where you are.
+
 ## The sections
 
 In the order the rail lists them:
