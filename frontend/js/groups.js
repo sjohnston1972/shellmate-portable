@@ -1545,10 +1545,28 @@
   async function _backupSchedule(group) {
     const current = group.backup || {};
     const last = group.backup_last;
-    const lastLine = last
-      ? `Last run ${new Date(last.at * 1000).toLocaleString()}: ${last.ok.length} ok, `
-        + `${last.failed.length} failed, ${last.skipped.length} skipped.`
-      : 'Not run yet.';
+    // What happened, and what did not (#612). "Last run Friday, 12 ok" is
+    // true after a weekend with ShellMate closed and says nothing about
+    // the two nights that were owed — and a gap in a backup history looks
+    // exactly like a period in which nothing changed.
+    let lastLine = 'Not run yet.';
+    if (last) {
+      lastLine = `Last run ${new Date(last.at * 1000).toLocaleString()}: `
+               + `${last.ok.length} ok, ${last.failed.length} failed, `
+               + `${last.skipped.length} skipped.`;
+      if (last.missed) {
+        const from = last.missed_from
+          ? new Date(last.missed_from * 1000).toLocaleDateString() : '';
+        const to = last.missed_to
+          ? new Date(last.missed_to * 1000).toLocaleDateString() : '';
+        const when = from && to && from !== to ? ` between ${from} and ${to}`
+          : (from ? ` on ${from}` : '');
+        lastLine += ` ${last.missed} earlier run`
+                  + `${last.missed === 1 ? ' was' : 's were'} missed${when},`
+                  + ' while ShellMate was closed — that run caught up once'
+                  + ' rather than repeating them.';
+      }
+    }
     const answer = await window.shellmateDialog.form({
       title: `Scheduled backups — ${group.name}`,
       body: 'Every device in the group has its configuration captured on the schedule, '

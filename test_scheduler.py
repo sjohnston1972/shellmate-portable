@@ -131,7 +131,8 @@ def main() -> int:
     print("=" * 52)
     print("  Scheduled backups")
     print("=" * 52)
-    for test in (test_when, test_run, test_stored_on_the_group):
+    for test in (test_when, test_run, test_stored_on_the_group,
+                 test_what_did_not_happen):
         try:
             test()
         except Exception as exc:
@@ -146,6 +147,47 @@ def main() -> int:
         for item in failed:
             print(f"  {item}")
     return 1 if failed else 0
+
+
+def test_what_did_not_happen() -> None:
+    """
+    A scheduler that reports only what ran (#612).
+
+    "Last run Friday, 12 ok" is true after a weekend with ShellMate closed
+    and says nothing about the two nights that were owed. A gap in a backup
+    history looks exactly like a period in which nothing changed, which is
+    the dangerous direction for this to fail in.
+    """
+    print("\n-- What was owed and did not happen --")
+    import time
+
+    now = time.time()
+    nightly = {"every": "daily", "at": "02:00", "enabled": True}
+
+    check("nothing owed when the last run was recent",
+          scheduler.missed_since(nightly, now - 12 * 3600, now) == [],
+          "a run twelve hours ago on a nightly schedule owes nothing")
+
+    weekend = scheduler.missed_since(nightly, now - 3 * 86400, now)
+    check("a long weekend owes three slots", len(weekend) == 3, str(len(weekend)))
+    check("and they are in order, oldest first",
+          weekend == sorted(weekend), str(weekend))
+
+    month = scheduler.missed_since(nightly, now - 30 * 86400, now)
+    check("a month owes about thirty", 29 <= len(month) <= 31, str(len(month)))
+
+    # Bounded, or a year of downtime on an hourly schedule walks nine
+    # thousand datetimes to produce a number nobody reads that precisely.
+    hourly = scheduler.missed_since({"every": "hourly", "enabled": True},
+                                    now - 400 * 86400, now)
+    check("a year of downtime is counted, not enumerated forever",
+          len(hourly) <= 200, str(len(hourly)))
+
+    check("an unscheduled group owes nothing",
+          scheduler.missed_since({"enabled": False}, now - 86400, now) == [])
+    check("and neither does one that has never run",
+          scheduler.missed_since(nightly, None, now) == [],
+          "with no last run there is no gap to describe")
 
 
 if __name__ == "__main__":

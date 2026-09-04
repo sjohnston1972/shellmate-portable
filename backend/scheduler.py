@@ -19,6 +19,17 @@ Rules:
 - **The record is on the group.** ``backup_last`` says when it ran, what
   succeeded and what did not, so the answer to "did last night's backup
   happen" is in the group's own menu rather than in a log.
+- **And it says what did *not* happen** (#612). A scheduler that reports
+  only what ran is indistinguishable from one that ran and found nothing:
+  close ShellMate on Friday, open it on Monday, and "last run Friday, 12
+  ok" is true and says nothing about the two nights that were owed. So a
+  catch-up records how many slots it stood in for.
+- **Catching up is a choice, and it is one run.** ShellMate catches up
+  where the container's pipelines skip, because a stale configuration
+  capture is the thing being avoided while a drift check answering about
+  last week is worthless. But it catches up *once* however far behind, so
+  three missed nights are one backup rather than three rounds of logins to
+  every device.
 
 The due-time arithmetic is a pure function so it can be tested without a
 clock, a thread or a device.
@@ -203,6 +214,30 @@ def _loop() -> None:
         _stop.wait(60)
 
 
+def missed_since(schedule, last_run: float | None, now: float) -> list[float]:
+    """
+    Every slot that came and went without a run (#612).
+
+    The scheduler could say when a backup last happened and nothing about
+    when one was owed and did not, so a weekend with ShellMate closed read
+    identically to a weekend in which nothing changed. A gap in a backup
+    history looking like a quiet period is the dangerous direction for this
+    to fail in.
+
+    Bounded at 200 slots so a year of downtime on an hourly schedule
+    produces a number rather than a walk through nine thousand datetimes.
+    """
+    plan = normalise(schedule)
+    if plan is None or not last_run:
+        return []
+    slots: list[float] = []
+    fire = next_run(plan, datetime.fromtimestamp(last_run) + timedelta(seconds=1))
+    while fire.timestamp() <= now and len(slots) < 200:
+        slots.append(fire.timestamp())
+        fire = next_run(plan, fire + timedelta(seconds=1))
+    return slots
+
+
 def tick(now: float) -> list[str]:
     """Run whatever is due. Returns the keys of the groups that ran."""
     from backend import groups as groups_module
@@ -223,7 +258,27 @@ def tick(now: float) -> list[str]:
         if not _running.acquire(blocking=False):
             return ran
         try:
+            # What was owed and did not happen, worked out before the run
+            # resets the clock. ShellMate catches up rather than skipping —
+            # deliberately, and differently from the container's pipelines,
+            # because a stale configuration capture is the thing being
+            # avoided and a drift check answering about last week is not.
+            #
+            # It catches up **once, however far behind**, never once per
+            # missed night: three missed nights are one backup, not three
+            # logins to every device in the group. The rest are recorded as
+            # missed rather than performed.
+            owed = missed_since(schedule, last or armed, now)
             result = run_now(group["key"])
+            if len(owed) > 1:
+                result = dict(result)
+                result["missed"] = len(owed) - 1
+                result["missed_from"] = owed[0]
+                result["missed_to"] = owed[-2]
+                groups_module.update_group(group["key"], {"backup_last": result})
+                logger.info("Scheduled backup for %s caught up: %d earlier "
+                            "run(s) were missed while ShellMate was closed",
+                            group["key"], len(owed) - 1)
             ran.append(group["key"])
             logger.info("Scheduled backup for %s: %d ok, %d failed, %d skipped",
                         group["key"], len(result["ok"]), len(result["failed"]), len(result["skipped"]))
