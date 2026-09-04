@@ -361,11 +361,76 @@ def routes() -> None:
           "; ".join(clashes))
 
 
+def examples() -> None:
+    """
+    The shipped templates (#590).
+
+    They are the first thing anybody sees in the area, so a broken one is
+    worse than none: it teaches that ShellMate's own examples do not work.
+    Every body is therefore validated by the same code that validates a
+    template somebody wrote.
+    """
+    print("\n-- The example templates --")
+    from backend import ansible_examples
+
+    # Seeding only ever happens into an empty library, and the tests above
+    # left templates in it, so this clears them first rather than asserting
+    # against whatever they happened to leave.
+    for leftover in ansible_library.templates():
+        ansible_library.delete_template(leftover["id"])
+
+    written = ansible_examples.seed_if_empty()
+    check("they seed into an empty library", written == len(ansible_examples.EXAMPLES),
+          f"wrote {written} of {len(ansible_examples.EXAMPLES)}")
+    check("seeding again does nothing",
+          ansible_examples.seed_if_empty() == 0,
+          "a set that reappears after being deleted argues with the user "
+          "about their own data")
+
+    shipped = ansible_library.templates()
+    check("every one survived validation",
+          len(shipped) == len(ansible_examples.EXAMPLES), str(len(shipped)))
+
+    for template in shipped:
+        holes = ansible_library.placeholders(template["body"])
+        described = {v["name"] for v in template["variables"]}
+        check(f"{template['name']}: every hole is described",
+              holes <= described, f"undescribed: {sorted(holes - described)}")
+        # A value that satisfies the variable's own constraints: a default
+        # where there is one, otherwise the first permitted choice, and only
+        # then something arbitrary.
+        values = {}
+        for spec in template["variables"]:
+            choices = spec.get("choices") or []
+            values[spec["name"]] = (spec.get("default")
+                                    or (choices[0] if choices else "x"))
+        try:
+            rendered = ansible_library.render_template(template, values)
+            why = ""
+        except Exception as exc:
+            rendered, why = "", f"{type(exc).__name__}: {exc}"
+        check(f"{template['name']}: it can be filled in", bool(rendered),
+              why or "a shipped example that cannot be rendered teaches that "
+                     "ShellMate's own examples do not work")
+
+    # A description that claims read-only beside a badge saying otherwise
+    # would teach the wrong lesson about which to trust.
+    for template in shipped:
+        if not template["writes"]:
+            continue
+        text = template["description"].lower()
+        check(f"{template['name']}: does not claim to be read-only",
+              "reads only" not in text and "read-only" not in text
+              or "marked as writing" in text,
+              template["description"])
+
+
 if __name__ == "__main__":
     templates()
     environments()
     repositories()
     keys()
+    examples()
     routes()
 
     print("\n" + "=" * 52)

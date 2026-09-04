@@ -84,6 +84,7 @@ shellmate/
 │   ├── alerts.py                # Things that will happen to a device unless somebody intervenes
 │   ├── ansible.py               # Driving Ansible from ShellMate, through a runner service (#585)
 │   ├── ansible_builder.py       # Getting to a first playbook without writing YAML (#586)
+│   ├── ansible_examples.py      # Templates worth starting from (#590)
 │   ├── ansible_health.py        # Is the link to the runner healthy, and is it actually secure?
 │   ├── ansible_keys.py          # The secrets an automation needs, and where they go (#586)
 │   ├── ansible_library.py       # What ShellMate keeps for Ansible, beside the runner (#586)
@@ -168,6 +169,7 @@ shellmate/
 │       ├── ansible_keys.js      # Credentials a run needs, held in the vault and sent only with a…
 │       ├── ansible_playbooks.js # Where the Playbooks area actually lives (#586)
 │       ├── ansible_repositories.js # Where a set of playbooks came from, and how it gets to the runner…
+│       ├── ansible_runs.js      # What has run, and what it did (#591)
 │       ├── ansible_templates.js # Parameterised plays: the holes, the form that fills them, and…
 │       ├── ansible_tls.js       # The TLS indicator, and the probe behind it (#586)
 │       ├── ansible_view.js      # The Ansible view: which area is showing, and nothing else (#586)

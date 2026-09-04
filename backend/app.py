@@ -4415,6 +4415,20 @@ class RepositoryNoteRequest(BaseModel):
     revision: str
 
 
+@app.get("/api/ansible/examples")
+async def ansible_seed_examples() -> dict:
+    """
+    Put the example templates in, if the library has never had any (#590).
+
+    Called when the Templates area first paints rather than at startup: it
+    touches the data folder, and doing that on every launch for a feature
+    most sessions never open is work nobody asked for.
+    """
+    from backend import ansible_examples
+
+    return {"seeded": await asyncio.to_thread(ansible_examples.seed_if_empty)}
+
+
 @app.get("/api/ansible/catalogue")
 async def ansible_catalogue() -> dict:
     """

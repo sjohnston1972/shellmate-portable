@@ -217,13 +217,19 @@ async def main() -> None:
         print("\n-- Deleting the template --")
         await page.click('.av-tpl-panel-head button:has-text("Back to templates")')
         await page.wait_for_selector(".av-tpl-card")
-        await page.click(".av-tpl-card button[title=\"Delete template\"]")
+        # By name, not by position or count: the library ships example
+        # templates now (#590), so "no cards left" stopped meaning "the one
+        # I made is gone" and the first card is no longer necessarily mine.
+        mine = page.locator('.av-tpl-card:has-text("Set interface description")')
+        await mine.locator('button[title="Delete template"]').click()
         await page.wait_for_selector(".sm-dialog-actions .btn-danger", timeout=5000)
         await page.click(".sm-dialog-actions .btn-danger")
-        await page.wait_for_timeout(300)
-        check("the template is gone",
-              await page.locator(".av-tpl-card").count() == 0,
+        await page.wait_for_timeout(400)
+        check("the template is gone", await mine.count() == 0,
               "the card survived the delete")
+        check("and the examples were left alone",
+              await page.locator(".av-tpl-card").count() > 0,
+              "deleting one template took the shipped examples with it")
 
         print("\n-- Nothing threw --")
         real = [e for e in errors if "favicon" not in e.lower()]

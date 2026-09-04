@@ -479,13 +479,41 @@
 
   // -- Registration ----------------------------------------------------------
 
+  /**
+   * Put the examples in, once, the first time anybody looks (#590).
+   *
+   * Here rather than at startup: it writes to the data folder, and doing
+   * that on every launch for an area most sessions never open is work
+   * nobody asked for. The backend only seeds a library that has never had
+   * a template, so deleting them sticks.
+   */
+  let seeded = false;
+
+  async function seedOnce() {
+    if (seeded) return false;
+    seeded = true;
+    try {
+      const out = await view.json('/api/ansible/examples');
+      if (out && out.seeded) {
+        await view.load();
+        return true;
+      }
+    } catch (e) {
+      // Examples are a convenience. Failing to write them is not a reason
+      // for the area to be unusable.
+      console.warn('[ansible] examples not seeded', e);
+    }
+    return false;
+  }
+
   view.area('templates', {
-    onShow: (state, changed) => {
+    onShow: async (state, changed) => {
       // Coming from another area starts fresh; a refresh click while
       // already here (changed === false) must not throw away an
       // in-progress edit or fill.
       if (changed) mode = 'list';
       render(state);
+      if (await seedOnce()) render(view.state);
     },
     onData: (state) => {
       if (view.current === 'templates' && mode === 'list') render(state);
