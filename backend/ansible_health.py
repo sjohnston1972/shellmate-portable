@@ -27,6 +27,16 @@ other way — the container prints one at startup — so ShellMate shows the
 fingerprint it is actually talking to and leaves the comparison to a person.
 Nothing here decides that a certificate is genuine.
 
+**Do not add a "trust this certificate" button.** It is the obvious next
+convenience and it would be worth nothing: fetching a certificate from the
+runner and saving it as the thing that vouches for the runner is a circle,
+and it would authenticate an interceptor exactly as readily as the real
+container. The displayed fingerprint has value for one reason only — it is
+compared against a value that came by a different path. Anything that
+closes that loop, including offering to download the certificate here as a
+shortcut to filling in the CA field, removes the only guarantee in it while
+appearing to add a feature.
+
 Expiry gets its own state. A certificate with three weeks left is working
 perfectly and is about to stop, and the only useful time to say so is
 before it does.

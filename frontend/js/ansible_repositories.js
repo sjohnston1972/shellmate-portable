@@ -241,8 +241,10 @@
         el('input', {
           type: 'text', id: 'av-repo-requirements', class: 'av-repo-input',
           placeholder: 'requirements.yml',
-          title: 'A path inside the runner’s project directory. Leave it '
-               + 'empty for requirements.yml.',
+          title: 'A path the runner resolves against /runner and then '
+               + '/runner/project, so myrepo/requirements.yml works as well '
+               + 'as project/myrepo/requirements.yml. Leave it empty for '
+               + 'requirements.yml.',
         }),
         el('button', {
           type: 'button', class: 'btn-secondary', id: 'av-repo-galaxy',
@@ -251,9 +253,12 @@
         el('span', { id: 'av-repo-galaxy-said', class: 'av-repo-hint' }),
       ]),
       el('p', { class: 'av-repo-hint' },
-        'A file that is not in the project directory is reported as missing '
-        + 'rather than quietly falling back to the default — so a '
-        + 'repository that keeps its own requirements file can be named here.'),
+        'A repository that keeps its own requirements file can be named '
+        + 'here: the runner looks under /runner and then /runner/project, so '
+        + 'myrepo/requirements.yml is enough. A file that is not there is '
+        + 'reported as missing rather than quietly falling back to the '
+        + 'default, and a path that climbs out or starts at the root is '
+        + 'refused.'),
     ]);
   }
 

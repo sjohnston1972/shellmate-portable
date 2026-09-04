@@ -119,10 +119,17 @@ would send you hunting through a `.env` file for what is actually a date.
 
 **Click the light** for the certificate ShellMate is talking to: who it was
 issued to, when it expires, which names and addresses it covers, the TLS
-version, and its SHA-256 fingerprint. Compare that fingerprint against the
-one the container prints at startup. That comparison is the only thing that
-makes a self-signed certificate trustworthy, and it is a comparison
-ShellMate cannot make for you — it shows you what it sees and stops there.
+version, and its SHA-256 fingerprint.
+
+Compare that fingerprint against the one the container prints at startup.
+That comparison is the only thing that makes a self-signed certificate
+trustworthy, and it only works because the two values reach you by
+different routes — one over the connection in question, one from the
+container's own logs. ShellMate deliberately cannot do it for you: taking
+the certificate off the connection and then treating it as the thing that
+vouches for that connection is a circle, and it would trust an interceptor
+just as readily as the real container. So ShellMate shows what it sees, and
+stops there.
 
 The check runs every 30 seconds while the view is open and every 5 minutes
 when it is not, and stops entirely while the window is hidden.
@@ -356,11 +363,16 @@ A repository usually brings its collections with it in a requirements file,
 and "module not found" three tasks into a run is what happens when nobody
 has run this.
 
-Leave the box empty for `requirements.yml`, or name another file inside the
-runner's project directory — a repository that keeps its own is the usual
-reason. A file that is not there is reported as missing rather than
-quietly falling back to the default, so naming one that turns out to be
-wrong fails where you can see it.
+Leave the box empty for `requirements.yml`, or name another file — a
+repository that keeps its own is the usual reason. The runner resolves the
+name against `/runner` and then `/runner/project`, so
+`myrepo/requirements.yml` is enough; you do not have to write the project
+directory in front of it.
+
+A file that is not there is reported as missing rather than quietly falling
+back to the default, so a name that turns out to be wrong fails where you
+can see it. A path that climbs out of those directories, or starts at the
+root, is refused outright.
 
 ## Reporting
 
