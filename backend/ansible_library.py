@@ -306,14 +306,28 @@ def save_repository(fields: dict) -> dict:
     if not re.match(r"^(https?://|git@|ssh://)", url):
         raise LibraryError("A repository URL should be https, ssh or git@.")
 
+    entry_id = str(fields.get("id") or uuid.uuid4())
+    revision = str(fields.get("revision") or "").strip()
+    checked = float(fields.get("checked") or 0) or None
+    if checked is None and revision:
+        # No caller passes `checked` directly — it is set by note_revision(),
+        # a deliberate second action. So an edit that leaves the revision
+        # exactly as it was (the ordinary case: fixing a URL, not reporting a
+        # new commit) must not silently erase when that revision was last
+        # actually checked, or noting one would be undone by the next
+        # unrelated correction.
+        existing = next((r for r in _load("repositories") if r.get("id") == entry_id), None)
+        if existing and existing.get("revision") == revision:
+            checked = existing.get("checked")
+
     entry = {
-        "id": str(fields.get("id") or uuid.uuid4()),
+        "id": entry_id,
         "name": name,
         "url": url,
         "branch": str(fields.get("branch") or "main").strip(),
         "path": str(fields.get("path") or "").strip(),
-        "revision": str(fields.get("revision") or "").strip(),
-        "checked": float(fields.get("checked") or 0) or None,
+        "revision": revision,
+        "checked": checked,
         "notes": str(fields.get("notes") or "").strip(),
         "updated": _now(),
     }

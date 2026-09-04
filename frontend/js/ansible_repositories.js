@@ -1,10 +1,21 @@
 /**
  * ansible_repositories.js — Where a set of playbooks came from, and how it gets to the runner (#586).
  *
- * Registered with the view rather than wired to the markup directly, so
- * this area can be built and replaced without touching the other seven.
- * Until it is built, it says so — an area that renders nothing at all
- * reads as a page that failed to load.
+ * ShellMate does not clone anything. The runner has no git API, and a
+ * portable executable carrying its own git implementation to drive a
+ * container it cannot reach directly would be the wrong shape for what is
+ * a desktop tool. So this is a record, not a sync: the remote, the branch,
+ * the path inside it the playbooks live under, and the last revision
+ * somebody actually looked at and noted — enough to say "the runner is
+ * three commits behind" in a change record, and nothing this cannot back
+ * up by having actually done the work.
+ *
+ * Noting a revision is deliberately a separate action from editing the
+ * rest of the record (`backend.ansible_library.note_revision`, wired to
+ * `POST /api/ansible/repositories/{id}/note`). Folding it into the ordinary
+ * save would stamp "checked" on every unrelated correction — fixing a typo
+ * in the branch name would silently claim somebody had just checked the
+ * remote, which they had not.
  */
 
 (function () {
@@ -12,13 +23,210 @@
 
   const view = window.ansibleView;
   if (!view) return;
+  const { el, icon, clear, empty, toast } = view;
 
-  function render() {
-    const body = document.getElementById('av-repositories-body');
-    if (!body) return;
-    view.clear(body);
-    body.appendChild(view.empty('Being built.'));
+  /** How long ago, in words. The exact time goes in the title attribute. */
+  function ago(seconds) {
+    if (!seconds) return 'not noted';
+    const delta = Math.max(0, Date.now() / 1000 - seconds);
+    if (delta < 60) return 'noted just now';
+    if (delta < 3600) return `noted ${Math.round(delta / 60)} min ago`;
+    if (delta < 86400) return `noted ${Math.round(delta / 3600)} h ago`;
+    return `noted ${Math.round(delta / 86400)} d ago`;
   }
 
-  view.area('repositories', { onShow: render });
+  /**
+   * What this area is and is not, said once at the top rather than implied
+   * by an absent "Sync now" button somebody would otherwise go looking for.
+   */
+  function notice() {
+    return el('div', { class: 'av-notice av-notice-info' }, [
+      icon('info'),
+      el('div', {}, [
+        el('strong', { text: 'This is a record, not a sync. ' }),
+        'ShellMate does not clone or pull anything. A playbook written here '
+        + 'reaches the runner because its project directory is a bind mount '
+        + "from the container host — either files are put there directly, "
+        + 'or that directory is kept in git and pulled to it. What is held '
+        + 'here is what somebody last noted: the remote, the branch, and the '
+        + "revision seen — enough to say the runner is behind, in words a "
+        + 'change record can use.',
+      ]),
+    ]);
+  }
+
+  /** The fields a repository form asks for, prefilled when editing. */
+  function fields(repo) {
+    repo = repo || {};
+    return [
+      { name: 'name', label: 'Name', required: true, value: repo.name || '',
+        placeholder: 'network-playbooks',
+        hint: 'What you will recognise it by here — not the remote name.' },
+      { name: 'url', label: 'URL', required: true, value: repo.url || '',
+        placeholder: 'git@github.com:org/network-playbooks.git',
+        hint: 'https, ssh, or a git@ address. This is never dialled by '
+             + 'ShellMate — it is only kept for the record.' },
+      { name: 'branch', label: 'Branch', value: repo.branch || 'main' },
+      { name: 'path', label: 'Path', value: repo.path || '',
+        placeholder: 'playbooks/',
+        hint: 'Where the playbooks live inside the repository, if not the '
+             + 'root.' },
+      { name: 'notes', label: 'Notes', type: 'textarea', rows: 3,
+        value: repo.notes || '',
+        hint: 'Anything else worth remembering — who owns it, what it is '
+             + 'not for.' },
+    ];
+  }
+
+  async function openForm(repo) {
+    const editing = Boolean(repo && repo.id);
+    const answer = await window.shellmateDialog.form({
+      title: editing ? `Edit ${repo.name}` : 'Add a repository',
+      confirmLabel: editing ? 'Save' : 'Add',
+      fields: fields(repo),
+    });
+    if (!answer) return;
+    try {
+      await view.post('/api/ansible/repositories', {
+        id: editing ? repo.id : '',
+        name: answer.name,
+        url: answer.url,
+        branch: answer.branch || 'main',
+        path: answer.path,
+        notes: answer.notes,
+        // The edit form leaves the revision as it was — noting one is its
+        // own action below, so a correction to the URL cannot accidentally
+        // blank out what was last actually seen.
+        revision: (repo && repo.revision) || '',
+      });
+      await view.load(true);
+    } catch (e) {
+      toast(e.message || String(e), 'error');
+    }
+  }
+
+  async function noteRevision(repo) {
+    const revision = await window.shellmateDialog.prompt({
+      title: `Note a revision for ${repo.name}`,
+      label: 'The commit or tag last seen at the remote',
+      value: repo.revision || '',
+    });
+    if (revision === null) return;
+    if (!revision.trim()) {
+      toast('A revision is needed to note one.', 'error');
+      return;
+    }
+    try {
+      await view.post(`/api/ansible/repositories/${encodeURIComponent(repo.id)}/note`,
+                       { revision: revision.trim() });
+      await view.load(true);
+    } catch (e) {
+      toast(e.message || String(e), 'error');
+    }
+  }
+
+  async function removeRepo(repo) {
+    const go = await window.shellmateDialog.confirm({
+      title: `Delete ${repo.name}?`,
+      body: 'This removes the record. It does not touch the runner or any '
+           + 'playbook already copied there.',
+      confirmLabel: 'Delete', danger: true,
+    });
+    if (!go) return;
+    try {
+      await view.del(`/api/ansible/repositories/${encodeURIComponent(repo.id)}`);
+      await view.load(true);
+    } catch (e) {
+      toast(e.message || String(e), 'error');
+    }
+  }
+
+  function row(repo) {
+    const nameCell = [
+      el('div', { class: 'av-repo-name' }, [icon('folder'), el('strong', { text: repo.name })]),
+    ];
+    if (repo.notes) {
+      nameCell.push(el('div', { class: 'av-repo-notes', title: repo.notes },
+        [icon('description'), repo.notes]));
+    }
+
+    const remoteCell = [el('span', { class: 'av-repo-remote', title: repo.url }, repo.url)];
+    if (repo.path) {
+      remoteCell.push(el('div', { class: 'av-repo-path' }, [icon('code'), repo.path]));
+    }
+
+    const revisionCell = repo.revision
+      ? [
+          el('div', { class: 'av-repo-revision', title: repo.revision },
+            [icon('commit'), el('code', { text: repo.revision })]),
+          el('div', { class: 'av-repo-when', title: repo.checked
+            ? new Date(repo.checked * 1000).toLocaleString() : '' },
+            [icon('history'), ago(repo.checked)]),
+        ]
+      : [el('span', { class: 'av-repo-none', text: 'none recorded' })];
+
+    return el('tr', {}, [
+      el('td', {}, nameCell),
+      el('td', {}, remoteCell),
+      el('td', {}, el('span', { class: 'av-pill av-pill-unknown av-repo-branch' },
+        [icon('tag'), repo.branch || 'main'])),
+      el('td', {}, revisionCell),
+      el('td', { class: 'av-row-actions' }, [
+        el('button', {
+          type: 'button', class: 'icon-btn', title: 'Note the revision seen',
+          onclick: () => noteRevision(repo),
+        }, icon('commit')),
+        el('button', {
+          type: 'button', class: 'icon-btn', title: 'Edit',
+          onclick: () => openForm(repo),
+        }, icon('edit')),
+        el('button', {
+          type: 'button', class: 'icon-btn', title: 'Delete',
+          onclick: () => removeRepo(repo),
+        }, icon('delete_forever')),
+      ]),
+    ]);
+  }
+
+  function render(state) {
+    const body = document.getElementById('av-repositories-body');
+    if (!body) return;
+    clear(body);
+    body.appendChild(notice());
+
+    const repos = ((state.library || {}).repositories) || [];
+
+    const addBtn = el('button', {
+      type: 'button', class: 'btn-primary', onclick: () => openForm(null),
+    }, [icon('add'), 'Add repository']);
+
+    body.appendChild(el('div', { class: 'av-repo-toolbar' }, [
+      el('h4', { class: 'av-block-title', text: `${repos.length} repositor${repos.length === 1 ? 'y' : 'ies'}` }),
+      addBtn,
+    ]));
+
+    if (!repos.length) {
+      body.appendChild(empty('No repositories recorded yet.',
+        el('button', {
+          type: 'button', class: 'btn-secondary', onclick: () => openForm(null),
+        }, [icon('add'), 'Add one'])));
+      return;
+    }
+
+    body.appendChild(el('table', { class: 'av-table' }, [
+      el('thead', {}, el('tr', {}, [
+        el('th', { text: 'Name' }), el('th', { text: 'Remote' }),
+        el('th', { text: 'Branch' }), el('th', { text: 'Revision' }),
+        el('th', { text: '' }),
+      ])),
+      el('tbody', {}, repos.map(row)),
+    ]));
+  }
+
+  view.area('repositories', {
+    onShow: (state) => render(state),
+    onData: (state) => {
+      if (view.current === 'repositories') render(state);
+    },
+  });
 })();
