@@ -42,6 +42,19 @@
   let openReport = null;
 
   /**
+   * What the diff window is currently showing, for the Explain button (#549).
+   *
+   * A pair of snapshot ids when two were picked from the history (or when a
+   * push named its before and after); null when the window is showing this
+   * session's connect-time drift, which the server already holds and can
+   * reach from the session id alone. Only ever identifiers — the diff itself
+   * is read, capped and masked server-side.
+   */
+  let openPair = null;
+  let openSession = null;
+  let openLabel = '';
+
+  /**
    * Kick off a drift check for a newly connected session.
    * Called by tabs.js once a tab is live.
    */
@@ -269,6 +282,13 @@
     if (!overlay) return;
 
     openReport = report;
+    // A report that names its two snapshots — a push's before and after —
+    // can be explained precisely; otherwise Explain means "this session's
+    // drift", which the server resolves from the session id.
+    openPair = (report.old_id && report.new_id)
+      ? { old: report.old_id, new: report.new_id } : null;
+    openSession = (sessionData && sessionData.session_id) || null;
+    openLabel = report.hostname || (sessionData && sessionData.display_label) || '';
 
     const name = report.hostname || sessionData.display_label || 'Device';
     // Opened from an unchanged device too now (#276), where "configuration
@@ -436,6 +456,8 @@
       const res = await fetch(`/api/configs/diff/${picked[0]}/${picked[1]}`);
       if (!res.ok) { note.textContent = 'Could not compare those.'; return; }
       const comparison = await res.json();
+      // Explain now means the pair on screen, not the connect-time drift.
+      openPair = { old: picked[0], new: picked[1] };
 
       document.getElementById('diff-summary').textContent =
         `${comparison.added} line${comparison.added === 1 ? '' : 's'} added, `
@@ -580,6 +602,23 @@
     if (overlay) {
       overlay.addEventListener('click', (e) => {
         if (e.target === overlay) overlay.classList.add('hidden');
+      });
+    }
+
+    // Explain (#549). The window stays open — the answer arrives in the chat
+    // pane beside it, which is where the diff is still on screen to read
+    // against. Nothing about the diff is sent from here: the button hands
+    // over two snapshot ids, or none at all, and the server does the rest.
+    const explain = document.getElementById('diff-explain');
+    if (explain) {
+      explain.addEventListener('click', () => {
+        if (typeof window.shellmateAskAboutDiff !== 'function') return;
+        window.shellmateAskAboutDiff({
+          oldId:     openPair ? openPair.old : null,
+          newId:     openPair ? openPair.new : null,
+          sessionId: openSession,
+          label:     openLabel,
+        });
       });
     }
 

@@ -665,7 +665,91 @@
     });
   }
 
+  /**
+   * The self-checks (#562).
+   *
+   * On the button, never on open. Two of the checks go over the network, and
+   * a Settings panel that reaches out the moment it is opened spends the
+   * air-gapped promise on the user's behalf — so they are a tick box beside
+   * the button and off by default.
+   *
+   * Rendered as a row of chips, one per check, with the detail and what to do
+   * about it underneath the one you pick. Anything that failed is selected
+   * for you: a green row of chips with a problem hidden inside it would be
+   * worse than no panel at all.
+   */
+  let _checksBound = false;
+
+  function _bindChecks() {
+    if (_checksBound) return;
+    const button = document.getElementById('diag-run-checks');
+    const host = document.getElementById('diag-checks');
+    const summary = document.getElementById('diag-checks-summary');
+    if (!button || !host || !summary) return;
+    _checksBound = true;
+
+    button.addEventListener('click', async () => {
+      const probes = !!(document.getElementById('diag-check-probes') || {}).checked;
+      button.disabled = true;
+      summary.textContent = probes ? 'Checking, including the internet…' : 'Checking…';
+      host.innerHTML = '';
+      try {
+        const res = await fetch(`/api/system/checks?probes=${probes ? 'true' : 'false'}`);
+        const data = await res.json();
+        summary.textContent = data.summary || '';
+        _renderChecks(host, data.checks || []);
+      } catch (e) {
+        summary.textContent = 'The checks could not be run: ' + e.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+
+  function _renderChecks(host, rows) {
+    host.innerHTML = '';
+    if (!rows.length) return;
+
+    const chips = document.createElement('div');
+    chips.className = 'diag-chip-row';
+    const detail = document.createElement('div');
+    detail.className = 'diag-check-detail';
+
+    const show = (row, chip) => {
+      chips.querySelectorAll('.diag-chip').forEach(c => c.classList.remove('selected'));
+      chip.classList.add('selected');
+      detail.innerHTML = '';
+      const what = document.createElement('p');
+      what.className = 'diag-check-line';
+      what.textContent = `${row.label}: ${row.detail}`;
+      detail.appendChild(what);
+      if (row.fix) {
+        const fix = document.createElement('p');
+        fix.className = 'settings-section-hint';
+        fix.textContent = row.fix;
+        detail.appendChild(fix);
+      }
+    };
+
+    let worst = null;
+    rows.forEach(row => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = `diag-chip diag-${row.status || 'warn'}`;
+      chip.textContent = row.label;
+      chip.title = row.detail || '';
+      chip.addEventListener('click', () => show(row, chip));
+      chips.appendChild(chip);
+      const rank = { fail: 2, warn: 1, ok: 0 }[row.status] || 0;
+      if (!worst || rank > worst.rank) worst = { row, chip, rank };
+    });
+
+    host.append(chips, detail);
+    if (worst && worst.rank > 0) show(worst.row, worst.chip);
+  }
+
   async function _populateDiagnostics() {
+    _bindChecks();
     const set = (id, text) => {
       const el = document.getElementById(id);
       if (el && text) el.textContent = text;

@@ -91,6 +91,7 @@ shellmate/
 │   ├── config_push.py           # Apply configuration with a preview first, and a way back (#407)
 │   ├── configs.py               # Configuration capture, storage and drift reporting
 │   ├── desktop.py               # Present ShellMate as a desktop application rather than a browser…
+│   ├── diagnostics.py           # Is this install healthy? (#562)
 │   ├── discovery.py             # Finding out what is on the wire
 │   ├── feedback.py              # The in-app bug and feature-request reporter (#370)
 │   ├── fingerprint.py           # Work out what kind of device is on the other end
@@ -118,6 +119,7 @@ shellmate/
 │   │   ├── chroma_client.py     # Optional Chroma vector-DB client for ShellMate
 │   │   ├── claude_client.py     # Streaming Claude API client for ShellMate
 │   │   ├── deepseek_client.py   # Streaming DeepSeek client for ShellMate
+│   │   ├── explain.py           # The prompts ShellMate composes itself, from device data it holds
 │   │   ├── http.py              # One httpx client per provider, reused across requests (#503)
 │   │   ├── ollama_client.py     # Streaming Ollama API client for ShellMate
 │   │   ├── openai_client.py     # Streaming OpenAI client for ShellMate

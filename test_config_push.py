@@ -57,8 +57,11 @@ class FakeIOS(paramiko.ServerInterface):
     """A switch with a running configuration you can change."""
 
     def __init__(self) -> None:
+        # The OSPF key is here on purpose: a review sends the stanzas a change
+        # lands in, and a running configuration carries credentials (#550).
         self.config = ["hostname sw1", "interface GigabitEthernet0/1", " description uplink",
-                       " no shutdown", "interface GigabitEthernet0/2", " shutdown", "end"]
+                       " no shutdown", "interface GigabitEthernet0/2", " shutdown",
+                       " ip ospf authentication-key 7 HASHHASH", "end"]
         self.typed: list[str] = []
         self.keep: list = []
 
@@ -215,6 +218,71 @@ def test_push() -> None:
         listener.close()
 
 
+def test_review() -> None:
+    """
+    #550: a second pair of eyes on the dry run, and nothing on the wire.
+
+    The two things that matter are that the review reaches the device not at
+    all, and that what it sends to a provider is masked — a running
+    configuration carries keys, and the stanzas a change lands in are exactly
+    where they are.
+    """
+    print("\n-- Review with the assistant --")
+    from backend import advanced
+    from backend.ai import explain
+
+    advanced.update({"capture.push_line_delay_ms": 20})
+    port, device, listener = start_device()
+    manager = SessionManager()
+    session_id = None
+    try:
+        created = manager.create_session(ConnectionParams(
+            connection_type="ssh", hostname="127.0.0.1", port=port,
+            username="neteng", password="x", display_label="sw1"))
+        session_id = created["session_id"]
+        session = manager.get_session(session_id)
+        time.sleep(1.5)
+        session["fingerprint"] = {"platform": "ios", "name": "Cisco IOS",
+                                  "confidence": 0.95, "source": "banner"}
+
+        # A stored capture to review against — the review itself must never
+        # take one, so it is taken here, deliberately, first.
+        config_push.preview(session, "hostname sw1\n", fresh=True)
+        before = list(device.typed)
+
+        change = "interface GigabitEthernet0/2\n description access\n no shutdown\n"
+        prompt = explain.push_review_prompt(session, change)
+
+        check("the review sent nothing to the device", device.typed == before,
+              str(device.typed[len(before):]))
+        check("the proposed lines are classified for the model",
+              "+  description access" in prompt, prompt)
+        check("the stanza the change lands in is included",
+              "interface GigabitEthernet0/2" in prompt and " shutdown" in prompt, prompt)
+        check("the credential in that stanza does not leave the machine",
+              "HASHHASH" not in prompt,
+              "the running configuration went to a provider in the clear")
+        check("it says nothing has been applied",
+              "Nothing has been sent" in prompt, prompt[:200])
+        check("and asks for the five things a review is for",
+              "Blast radius" in prompt and "The way back" in prompt, prompt[-400:])
+
+        # The cap: zero sends the change and no surrounding configuration.
+        advanced.update({"ai.review_context_lines": 0})
+        bare = explain.push_review_prompt(session, change)
+        check("zero configuration lines sends the change and nothing round it",
+              "+  description access" in bare and " ip ospf" not in bare, bare)
+
+        held = explain.push_review_prompt(session, "reload\n")
+        check("a guardrail hit is put in front of the reviewer",
+              "guardrail would hold" in held and "reload" in held, held)
+    finally:
+        advanced.reset()
+        if session_id:
+            manager.destroy_session(session_id)
+        listener.close()
+
+
 def _raises(fn, needle: str) -> bool:
     try:
         fn()
@@ -227,11 +295,12 @@ def main() -> int:
     print("=" * 52)
     print("  Configuration push")
     print("=" * 52)
-    try:
-        test_push()
-    except Exception as exc:
-        failed.append(f"test_push: raised {type(exc).__name__}: {exc}")
-        print(f"  FAIL test_push raised {type(exc).__name__}: {exc}")
+    for test in (test_push, test_review):
+        try:
+            test()
+        except Exception as exc:
+            failed.append(f"{test.__name__}: raised {type(exc).__name__}: {exc}")
+            print(f"  FAIL {test.__name__} raised {type(exc).__name__}: {exc}")
     try:
         store.close()
     except Exception:

@@ -809,7 +809,11 @@ async def session_drift(session_id: str) -> dict:
     """
     session = _require_session(session_id)
     try:
-        return await asyncio.to_thread(drift_report, session)
+        report = await asyncio.to_thread(drift_report, session)
+        # Kept on the session so the assistant can be told what changed
+        # without capturing the configuration a second time (#549).
+        session["drift"] = report
+        return report
     except (OSError, ConnectionError_) as exc:
         # The device dropped the session while the capture ran; that is a
         # state of the world, not a server fault.
@@ -2396,6 +2400,23 @@ async def system_info() -> dict:
         "commit":         app_version.build_info()["commit"],
         "describe":       app_version.describe(),
     }
+
+
+@app.get("/api/system/checks")
+async def system_checks(probes: bool = False) -> dict:
+    """
+    Run the self-checks and say whether this install is healthy (#562).
+
+    `probes=true` adds the two that go over the network. They are opt-in and
+    per request rather than on every Settings open, because ShellMate promises
+    to work air-gapped and a panel that reaches out the moment it is opened
+    spends that promise on the user's behalf.
+    """
+    from backend import diagnostics
+
+    rows = await asyncio.to_thread(diagnostics.run, probes)
+    return {"checks": rows, "summary": diagnostics.summarise(rows),
+            "probed": bool(probes)}
 
 
 @app.get("/api/system/update")
@@ -4656,6 +4677,52 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     except Exception:
                         platform_id = ""
                 user_message = _auto_analysis_prompt(auto, platform_id)
+
+            # Explain a configuration diff (#549): the drift report for this
+            # session, or any two stored captures. Composed server-side for
+            # the same reason as the block above — it carries configuration,
+            # so `outbound` has to see it before a provider does.
+            diff_request = msg.get("diff_request")
+            if isinstance(diff_request, dict):
+                from backend.ai import explain
+                sess = session_manager.get_session(session_id) if session_id else None
+                user_message = await asyncio.to_thread(
+                    explain.diff_prompt, diff_request, sess)
+                if not user_message:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": "There is no configuration diff to explain — "
+                                   "ShellMate has no capture of this device yet.",
+                    }))
+                    # No "done" as well: the browser's error handler already
+                    # closes the streaming bubble, and a second close pops the
+                    # queue of pending analyses behind it.
+                    continue
+
+            # Review a proposed configuration change before it is applied
+            # (#550). Nothing reaches the device: the preview is recomputed
+            # against the *stored* capture, and the classified lines and the
+            # stanzas they land in are masked here, not in the browser.
+            review = msg.get("review_request")
+            if isinstance(review, dict) and review.get("text"):
+                sess = session_manager.get_session(session_id) if session_id else None
+                if sess is None:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": "That session is no longer open, so there is "
+                                   "nothing to review the change against.",
+                    }))
+                    continue
+                try:
+                    from backend.ai import explain
+                    user_message = await asyncio.to_thread(
+                        explain.push_review_prompt, sess, str(review.get("text")))
+                except Exception as exc:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": f"The change could not be reviewed: {exc}",
+                    }))
+                    continue
 
             # Investigate mode (#403): how many steps have been approved.
             step = msg.get("investigate_step")

@@ -176,6 +176,22 @@ Each block carries two copy buttons:
 
 **Copy all** in the header takes the whole diff.
 
+**Explain** hands the comparison to the assistant and asks what the changes do
+and whether they could cause what you are seeing. The window stays open — the
+answer arrives in the chat pane beside it, so the diff is still on screen to
+read the answer against. It explains whatever is currently shown: the drift
+since your last visit, the before-and-after of a configuration you have just
+applied, or any two captures you have picked from the history.
+
+The diff is fetched, capped and masked on the server, exactly like terminal
+output — the browser sends only which two captures to compare. How much of it
+travels is **Lines of the configuration diff sent** in Stockton, under AI
+Assistant; what is over the cap is announced to the assistant rather than
+quietly dropped, so it never answers as though it read the whole thing.
+
+Typing `/diff` in the chat asks the same question about the active tab without
+opening the window.
+
 ### Settings
 
 Under **Settings → Configuration Capture**:

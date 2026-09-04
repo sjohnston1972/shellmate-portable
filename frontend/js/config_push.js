@@ -44,14 +44,19 @@
       return;
     }
 
+    // The classified lines scroll; the warning and the review button below
+    // them must not scroll out of sight, so they are siblings of the
+    // scrolling block rather than the last thing inside it.
     const content = document.createElement('div');
-    content.className = 'push-preview';
+    const listing = document.createElement('div');
+    listing.className = 'push-preview';
+    content.appendChild(listing);
     report.lines.forEach(line => {
       const row = document.createElement('div');
       row.className = `diff-line push-${line.status}`;
       const mark = line.status === 'add' ? '+' : line.status === 'remove' ? '−' : '=';
       row.textContent = `${mark} ${line.text}`;
-      content.appendChild(row);
+      listing.appendChild(row);
     });
     if (report.dangerous && report.dangerous.length) {
       const warn = document.createElement('div');
@@ -59,6 +64,7 @@
       warn.textContent = `The guardrail would hold: ${report.dangerous.join('; ')}. Applying will need confirming.`;
       content.appendChild(warn);
     }
+    content.appendChild(_reviewButton(tab, text));
 
     const go = await window.shellmateDialog.form({
       title: `Preview — ${tab.label || tab.hostname || 'device'} (${report.platform})`,
@@ -110,13 +116,57 @@
       window.showConfigDiff({
         hostname: tab.hostname || tab.label, changed: diff.changed,
         added: diff.added, removed: diff.removed, days_since: 0, diff: diff.diff,
-      }, { display_label: tab.label });
+        // Named so Explain in that window means *this push* rather than
+        // whatever the connect-time drift check found (#549).
+        old_id: result.before_id, new_id: result.after_id,
+      }, { display_label: tab.label, session_id: tab.sessionId });
       _offerRestore(tab, result.before_id);
     } else if (window.shellmateAlerts) {
       window.shellmateAlerts.notify({ severity: 'info', icon: 'tune',
         title: 'Configuration applied',
         body: `${result.sent.length} lines sent. ${diff.changed ? diff.changed + ' lines differ' : 'No difference captured'}${result.saved ? ', and saved' : ''}.` });
     }
+  }
+
+  /**
+   * Review with the assistant, from inside the preview (#550).
+   *
+   * A dry-run explanation is worth most in the seconds before Apply, and
+   * everything it needs has already been computed — the classification of
+   * every line, the guardrail hits, the capture it was compared against. The
+   * dialog deliberately stays open: the answer arrives in the chat pane
+   * beside it, so the preview is still on screen to read the review against,
+   * and pressing this changes nothing about what Apply will do.
+   *
+   * Only the lines the engineer typed go over the socket. The server rebuilds
+   * the preview against the stored capture — never a fresh one, so nothing
+   * touches the device — and masks it before any provider sees it.
+   */
+  function _reviewButton(tab, text) {
+    const row = document.createElement('div');
+    row.className = 'push-review-row';
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn-tertiary';
+    button.innerHTML = '<span class="material-symbols-outlined">smart_toy</span> Review with the assistant';
+    button.title = 'Ask what this change does, what it might break, and how to undo it. '
+                 + 'Nothing is sent to the device.';
+    button.addEventListener('click', () => {
+      if (typeof window.shellmateAskForReview !== 'function') return;
+      window.shellmateAskForReview({
+        text,
+        sessionId: tab.sessionId,
+        label: tab.label || tab.hostname || '',
+      });
+      note.textContent = 'Asked — the answer is in the chat pane.';
+    });
+
+    const note = document.createElement('span');
+    note.className = 'setting-value';
+
+    row.append(button, note);
+    return row;
   }
 
   /** A button in the diff panel that proposes the way back. */

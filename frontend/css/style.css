@@ -1762,6 +1762,25 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 .push-preview .push-remove { color: var(--error, #f38ba8); }
 .push-preview .push-present { color: var(--on-surface-muted); }
 .push-danger { margin-top: 6px; color: var(--error, #f38ba8); font-size: 12px; }
+/* Review with the assistant (#550) — a sibling of the scrolling listing, so
+   it stays in view however long the change is. */
+.push-review-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+
+/* Diagnostics self-checks (#562). Each chip takes its colour from the status
+   tokens rather than a literal, and its border from currentColor, so the
+   three states stay a set in both themes instead of drifting apart. */
+.diag-probe-toggle { font-size: 12px; color: var(--on-surface-muted); display: inline-flex;
+  align-items: center; gap: 4px; margin-left: 8px; }
+.diag-checks { margin: 4px 0 12px; }
+.diag-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.diag-chip { font-size: 12px; font-family: inherit; padding: 2px 10px; cursor: pointer;
+  border-radius: 999px; border: 1px solid currentColor; background: transparent; }
+.diag-chip.selected { outline: 1px solid currentColor; outline-offset: 1px; }
+.diag-chip.diag-ok   { color: var(--ok);    background: var(--ok-tint); }
+.diag-chip.diag-warn { color: var(--warn);  background: var(--warn-tint); }
+.diag-chip.diag-fail { color: var(--error); background: var(--error-tint); }
+.diag-check-detail { margin-top: 8px; }
+.diag-check-line { margin: 0 0 4px; font-size: 13px; color: var(--on-surface); }
 
 /* Timed replay (#415) */
 /* The explicit date range on the history search (#575). */

@@ -1901,6 +1901,26 @@ GigEth0/2     unassigned    YES unset  down     down
             it has recorded, and the tools for when something goes wrong. The
             rows below are filled in when Settings opens.</p>
 
+          <!-- Self-checks (#562). The support bundle answers "what happened"
+               after the fact; this answers "is this copy healthy" before
+               there is a reason to ask. Run on the button, never on open —
+               the two network probes are opt-in because ShellMate promises
+               to work air-gapped. -->
+          <div class="setting-row">
+            <label class="setting-label"
+                   data-tip="Reads the things that degrade quietly: which window frame took it, whether the data folder beside the executable was writable, whether the vault can seal and read back a value, whether SQLite has FTS5, which port was bound, a leftover copy from an update, and anything queued in the feedback outbox.||Nothing is changed and nothing leaves the machine unless you tick the probes, which ask GitHub and the licence service whether they answer. The same checks go into the support bundle as checks.txt.">Self-checks
+              <span class="setting-hint">Whether this installation is healthy — the things that fail quietly.</span>
+            </label>
+            <span class="setting-value">
+              <button type="button" id="diag-run-checks" class="btn-tertiary">Run checks</button>
+              <label class="diag-probe-toggle" title="Asks GitHub and the licence service whether they answer. Nothing about your devices is sent.">
+                <input type="checkbox" id="diag-check-probes"> also check the internet
+              </label>
+              <span id="diag-checks-summary" class="setting-hint"></span>
+            </span>
+          </div>
+          <div id="diag-checks" class="diag-checks"></div>
+
           <!-- About this installation — filled by settings.js from
                /api/system/info and /api/history/stats (#222). -->
           <div class="setting-row">
@@ -2027,6 +2047,14 @@ GigEth0/2     unassigned    YES unset  down     down
     <div id="diff-panel" class="side-panel side-panel-wide">
       <div class="panel-header">
         <h2 class="panel-title" id="diff-title">Configuration changes</h2>
+        <!-- #549: ShellMate already holds the answer to "what changed since
+             yesterday"; this hands it to the assistant, masked, rather than
+             leaving it to guess from whatever is in the terminal buffer. -->
+        <button id="diff-explain" class="btn-tertiary"
+                title="Ask the assistant what these changes do, and whether they could cause what you are seeing">
+          <span class="material-symbols-outlined">smart_toy</span>
+          Explain
+        </button>
         <button id="diff-copy-all" class="btn-tertiary" title="Copy the whole diff">
           <span class="material-symbols-outlined">content_copy</span>
           Copy all

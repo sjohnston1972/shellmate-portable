@@ -267,6 +267,18 @@ def _device_facts(session: dict) -> dict:
             "source":     take("source", ""),
         })
 
+    # What the connect-time drift check found (#549). Read from the cached
+    # report, never re-captured: the command has already been sent to the
+    # device once, and sending it again to answer a question would be a
+    # second, unannounced conversation with it.
+    try:
+        from backend.ai import explain
+        drift = explain.drift_facts(session)
+        if drift:
+            facts["drift"] = drift
+    except Exception:                       # a diff is never worth breaking chat
+        pass
+
     tracker = session.get("alerts")
     try:
         pending = tracker.payload().get("pending") if tracker else None

@@ -6,6 +6,28 @@ exists.
 
 ## 1.1.3
 
+- **The assistant can see what changed.** The configuration diff from the
+  connect-time drift check now travels with your questions, and an **Explain**
+  button in the diff window asks what the changes do and whether they could
+  cause what you are seeing — for the drift since your last visit, a
+  configuration you have just applied, or any two captures you pick. `/diff`
+  in the chat asks the same thing. The diff is masked and capped on the
+  server, like everything else that leaves the machine.
+
+- **Review with the assistant**, on a configuration preview. Before you press
+  Apply, the classified lines and the stanzas they land in go to the
+  assistant with a fixed review: what the change does, ordering problems, a
+  missing `no shutdown` or `commit`, what else it touches, and the lines that
+  would undo it. Nothing is sent to the device, and the preview stays open
+  beside the answer.
+
+- **Run checks** in Settings → Diagnostics. A row of chips saying whether
+  this installation is healthy: which window frame took it, whether the data
+  folder is the one beside the executable, whether the vault seals and reads
+  back, FTS5, the port that was bound, a leftover copy from an update, and
+  the feedback outbox — with what to do about anything amber or red. The two
+  network checks are opt-in, per press. The same checks go into the support
+  bundle as `checks.txt`.
 - Session history can be searched **between two dates**, with optional
   times, instead of only the last day, week, month or quarter.
 - Session playback shows where it has reached: a draggable bar with the

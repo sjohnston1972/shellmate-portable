@@ -256,6 +256,32 @@ def _volatile_facts(facts: dict) -> list[str]:
     return out
 
 
+def render_drift_block(drift: dict, active_label: str) -> list[str]:
+    """
+    What changed on this device since the last visit, as the model sees it (#549).
+
+    ShellMate captures the running configuration on connect and diffs it
+    against the previous visit; until now the model was told only *when* the
+    capture happened, so "what changed since yesterday" — the first question
+    in most outages — was answered by guessing from whatever ``show run``
+    happened to be in the buffer.
+
+    The diff arrives already redacted and already capped by
+    ``explain.drift_facts()``; this only words it.
+    """
+    if not drift or not (drift.get("diff") or "").strip():
+        return []
+    days = drift.get("days_since")
+    when = (f"{days} day{'' if days == 1 else 's'} ago" if days else "the last visit")
+    return [
+        f"=== CONFIGURATION CHANGES SINCE LAST VISIT: {active_label} ===",
+        f"  {drift.get('changed', 0)} lines differ from the capture taken {when} "
+        f"({drift.get('added', 0)} added, {drift.get('removed', 0)} removed). "
+        f"ShellMate captured both; this is not something the engineer typed.",
+        drift["diff"],
+    ]
+
+
 def _sessions_block(sessions_summary: list[dict]) -> list[str]:
     lines = ["=== OPEN SESSIONS ==="]
     if sessions_summary:
@@ -346,6 +372,15 @@ def build_context_prompt(
             lines.append(f"=== DEVICE FACTS: {active_label} ===")
             lines.extend(f"  {fact}" for fact in facts)
             lines.append("")
+
+    # What ShellMate's own connect-time capture found had changed (#549).
+    # Kept out of the system preamble on purpose: the drift check finishes a
+    # couple of seconds after the tab opens, so putting it in the cached
+    # prefix would invalidate that prefix mid-session for every device.
+    drift_lines = render_drift_block((device_context or {}).get("drift"), active_label)
+    if drift_lines:
+        lines.extend(drift_lines)
+        lines.append("")
 
     # Active session terminal output
     lines.append(f"=== ACTIVE SESSION: {active_label} ===")
