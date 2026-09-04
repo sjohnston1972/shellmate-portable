@@ -43,6 +43,31 @@ GigabitEthernet0/2     unassigned      YES unset  administratively down down
 """
 
 
+XR_BRIEF = """Interface                      IP-Address      Status                Protocol Vrf-Name
+MgmtEth0/RSP0/CPU0/0           10.0.0.1        Up                    Up       default
+TenGigE0/0/0/0                 10.1.1.1        Up                    Up       default
+TenGigE0/0/0/1                 unassigned      Shutdown              Down     default
+"""
+
+
+def _ntc_names() -> set:
+    """Every platform name the installed ntc-templates index knows."""
+    import os
+
+    import ntc_templates
+    index = os.path.join(os.path.dirname(ntc_templates.__file__), "templates", "index")
+    names = set()
+    with open(index, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith("Template,"):
+                continue
+            parts = [part.strip() for part in line.split(",")]
+            if len(parts) >= 3:
+                names.add(parts[2])
+    return names
+
+
 def test_parsing() -> None:
     print("\n-- Parsing --")
     check("ntc-templates is installed", parsed.available())
@@ -56,7 +81,19 @@ def test_parsing() -> None:
     check("an unknown platform is None", parsed.parse("mystery", "show version", "x") is None)
     check("empty output is None", parsed.parse("ios", "show version", "") is None)
     check("every ShellMate platform maps to an ntc name",
-          set(parsed.NTC_PLATFORMS) >= {"ios", "nxos", "asa", "junos", "panos", "arista", "linux"})
+          set(parsed.NTC_PLATFORMS) >= {"ios", "nxos", "asa", "junos", "panos", "arista",
+                                        "linux", "iosxr", "fortios", "routeros",
+                                        "huawei", "aoscx"})
+    check("and every name it maps to is one ntc-templates actually has",
+          _ntc_names() >= set(parsed.NTC_PLATFORMS.values()),
+          f"unknown: {sorted(set(parsed.NTC_PLATFORMS.values()) - _ntc_names())}")
+
+    # Huawei is the one where the obvious name is the wrong one: the bare
+    # `huawei` prefix belongs to the OLT templates, and VRP is `huawei_vrp`.
+    xr = parsed.parse("iosxr", "show ip interface brief", XR_BRIEF)
+    check("an IOS-XR interface brief parses through the cisco_xr templates",
+          isinstance(xr, list) and any(r.get("interface", "").startswith("TenGigE")
+                                       for r in xr), str(xr))
 
 
 def test_rendering() -> None:

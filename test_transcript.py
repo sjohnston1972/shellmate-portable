@@ -183,6 +183,18 @@ def test_prompt_matching() -> None:
         ("admin@PA-VM(active)>",         "PAN-OS"),
         ("neteng@jump:~$",               "Linux jump host"),
         ("nxos-leaf-01#",                "NX-OS"),
+        # The platform pack (#524).
+        ("RP/0/RSP0/CPU0:edge-xr#",      "IOS-XR"),
+        ("RP/0/RSP0/CPU0:edge-xr(config)#", "IOS-XR config"),
+        ("FGT-01 # ",                    "FortiOS"),
+        ("FGT-01 (global) # ",           "FortiOS with a VDOM named"),
+        ("<core-sw1>",                   "Huawei VRP user view"),
+        ("[core-sw1]",                   "Huawei VRP system view"),
+        ("[~core-sw1]",                  "Huawei VRP with uncommitted changes"),
+        ("[core-sw1-GigabitEthernet0/0/1]", "Huawei VRP interface view"),
+        ("[admin@MikroTik] > ",          "MikroTik RouterOS"),
+        ("[admin@MikroTik] /ip address> ", "RouterOS inside a menu"),
+        ("aoscx-01(config-if-1/1/1)#",   "Aruba AOS-CX interface config"),
     ]
     for line, label in should_match:
         check(f"recognises {label}: {line}", match_prompt(line) is not None)
@@ -194,6 +206,17 @@ def test_prompt_matching() -> None:
         ("Password: ", "a credential prompt"),
         ("% Invalid input detected at '^' marker.", "an error message"),
         ("  1: GigabitEthernet0/1", "numbered output"),
+        # The bracketed vendor prompts cost these (#524). `[HUAWEI]` and
+        # `[OK]` are the same shape, and `[OK]` is what IOS prints after
+        # `write memory`; `<core-sw1>` and `<html>` are the same shape too.
+        ("[edit interfaces]",            "a Junos edit banner"),
+        ("[edit]",                       "a bare Junos edit banner"),
+        ("<html>",                       "an HTML tag"),
+        ("<?xml version=\"1.0\"?>",      "an XML declaration"),
+        ("[INFO] something happened",    "a bracketed log level"),
+        ("[OK]",                         "what IOS prints after write memory"),
+        ("[FAILED] to start the service", "a bracketed status word"),
+        ("[1]+ Done   sleep 5",          "a shell job number"),
     ]
     for line, label in should_not_match:
         check(f"rejects {label}", match_prompt(line) is None,
@@ -229,6 +252,16 @@ def test_hostname_detection() -> None:
         ("core-sw(config-if)#\r\n",               "core-sw",   "strips config mode"),
         ("ASA-FW/pri/act#\r\n",                   "ASA-FW",    "strips failover context"),
         ("neteng@jump:~$ ls\r\nneteng@jump:~$",   "jump",      "Linux"),
+        # IOS-XR puts the node it landed on in front of the hostname. Split
+        # that on the *first* colon, as the Linux case wants, and every XR
+        # tab is called "RP".
+        ("RP/0/RSP0/CPU0:edge-xr#\r\n",           "edge-xr",   "IOS-XR"),
+        ("RP/0/RSP0/CPU0:edge-xr(config)#\r\n",   "edge-xr",   "IOS-XR in config"),
+        ("FGT-01 (global) # \r\n",                "FGT-01",    "FortiOS VDOM"),
+        ("<core-sw1>\r\n",                        "core-sw1",  "Huawei user view"),
+        ("[core-sw1]\r\n",                        "core-sw1",  "Huawei system view"),
+        ("[core-sw1-GigabitEthernet0/0/1]\r\n",   "core-sw1",  "Huawei interface view"),
+        ("[admin@MikroTik] > \r\n",               "MikroTik",  "RouterOS"),
     ]
     for text, expected, label in cases:
         got = detect_hostname(text)
@@ -420,6 +453,79 @@ def test_junos_edit_banner() -> None:
               "[edit]" not in records[0].output, f"got {records[0].output!r}")
 
 
+def test_vendor_prompts_segment_too(): # noqa: E301
+    """
+    Recognising a prompt is only half of it — it has to cut the stream (#524).
+
+    On a device whose prompt does not match, tab naming, command
+    segmentation, history, drift capture, alias expansion and the guardrail
+    all silently do nothing. These replay a session on each of the shapes
+    the platform pack added.
+    """
+    print("\n-- Segmentation on the new prompt shapes --")
+
+    def replay(stream: str) -> list:
+        parser = TranscriptParser()
+        return parser.feed(stream)
+
+    xr = replay(
+        "RP/0/RSP0/CPU0:edge-xr#show ipv4 interface brief\r\n"
+        "Interface           IP-Address      Status\r\n"
+        "TenGigE0/0/0/0      10.1.1.1        Up\r\n"
+        "RP/0/RSP0/CPU0:edge-xr#"
+    )
+    check("IOS-XR: one command, output intact",
+          len(xr) == 1 and xr[0].command == "show ipv4 interface brief"
+          and "TenGigE0/0/0/0" in xr[0].output, f"got {[r.command for r in xr]}")
+
+    vrp = replay(
+        "<core-sw1>display version\r\n"
+        "Huawei Versatile Routing Platform Software\r\n"
+        "VRP (R) software, Version 5.170 (S5720 V200R019C10SPC500)\r\n"
+        "<core-sw1>system-view\r\n"
+        "Enter system view, return user view with Ctrl+Z.\r\n"
+        "[core-sw1]interface GigabitEthernet0/0/1\r\n"
+        "[core-sw1-GigabitEthernet0/0/1]"
+    )
+    check("Huawei VRP: user view, system view and interface view all cut",
+          [r.command for r in vrp] == ["display version", "system-view",
+                                       "interface GigabitEthernet0/0/1"],
+          f"got {[r.command for r in vrp]}")
+    if vrp:
+        check("  and the version output belongs to the command that asked",
+              "VRP (R) software" in vrp[0].output, f"got {vrp[0].output!r}")
+
+    ros = replay(
+        "[admin@MikroTik] > /interface print\r\n"
+        "Flags: D - dynamic; X - disabled\r\n"
+        " 0  R ether1  ether  1500\r\n"
+        "[admin@MikroTik] > "
+    )
+    check("RouterOS: the menu path after the prompt is the command",
+          len(ros) == 1 and ros[0].command == "/interface print",
+          f"got {[r.command for r in ros]}")
+
+    forti = replay(
+        "FGT-01 (global) # get system status\r\n"
+        "Version: FortiGate-100F v7.2.5,build1517,230606 (GA.F)\r\n"
+        "FGT-01 (global) # "
+    )
+    check("FortiOS: the space before the VDOM does not hide the prompt",
+          len(forti) == 1 and forti[0].command == "get system status",
+          f"got {[r.command for r in forti]}")
+
+    # The line that made the bracketed forms risky in the first place.
+    ios = replay(
+        "switch01#write memory\r\n"
+        "Building configuration...\r\n"
+        "[OK]\r\n"
+        "switch01#"
+    )
+    check("[OK] after a write does not slice the record in two",
+          len(ios) == 1 and "[OK]" in ios[0].output,
+          f"got {[(r.command, r.output) for r in ios]}")
+
+
 def main() -> int:
     print("=" * 52)
     print("  Transcript and ANSI tests")
@@ -441,6 +547,7 @@ def main() -> int:
         test_flush_captures_last_command,
         test_output_not_split_by_hashes,
         test_junos_edit_banner,
+        test_vendor_prompts_segment_too,
     ):
         try:
             test()

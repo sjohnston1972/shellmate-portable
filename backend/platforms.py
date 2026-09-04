@@ -466,6 +466,295 @@ BUILTIN: dict[str, PlatformProfile] = {
         config_mode_markers=["(config"],
         comment_prefix="!",
     ),
+    # -----------------------------------------------------------------
+    # Beyond the Cisco / Juniper / Palo core (#524)
+    #
+    # A mixed estate is the norm, and a tool that identifies six vendors and
+    # goes blind on the FortiGate at the edge loses its device-awareness
+    # story exactly where it is most useful.
+    #
+    # Each profile below carries only what has been checked against the
+    # vendor's own command reference. Where the honest answer is "this
+    # platform has no such command", the field is blank and the comment says
+    # why. A blank field costs a line of typing; a wrong one is sent to a
+    # device.
+    # -----------------------------------------------------------------
+    "iosxr": PlatformProfile(
+        id="iosxr",
+        name="Cisco IOS-XR",
+        # XR keeps the classic exec commands, and this one is unchanged.
+        paging_off="terminal length 0",
+        show_run="show running-config",
+        version_command="show version",
+        # "Cisco IOS XR Software" also contains "cisco ios", which the IOS
+        # profile claims. The longest signature wins, so the XR ones have to
+        # be longer than IOS's — and they are.
+        signatures=["cisco ios xr software", "cisco ios xr", "ios-xr", "iosxr"],
+        aliases={
+            'acl': 'show access-lists',
+            'arp': 'show arp',
+            'bgp': 'show bgp summary',
+            'cdp': 'show cdp neighbors detail',
+            'clock': 'show clock',
+            'cpu': 'show processes cpu',
+            'default': 'show route 0.0.0.0/0',
+            'desc': 'show interfaces description',
+            'diff': 'show configuration commit changes last 1',
+            'int': 'show ipv4 interface brief',
+            'ints': 'show ipv4 interface brief',
+            'inv': 'show inventory',
+            'lldp': 'show lldp neighbors detail',
+            'log': 'show logging last 100',
+            'mem': 'show memory summary',
+            'nei': 'show cdp neighbors',
+            'ntp': 'show ntp associations',
+            'ospf': 'show ospf neighbor',
+            'power': 'show environment power',
+            'routes': 'show route',
+            'run': 'show running-config',
+            'temp': 'show environment temperature',
+            'uptime': 'show version | include uptime',
+            'users': 'show users',
+            'ver': 'show version',
+            'vrf': 'show vrf all',
+        },
+        dangerous_commands=[
+            "reload", "admin reload", "commit replace", "load",
+            "clear configuration", "delete", "format", "shutdown",
+            "no shutdown", "clear counters", "install remove",
+            "install replace", "install rollback",
+        ],
+        config_mode_markers=["(config", "(admin-config"],
+        comment_prefix="!",
+        # No configuration push. XR commits in two stages — `commit`, then
+        # `end` — and leaving configuration mode with the change uncommitted
+        # asks an interactive question instead. That is two commands where
+        # config_exit holds one, and the wrong half of it discards the work
+        # silently. Blank means ShellMate will not push here; the lines can
+        # still be pasted by hand.
+        config_enter="",
+        config_exit="",
+        save_command="",
+    ),
+    "fortios": PlatformProfile(
+        id="fortios",
+        name="Fortinet FortiOS",
+        # Deliberately blank. FortiOS has no per-session paging command:
+        # paging is `config system console` / `set output standard`, a
+        # configuration change that outlives the session and is shared by
+        # every administrator on the box. Changing a setting on somebody
+        # else's firewall to save a keypress is not a trade ShellMate makes,
+        # so nothing is sent and the engineer presses space.
+        paging_off="",
+        # `show` from the root prompt is the non-default configuration — the
+        # same thing a backup contains. `show full-configuration` includes
+        # every default and runs to tens of thousands of lines.
+        show_run="show",
+        version_command="get system status",
+        signatures=["fortigate", "fortinet", "fortios"],
+        aliases={
+            'arp': 'get system arp',
+            'bgp': 'get router info bgp summary',
+            'conns': 'diagnose sys session stat',
+            'cpu': 'get system performance status',
+            'ha': 'get system ha status',
+            'int': 'get system interface',
+            'ints': 'get system interface',
+            'inv': 'get hardware status',
+            'mem': 'get system performance status',
+            'ospf': 'get router info ospf neighbor',
+            'policy': 'show firewall policy',
+            'routes': 'get router info routing-table all',
+            'run': 'show',
+            'sessions': 'diagnose sys session stat',
+            'uptime': 'get system performance status',
+            'ver': 'get system status',
+        },
+        dangerous_commands=[
+            "execute reboot", "execute shutdown", "execute factoryreset",
+            "execute factoryreset2", "execute formatlogdisk",
+            "execute restore", "execute disconnect-admin-session",
+            "delete", "purge", "unset",
+        ],
+        # FortiOS names the object being edited in the prompt itself:
+        # FGT-01 (global) #, FGT-01 (port1) #.
+        config_mode_markers=["("],
+        comment_prefix="#",
+        # No configuration push: FortiOS applies each `next` / `end` as it is
+        # typed, so there is no preview-then-commit shape to hang the
+        # existing enter / exit / save contract on.
+        config_enter="",
+        config_exit="",
+        save_command="",
+    ),
+    "routeros": PlatformProfile(
+        id="routeros",
+        name="MikroTik RouterOS",
+        # Deliberately blank. RouterOS pages with an interactive
+        # "-- [Q quit|D dump|down]" and has no session-wide switch to turn
+        # it off; the per-command answer is to append `without-paging` to the
+        # command, which belongs to the command and not to the session.
+        paging_off="",
+        show_run="/export",
+        version_command="/system resource print",
+        signatures=["mikrotik", "routeros"],
+        aliases={
+            'arp': '/ip arp print',
+            'clock': '/system clock print',
+            'cpu': '/system resource print',
+            'dhcp': '/ip dhcp-server lease print',
+            'disk': '/system resource print',
+            'int': '/interface print',
+            'ints': '/interface print',
+            'lldp': '/ip neighbor print',
+            'log': '/log print',
+            'mem': '/system resource print',
+            'nat': '/ip firewall nat print',
+            'nei': '/ip neighbor print',
+            'ospf': '/routing ospf neighbor print',
+            'policy': '/ip firewall filter print',
+            'port': '/interface ethernet print',
+            'routes': '/ip route print',
+            'run': '/export',
+            'uptime': '/system resource print',
+            'users': '/user active print',
+            'ver': '/system resource print',
+            'vlans': '/interface vlan print',
+        },
+        dangerous_commands=[
+            "/system reboot", "/system shutdown",
+            "/system reset-configuration", "/system package downgrade",
+            "/system routerboard upgrade", "/file remove", "remove",
+        ],
+        # RouterOS has no configuration mode: a command either takes effect
+        # or it does not, so there is nothing to enter, leave or save.
+        config_mode_markers=[],
+        comment_prefix="#",
+        config_enter="",
+        config_exit="",
+        save_command="",
+    ),
+    "huawei": PlatformProfile(
+        id="huawei",
+        name="Huawei VRP",
+        # `temporary` is the point: it lasts for this session and is not
+        # written to the configuration, so ShellMate cannot leave a device
+        # changed behind it.
+        paging_off="screen-length 0 temporary",
+        show_run="display current-configuration",
+        version_command="display version",
+        signatures=[
+            "huawei versatile routing platform", "vrp (r) software",
+            "huawei", "vrp",
+        ],
+        aliases={
+            'acl': 'display acl all',
+            'arp': 'display arp',
+            'bgp': 'display bgp peer',
+            'clock': 'display clock',
+            'cpu': 'display cpu-usage',
+            'desc': 'display interface description',
+            'dhcp': 'display ip pool',
+            'int': 'display interface brief',
+            'ints': 'display interface brief',
+            'inv': 'display device',
+            'lldp': 'display lldp neighbor brief',
+            'log': 'display logbuffer',
+            'mac': 'display mac-address',
+            'mem': 'display memory-usage',
+            'nei': 'display lldp neighbor brief',
+            'ntp': 'display ntp status',
+            'ospf': 'display ospf peer brief',
+            'port': 'display interface brief',
+            'power': 'display power',
+            'routes': 'display ip routing-table',
+            'run': 'display current-configuration',
+            'start': 'display saved-configuration',
+            'stp': 'display stp brief',
+            'temp': 'display temperature',
+            'trunks': 'display eth-trunk',
+            'uptime': 'display version',
+            'users': 'display users',
+            'ver': 'display version',
+            'vlans': 'display vlan',
+            'vrf': 'display ip vpn-instance',
+        },
+        dangerous_commands=[
+            "reboot", "schedule reboot", "reset saved-configuration",
+            "reset counters", "shutdown", "undo shutdown", "delete",
+            "format", "undo interface", "undo vlan", "startup system-software",
+        ],
+        # The system view is [hostname]; the user view is <hostname>.
+        config_mode_markers=["["],
+        comment_prefix="#",
+        reload_patterns=[
+            r"^\s*schedule\s+reboot\s+delay\s+(?P<h>\d+):(?P<m>\d{1,2})\b",
+            r"^\s*schedule\s+reboot\s+delay\s+(?P<m>\d+)\b",
+            r"^\s*schedule\s+reboot\s+at\s+(?P<at>\d{1,2}:\d{2})\b",
+        ],
+        reload_cancel_patterns=[
+            r"^\s*undo\s+schedule\s+reboot\b",
+        ],
+        reload_cancel_command="undo schedule reboot",
+        config_enter="system-view",
+        config_exit="return",
+        # Deliberately blank. `save` asks "Are you sure to continue?[Y/N]",
+        # and the push sequence has no way to answer it — it would leave the
+        # device sitting at a question nobody sent. Saving stays something
+        # the engineer types, and sees the answer to.
+        save_command="",
+    ),
+    "aoscx": PlatformProfile(
+        id="aoscx",
+        name="Aruba AOS-CX",
+        # `no page` is the AOS-CX session command. The signatures below
+        # deliberately do not include a bare "aruba": ArubaOS-Switch and the
+        # ArubaOS controllers are different platforms with different
+        # commands, and a signature that swept all three in would send this
+        # to devices it is wrong for.
+        paging_off="no page",
+        show_run="show running-config",
+        version_command="show version",
+        signatures=["arubaos-cx", "aos-cx"],
+        aliases={
+            'arp': 'show arp',
+            'bgp': 'show bgp ipv4 unicast summary',
+            'clock': 'show clock',
+            'cpu': 'show system resource-utilization',
+            'int': 'show interface brief',
+            'ints': 'show interface brief',
+            'inv': 'show system',
+            'lldp': 'show lldp neighbor-info',
+            'log': 'show events',
+            'mac': 'show mac-address-table',
+            'mem': 'show system resource-utilization',
+            'nei': 'show lldp neighbor-info',
+            'ntp': 'show ntp status',
+            'ospf': 'show ospf neighbors',
+            'port': 'show interface brief',
+            'power': 'show environment power-supply',
+            'routes': 'show ip route',
+            'run': 'show running-config',
+            'start': 'show startup-config',
+            'stp': 'show spanning-tree',
+            'temp': 'show environment temperature',
+            'uptime': 'show system',
+            'ver': 'show version',
+            'vlans': 'show vlan',
+            'vrf': 'show vrf',
+            'vsx': 'show vsx status',
+        },
+        dangerous_commands=[
+            "boot system", "erase all zeroize", "erase all",
+            "erase startup-config", "write erase", "reload", "shutdown",
+            "no shutdown", "clear counters",
+        ],
+        config_mode_markers=["(config"],
+        comment_prefix="!",
+        config_enter="configure terminal",
+        config_exit="end",
+        save_command="write memory",
+    ),
     "linux": PlatformProfile(
         id="linux",
         name="Linux / Unix shell",

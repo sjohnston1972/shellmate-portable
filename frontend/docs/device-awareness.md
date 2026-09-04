@@ -40,8 +40,12 @@ usually is not:
 | `hostname(config)#` | Cisco IOS | No |
 | `user@host>` | Junos | No |
 | `host(active)#` | PAN-OS | No |
+| `<hostname>` / `[hostname]` | Huawei VRP | No |
+| `host (global) #` | Fortinet FortiOS | No |
 | `host:~$` | a shell | Yes |
 | `host/pri/act#` | Cisco ASA | Yes |
+| `RP/0/RSP0/CPU0:host#` | Cisco IOS-XR | Yes |
+| `[admin@host] >` | MikroTik RouterOS | Yes |
 
 `hostname(config)#` looks decisive, and in a sense it is — nothing else prints
 it. But it says the device is *Cisco-shaped*, and IOS, NX-OS, ASA and Arista
@@ -49,6 +53,14 @@ EOS all print it identically. The command that would be sent belongs to the
 platform, not the family: `terminal length 0` is right on three of those and
 wrong on the ASA. A prompt that narrows the field to four vendors is not the
 same as one that picks the platform.
+
+`<hostname>` is the same story in a different alphabet: it is Huawei VRP, and
+it is also HP Comware, which came from the same lineage and wants
+`screen-length disable` rather than VRP's `screen-length 0 temporary`. The two
+that *do* clear the bar clear it because they name the platform rather than
+the family — `RP/0/RSP0/CPU0:host#` is IOS-XR and nothing else — or because
+the profile has nothing to send in the first place, which is the case for
+RouterOS and for a shell.
 
 So a device with a legal banner instead of a version string — extremely
 common — or anything reached through a terminal server is identified from its
@@ -83,8 +95,9 @@ connection, see below.
 
 ### Turns paging off
 
-`terminal length 0` on IOS and NX-OS, `terminal pager 0` on ASA,
-`set cli screen-length 0` on Junos, `set cli pager off` on PAN-OS.
+`terminal length 0` on IOS, IOS-XR and NX-OS, `terminal pager 0` on ASA,
+`set cli screen-length 0` on Junos, `set cli pager off` on PAN-OS,
+`screen-length 0 temporary` on Huawei VRP, `no page` on Aruba AOS-CX.
 
 The command is echoed into the terminal exactly as if you had typed it, and
 the interface says what was sent. Nothing is typed into your session
@@ -92,6 +105,21 @@ silently — you may have to account for what happened in that session later.
 
 A device that cannot be identified confidently gets **nothing**. A wrong
 command is worse than a command not sent.
+
+Two platforms get nothing even when they are identified with certainty,
+because there is no right command to send:
+
+- **FortiOS** turns paging off through `config system console` /
+  `set output standard` — a configuration change that outlives your session
+  and is shared by everyone else administering that firewall. Changing a
+  setting on somebody else's box to save yourself a keypress is not a trade
+  ShellMate makes.
+- **MikroTik RouterOS** pages per command, not per session: the answer is
+  `without-paging` on the end of the command you are running, which belongs
+  to the command rather than to the session.
+
+The note in the corner says so, using the same wording as a platform with no
+paging command at all rather than implying the device refused.
 
 Turn it off under **Settings → Device Awareness**. Turned off, the note in the
 corner says the setting is off rather than implying the device refused —
@@ -101,30 +129,66 @@ interchangeable.
 ### Picks the right commands
 
 Retrieving a running configuration is `show running-config` on IOS,
-`show configuration | display set` on Junos, and `show config running` on
-PAN-OS. Configuration snapshots and drift detection use whichever applies.
-The destructive-command list is per-platform for the same reason.
+`show configuration | display set` on Junos, `show config running` on PAN-OS,
+`display current-configuration` on Huawei VRP and `/export` on RouterOS.
+Configuration snapshots and drift detection use whichever applies. The
+destructive-command list is per-platform for the same reason.
 
 ### Enables aliases
 
 See below.
 
+## The platforms it knows
+
+| Platform | Paging off | Running config | Apply configuration |
+|---|---|---|---|
+| Cisco IOS / IOS-XE | `terminal length 0` | `show running-config` | Yes |
+| Cisco IOS-XR | `terminal length 0` | `show running-config` | No |
+| Cisco NX-OS | `terminal length 0` | `show running-config` | Yes |
+| Cisco ASA | `terminal pager 0` | `show running-config` | Yes |
+| Juniper Junos | `set cli screen-length 0` | `show configuration \| display set` | Yes |
+| Palo Alto PAN-OS | `set cli pager off` | `show config running` | Yes |
+| Arista EOS | `terminal length 0` | `show running-config` | Yes |
+| Aruba AOS-CX | `no page` | `show running-config` | Yes |
+| Huawei VRP | `screen-length 0 temporary` | `display current-configuration` | Yes, without Save |
+| Fortinet FortiOS | — | `show` | No |
+| MikroTik RouterOS | — | `/export` | No |
+| Linux / Unix shell | — | — | No |
+| Unknown device | — | — | No |
+
+"No" in the last column is a decision, not a gap. *Apply configuration* has
+one command to enter configuration mode, one to leave it and one to save, and
+three platforms do not fit that shape: IOS-XR commits in two stages
+(`commit`, then `end`) and asks an interactive question if you leave without
+committing; FortiOS applies each `end` as you type it, so there is nothing to
+preview; RouterOS has no configuration mode at all. Huawei VRP enters and
+leaves cleanly but its `save` asks *Are you sure to continue?[Y/N]*, which a
+scripted push has no way to answer — so saving there stays something you type
+and see the answer to.
+
+Every row is editable, and a platform ShellMate has never seen can be added.
+See **Editing what ShellMate knows** below.
+
 ## Aliases
 
 Type `ints` and get the right command for whatever you are connected to:
 
-| Alias | IOS | Junos | PAN-OS |
-|---|---|---|---|
-| `ints` | `show ip interface brief` | `show interfaces terse` | `show interface all` |
-| `routes` | `show ip route` | `show route` | `show routing route` |
-| `bgp` | `show ip bgp summary` | `show bgp summary` | `show routing protocol bgp summary` |
-| `cpu` | `show processes cpu sorted` | `show chassis routing-engine` | `show system resources` |
-| `log` | `show logging` | `show log messages \| last 100` | `show log system` |
+| Alias | IOS | Junos | Huawei VRP | RouterOS |
+|---|---|---|---|---|
+| `ints` | `show ip interface brief` | `show interfaces terse` | `display interface brief` | `/interface print` |
+| `routes` | `show ip route` | `show route` | `display ip routing-table` | `/ip route print` |
+| `bgp` | `show ip bgp summary` | `show bgp summary` | `display bgp peer` | — |
+| `cpu` | `show processes cpu sorted` | `show chassis routing-engine` | `display cpu-usage` | `/system resource print` |
+| `log` | `show logging` | `show log messages \| last 100` | `display logbuffer` | `/log print` |
 
-Around forty aliases ship for IOS and NX-OS, thirty-five for Junos and
-Arista, and proportionate sets for ASA, PAN-OS and Linux. The same short name
-means the same *intent* on every platform, which is the whole point in a
-mixed estate.
+Around forty aliases ship for IOS and NX-OS, thirty-five for Junos, Arista,
+Huawei VRP and Aruba AOS-CX, and proportionate sets for ASA, PAN-OS, IOS-XR,
+FortiOS, RouterOS and Linux. The same short name means the same *intent* on
+every platform, which is the whole point in a mixed estate.
+
+Where a platform's answer depends on which release it is running, there is no
+alias rather than a guess — `bgp` on RouterOS is `/routing bgp peer print` on
+version 6 and `/routing bgp session print` on version 7, so it is left out.
 
 Two rules keep this safe:
 
@@ -173,10 +237,12 @@ Three fields say how *Apply configuration* talks to a platform:
 `config_enter` (what opens configuration mode), `config_exit` (what leaves
 it, committing where the platform commits on exit) and `save_command` (what
 makes the change survive a reload). The built-ins carry them for IOS, NX-OS,
-ASA, Junos, PAN-OS and EOS. A `platforms.json` written by an earlier version
-lacks the fields; a blank one falls back to the built-in value, so an
-existing installation pushes to the platforms it already knew without an
-edit. A platform with no enter command is never pushed to.
+ASA, Junos, PAN-OS, EOS, Aruba AOS-CX and Huawei VRP — see the table above
+for the platforms deliberately left out and why. A `platforms.json` written
+by an earlier version lacks the fields; a blank one falls back to the
+built-in value, so an existing installation pushes to the platforms it
+already knew without an edit. A platform with no enter command is never
+pushed to.
 
 The assistant also uses the platform id to parse show output into rows: the
 built-in ids map to ntc-templates' names, and a platform you add yourself is

@@ -76,6 +76,32 @@ BANNERS = {
         "Hardware version: 01.31\r\n"
         "Software image version: 4.24.5M\r\n"
     ),
+    # The platform pack (#524).
+    "iosxr": (
+        "Cisco IOS XR Software, Version 7.3.2\r\n"
+        "Copyright (c) 2013-2021 by Cisco Systems, Inc.\r\n"
+        "cisco ASR9K Series (Intel 686 F6M14S4) processor\r\n"
+    ),
+    "fortios": (
+        "Version: FortiGate-100F v7.2.5,build1517,230606 (GA.F)\r\n"
+        "Serial-Number: FGT100FTK20001234\r\n"
+        "Hostname: FGT-01\r\n"
+    ),
+    "routeros": (
+        "MikroTik RouterOS 7.11.2 (c) 1999-2023  https://www.mikrotik.com/\r\n"
+        "board-name: hEX-S\r\n"
+    ),
+    "huawei": (
+        "Huawei Versatile Routing Platform Software\r\n"
+        "VRP (R) software, Version 5.170 (S5720 V200R019C10SPC500)\r\n"
+        "HUAWEI S5720-28X-LI-24S-AC Routing Switch uptime is 3 days\r\n"
+    ),
+    "aoscx": (
+        "ArubaOS-CX\r\n"
+        "(c) Copyright 2017-2023 Hewlett Packard Enterprise Development LP\r\n"
+        "Version      : FL.10.09.1010\r\n"
+        "Build Date   : 2023-01-01\r\n"
+    ),
 }
 
 
@@ -99,6 +125,11 @@ def test_version_and_model_extraction() -> None:
         ("junos", "20.4R3-S2.6", "srx345"),
         ("panos", "10.1.6", "PA-VM"),
         ("arista", "4.24.5M", None),
+        ("iosxr", "7.3.2", "ASR9K"),
+        ("fortios", "7.2.5", "FortiGate-100F"),
+        ("routeros", "7.11.2", "hEX-S"),
+        ("huawei", "5.170", "S5720-28X-LI-24S-AC"),
+        ("aoscx", "FL.10.09.1010", None),
     ]
     for platform, version, model in expectations:
         result = identify(banner=BANNERS[platform])
@@ -128,6 +159,11 @@ def test_prompt_fallback() -> None:
         ("neteng@srx-edge>", "junos"),
         ("ASA-FW/pri/act#", "asa"),
         ("switch01(config-if)#", "ios"),
+        ("RP/0/RSP0/CPU0:edge-xr#", "iosxr"),
+        ("[admin@MikroTik] >", "routeros"),
+        ("<core-sw1>", "huawei"),
+        ("[core-sw1]", "huawei"),
+        ("FGT-01 (global) #", "fortios"),
     ]
     for prompt, expected in cases:
         result = identify(banner="", prompt=prompt)
@@ -304,6 +340,146 @@ def test_profiles_are_editable() -> None:
         check("a corrupt file falls back to the built-ins",
               resolve_alias("ios", "ints") == "show ip interface brief",
               f"got {resolve_alias('ios', 'ints')}")
+    finally:
+        platforms_module._cache = None
+        paths._data_dir_cache = _TEMP
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def test_the_platform_pack() -> None:
+    """
+    What the five newest profiles will and will not send (#524).
+
+    The paging command is the only thing ShellMate types into a session
+    unasked, so it is the one field where "we are not sure" has to mean an
+    empty string rather than a plausible guess. FortiOS pages through a
+    configuration change shared by every administrator on the box, and
+    RouterOS answers paging per command rather than per session; neither has
+    a per-session command, so neither gets one.
+    """
+    print("\n-- The platform pack --")
+
+    sends = {
+        "iosxr":  "terminal length 0",
+        "huawei": "screen-length 0 temporary",
+        "aoscx":  "no page",
+    }
+    for platform, command in sends.items():
+        check(f"{platform} turns paging off with {command!r}",
+              get_profile(platform).paging_off == command,
+              f"got {get_profile(platform).paging_off!r}")
+
+    for platform in ("fortios", "routeros"):
+        check(f"{platform} sends nothing, because it has nothing to send",
+              get_profile(platform).paging_off == "",
+              f"got {get_profile(platform).paging_off!r}")
+        check(f"  and {platform} is still identified and still useful",
+              bool(get_profile(platform).show_run
+                   and get_profile(platform).version_command))
+
+    # An XR banner contains "Cisco IOS", and the IOS version pattern matches
+    # it. Getting this wrong means a confident, wrong answer above the gate.
+    xr = identify(banner=BANNERS["iosxr"])
+    check("an IOS-XR banner is not read as IOS", xr.platform == "iosxr",
+          f"got {xr.platform} at {xr.confidence}")
+    ios = identify(banner=BANNERS["ios"])
+    check("and an IOS banner is still IOS", ios.platform == "ios",
+          f"got {ios.platform}")
+
+    # A prompt names the platform for XR and RouterOS, and only the family
+    # for Huawei — HP Comware prints <host> and [host] identically and wants
+    # a different paging command.
+    check("an XR node id is enough to act on",
+          identify(banner="", prompt="RP/0/RSP0/CPU0:edge-xr#").certain_enough_to_act)
+    check("a Huawei prompt alone is not",
+          not identify(banner="", prompt="<core-sw1>").certain_enough_to_act)
+
+    check("ints expands on IOS-XR",
+          resolve_alias("iosxr", "ints") == "show ipv4 interface brief",
+          f"got {resolve_alias('iosxr', 'ints')}")
+    check("ints expands on Huawei VRP",
+          resolve_alias("huawei", "ints") == "display interface brief",
+          f"got {resolve_alias('huawei', 'ints')}")
+    check("ints expands on RouterOS",
+          resolve_alias("routeros", "ints") == "/interface print",
+          f"got {resolve_alias('routeros', 'ints')}")
+    check("ints expands on FortiOS",
+          resolve_alias("fortios", "ints") == "get system interface",
+          f"got {resolve_alias('fortios', 'ints')}")
+    check("ints expands on AOS-CX",
+          resolve_alias("aoscx", "ints") == "show interface brief",
+          f"got {resolve_alias('aoscx', 'ints')}")
+
+    from backend.platforms import matches_dangerous
+    check("a Huawei reboot is held", matches_dangerous("huawei", "reboot") == "reboot")
+    check("a RouterOS reset is held",
+          matches_dangerous("routeros", "/system reset-configuration")
+          == "/system reset-configuration")
+    check("a FortiOS factory reset is held",
+          matches_dangerous("fortios", "execute factoryreset") == "execute factoryreset")
+    check("an ordinary Huawei display is not",
+          matches_dangerous("huawei", "display interface brief") == "")
+
+    # Blank config commands mean "ShellMate will not push here", which is the
+    # documented meaning and not an oversight: XR commits in two stages,
+    # FortiOS applies as you type, and RouterOS has no configuration mode.
+    for platform in ("iosxr", "fortios", "routeros"):
+        check(f"{platform} is not pushed to", get_profile(platform).config_enter == "",
+              f"got {get_profile(platform).config_enter!r}")
+    check("Huawei enters and leaves configuration mode",
+          get_profile("huawei").config_enter == "system-view"
+          and get_profile("huawei").config_exit == "return")
+    check("  but does not offer Save, which asks a question nobody can answer",
+          get_profile("huawei").save_command == "",
+          f"got {get_profile('huawei').save_command!r}")
+    check("AOS-CX is Cisco-shaped all the way through",
+          get_profile("aoscx").config_enter == "configure terminal"
+          and get_profile("aoscx").save_command == "write memory")
+
+    from backend.session.parsed import NTC_PLATFORMS
+    check("every new platform maps to an ntc-templates name",
+          {"iosxr", "fortios", "routeros", "huawei", "aoscx"} <= set(NTC_PLATFORMS),
+          f"got {sorted(NTC_PLATFORMS)}")
+
+
+def test_new_platforms_reach_an_existing_install() -> None:
+    """
+    A platforms.json written before the pack must gain it, not block it.
+
+    Profiles are data, so an installation that has ever opened the editor
+    has a complete file on disk. If that file simply won, the five new
+    platforms would reach nobody who had used ShellMate before — which is
+    the same trap `_merge_profile` was written for on aliases.
+    """
+    print("\n-- New platforms on an existing installation --")
+    directory = Path(tempfile.mkdtemp(prefix="shellmate-pack-"))
+    paths._data_dir_cache = directory
+    platforms_module._cache = None
+    try:
+        load_profiles(refresh=True)
+        path = platforms_module.profiles_path()
+        document = json.loads(path.read_text(encoding="utf-8"))
+
+        # Rewind the file to what an earlier version wrote: the old seven,
+        # with one edit of the user's own.
+        for new in ("iosxr", "fortios", "routeros", "huawei", "aoscx"):
+            document["platforms"].pop(new, None)
+        document["platforms"]["ios"]["paging_off"] = "terminal length 0 exec"
+        path.write_text(json.dumps(document), encoding="utf-8")
+
+        platforms_module._cache = None
+        load_profiles(refresh=True)
+
+        check("a file that predates the pack still loads",
+              get_profile("ios").name == "Cisco IOS / IOS-XE")
+        check("and the user's own edit survives",
+              get_profile("ios").paging_off == "terminal length 0 exec",
+              f"got {get_profile('ios').paging_off!r}")
+        for new in ("iosxr", "fortios", "routeros", "huawei", "aoscx"):
+            check(f"  {new} arrives from the built-ins",
+                  get_profile(new).id == new, f"got {get_profile(new).id!r}")
+        check("and it is fingerprintable straight away",
+              identify(banner=BANNERS["huawei"]).platform == "huawei")
     finally:
         platforms_module._cache = None
         paths._data_dir_cache = _TEMP
@@ -607,6 +783,8 @@ def main() -> int:
         test_refinement,
         test_profiles_and_aliases,
         test_profiles_are_editable,
+        test_the_platform_pack,
+        test_new_platforms_reach_an_existing_install,
         test_outbound_pipeline,
         test_dangerous_command_matching,
         test_the_guardrail_holds_before_it_sends,

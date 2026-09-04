@@ -30,6 +30,14 @@ NTC_PLATFORMS = {
     "panos":  "paloalto_panos",
     "arista": "arista_eos",
     "linux":  "linux",
+    # #524. ntc-templates names Huawei's VRP templates `huawei_vrp`; the
+    # bare `huawei` prefix belongs to its OLT lines (`huawei_ont`,
+    # `huawei_smartax`), which are a different command set entirely.
+    "iosxr":    "cisco_xr",
+    "fortios":  "fortinet",
+    "routeros": "mikrotik_routeros",
+    "huawei":   "huawei_vrp",
+    "aoscx":    "aruba_aoscx",
 }
 
 #: Rows beyond this are summarised as a count — a full routing table is not
