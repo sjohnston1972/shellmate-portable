@@ -9667,6 +9667,33 @@ body {
 
 .av-block { margin-bottom: 24px; }
 
+/* Runs, grouped by what started them (#591). The heading is the answer to
+   "who asked for this", which is the first question about a run nobody
+   watched happen. */
+.av-runs-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 16px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.av-runs-group:first-child { margin-top: 0; }
+.av-runs-group .material-symbols-outlined {
+  font-size: var(--icon-xs);
+  color: var(--primary);
+}
+
+.av-runs-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--on-surface-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .av-block-title {
   margin: 0 0 10px;
   font-size: 12px;

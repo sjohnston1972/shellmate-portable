@@ -39,6 +39,26 @@
     return `${Math.round(delta / 86400)} d ago`;
   }
 
+  /**
+   * How late a scheduled run was, when that is worth knowing.
+   *
+   * A pipeline set to run at three and running at three is unremarkable;
+   * one that ran forty minutes late is the container having been asleep,
+   * which is exactly the failure mode this deployment is prone to and the
+   * thing a timestamp alone hides.
+   */
+  function lateness(job) {
+    if (!job.scheduled_for || !job.started) return '';
+    const due = Date.parse(job.scheduled_for);
+    const ran = Date.parse(job.started);
+    if (!due || !ran || Number.isNaN(due) || Number.isNaN(ran)) return '';
+    const late = Math.round((ran - due) / 1000);
+    if (late < 90) return ago(job.started);
+    const much = late < 3600 ? `${Math.round(late / 60)} min`
+                             : `${Math.round(late / 3600)} h`;
+    return `${ago(job.started)} · ${much} late`;
+  }
+
   function statusPill(status) {
     const kind = {
       successful: 'ok', running: 'warn', starting: 'warn',
@@ -78,31 +98,60 @@
       return;
     }
 
-    host.appendChild(el('table', { class: 'av-table' }, [
-      el('thead', {}, el('tr', {}, [
-        el('th', { text: 'Playbook' }), el('th', { text: 'Result' }),
-        el('th', { text: 'Started' }), el('th', { text: '' }),
-      ])),
-      el('tbody', {}, rows.slice(0, 40).map(job => el('tr', {}, [
-        el('td', {}, el('span', { class: 'av-job-name',
-                                  text: job.playbook || job.id || '—' })),
-        el('td', {}, statusPill(job.status)),
-        el('td', { class: 'av-when',
-                   title: job.started ? String(job.started) : '' },
-           ago(job.started)),
-        el('td', { class: 'av-row-actions' }, el('button', {
-          type: 'button', class: 'btn-tertiary',
-          title: 'Follow this run and read its output',
-          onclick: () => {
-            if (typeof window.ansibleWatchJob === 'function') {
-              window.ansibleWatchJob(job);
-            } else {
-              view.show('playbooks');
-            }
-          },
-        }, [icon('visibility'), 'Watch'])),
-      ]))),
-    ]));
+    // Grouped by what started them. A run carries the pipeline that fired
+    // it, or null when a person did — and "who asked for this" is the first
+    // question about a run somebody did not watch happen.
+    const groups = new Map();
+    rows.slice(0, 60).forEach((job) => {
+      const key = job.pipeline || '';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(job);
+    });
+
+    // Manual first: it is the list somebody recognises, and a pipeline's
+    // own runs are the ones they can go and look at per pipeline.
+    const order = [...groups.keys()].sort((a, b) => {
+      if (!a) return -1;
+      if (!b) return 1;
+      return a.localeCompare(b);
+    });
+
+    order.forEach((key) => {
+      host.appendChild(el('h5', { class: 'av-runs-group' }, [
+        icon(key ? 'schedule' : 'bolt'),
+        el('span', { text: key ? key : 'Started by hand' }),
+        el('span', { class: 'av-runs-count',
+                     text: String(groups.get(key).length) }),
+      ]));
+      host.appendChild(el('table', { class: 'av-table' }, [
+        el('thead', {}, el('tr', {}, [
+          el('th', { text: 'Playbook' }), el('th', { text: 'Result' }),
+          el('th', { text: key ? 'Due / started' : 'Started' }),
+          el('th', { text: '' }),
+        ])),
+        el('tbody', {}, groups.get(key).map(job => el('tr', {}, [
+          el('td', {}, el('span', { class: 'av-job-name',
+                                    text: job.playbook || job.id || '—' })),
+          el('td', {}, statusPill(job.status)),
+          el('td', { class: 'av-when',
+                     title: [job.scheduled_for && `due ${job.scheduled_for}`,
+                             job.started && `started ${job.started}`]
+                            .filter(Boolean).join(' · ') },
+             lateness(job) || ago(job.started)),
+          el('td', { class: 'av-row-actions' }, el('button', {
+            type: 'button', class: 'btn-tertiary',
+            title: 'Follow this run and read its output',
+            onclick: () => {
+              if (typeof window.ansibleWatchJob === 'function') {
+                window.ansibleWatchJob(job);
+              } else {
+                view.show('playbooks');
+              }
+            },
+          }, [icon('visibility'), 'Watch'])),
+        ]))),
+      ]));
+    });
   }
 
   function render() {
