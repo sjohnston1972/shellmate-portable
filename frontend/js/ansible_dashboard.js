@@ -117,6 +117,21 @@
         ]),
       ]);
     }
+    if (runner.kind === 'certificate') {
+      return el('div', { class: 'av-notice av-notice-bad' }, [
+        icon('encrypted'),
+        el('div', {}, [
+          el('strong', { text: 'The runner answered, but its certificate was refused. ' }),
+          runner.detail || '',
+          ' This is a trust problem, not a network one: give ShellMate the '
+          + "runner's CA certificate rather than turning verification off.",
+        ]),
+        el('button', {
+          type: 'button', class: 'btn-secondary',
+          onclick: () => (window.openSettings ? window.openSettings('ansible') : null),
+        }, 'Open Settings'),
+      ]);
+    }
     return el('div', { class: 'av-notice av-notice-bad' }, [
       icon('error'),
       el('div', {}, [
@@ -137,7 +152,29 @@
     const books = overview.playbooks || {};
     const keys = (state.keys || {}).keys || [];
 
-    if (!runner.reachable) body.appendChild(runnerTrouble(runner));
+    if (!runner.reachable) {
+      body.appendChild(runnerTrouble(runner));
+    } else if (runner.encrypted && runner.verified === false) {
+      body.appendChild(el('div', { class: 'av-notice av-notice-warn' }, [
+        icon('encrypted'),
+        el('div', {}, [
+          el('strong', { text: 'The certificate is not being checked. ' }),
+          'Runs are encrypted but nothing verifies who is on the other end. '
+          + 'That is a reasonable trade for a development certificate and a '
+          + 'poor one for anything else.',
+        ]),
+      ]));
+    } else if (runner.encrypted === false) {
+      body.appendChild(el('div', { class: 'av-notice av-notice-warn' }, [
+        icon('info'),
+        el('div', {}, [
+          el('strong', { text: 'Plain HTTP. ' }),
+          'The token and anything a run carries cross the network in the '
+          + 'clear. Fine on a trusted management LAN; put TLS in front of '
+          + 'the runner the day it moves.',
+        ]),
+      ]));
+    }
 
     body.appendChild(el('section', { class: 'av-block' }, [
       el('h4', { class: 'av-block-title' }, 'Recent runs'),

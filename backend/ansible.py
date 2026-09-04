@@ -64,11 +64,19 @@ FINISHED_STATES = ("successful", "failed", "timeout", "canceled", "cancelled", "
 
 
 class AnsibleError(RuntimeError):
-    """The runner refused, or could not be reached. Carries its own words."""
+    """
+    The runner refused, or could not be reached. Carries its own words.
 
-    def __init__(self, message: str, code: int = 0):
+    ``kind`` separates failures that need different actions. A certificate
+    that does not verify and a container that is not running both arrive
+    here as a failed connection, and reporting both as "unreachable" sends
+    somebody to the firewall for a problem in a file on their own disk.
+    """
+
+    def __init__(self, message: str, code: int = 0, kind: str = ""):
         super().__init__(message)
         self.code = code
+        self.kind = kind
 
 
 class NotConfigured(AnsibleError):
@@ -188,6 +196,47 @@ def _detail(response) -> str:
     return ""
 
 
+def _certificate_problem(exc: BaseException) -> str:
+    """
+    The certificate's own complaint, if that is what went wrong.
+
+    httpx wraps a TLS failure in a ConnectError, so the useful sentence is
+    two or three ``__cause__`` links down. Walking for it is worth the code
+    because of what happens otherwise: a certificate that does not verify
+    is reported as "could not reach the runner", which is true and useless.
+    It sends somebody to the firewall for a problem in a file on their own
+    disk, and the switch they reach for next is the one that turns
+    verification off.
+    """
+    import ssl
+
+    seen = 0
+    while exc is not None and seen < 6:
+        if isinstance(exc, ssl.SSLError):
+            return " ".join(str(a) for a in exc.args if isinstance(a, str)) or str(exc)
+        text = str(exc)
+        if "CERTIFICATE_VERIFY_FAILED" in text or "certificate verify failed" in text:
+            return text
+        exc = exc.__cause__ or exc.__context__
+        seen += 1
+    return ""
+
+
+def _transport_error(exc: Exception, cfg: "RunnerConfig") -> "AnsibleError":
+    """Why the call did not happen, said as the thing that needs fixing."""
+    trouble = _certificate_problem(exc)
+    if trouble:
+        fix = ("Give ShellMate the runner's CA certificate under Settings → "
+               "Ansible." if not cfg.ca_cert else
+               f"The CA file given is {cfg.ca_cert}.")
+        return AnsibleError(
+            f"The runner's certificate was not accepted: {trouble}. {fix}",
+            code=0, kind="certificate")
+    return AnsibleError(
+        f"Could not reach the runner at {cfg.url} "
+        f"({exc.__class__.__name__}).", kind="unreachable")
+
+
 def _call(method: str, path: str, *, json_body: Any = None,
           params: dict | None = None, text: bool = False) -> Any:
     cfg = config()
@@ -201,9 +250,7 @@ def _call(method: str, path: str, *, json_body: Any = None,
             response = client.request(method, f"{cfg.url}{path}",
                                       json=json_body, params=params or None)
     except httpx.HTTPError as exc:
-        raise AnsibleError(
-            f"Could not reach the runner at {cfg.url} "
-            f"({exc.__class__.__name__}).") from exc
+        raise _transport_error(exc, cfg) from exc
     if response.status_code >= 400:
         message = _detail(response) or f"The runner answered {response.status_code}."
         if response.status_code in (401, 403):
@@ -238,7 +285,7 @@ def ping() -> dict:
         health = _call("GET", "/health") or {}
     except AnsibleError as exc:
         return {"reachable": False, "configured": True, "url": cfg.url,
-                "detail": str(exc)}
+                "kind": getattr(exc, "kind", ""), "detail": str(exc)}
     try:
         books = list_playbooks()
     except AnsibleError as exc:
@@ -248,10 +295,16 @@ def ping() -> dict:
                     "detail": ("The runner is there but will not accept ShellMate: "
                                "check the token under Settings → Ansible.")}
         return {"reachable": False, "configured": True, "url": cfg.url,
-                "detail": str(exc)}
+                "kind": getattr(exc, "kind", ""), "detail": str(exc)}
     core = health.get("ansible_core", "")
     return {
         "reachable": True, "configured": True, "url": cfg.url,
+        # Said out loud rather than assumed: somebody who turned verification
+        # off for a development certificate should be reminded that a run is
+        # going over a connection nothing is checking.
+        "verified": bool(cfg.url.startswith("https://")
+                         and (cfg.ca_cert or cfg.verify_tls)),
+        "encrypted": cfg.url.startswith("https://"),
         "playbooks": len(books),
         "ansible_core": core,
         "ansible_runner": health.get("ansible_runner", ""),

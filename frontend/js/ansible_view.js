@@ -167,17 +167,33 @@
       label = 'Not set up';
       says = runner.detail || 'No runner address yet. Settings → Ansible.';
     } else if (runner.reachable && runner.authenticated !== false) {
-      cls = 'av-pill-ok';
-      label = 'Connected';
+      // Connected, but say on what terms. A run going over a connection
+      // nothing is checking is a thing the person who chose that should be
+      // reminded of, not spared.
+      const unverified = runner.encrypted && runner.verified === false;
+      cls = unverified ? 'av-pill-warn' : 'av-pill-ok';
+      label = unverified ? 'Connected, unverified' : 'Connected';
       says = runner.url || '';
       if (typeof runner.playbooks === 'number') {
         says += `${says ? ' — ' : ''}${runner.playbooks} playbook`
              + `${runner.playbooks === 1 ? '' : 's'}`;
       }
+      if (unverified) {
+        says += ' — the certificate is not being checked.';
+      } else if (runner.encrypted === false) {
+        says += ' — plain HTTP, so the token crosses in the clear.';
+      }
     } else if (runner.reachable) {
       cls = 'av-pill-warn';
       label = 'Refusing us';
       says = runner.detail || 'The runner is there but will not accept ShellMate.';
+    } else if (runner.kind === 'certificate') {
+      // Not a reachability problem. Something answered; ShellMate would not
+      // trust it. Filing that under "unreachable" sends somebody to the
+      // firewall for a problem in a file on their own disk.
+      cls = 'av-pill-bad';
+      label = 'Certificate refused';
+      says = runner.detail || "The runner's certificate was not accepted.";
     } else {
       cls = 'av-pill-bad';
       label = 'Unreachable';
