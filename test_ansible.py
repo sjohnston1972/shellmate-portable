@@ -266,6 +266,46 @@ def test_playbooks_and_runs() -> None:
           "nope.yml" in missing, missing)
 
 
+def test_the_transport_is_reported_even_when_refused() -> None:
+    """
+    Whether the connection is encrypted and checked is not an auth question.
+
+    A runner that answers and then refuses the token is a state somebody can
+    sit in for an afternoon while they hunt for the value. Reporting the TLS
+    facts only on the success path left the header unable to say "connected
+    but unverified" in exactly that window — which is when it is most worth
+    knowing, because turning verification off is the wrong thing to try next
+    and it is the thing people try.
+    """
+    print("\n-- The transport, reported whether or not we got in --")
+
+    def refuses(request):
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"ansible_core": "2.21.3"})
+        return httpx.Response(401, json={"detail": "no"})
+
+    from backend.settings_store import update_settings
+    update_settings({"ansible": {"runner_url": "https://runner.test:8081",
+                                 "token": "", "ca_cert": "", "client_cert": "",
+                                 "client_key": "", "verify_tls": True}})
+    real, Patched.transport = httpx.Client, service(refuses)
+    httpx.Client = Patched
+    try:
+        state = ansible.ping()
+    finally:
+        httpx.Client = real
+
+    check("a refused runner still reports it was reached",
+          state["reachable"] is True and state["authenticated"] is False,
+          str(state))
+    check("and that the connection was encrypted",
+          state.get("encrypted") is True, str(state))
+    check("and that the certificate was checked",
+          state.get("verified") is True, str(state))
+    check("and points at the token rather than the network",
+          "token" in state.get("detail", "").lower(), str(state))
+
+
 def test_the_token_travels_when_there_is_one() -> None:
     print("\n-- Auth, when the deployment has any --")
     seen = {}
@@ -409,6 +449,7 @@ def main() -> int:
     print("=" * 52)
     for test in (test_not_configured, test_playbooks_and_runs,
                  test_the_token_travels_when_there_is_one,
+        test_the_transport_is_reported_even_when_refused,
                  test_the_runners_words_reach_the_user,
                  test_inventory_from_the_estate, test_the_library):
         try:

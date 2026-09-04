@@ -281,30 +281,36 @@ def ping() -> dict:
     # /health needs no token by design, so it separates two failures that
     # look alike from the outside: a runner that cannot be reached, and one
     # that can be reached but will not talk to us.
+    # Whether the connection is encrypted, and whether anything checked the
+    # certificate, are facts about the transport — true or false regardless
+    # of whether the token was then accepted. Computing them only on the
+    # success path left the header unable to say "unverified" for a runner
+    # that answered and refused us, which is a state somebody can easily be
+    # in for an afternoon.
+    transport = {
+        "encrypted": cfg.url.startswith("https://"),
+        "verified": bool(cfg.url.startswith("https://")
+                         and (cfg.ca_cert or cfg.verify_tls)),
+    }
     try:
         health = _call("GET", "/health") or {}
     except AnsibleError as exc:
         return {"reachable": False, "configured": True, "url": cfg.url,
-                "kind": getattr(exc, "kind", ""), "detail": str(exc)}
+                "kind": getattr(exc, "kind", ""), "detail": str(exc), **transport}
     try:
         books = list_playbooks()
     except AnsibleError as exc:
         if exc.code in (401, 403):
             return {"reachable": True, "configured": True, "authenticated": False,
-                    "url": cfg.url, "ansible_core": health.get("ansible_core", ""),
+                    "url": cfg.url, **transport,
+                    "ansible_core": health.get("ansible_core", ""),
                     "detail": ("The runner is there but will not accept ShellMate: "
                                "check the token under Settings → Ansible.")}
         return {"reachable": False, "configured": True, "url": cfg.url,
-                "kind": getattr(exc, "kind", ""), "detail": str(exc)}
+                "kind": getattr(exc, "kind", ""), "detail": str(exc), **transport}
     core = health.get("ansible_core", "")
     return {
-        "reachable": True, "configured": True, "url": cfg.url,
-        # Said out loud rather than assumed: somebody who turned verification
-        # off for a development certificate should be reminded that a run is
-        # going over a connection nothing is checking.
-        "verified": bool(cfg.url.startswith("https://")
-                         and (cfg.ca_cert or cfg.verify_tls)),
-        "encrypted": cfg.url.startswith("https://"),
+        "reachable": True, "configured": True, "url": cfg.url, **transport,
         "playbooks": len(books),
         "ansible_core": core,
         "ansible_runner": health.get("ansible_runner", ""),
