@@ -665,6 +665,16 @@ SETTINGS: tuple[Setting, ...] = (
             "can produce a diff of thousands of lines; what is over the cap is "
             "announced rather than dropped silently. Zero sends none of it.",
             minimum=0, maximum=5000, unit="lines"),
+    Setting("ai.review_context_lines", "Configuration sent with a push review", 300, "int",
+            "How much of the running configuration goes with **Review with "
+            "the assistant** on a configuration preview.",
+            "Only the stanzas the proposed lines land in are sent, never the "
+            "whole configuration — \"add an address under interface Gi0/2\" "
+            "reads very differently when Gi0/2 already has one (#550). A "
+            "change touching thirty interfaces still adds up, which is what "
+            "the cap is for. Zero sends the proposed lines and no "
+            "surrounding configuration at all.",
+            minimum=0, maximum=5000, unit="lines"),
     Setting("ai.redact_context", "Mask secrets in what is sent", True, "bool",
             "Apply the same redaction that covers session logs.",
             "Terminal output going to a third-party API is at least as "

@@ -136,4 +136,144 @@ def diff_prompt(request: dict, session: dict | None) -> str:
     )
 
 
-__all__ = ["diff_prompt", "drift_facts", "DIFF_QUESTION"]
+# ---------------------------------------------------------------------------
+# Reviewing a proposed change before it is applied (#550)
+# ---------------------------------------------------------------------------
+
+#: What a review is for. Fixed here rather than typed by the engineer: the
+#: value of a second pair of eyes at this moment is that it looks at the same
+#: five things every time, including on the change that seems obvious.
+REVIEW_QUESTION = """\
+Review this proposed configuration change before it is applied. Cover, in
+this order and briefly:
+
+1. **Intended effect** — what this change does, in one or two sentences.
+2. **Ordering** — anything that must come before something else, or that will
+   fail as written because the thing it refers to does not exist yet.
+3. **Omissions** — a missing `no shutdown`, a missing `commit` or `write`, an
+   interface left without an address, an ACL applied but never defined.
+4. **Blast radius** — what else on this device is affected, and whether any of
+   it could drop the session you are typing into.
+5. **The way back** — the lines that would undo this, as a block.
+
+Say plainly if it looks routine. Do not suggest running anything: nothing has
+been applied, and this is a review, not a next step."""
+
+
+def _stanzas(config_text: str, wanted: set[str]) -> list[str]:
+    """
+    The sections of the running configuration a change lands in.
+
+    A stanza is an unindented line and the indented lines under it — how every
+    platform ShellMate knows prints an interface, an ACL or a routing process.
+    Sending the whole configuration would answer the question and cost a
+    fortune; sending only the changed lines answers a different question,
+    because "add `ip address …` under `interface Gi0/2`" reads very
+    differently when Gi0/2 already has one.
+    """
+    out: list[str] = []
+    current: list[str] | None = None
+    header = ""
+    for raw in (config_text or "").splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        if not line.startswith((" ", "\t")):
+            if current and header.strip().lower() in wanted:
+                out.extend(current)
+            header = line
+            current = [line]
+        elif current is not None:
+            current.append(line)
+    if current and header.strip().lower() in wanted:
+        out.extend(current)
+    return out
+
+
+def _targets(rows: list[dict]) -> set[str]:
+    """The unindented lines a change touches, as stanza headers to look for."""
+    wanted: set[str] = set()
+    for row in rows:
+        text = str(row.get("text", ""))
+        if text.startswith((" ", "\t")):
+            continue
+        stripped = text.strip().lower()
+        for prefix in ("no ", "delete ", "undo "):
+            if stripped.startswith(prefix):
+                stripped = stripped[len(prefix):].strip()
+                break
+        if stripped:
+            wanted.add(stripped)
+    return wanted
+
+
+def push_review_prompt(session: dict, text: str) -> str:
+    """
+    Compose the "review this before I apply it" message (#550).
+
+    Everything here is already computed: ``config_push.preview()`` classes
+    every line as an addition, a line already present or a removal, names the
+    capture it compared against and lists what the guardrail would hold. The
+    only thing missing was somebody to read it.
+
+    Deliberately re-runs the preview with ``fresh=False``. The dialog the
+    engineer is looking at may have compared against a fresh capture, but a
+    review must not open a second conversation with the device at the moment
+    they are deciding whether to have the first — so this reads the stored
+    capture, and says which one it read.
+    """
+    from backend import config_push
+    from backend.store import store
+
+    report = config_push.preview(session, text, fresh=False)
+    rows = report.get("lines") or []
+
+    marks = {"add": "+", "remove": "-", "present": "="}
+    classified = "\n".join(
+        f"{marks.get(row.get('status'), '?')} {row.get('text', '')}" for row in rows)
+
+    hostname = session.get("hostname") or ""
+    snapshot = store.latest_snapshot(hostname) if hostname else None
+    context = _stanzas((snapshot or {}).get("content") or "", _targets(rows))
+    context_text = _cap(redact_text("\n".join(context)),
+                        int(advanced("ai.review_context_lines")), "configuration")
+
+    commands = report.get("commands") or {}
+    dangerous = report.get("dangerous") or []
+
+    parts = [
+        f"I am about to apply this change to {hostname or 'a device'} "
+        f"({report.get('platform', 'unknown platform')}). Nothing has been sent "
+        f"to it — this is the dry run.",
+        "",
+        f"ShellMate's preview says: {report.get('summary', '')}",
+        f"The lines would be wrapped in `{commands.get('enter', '')}` … "
+        f"`{commands.get('exit', '')}`.",
+        "",
+        "The proposed change, with ShellMate's own classification "
+        "(+ new, = already present, - a removal whose target exists):",
+        "```",
+        redact_text(classified),
+        "```",
+    ]
+    if dangerous:
+        parts += ["",
+                  "The guardrail would hold these lines, and they need "
+                  "confirming before they are sent:",
+                  "```", redact_text("\n".join(dangerous)), "```"]
+    if context_text.strip():
+        parts += ["",
+                  "The parts of the running configuration these lines land in, "
+                  "from ShellMate's latest capture:",
+                  "```", context_text, "```"]
+    elif hostname and not snapshot:
+        parts += ["",
+                  "ShellMate holds no capture of this device, so every line "
+                  "above reads as new and there is no current configuration to "
+                  "compare against. Say so if it matters to your answer."]
+    parts += ["", REVIEW_QUESTION]
+    return "\n".join(parts)
+
+
+__all__ = ["diff_prompt", "drift_facts", "push_review_prompt",
+           "DIFF_QUESTION", "REVIEW_QUESTION"]

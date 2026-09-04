@@ -14,6 +14,13 @@ exists.
   in the chat asks the same thing. The diff is masked and capped on the
   server, like everything else that leaves the machine.
 
+- **Review with the assistant**, on a configuration preview. Before you press
+  Apply, the classified lines and the stanzas they land in go to the
+  assistant with a fixed review: what the change does, ordering problems, a
+  missing `no shutdown` or `commit`, what else it touches, and the lines that
+  would undo it. Nothing is sent to the device, and the preview stays open
+  beside the answer.
+
 - An **update channel** under Stockton → Diagnostics: `stable` offers only
   full releases, `beta` also offers prereleases for people trying a build
   early, marked Beta in the update window. **What's new in this version**

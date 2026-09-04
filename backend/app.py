@@ -4682,6 +4682,31 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     # queue of pending analyses behind it.
                     continue
 
+            # Review a proposed configuration change before it is applied
+            # (#550). Nothing reaches the device: the preview is recomputed
+            # against the *stored* capture, and the classified lines and the
+            # stanzas they land in are masked here, not in the browser.
+            review = msg.get("review_request")
+            if isinstance(review, dict) and review.get("text"):
+                sess = session_manager.get_session(session_id) if session_id else None
+                if sess is None:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": "That session is no longer open, so there is "
+                                   "nothing to review the change against.",
+                    }))
+                    continue
+                try:
+                    from backend.ai import explain
+                    user_message = await asyncio.to_thread(
+                        explain.push_review_prompt, sess, str(review.get("text")))
+                except Exception as exc:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": f"The change could not be reviewed: {exc}",
+                    }))
+                    continue
+
             # Investigate mode (#403): how many steps have been approved.
             step = msg.get("investigate_step")
             investigate_step = int(step) if isinstance(step, (int, float)) else None

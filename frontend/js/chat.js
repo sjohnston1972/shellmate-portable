@@ -552,6 +552,63 @@
     }));
   }
 
+  /**
+   * Ask the assistant to review a proposed configuration change (#550).
+   *
+   * The preview dialog stays open behind this; the answer lands in the chat
+   * pane beside it. Only the lines the engineer typed go up — the server
+   * re-runs the preview against the stored capture, so the classification and
+   * the surrounding stanzas are read, capped and masked where `outbound` can
+   * see them. Nothing here reaches the device: reviewing a change must not
+   * start a second conversation with a switch at the moment somebody is
+   * deciding whether to have the first.
+   *
+   * @param {{text: string, sessionId?: string, label?: string}} spec
+   */
+  function askForReview(spec) {
+    const opts = spec || {};
+    if (!opts.text || !opts.text.trim()) return;
+    _revealPanel();
+    if (isStreaming) {
+      appendErrorBubble('One question at a time — this one is still being answered.');
+      return;
+    }
+    if (!chatWs || chatWs.readyState !== WebSocket.OPEN) {
+      appendErrorBubble('The assistant is not connected, so the change cannot be reviewed.');
+      return;
+    }
+    const activeTab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+    const sid = opts.sessionId || (activeTab ? activeTab.sessionId : null);
+
+    const asked = `Review this configuration change before I apply it${opts.label ? ' — ' + opts.label : ''}.`;
+    appendUserBubble(asked);
+    if (typeof window.addJiraChatMessage === 'function') {
+      window.addJiraChatMessage('user', asked);
+    }
+
+    const history = _recentHistory();
+    startStreamingBubble();
+    if (streamingBubble && sid) streamingBubble.dataset.contextSession = sid;
+    isStreaming = true;
+    sendBtn.disabled = true;
+
+    const openIds = typeof window.getOpenSessionIds === 'function' ? window.getOpenSessionIds() : [];
+    const picked = typeof window.getChatContextSelection === 'function'
+      ? window.getChatContextSelection() : null;
+    chatWs.send(JSON.stringify({
+      message:        '',
+      history,
+      review_request: { text: opts.text },
+      session_id:     sid,
+      open_session_ids: openIds,
+      context_session_ids: picked,
+      backend:        currentBackend,
+      model:          currentModel,
+      context_mode:   picked ? 'selected' : contextMode,
+      mode:           typeof window.getShellmateMode === 'function' ? window.getShellmateMode() : 'tshoot',
+    }));
+  }
+
   /** Bring the chat pane back if it is hidden — an answer nobody can see is none. */
   function _revealPanel() {
     const ai = (window.shellmateSettings || {}).ai || {};
@@ -1382,6 +1439,7 @@
   // Used by the diff window's Explain button and the config-push review
   // (#549, #550). Both send identifiers, never device configuration.
   window.shellmateAskAboutDiff = askAboutDiff;
+  window.shellmateAskForReview = askForReview;
   window._chatSetBackend     = (val) => {
     if (backendSelect) backendSelect.value = val;
     const idx = val.indexOf(':');

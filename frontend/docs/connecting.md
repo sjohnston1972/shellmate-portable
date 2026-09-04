@@ -324,6 +324,26 @@ preview and pressed Apply.
 4. **See what changed.** The configuration is captured before and after,
    both go into the archive, and the diff opens in the configuration panel.
 
+### Review with the assistant
+
+The preview carries a **Review with the assistant** button. It asks for the
+five things a second pair of eyes is worth: the intended effect, anything that
+has to happen in a different order, an omission such as a missing `no
+shutdown` or `commit`, what else on the device the change touches, and the
+lines that would undo it.
+
+The dialog stays open and the answer arrives in the chat pane beside it, so
+the preview is still on screen to read the review against. Pressing it changes
+nothing about what Apply will do, and **nothing is sent to the device** — the
+review is built from the preview you are looking at and the stored capture,
+never a fresh one.
+
+What goes to the assistant is the platform, the classified lines, the
+guardrail hits, and the stanzas of the running configuration your lines land
+in — masked on the server like everything else that leaves the machine.
+**Configuration sent with a push review** in Stockton, under AI Assistant,
+caps how much surrounding configuration travels; zero sends the change alone.
+
 ### The guardrail
 
 A line on the platform's dangerous list — `reload`, `shutdown`, `write

@@ -1762,6 +1762,9 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 .push-preview .push-remove { color: var(--error, #f38ba8); }
 .push-preview .push-present { color: var(--on-surface-muted); }
 .push-danger { margin-top: 6px; color: var(--error, #f38ba8); font-size: 12px; }
+/* Review with the assistant (#550) — a sibling of the scrolling listing, so
+   it stays in view however long the change is. */
+.push-review-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 
 /* Timed replay (#415) */
 #replay-controls { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
