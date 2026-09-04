@@ -19,6 +19,8 @@ the vault where nothing can reach it.
     python test_profiles.py
 """
 
+import csv
+import io
 import json
 import shutil
 import sys
@@ -75,6 +77,10 @@ def reset(entries: list[dict] | None = None) -> None:
     plaintext = _temp / "credentials-plaintext.json"
     if plaintext.exists():
         plaintext.unlink()
+
+
+#: A value that must never reach an export or profiles.json.
+CSV_SECRET_VALUE = "TOP-SECRET-DEVICE-PASSWORD"
 
 
 def test_identity() -> None:
@@ -779,6 +785,278 @@ def test_tags() -> None:
           str(profiles._load()[0].get("tags")))
 
 
+# ---------------------------------------------------------------------------
+# The estate as a spreadsheet (#535)
+#
+# Two of these are security properties rather than conveniences, and both fail
+# silently if they regress: a password column quietly stripped leaves somebody
+# believing their passwords are in ShellMate, and an un-neutralised cell is a
+# formula that runs the moment the export is opened.
+# ---------------------------------------------------------------------------
+
+
+def test_a_password_column_is_refused_not_stripped() -> None:
+    print("\n-- A CSV carrying passwords --")
+    reset()
+
+    text = ("name,hostname,username,password\n"
+            "core-sw-01,10.1.1.1,admin,hunter2\n")
+    refused = ""
+    try:
+        profiles.import_csv(text)
+    except ValueError as exc:
+        refused = str(exc)
+
+    check("a password column stops the whole import",
+          "password" in refused.lower(), refused or "it was accepted")
+    check("and nothing was written",
+          profiles._load() == [], str(profiles._load()))
+
+    # The point of refusing rather than stripping: the caller is told, so the
+    # interface can say why. A silent strip reports success.
+    check("the message says what to do instead",
+          "shared credential" in refused, refused)
+
+    for header in ("Enable Password", "SSH passphrase", "api secret"):
+        raised = False
+        try:
+            profiles.import_csv(f"name,hostname,{header}\na,10.1.1.1,x\n")
+        except ValueError:
+            raised = True
+        check(f"'{header}' is refused too", raised)
+
+
+def test_a_csv_becomes_connections() -> None:
+    print("\n-- Reading an estate in --")
+    reset()
+
+    text = (
+        "Name,IP Address,Port,Type,User,Groups,Platform\n"
+        "core-sw-01,10.1.1.1,22,ssh,admin,site-004/core,cisco_ios\n"
+        "acc-sw-01,10.1.1.2,,ssh,admin,\"site-004/access,production\",\n"
+        "old-term,10.1.1.9,23,telnet,,site-004,\n"
+    )
+
+    preview = profiles.import_csv(text)
+    check("the header row is recognised by its aliases",
+          preview["columns"][:4] == ["name", "hostname", "port", "type"],
+          str(preview["columns"]))
+    check("three new, none already saved",
+          (preview["new"], preview["already_saved"]) == (3, 0), str(preview))
+    check("a preview writes nothing", profiles._load() == [])
+
+    applied = profiles.import_csv(text, apply=True)
+    check("applying saves them", applied["new"] == 3, str(applied))
+
+    saved = {p["name"]: p for p in profiles._load()}
+    check("the port defaults per transport",
+          saved["acc-sw-01"]["port"] == 22 and saved["old-term"]["port"] == 23,
+          str([saved["acc-sw-01"]["port"], saved["old-term"]["port"]]))
+    check("groups arrive as tags, nesting intact",
+          saved["acc-sw-01"]["tags"] == ["site-004/access", "production"],
+          str(saved["acc-sw-01"].get("tags")))
+    check("the platform is carried across",
+          saved["core-sw-01"]["platform"] == "cisco_ios")
+
+    again = profiles.import_csv(text, apply=True)
+    check("importing the same file twice adds nothing",
+          (again["new"], again["already_saved"]) == (0, 3), str(again))
+    check("and there are still three connections",
+          len(profiles._load()) == 3, str(len(profiles._load())))
+
+
+def test_a_bad_row_is_named_and_the_rest_go_in() -> None:
+    print("\n-- One bad row --")
+    reset()
+
+    text = (
+        "name,hostname,port,type\n"
+        "good,10.1.1.1,22,ssh\n"
+        "no-address,,22,ssh\n"
+        "bad-port,10.1.1.3,notaport,ssh\n"
+        "console,COM3,,serial\n"
+        "wrong-type,10.1.1.4,22,carrier-pigeon\n"
+    )
+    result = profiles.import_csv(text, apply=True)
+    check("the readable row went in", result["new"] == 1, str(result))
+    check("four rows were rejected", len(result["rejected"]) == 4,
+          str(result["rejected"]))
+
+    reasons = {row["line"]: row["why"] for row in result["rejected"]}
+    check("each rejection names its line number",
+          sorted(reasons) == [3, 4, 5, 6], str(sorted(reasons)))
+    check("and says why, not just that",
+          "hostname" in reasons[3] and "port number" in reasons[4]
+          and "COM port" in reasons[5] and "carrier-pigeon" in reasons[6],
+          str(reasons))
+
+
+def test_an_unknown_credential_rejects_the_row() -> None:
+    """Never silently unattached: the row would import and never connect."""
+    print("\n-- Credential by name --")
+    reset()
+    entry = profiles.save_credential_set("Lab login", "admin", "", "plaintext")
+
+    result = profiles.import_csv(
+        "name,hostname,type,credential\n"
+        "sw1,10.2.1.1,ssh,Lab login\n"
+        "sw2,10.2.1.2,ssh,Nothing called this\n",
+        apply=True)
+
+    check("the named credential is attached by name",
+          profiles._load()[0].get("credential_ref") == entry["id"],
+          str(profiles._load()))
+    check("an unknown name rejects the row rather than dropping the link",
+          len(result["rejected"]) == 1
+          and "shared credential" in result["rejected"][0]["why"],
+          str(result["rejected"]))
+
+
+def test_a_bulk_import_is_one_write() -> None:
+    """`retag_many`'s rule: one load and one save however many arrive."""
+    print("\n-- One load, one save --")
+    reset()
+
+    writes = []
+    original = profiles._save
+    profiles._save = lambda entries: (writes.append(len(entries)), original(entries))[1]
+    try:
+        rows = [{"name": f"sw{n}", "hostname": f"10.3.0.{n}", "port": 22,
+                 "connection_type": "ssh", "username": "admin"}
+                for n in range(1, 51)]
+        profiles.save_many(rows)
+    finally:
+        profiles._save = original
+
+    check("fifty connections cost one write", writes == [50], str(writes))
+    check("and all fifty are there", len(profiles._load()) == 50)
+
+
+def test_an_import_adds_groups_rather_than_replacing_them() -> None:
+    print("\n-- Re-importing does not empty a group --")
+    reset()
+    profiles.save_many([{"name": "sw1", "hostname": "10.4.0.1", "port": 22,
+                         "connection_type": "ssh", "username": "admin",
+                         "tags": ["glasgow"]}])
+
+    profiles.import_csv("name,hostname,type,username,groups\n"
+                        "sw1,10.4.0.1,ssh,admin,production\n", apply=True)
+    check("the group it already had survives the import",
+          profiles._load()[0]["tags"] == ["glasgow", "production"],
+          str(profiles._load()[0].get("tags")))
+
+
+def test_the_export_cannot_be_a_formula() -> None:
+    """The #513 lesson: a device name is not ours to trust."""
+    print("\n-- Formula injection --")
+    reset()
+    profiles.save_many([
+        {"name": "=cmd|'/c calc'!A1", "hostname": "10.5.0.1", "port": 22,
+         "connection_type": "ssh", "username": "admin"},
+        {"name": "+1234", "hostname": "10.5.0.2", "port": 22,
+         "connection_type": "ssh", "username": "-admin"},
+        {"name": "@SUM(A1)", "hostname": "10.5.0.3", "port": 22,
+         "connection_type": "ssh", "username": "admin"},
+    ])
+
+    text = profiles.export_csv()
+    rows = list(csv.reader(io.StringIO(text)))
+    body = rows[1:]
+
+    dangerous = [cell for row in body for cell in row
+                 if cell[:1] in ("=", "+", "-", "@", "\t", "\r")]
+    check("no exported cell begins as a formula", not dangerous, str(dangerous))
+    check("the value is kept, only prefixed",
+          any(cell == "'=cmd|'/c calc'!A1" for row in body for cell in row),
+          str(body))
+    check("a username starting with a dash is neutralised too",
+          any(cell == "'-admin" for row in body for cell in row), str(body))
+
+
+def test_the_export_carries_no_secret() -> None:
+    print("\n-- Nothing secret leaves in the export --")
+    reset()
+    entry = profiles.save_credential_set("Lab login", "admin", CSV_SECRET_VALUE, "plaintext")
+    saved = profiles.save_many([{"name": "sw1", "hostname": "10.6.0.1",
+                                 "port": 22, "connection_type": "ssh",
+                                 "username": "admin", "tags": ["glasgow"],
+                                 "credential_ref": entry["id"]}])["created"][0]
+    profiles.save_plaintext_credentials(saved["id"], {"password": CSV_SECRET_VALUE})
+
+    text = profiles.export_csv()
+    header = next(csv.reader(io.StringIO(text)))
+
+    check("no column is a secret",
+          not (set(header) & profiles.SECRET_FIELDS), str(header))
+    check("and no stored password appears anywhere in the file",
+          CSV_SECRET_VALUE not in text)
+    check("the credential column is the set's name, which can be re-imported",
+          "Lab login" in text, text)
+
+
+def test_the_export_can_be_one_group() -> None:
+    print("\n-- Exporting one group --")
+    reset()
+    profiles.save_many([
+        {"name": "a", "hostname": "10.7.0.1", "port": 22, "connection_type": "ssh",
+         "username": "admin", "tags": ["site-004"]},
+        {"name": "b", "hostname": "10.7.0.2", "port": 22, "connection_type": "ssh",
+         "username": "admin", "tags": ["site-004/access"]},
+        {"name": "c", "hostname": "10.7.0.3", "port": 22, "connection_type": "ssh",
+         "username": "admin", "tags": ["site-005"]},
+    ])
+
+    text = profiles.export_csv("site-004")
+    rows = list(csv.reader(io.StringIO(text)))[1:]
+    names = sorted(row[0] for row in rows)
+    check("the subtree comes with the group, and nothing else does",
+          names == ["a", "b"], str(names))
+    # `site-004` must not swallow `site-0040`; the separator is what makes the
+    # prefix match safe, the same rule profiles_tagged() uses.
+    check("a longer group name that merely starts the same is left out",
+          "site-005" not in text)
+
+
+def test_an_export_re_imports_as_itself() -> None:
+    print("\n-- Round trip --")
+    reset()
+    profiles.save_many([{"name": "core-sw-01", "hostname": "10.8.0.1",
+                         "port": 2222, "connection_type": "ssh",
+                         "username": "neteng", "tags": ["site-004/core"],
+                         "platform": "cisco_ios"}])
+    text = profiles.export_csv()
+
+    result = profiles.import_csv(text, apply=True)
+    check("re-importing an export adds nothing",
+          (result["new"], result["already_saved"]) == (0, 1), str(result))
+
+    reset()
+    profiles.import_csv(text, apply=True)
+    restored = profiles._load()[0]
+    check("into an empty ShellMate it comes back whole",
+          (restored["name"], restored["hostname"], restored["port"],
+           restored["username"], restored["tags"], restored["platform"])
+          == ("core-sw-01", "10.8.0.1", 2222, "neteng",
+              ["site-004/core"], "cisco_ios"),
+          str(restored))
+
+
+def test_a_file_with_no_header_is_read_in_column_order() -> None:
+    print("\n-- No header row --")
+    reset()
+    result = profiles.import_csv(
+        "core-sw-01,10.9.0.1,22,ssh,admin,glasgow,,\n", apply=True)
+    check("the documented column order is assumed", result["new"] == 1, str(result))
+    check("and the row is read as a device, not a header",
+          profiles._load()[0]["hostname"] == "10.9.0.1", str(profiles._load()))
+
+    reset()
+    semicolons = profiles.import_csv(
+        "name;hostname;port;type;username\nsw1;10.9.0.2;22;ssh;admin\n", apply=True)
+    check("a semicolon-separated export is read as one too",
+          semicolons["new"] == 1, str(semicolons))
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Connection profiles")
@@ -802,7 +1080,18 @@ def main() -> int:
                  test_deleting_a_shared_credential_detaches_what_used_it,
                  test_a_set_needs_a_name_and_holds_no_secret,
                  test_the_two_ssh_forms_are_one_device,
-                 test_tags):
+                 test_tags,
+                 test_a_password_column_is_refused_not_stripped,
+                 test_a_csv_becomes_connections,
+                 test_a_bad_row_is_named_and_the_rest_go_in,
+                 test_an_unknown_credential_rejects_the_row,
+                 test_a_bulk_import_is_one_write,
+                 test_an_import_adds_groups_rather_than_replacing_them,
+                 test_the_export_cannot_be_a_formula,
+                 test_the_export_carries_no_secret,
+                 test_the_export_can_be_one_group,
+                 test_an_export_re_imports_as_itself,
+                 test_a_file_with_no_header_is_read_in_column_order):
         try:
             test()
         except Exception as exc:

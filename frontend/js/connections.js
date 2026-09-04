@@ -1483,6 +1483,209 @@
     connectSpinner.classList.toggle('hidden', !loading);
   }
 
+  // -------------------------------------------------------------------------
+  // The estate as a spreadsheet (#535)
+  //
+  // A 200-site team already holds its estate somewhere — a spreadsheet, or an
+  // export from whatever monitors it. Typing that into the dialog, or
+  // sweeping every subnet to rediscover it, is the reason it stays there.
+  //
+  // The preview before the write is the whole point: the same parser that
+  // will do the work counts the rows first, so "142 new, 17 already saved,
+  // 3 unreadable rows" is a promise rather than an estimate.
+  // -------------------------------------------------------------------------
+
+  /** The columns, shown in the dialog and used as the placeholder. */
+  const CSV_HEADER = 'name,hostname,port,type,username,groups,platform,credential';
+
+  /** A file chosen from disk, read here rather than uploaded. */
+  function _pickCsvFile() {
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.csv,.txt,text/csv,text/plain';
+      input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        if (!file) { resolve(null); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => resolve(null);
+        reader.readAsText(file);
+      });
+      input.click();
+    });
+  }
+
+  /** The "or choose a file" row that sits above the textarea. */
+  function _importContent() {
+    const row = document.createElement('div');
+    row.className = 'csv-import-row';
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn-secondary';
+    button.innerHTML = '<span class="material-symbols-outlined">upload</span>'
+      + 'Choose a CSV file…';
+    button.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const text = await _pickCsvFile();
+      if (text === null) return;
+      // The dialog builds its own controls, so the textarea is found rather
+      // than held: there is exactly one in a ShellMate dialog at a time.
+      const box = document.querySelector('.sm-dialog textarea');
+      if (box) { box.value = text; box.focus(); }
+    });
+
+    const hint = document.createElement('p');
+    hint.className = 'csv-import-hint';
+    hint.textContent = 'Columns: ' + CSV_HEADER
+      + '. A header row is detected; without one the columns are read in that '
+      + 'order. Groups are comma-separated and may be nested (site-004/access). '
+      + 'Credential is the name of a shared credential, and ShellMate will not '
+      + 'import passwords.';
+
+    row.append(button, hint);
+    return row;
+  }
+
+  async function _postImport(text, apply) {
+    const res = await fetch('/api/profiles/import', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ text, apply }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Server error ${res.status}`);
+    return data;
+  }
+
+  /** Paste or open a CSV, see what it comes to, then save it. */
+  async function importEstate() {
+    const answer = await window.shellmateDialog.form({
+      title: 'Import connections',
+      body:  'Paste rows from a spreadsheet, or choose a CSV file. Nothing is '
+             + 'saved until you have seen what it comes to.',
+      content: _importContent(),
+      confirmLabel: 'Read it',
+      fields: [{ name: 'text', label: 'Rows', type: 'textarea',
+                 placeholder: CSV_HEADER }],
+    });
+    if (!answer || !(answer.text || '').trim()) return;
+
+    let preview;
+    try {
+      preview = await _postImport(answer.text, false);
+    } catch (err) {
+      await window.shellmateDialog.alert({
+        title: 'That file could not be read', body: String(err.message || err),
+      });
+      return;
+    }
+
+    const bad = preview.rejected || [];
+    const ok = await window.shellmateDialog.confirm({
+      title: `Import ${preview.new} connection${preview.new === 1 ? '' : 's'}?`,
+      body:  `${preview.rows} row${preview.rows === 1 ? '' : 's'} read: `
+             + `${preview.new} new, ${preview.already_saved} already saved, `
+             + `${bad.length} unreadable. Rows already saved keep the name and `
+             + `groups they have and gain any this file adds.`,
+      // Named, not counted. "3 unreadable rows" tells nobody which three.
+      list:  bad.slice(0, 12).map(row => ({ text: `Line ${row.line}: ${row.why}` })),
+      confirmLabel: preview.new ? 'Import them' : 'Import anyway',
+    });
+    if (!ok) return;
+
+    try {
+      const result = await _postImport(answer.text, true);
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          icon: 'upload', title: 'Connections imported',
+          body: `${result.new} added, ${result.already_saved} already saved`
+                + (result.rejected.length ? `, ${result.rejected.length} skipped.` : '.'),
+        });
+      }
+      if (typeof window.renderWelcomeProfiles === 'function') {
+        await window.renderWelcomeProfiles();
+      }
+    } catch (err) {
+      await window.shellmateDialog.alert({
+        title: 'Nothing was imported', body: String(err.message || err),
+      });
+    }
+  }
+
+  /**
+   * Write the estate, or one group, out as CSV.
+   *
+   * Saved through the platform's folder dialog where there is a native
+   * window, because a browser download there does nothing visible — the same
+   * lesson logs.js records (#578). The blob is the fallback, not the plan.
+   */
+  async function exportEstate(group) {
+    const key = group || '';
+    try {
+      const saved = await fetch('/api/profiles/export', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ group: key }),
+      });
+      if (saved.ok) {
+        const data = await saved.json();
+        if (data.cancelled) return;
+        if (window.shellmateAlerts) {
+          window.shellmateAlerts.notify({
+            global: true, icon: 'download', title: 'Connections exported',
+            body: `Saved to ${data.path}. The folder has been opened.`,
+          });
+        }
+        return;
+      }
+      if (saved.status !== 409) {
+        const err = await saved.json().catch(() => ({}));
+        throw new Error(err.detail || `server returned ${saved.status}`);
+      }
+    } catch (err) {
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          global: true, severity: 'warning', icon: 'error',
+          title: 'Could not export the connections', body: String(err.message || err),
+        });
+      }
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/profiles/export.csv?group=' + encodeURIComponent(key));
+      if (!res.ok) throw new Error(`server returned ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shellmate-' + (key.replace(/[^a-z0-9._-]+/gi, '-') || 'connections') + '.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          global: true, icon: 'download', title: 'Download started',
+          body: "Check your browser's downloads folder.",
+        });
+      }
+    } catch (err) {
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          global: true, severity: 'warning', icon: 'error',
+          title: 'Could not export the connections', body: String(err.message || err),
+        });
+      }
+    }
+  }
+
+  window.shellmateEstateCsv = { importEstate, exportEstate };
+
+
+
   window.showConnectionDialog  = showConnectionDialog;
   window.hideConnectionDialog  = hideConnectionDialog;
   window.renderWelcomeProfiles = renderWelcomeProfiles;

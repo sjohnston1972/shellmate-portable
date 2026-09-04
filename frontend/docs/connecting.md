@@ -135,6 +135,46 @@ connection named after the device but still dialling the IP works everywhere,
 whereas one dialling the name only works where that name resolves — which on
 a management network is frequently nowhere.
 
+### Importing and exporting the estate
+
+If the estate is already in a spreadsheet or comes out of whatever monitors
+it, you do not have to type it in again. Right-click the empty space in the
+group tree, or the tree's root row, for **Import connections…** — paste rows
+straight from the spreadsheet, or choose a `.csv` file.
+
+The columns are:
+
+```
+name,hostname,port,type,username,groups,platform,credential
+```
+
+A header row is detected and its names can vary — `IP Address`, `host`,
+`user`, `tags` and `site` are all understood. Without a header the columns are
+read in the order above. `port` may be left empty and defaults to 22 or 23 by
+type. `groups` is comma-separated inside its cell and may be nested, so
+`site-004/access,production` puts one device in two groups. `credential` is
+the **name** of a shared credential — the row is rejected if there is no such
+credential, rather than importing a connection that can never log in.
+
+Nothing is saved until you have seen what the file comes to: the preview says
+how many rows are new, how many are already saved, and names each row it could
+not read with the line number and the reason. A device already saved keeps the
+name and groups it has and gains any the file adds — re-importing an updated
+spreadsheet never empties a group you arranged by hand.
+
+**ShellMate will not import passwords.** A file with a `password` column is
+refused outright rather than having the column quietly dropped, because an
+import that reports success would leave you believing the passwords are in
+ShellMate when they are only in the file. Use a shared credential, or save the
+password against the connection afterwards.
+
+**Export as CSV…** is on the same root menu for the whole estate, and on any
+group's own menu for that group and everything nested beneath it. The file has
+the same columns, so it re-imports as itself. It never contains a password:
+the credential column holds the name of a shared credential and nothing else.
+Cells beginning `=`, `+`, `-` or `@` are written with a leading apostrophe, so
+a device named after a spreadsheet formula cannot run when the file is opened.
+
 ## Remembering passwords
 
 Tick **Remember these credentials in the encrypted vault** and the password

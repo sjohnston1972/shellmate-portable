@@ -2283,6 +2283,9 @@
         onClick: () => _backupSchedule(group) },
       { icon: 'download', label: 'Back up configurations now', disabled: empty, title: why,
         onClick: () => _backupNow(group) },
+      // The group and everything nested under it, as a spreadsheet (#535).
+      { icon: 'table', label: 'Export as CSV…', disabled: empty, title: why,
+        onClick: () => window.shellmateEstateCsv.exportEstate(group.key) },
       'sep',
       { icon: 'delete_forever', label: 'Delete group…', danger: true,
         onClick: () => deleteGroup(group) },
@@ -2301,6 +2304,14 @@
     const loose = _ungroupedProfiles().length;
     window.shellmateMenu.open(event, [
       { icon: 'add', label: 'New group...', onClick: () => newGroup() },
+      'sep',
+      // The estate as a spreadsheet (#535). At the root because that is what
+      // it acts on — everything — and because the scanner was until now the
+      // only bulk way in.
+      { icon: 'upload', label: 'Import connections…',
+        onClick: () => window.shellmateEstateCsv.importEstate() },
+      { icon: 'download', label: 'Export all as CSV…',
+        onClick: () => window.shellmateEstateCsv.exportEstate('') },
       'sep',
       { icon: 'delete_forever', danger: true, disabled: !loose,
         label: loose ? `Delete all ${loose} ungrouped connection${loose === 1 ? '' : 's'}…` : 'Nothing ungrouped to delete',

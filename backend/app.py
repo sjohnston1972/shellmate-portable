@@ -2332,6 +2332,78 @@ async def create_profile(request: SaveProfileRequest) -> dict:
     return profile
 
 
+class ProfileImportRequest(BaseModel):
+    """Body for POST /api/profiles/import."""
+
+    #: The CSV itself — pasted from a spreadsheet or read from a file.
+    text: str = ""
+    #: False previews, True writes. The same parse either way, so the counts
+    #: shown before cannot disagree with what happens after.
+    apply: bool = False
+
+
+class ProfileExportRequest(BaseModel):
+    """Body for POST /api/profiles/export."""
+
+    #: One group and everything nested under it. Empty means the estate.
+    group: str = ""
+
+
+@app.post("/api/profiles/import")
+async def import_profiles(request: ProfileImportRequest) -> dict:
+    """
+    Read an estate out of a CSV (#535), previewing it or saving it.
+
+    A file carrying a password column is refused outright rather than having
+    the column stripped — see profiles.import_csv.
+    """
+    try:
+        return await asyncio.to_thread(
+            profiles_module.import_csv, request.text, request.apply)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/profiles/export.csv")
+async def export_profiles_csv(group: str = "") -> Response:
+    """The estate, or one group, as CSV. Never carries a secret."""
+    text = await asyncio.to_thread(profiles_module.export_csv, group)
+    stem = "shellmate-" + (re.sub(r"[^a-z0-9._-]+", "-", group.lower()) or "connections")
+    return Response(
+        content=text, media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{stem}.csv"'})
+
+
+@app.post("/api/profiles/export")
+async def save_profiles_csv(request: ProfileExportRequest) -> dict:
+    """
+    Save the CSV where the user chooses, through the platform's own folder
+    dialog — the shape POST /api/logs/{filename}/save established, because in
+    the native window a browser download does nothing anybody can see.
+
+    Answers 409 without a native window, and the page falls back to fetching
+    /api/profiles/export.csv as a blob.
+    """
+    if not desktop.has_native_window():
+        raise HTTPException(status_code=409, detail="No native window; use the browser download.")
+    folder = await asyncio.to_thread(desktop.pick_directory, "Export connections to…")
+    if not folder:
+        return {"cancelled": True}
+
+    text = await asyncio.to_thread(profiles_module.export_csv, request.group)
+    stem = "shellmate-" + (re.sub(r"[^a-z0-9._-]+", "-", request.group.lower()) or "connections")
+    target = Path(folder) / f"{stem}.csv"
+    try:
+        # utf-8-sig: Excel reads a plain UTF-8 CSV as the system code page and
+        # mangles every non-ASCII device name in the estate.
+        await asyncio.to_thread(target.write_text, text, "utf-8-sig")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not write the file: {exc}") from exc
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(desktop.reveal, str(Path(folder)))
+    return {"path": str(target)}
+
+
 @app.delete("/api/profiles/untagged")
 async def delete_untagged_profiles() -> dict:
     """Delete every connection that is in no group (#454). Returns the count."""

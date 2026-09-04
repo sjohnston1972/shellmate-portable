@@ -6,6 +6,14 @@ exists.
 
 ## 1.1.3
 
+- **Import and export the estate as CSV.** Right-click the group tree's
+  background for **Import connections…** — paste rows from a spreadsheet or
+  choose a file — and **Export all as CSV…**; any group's own menu exports
+  that group and everything nested under it. A preview says how many rows
+  are new, how many are already saved, and names each one it could not read
+  before anything is written. A file carrying a `password` column is refused
+  outright rather than having the column quietly dropped.
+
 - An **update channel** under Stockton → Diagnostics: `stable` offers only
   full releases, `beta` also offers prereleases for people trying a build
   early, marked Beta in the update window. **What's new in this version**

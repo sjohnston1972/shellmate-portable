@@ -7073,6 +7073,26 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
   color: var(--on-surface-dim);
 }
 
+/* Importing an estate from a spreadsheet (#535). The file button sits above
+   the paste box rather than beside it, because the two are alternatives and
+   a row of controls would read as "do both". */
+.csv-import-row {
+  margin: 0 0 12px;
+}
+
+.csv-import-row .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.csv-import-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--on-surface-dim);
+}
+
 /* A choice between two outcomes, each with its own sentence — deleting a
    group keeps its connections or takes them too (#360). Radios rather than
    a checkbox: neither outcome is a modifier on the other, and the safe one

@@ -15,7 +15,9 @@ profile id and the backend fills the credentials in server-side, so a
 remembered password exists only on disk (encrypted) and in memory during the
 handshake.
 """
+import csv
 import functools
+import io
 import ipaddress
 import json
 import threading
@@ -1289,3 +1291,327 @@ def _delete_where(predicate) -> int:
     _save(kept)
     forget_many(removed)
     return len(removed)
+
+
+# ---------------------------------------------------------------------------
+# The estate as a spreadsheet (#535)
+#
+# The only bulk route into ShellMate was the scanner, which means a team that
+# already holds its estate in a spreadsheet or a monitoring export had to
+# either type two hundred sites into the dialog or sweep every subnet to
+# rediscover what it already knew.
+#
+# Two rules shape this and neither is negotiable:
+#
+# **A password column is refused, not stripped.** SECRET_FIELDS would quietly
+# drop it and the import would report success, leaving somebody believing the
+# passwords went in — and a file full of plaintext device passwords sitting in
+# their downloads folder because ShellMate implied it was the right shape.
+#
+# **Every exported cell is neutralised against formula injection.** A cell
+# beginning `=`, `+`, `-`, `@`, tab or carriage return is executed on open by
+# Excel and Sheets, and a device name is not ours to trust — a connection
+# named `=cmd|...` came from a scan of somebody else's network. This is the
+# same lesson as #513 on the licence portal.
+# ---------------------------------------------------------------------------
+
+#: The columns, in the order they are written and assumed when a file has no
+#: header row. `credential` is the *name* of a shared credential, never a value.
+CSV_COLUMNS = ("name", "hostname", "port", "type", "username", "groups",
+               "platform", "credential")
+
+#: What a header cell may be called. Generous on purpose: the file usually
+#: comes out of a monitoring tool or somebody's own spreadsheet, and refusing
+#: "IP Address" because it is not "hostname" would send them to a text editor.
+_CSV_ALIASES = {
+    "name": "name", "display name": "name", "label": "name", "device": "name",
+    "hostname": "hostname", "host": "hostname", "address": "hostname",
+    "ip": "hostname", "ip address": "hostname", "target": "hostname",
+    "port": "port", "tcp port": "port",
+    "type": "type", "connection type": "type", "transport": "type",
+    "protocol": "type",
+    "username": "username", "user": "username", "login": "username",
+    "groups": "groups", "group": "groups", "tags": "groups", "tag": "groups",
+    "site": "groups",
+    "platform": "platform", "os": "platform", "device type": "platform",
+    "credential": "credential", "credentials": "credential",
+    "credential set": "credential", "shared credential": "credential",
+}
+
+#: Words in a header that mean the file carries secrets. Matched as substrings
+#: because "Enable Password" and "SSH passphrase" are the shapes these arrive
+#: in, and the point is to stop rather than to be precise.
+_CSV_REFUSED_WORDS = ("password", "passphrase", "secret")
+
+#: A leading character a spreadsheet reads as the start of a formula.
+_CSV_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_cell(value) -> str:
+    """
+    One cell, made safe to open in a spreadsheet.
+
+    An apostrophe rather than a quote or an escape: Excel and Sheets both read
+    a leading apostrophe as "this is text", show the value without it, and
+    never evaluate it. Nothing else in either application does all three.
+    """
+    text = "" if value is None else str(value)
+    return "'" + text if text[:1] in _CSV_FORMULA_LEAD else text
+
+
+def _csv_column(cell: str) -> str:
+    """The column a header cell names, or "" if it names none of them."""
+    cleaned = " ".join((cell or "").replace("_", " ").split()).strip().lower()
+    return _CSV_ALIASES.get(cleaned, "")
+
+
+def _read_csv(text: str) -> tuple[list[str], list[tuple[int, list[str]]]]:
+    """
+    Split pasted or uploaded text into columns and numbered rows.
+
+    The delimiter is sniffed rather than assumed. A spreadsheet saved in a
+    locale whose list separator is `;` exports semicolons, and every row would
+    otherwise arrive as one unreadable field — reported as two hundred broken
+    rows rather than as the one thing that is actually wrong.
+
+    Raises:
+        ValueError: Nothing usable, or a column carrying secrets.
+    """
+    if not (text or "").strip():
+        raise ValueError("There is nothing to import.")
+
+    try:
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|")
+    except csv.Error:
+        dialect = csv.excel
+
+    rows = [(number, [cell.strip() for cell in row])
+            for number, row in enumerate(csv.reader(io.StringIO(text), dialect), start=1)
+            if any((cell or "").strip() for cell in row)]
+    if not rows:
+        raise ValueError("There is nothing to import.")
+
+    first = rows[0][1]
+
+    # Checked before anything else, and whatever the row turns out to be. A
+    # file with a password column is refused outright: importing it and
+    # silently discarding the column would leave somebody believing the
+    # passwords are in ShellMate when they are only in the file.
+    for cell in first:
+        lowered = (cell or "").lower()
+        if any(word in lowered for word in _CSV_REFUSED_WORDS):
+            raise ValueError(
+                f"This file has a '{cell}' column. ShellMate will not import "
+                f"passwords from a spreadsheet — take the column out and import "
+                f"the rest, then save the password against the connection or "
+                f"point the rows at a shared credential by name.")
+
+    mapped = [_csv_column(cell) for cell in first]
+    # A header is a row whose cells are column *names*. Two hits is the
+    # threshold: one could be a device genuinely called "name".
+    if sum(1 for column in mapped if column) >= 2:
+        rows = rows[1:]
+        columns = mapped
+    else:
+        columns = list(CSV_COLUMNS)
+
+    if not rows:
+        raise ValueError("That is a header row and nothing else.")
+    return columns, rows
+
+
+def _row_to_profile(record: dict, sets: dict[str, str]) -> dict:
+    """
+    One CSV row as profile fields.
+
+    Raises:
+        ValueError: Said plainly, because it is shown against the row number.
+    """
+    kind = (record.get("type") or "ssh").strip().lower() or "ssh"
+    if kind in ("serial", "console", "com"):
+        raise ValueError("a serial connection names a COM port on one "
+                         "particular machine, so it cannot be imported")
+    if kind not in ("ssh", "telnet"):
+        raise ValueError(f"'{kind}' is not a connection type ShellMate has")
+
+    hostname = (record.get("hostname") or "").strip()
+    if not hostname:
+        raise ValueError("no hostname or address")
+
+    port_text = (record.get("port") or "").strip()
+    if port_text:
+        try:
+            port = int(port_text)
+        except ValueError:
+            raise ValueError(f"'{port_text}' is not a port number") from None
+        if not 1 <= port <= 65535:
+            raise ValueError(f"{port} is not a port number")
+    else:
+        port = DEFAULT_PORTS.get(kind, 22)
+
+    fields = {
+        "name":            (record.get("name") or "").strip() or hostname,
+        "hostname":        hostname,
+        "port":            port,
+        "connection_type": kind,
+        "username":        (record.get("username") or "").strip(),
+        "tags":            normalise_tags(record.get("groups")),
+        "platform":        (record.get("platform") or "").strip(),
+        # So an imported connection can be told from one somebody typed, the
+        # way the scanner's `discovered` flag does.
+        "imported":        True,
+    }
+
+    credential = (record.get("credential") or "").strip()
+    if credential:
+        # Rejected with a reason rather than left unattached. A row that
+        # imports "successfully" and then cannot connect is worse than one
+        # that says which credential it could not find.
+        set_id = sets.get(credential.lower())
+        if not set_id:
+            raise ValueError(f"there is no shared credential called '{credential}'")
+        fields["credential_ref"] = set_id
+
+    return fields
+
+
+@_synchronised
+def save_many(rows: list[dict]) -> dict:
+    """
+    Save many connections in one load and one save (#535).
+
+    The shape `retag_many()` established, for the same reason: `save_profile()`
+    parses and rewrites the whole file per connection, so importing two hundred
+    sites through it would rewrite profiles.json two hundred times.
+
+    A row matching something already saved fills its gaps and **adds** its
+    groups rather than replacing them — the same "adding, never moving" rule
+    the dashboard uses, so re-importing a spreadsheet with one extra column
+    cannot silently empty a group somebody arranged by hand.
+
+    Returns ``created`` and ``existing``, the profiles as stored.
+    """
+    profiles = _load()
+    created: list[dict] = []
+    existing: list[dict] = []
+
+    for fields in rows:
+        cleaned = {k: v for k, v in fields.items() if k not in SECRET_FIELDS}
+        cleaned["tags"] = normalise_tags(cleaned.get("tags"))
+
+        match = find_matching(cleaned, profiles)
+        if match is not None:
+            merged = normalise_tags(normalise_tags(match.get("tags")) + cleaned["tags"])
+            _absorb(match, {k: v for k, v in cleaned.items() if k != "tags"})
+            if merged:
+                match["tags"] = merged
+            existing.append(match)
+            continue
+
+        profile = {"id": str(uuid.uuid4()), **cleaned}
+        if not profile.get("tags"):
+            profile.pop("tags", None)
+        profile["name"] = cleaned.get("name") or cleaned.get("hostname") or "unnamed"
+        profiles.append(profile)
+        created.append(profile)
+
+    if created or existing:
+        _save(profiles)
+    return {"created": created, "existing": existing}
+
+
+def import_csv(text: str, apply: bool = False) -> dict:
+    """
+    Read an estate out of a CSV, previewing it or saving it.
+
+    ``apply=False`` is the preview the dialog shows before anything is
+    written — "142 new, 17 already saved, 3 unreadable rows" — parsed by
+    exactly the code that will do the work, so the numbers cannot disagree
+    with the outcome.
+
+    Raises:
+        ValueError: The file as a whole is unusable: empty, or carrying a
+            password column. A single bad *row* is not this — it is reported
+            in ``rejected`` with its line number and why, and the rest go in.
+    """
+    columns, rows = _read_csv(text)
+    sets = {(entry.get("name") or "").strip().lower(): entry.get("id", "")
+            for entry in _load_sets()}
+
+    prepared: list[dict] = []
+    rejected: list[dict] = []
+    for line, values in rows:
+        record = {column: value for column, value in zip(columns, values) if column}
+        try:
+            prepared.append(_row_to_profile(record, sets))
+        except ValueError as exc:
+            rejected.append({"line": line, "why": str(exc),
+                             "text": ", ".join(values)[:120]})
+
+    result = {
+        "columns":       [column for column in columns if column],
+        "rows":          len(rows),
+        "rejected":      rejected,
+        "applied":       False,
+        "new":           0,
+        "already_saved": 0,
+    }
+
+    if apply:
+        written = save_many(prepared)
+        result.update(applied=True, new=len(written["created"]),
+                      already_saved=len(written["existing"]))
+        return result
+
+    # Counted against what is saved *and* against the rest of the file: the
+    # same device listed twice is one connection, not two, which is what
+    # save_many() will make of it.
+    profiles = _load()
+    seen: set[tuple] = set()
+    for fields in prepared:
+        key = identity(fields)
+        if key in seen or find_matching(fields, profiles) is not None:
+            result["already_saved"] += 1
+        else:
+            result["new"] += 1
+        seen.add(key)
+    return result
+
+
+def export_csv(group: str = "") -> str:
+    """
+    The estate, or one group and everything nested under it, as CSV.
+
+    Never carries a secret: the credential column holds the *name* of a shared
+    credential so the file can be re-imported and re-attached, and a
+    per-connection password has no column at all. SECRET_FIELDS keeps them out
+    of profiles.json in the first place; this keeps them out of the export
+    even if one ever got there.
+    """
+    names = {entry.get("id", ""): entry.get("name", "") for entry in _load_sets()}
+    wanted = (group or "").strip().lower()
+    prefix = f"{wanted}/"
+
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\r\n")
+    writer.writerow(CSV_COLUMNS)
+
+    for profile in _load():
+        tags = normalise_tags(profile.get("tags"))
+        if wanted and not (wanted in tags or any(t.startswith(prefix) for t in tags)):
+            continue
+
+        kind = (profile.get("connection_type") or "ssh").strip().lower()
+        serial = kind == "serial"
+        writer.writerow([_csv_cell(value) for value in (
+            profile.get("name", ""),
+            profile.get("serial_port", "") if serial else profile.get("hostname", ""),
+            "" if serial else (profile.get("port") or DEFAULT_PORTS.get(kind, 22)),
+            kind,
+            profile.get("username", ""),
+            ",".join(tags),
+            profile.get("platform", ""),
+            names.get(profile.get("credential_ref") or "", ""),
+        )])
+
+    return out.getvalue()
