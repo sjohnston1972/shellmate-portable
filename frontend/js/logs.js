@@ -334,5 +334,28 @@
     _viewerFile = '';
   }
 
+  /**
+   * Open one log file by name (#534).
+   *
+   * The tab menu and the status-bar chip both know which file a session is
+   * writing to, and "show me" is the next thing anybody wants. The entry is
+   * looked up so the viewer has its size and date; a file that does not
+   * exist yet — a log with nothing written to it — falls back to the list
+   * rather than to an error, because "there is nothing in it yet" is the
+   * honest answer and the list says so.
+   */
+  window.viewLogFile = async (filename) => {
+    if (filename) {
+      try {
+        const res = await fetch('/api/logs');
+        const files = res.ok ? await res.json() : [];
+        const found = files.find(f => f.filename === filename);
+        if (found) { await openViewer(found); return true; }
+      } catch (_) { /* the list below is the fallback */ }
+    }
+    await openLogs();
+    return false;
+  };
+
   window.openLogs = openLogs;
 })();

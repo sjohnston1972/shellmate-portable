@@ -140,9 +140,13 @@
     // nothing on the network can forge.
     if (info.hostKey) add('Host key', info.hostKey);
 
+    // Which file, not just that there is one (#534): "is this being
+    // recorded" is always followed by "where".
+    if (info.logging && info.logFile) add('Log', info.logFile);
+
     const flags = [];
     if (info.keepAlive) flags.push('keep-alive');
-    if (info.logging) flags.push('logging');
+    if (info.logging && !info.logFile) flags.push('logging');
     if (!info.profileId) flags.push('not saved');
     if (flags.length) add('Also', flags.join(', '));
 

@@ -388,6 +388,15 @@
               aria-label="Copy recent output">
         <span class="material-symbols-outlined">content_copy</span>
       </button>
+      <!-- Only while this session is actually being written to a file (#534),
+           so it is information rather than furniture. Wrapped with its
+           separator, like the usage reading, so hiding it leaves no bare
+           pipe behind. -->
+      <span id="status-logging-wrap" class="hidden"><span class="status-sep">|</span><button
+              type="button" id="status-logging" class="status-btn"
+              title="This session is being written to a file. Click to read it."
+              aria-label="Open this session's log"><span
+              class="material-symbols-outlined">description</span> Logging</button></span>
       <span class="status-sep">|</span>
       <span id="status-tabs">Tabs: 0</span>
       <span class="status-sep">|</span>
@@ -2135,6 +2144,15 @@ GigEth0/2     unassigned    YES unset  down     down
     <span class="material-symbols-outlined">search</span>
     <input type="search" id="term-search-input" placeholder="Find in this terminal…"
            autocomplete="off" spellcheck="false" />
+    <!-- The three toggles xterm's search addon already understands (#531).
+         Lettered rather than iconned: "Aa" and ".*" are what every editor
+         uses, and neither has a glyph in the subsetted icon font. -->
+    <button type="button" id="term-search-case" class="term-search-toggle"
+            aria-pressed="false" title="Match case">Aa</button>
+    <button type="button" id="term-search-word" class="term-search-toggle"
+            aria-pressed="false" title="Whole word only">|ab|</button>
+    <button type="button" id="term-search-regex" class="term-search-toggle"
+            aria-pressed="false" title="Regular expression">.*</button>
     <span id="term-search-count"></span>
     <button type="button" id="term-search-prev" class="icon-btn" title="Previous (Shift+Enter)">
       <span class="material-symbols-outlined">keyboard_arrow_up</span>
@@ -2142,9 +2160,38 @@ GigEth0/2     unassigned    YES unset  down     down
     <button type="button" id="term-search-next" class="icon-btn" title="Next (Enter)">
       <span class="material-symbols-outlined">keyboard_arrow_down</span>
     </button>
+    <!-- The `| include` you cannot run on output that has already scrolled
+         past: only the matching lines, in one list. -->
+    <button type="button" id="term-search-filter" class="icon-btn"
+            aria-pressed="false" title="Show only the matching lines">
+      <span class="material-symbols-outlined">list</span>
+    </button>
     <button type="button" id="term-search-close" class="icon-btn" title="Close (Escape)">
       <span class="material-symbols-outlined">close</span>
     </button>
+  </div>
+
+  <!-- The filter view (#531). Read-only, built from the same buffer the
+       terminal is showing, so it reaches the four thousand lines that have
+       already gone past the top of the screen. A snapshot with a refresh
+       rather than a live view: rebuilding it on every chunk of device output
+       would move the line somebody is reading while they read it. -->
+  <div id="term-filter" class="hidden" role="region" aria-label="Matching lines">
+    <div id="term-filter-head">
+      <span id="term-filter-count"></span>
+      <button type="button" id="term-filter-refresh" class="icon-btn"
+              title="Rebuild from what is in the terminal now">
+        <span class="material-symbols-outlined">refresh</span>
+      </button>
+      <button type="button" id="term-filter-copy" class="icon-btn"
+              title="Copy these lines">
+        <span class="material-symbols-outlined">content_copy</span>
+      </button>
+      <button type="button" id="term-filter-close" class="icon-btn" title="Close">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div id="term-filter-lines"></div>
   </div>
 
   <div id="broadcast-overlay" class="panel-overlay hidden">

@@ -6,6 +6,23 @@ exists.
 
 ## 1.1.3
 
+- **Ctrl+F does regular expressions, and can show you only the matching
+  lines.** Three toggles on the find bar — match case, whole word, and `.*`
+  for a regular expression — so `Gi1/0/2[0-9]` and `\berr-disabled\b` are
+  searches you can actually run; all three are remembered. The list button
+  beside them opens a filter view: every matching line of the scrollback and
+  nothing else, which is `| include` for output that has already gone past.
+  Click a line to take the terminal to it, or copy the lot.
+
+- **Log one session, from its own tab menu — and save the scrollback of one
+  that was not logged.** **Log this session** starts or stops a file for that
+  tab alone, immediately, and says whether it is on for this tab or simply
+  following the global switch; the status bar shows a **Logging** chip while
+  something is being written, and clicking it opens the file. For the tab
+  nobody thought to log, **Save scrollback as…** writes what the terminal is
+  still holding — masked by the same *Obscure passwords and secrets* setting,
+  and it works on a disconnected tab too.
+
 - **Call a pending reload off from the tab's menu.** Right-click the tab and
   **Cancel pending reload…** sends the platform's own cancel command — `reload
   cancel`, `clear system reboot`, `undo schedule reboot`, whichever the device

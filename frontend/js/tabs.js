@@ -743,6 +743,7 @@
     if (!active) {
       connEl.textContent  = 'No active session';
       bufferEl.textContent = 'Buffer: 0L';
+      _paintLoggingChip(null);
       if (window.shellmateUptime) window.shellmateUptime.render();
       return;
     }
@@ -753,8 +754,37 @@
     const lines = active.getBufferLines ? active.getBufferLines() : 0;
     bufferEl.textContent = `Buffer: ${lines.toLocaleString()}L`;
 
+    _paintLoggingChip(active);
+
     if (typeof window.updateContextStatus === 'function') window.updateContextStatus();
     if (window.shellmateUptime) window.shellmateUptime.render();
+  }
+
+  /**
+   * Say in the status bar when this session is being recorded (#534).
+   *
+   * Present only while something is actually being written, so it is
+   * information rather than furniture — and it opens the file, because the
+   * next question after "is this being logged" is always "show me".
+   */
+  function _paintLoggingChip(tab) {
+    const wrap = document.getElementById('status-logging-wrap');
+    if (!wrap) return;
+    const on = !!(tab && tab.logging);
+    wrap.classList.toggle('hidden', !on);
+    if (!on) return;
+    const button = document.getElementById('status-logging');
+    if (!button) return;
+    button.title = tab.logFile
+      ? `This session is being written to ${tab.logFile}. Click to read it.`
+      : 'This session is being written to a file.';
+    button.onclick = () => {
+      if (tab.logFile && typeof window.viewLogFile === 'function') {
+        window.viewLogFile(tab.logFile);
+      } else if (typeof window.openLogs === 'function') {
+        window.openLogs();
+      }
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -1673,6 +1703,12 @@
         setting: 'copy' },
       { action: 'copy-screen', icon: 'content_copy', label: 'Copy visible screen',
         setting: 'copy_screen' },
+      // The same scrollback, to a file rather than the clipboard (#534).
+      // Offered on a disconnected tab too: the buffer is still there, and a
+      // session that has just dropped is exactly when somebody wants a copy
+      // of what it said.
+      { action: 'save-scrollback', icon: 'save', label: 'Save scrollback as…',
+        setting: 'save_scrollback' },
       // The address is what you need somewhere else: a ticket, a chat, a
       // firewall rule. The tab shows the device's *name* once it announces
       // itself, which is exactly when the address stops being on screen.
@@ -1715,6 +1751,14 @@
       // overwritten by the second and could not be turned off on its own.
       { action: 'keepalive-all', icon: 'refresh',
         label: 'Keep all tabs alive', setting: 'keep_alive_all' },
+      // The same argument keep-alive was built on (#534): "record this one,
+      // from now" is a decision about one session, made in the middle of it,
+      // and turning the global switch on to get it starts a file for every
+      // other tab as well.
+      { action: 'logging', icon: 'description', label: 'Log this session',
+        setting: 'logging', value: (tab) => _loggingLabel(tab) },
+      { action: 'log-open', icon: 'folder_open', label: 'Open this log',
+        setting: 'log_open', when: (tab) => tab && !!tab.logFile },
     ],
     [
       // Two entries, deliberately, because they are two different acts
@@ -1791,6 +1835,21 @@
            + 'not guess one. Cancel the reload on the device.';
     }
     return '';
+  }
+
+  /**
+   * Whether this session is being written to a file, and on whose say-so.
+   *
+   * The same three states keep-alive has, for the same reason: "on because I
+   * said so for this tab" and "on because the setting is on" behave
+   * identically until somebody changes the setting, and then they do not.
+   */
+  function _loggingLabel(tab) {
+    if (!tab) return '';
+    if (tab.logOverride === true)  return 'on';
+    if (tab.logOverride === false) return 'off';
+    const global = ((window.shellmateSettings || {}).logging || {}).enabled;
+    return global ? 'on (setting)' : 'off (setting)';
   }
 
   /** What scheme this tab is currently using, for the menu entry. */
@@ -1967,6 +2026,13 @@
               window.shellmateAlerts.dismissPending(tab.sessionId);
             }
             break;
+
+          case 'logging':       _toggleLogging(tab);              break;
+          case 'log-open':
+            if (typeof window.viewLogFile === 'function') window.viewLogFile(tab.logFile);
+            else if (typeof window.openLogs === 'function') window.openLogs();
+            break;
+          case 'save-scrollback': _saveScrollback(tab);           break;
           case 'disconnect':     _disconnectSessions([tab]);        break;
           case 'disconnect-all': _disconnectSessions(
                                    tabs.filter(t => t.isConnected)); break;
@@ -2098,6 +2164,94 @@
           : 'The device may now idle them out on its own timeout.',
       });
     }
+  }
+
+  /**
+   * Start or stop logging this one session (#534).
+   *
+   * The override is held on the session server-side, because that is where
+   * the file handle is; the tab keeps a copy so the menu can say which way
+   * the toggle sits. Nothing is announced from here — the backend answers
+   * with the state it actually reached, and that is what the toast reports.
+   * A tab that says "logging" while nothing is being written would be worse
+   * than no indicator at all.
+   */
+  function _toggleLogging(tab) {
+    if (!tab || !tab.websocket) return;
+    const global = ((window.shellmateSettings || {}).logging || {}).enabled === true;
+    const current = tab.logOverride;
+    const wanted = !(current === undefined || current === null ? global : current);
+    try {
+      tab.websocket.send(JSON.stringify({ type: 'logging', enabled: wanted }));
+    } catch (_) {
+      return;                       // a closed socket writes no log
+    }
+    tab.logAnnounce = true;
+    tab.logOverride = wanted;       // corrected by the answer, if it differs
+  }
+
+  /**
+   * Write what this terminal is holding to a file (#534).
+   *
+   * For the tab nobody thought to log: the change is done, the evidence is
+   * on screen, and turning logging on now would record only what happens
+   * next. The same buffer walk Copy all scrollback uses, sent to the server
+   * so that one place decides whether secrets are masked — the browser has
+   * the raw text and must not be the thing that writes it to a file.
+   */
+  async function _saveScrollback(tab) {
+    if (!tab) return;
+    const lines = typeof window.terminalOutputLines === 'function'
+      ? window.terminalOutputLines(tab.sessionId) : [];
+    const text = lines.map(line => line.text).join('\n');
+    const say = (options) => {
+      if (window.shellmateAlerts) window.shellmateAlerts.notify(options);
+    };
+    if (!text.trim()) {
+      say({ severity: 'info', icon: 'save', title: 'Nothing to save',
+            body: 'This terminal has no output yet.' });
+      return;
+    }
+
+    const stem = String(tab.label || 'session').replace(/[^A-Za-z0-9._-]+/g, '-');
+    try {
+      const res = await fetch('/api/scrollback/save', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ filename: `${stem}-scrollback.log`, text }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `server returned ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.cancelled) return;
+      if (data.path) {
+        say({ global: true, icon: 'save', title: 'Scrollback saved',
+              body: `Saved to ${data.path}. The folder has been opened.` });
+        return;
+      }
+      // No native window to open a folder dialog with, so the server sent
+      // back the prepared text for the browser to save instead.
+      _downloadText(data.filename || `${stem}-scrollback.log`, data.text || '');
+      say({ global: true, icon: 'save', title: 'Download started',
+            body: `${data.filename} — check your browser's downloads folder.` });
+    } catch (e) {
+      say({ global: true, severity: 'warning', icon: 'error',
+            title: 'Could not save the scrollback', body: String(e.message || e) });
+    }
+  }
+
+  /** Hand the browser a file it did not fetch. */
+  function _downloadText(filename, text) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
   }
 
   /**
@@ -3150,6 +3304,9 @@
       hostKey:      tab.hostKey || '',
       keepAlive:    !!(tab.keepAlive || tab.keep_alive),
       logging:      !!(tab.logging || tab.logEnabled),
+      // Which file, so the card answers "where is it" rather than only
+      // "yes" (#534).
+      logFile:      tab.logFile || '',
       profileId:    tab.profileId || '',
       // The bare duration: the card adds "Connected for" / "Disconnected
       // after" itself, and label() already carries those words (#581).
@@ -3201,6 +3358,37 @@
     const kind = (detail.pending && detail.pending.kind) || '';
     // alerts.py uses RELOAD / COMMIT_CONFIRM.
     if (kind) tab.hadPendingReload = kind.toUpperCase().includes('RELOAD');
+  });
+
+  // Whether this session is being written to a file (#534). The backend is
+  // the authority: the tab's own override and the global switch both feed
+  // into the answer, and the file is only real if the server says so.
+  window.addEventListener('shellmate:logging-state', (e) => {
+    const detail = e.detail || {};
+    const tab = tabs.find(t => t.sessionId === detail.sessionId);
+    if (!tab) return;
+    tab.logging     = !!detail.enabled;
+    tab.logFile     = detail.filename || '';
+    tab.logOverride = detail.override === undefined ? null : detail.override;
+
+    // Only when this window asked for the change. The same message arrives
+    // on connect and after any settings save, and a toast on every one of
+    // those is noise nobody reads.
+    if (tab.logAnnounce) {
+      tab.logAnnounce = false;
+      if (window.shellmateAlerts) {
+        window.shellmateAlerts.notify({
+          icon: 'description', sessionId: tab.sessionId,
+          title: tab.logging ? `Logging ${tab.label}` : `Stopped logging ${tab.label}`,
+          body: tab.logging
+            ? `Everything this session prints from now on is written to `
+              + `${tab.logFile} in the log folder. What is already on screen `
+              + `is not — use Save scrollback as… for that.`
+            : 'The file is closed and keeps what was written to it.',
+        });
+      }
+    }
+    updateStatusBar();
   });
 
   // The socket between this window and ShellMate dropped and is being

@@ -127,6 +127,19 @@ def collect(ws, needle: str, timeout: float = 8.0) -> str:
     return seen
 
 
+def answer(ws, kind: str, timeout: float = 8.0) -> dict | None:
+    """Read until a message of *kind* arrives; device output flows past."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            msg = json.loads(ws.receive_text())
+        except Exception:
+            return None
+        if msg.get("type") == kind:
+            return msg
+    return None
+
+
 def main() -> int:
     print("=" * 52)
     print("  Reader thread")
@@ -158,6 +171,52 @@ def main() -> int:
             check("the session still answers after a reattach", "UTC Wed Sep 3 2026" in seen, repr(seen[-120:]))
             check("still one reader thread, not one per attach",
                   sum(1 for n in reader_names() if sid[:8] in n) == 1, str(reader_names()))
+
+        # ------------------------------------------------------------------
+        # Logging one session (#534)
+        #
+        # The global switch stays off throughout: the whole point of the
+        # override is that "record this one, from now" must not start a file
+        # for every other tab. So a file appearing at all here is the test.
+        # ------------------------------------------------------------------
+        print("\n-- Logging this one session --")
+        from backend.settings_store import log_directory, update_settings
+        update_settings({"logging": {"enabled": False}})
+
+        with client.websocket_connect(f"/ws/terminal/{sid}") as ws:
+            # With no `enabled` key it only asks — which is what a reattached
+            # socket does, so that learning the state cannot wipe an override
+            # the session is already carrying.
+            ws.send_text(json.dumps({"type": "logging"}))
+            state = answer(ws, "logging_state")
+            check("a socket can ask whether its session is being logged",
+                  state is not None and state.get("enabled") is False, str(state))
+
+            ws.send_text(json.dumps({"type": "logging", "enabled": True}))
+            state = answer(ws, "logging_state")
+            check("one tab can turn it on for itself",
+                  state is not None and state.get("enabled") is True, str(state))
+            check("and is told which file it is writing to",
+                  bool(state and state.get("filename", "").endswith(".log")), str(state))
+            check("while the global setting is still off",
+                  update_settings({}).get("logging", {}).get("enabled") is False)
+
+            ws.send_text(json.dumps({"type": "input", "data": "show clock\r"}))
+            collect(ws, "UTC Wed Sep 3 2026")
+
+            written = log_directory() / state["filename"]
+            deadline = time.time() + 5
+            while time.time() < deadline and not written.exists():
+                time.sleep(0.1)
+            check("the file is written", written.exists(), str(written))
+            check("with what the device said in it",
+                  written.exists() and "show clock" in written.read_text(encoding="utf-8"),
+                  written.read_text(encoding="utf-8")[-200:] if written.exists() else "")
+
+            ws.send_text(json.dumps({"type": "logging", "enabled": False}))
+            state = answer(ws, "logging_state")
+            check("and it can be stopped again without touching the setting",
+                  state is not None and state.get("enabled") is False, str(state))
 
         print("\n-- Closing the session ends the thread --")
         client.delete(f"/api/sessions/{sid}")

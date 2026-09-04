@@ -605,6 +605,198 @@ async def run():
         except Exception as e:
             fail("the new tab-menu entries are switchable", str(e))
 
+        # Find in the terminal (#531)
+        #
+        # The toggles are options passed to xterm's search addon, so what is
+        # worth testing is not that the addon searches — it does — but that
+        # the toggles mean what the bar says they mean, that they are
+        # remembered, and that the filter view says which session it is
+        # listing rather than showing an empty pane.
+        # ------------------------------------------------------------------
+        print("\n-- Find in the terminal --")
+
+        try:
+            await page.evaluate(
+                "() => document.getElementById('term-search')"
+                ".classList.remove('hidden')")
+            for name in ("term-search-case", "term-search-word",
+                         "term-search-regex", "term-search-filter"):
+                await expect(page.locator(f"#{name}")).to_be_visible()
+            ok("the find bar offers case, whole word, regex and filter")
+        except Exception as e:
+            fail("the find bar offers case, whole word, regex and filter", str(e))
+
+        # (term, haystack, toggles, expected) — the toggles are set through
+        # the buttons, so this exercises the same path a person does.
+        find_cases = [
+            ("a.c", "abc", [], False),
+            ("a.c", "a.c", [], True),
+            ("a.c", "abc", ["term-search-regex"], True),
+            ("err", "err-disabled", [], True),
+            ("err", "error", ["term-search-word"], False),
+            ("Gi1/0/2[0-9]", "Gi1/0/24 notconnect",
+             ["term-search-regex"], True),
+            ("SERIAL", "serial", [], True),
+            ("SERIAL", "serial", ["term-search-case"], False),
+        ]
+        for term, haystack, toggles, expected in find_cases:
+            label = f"{term!r} in {haystack!r} with {toggles or 'no toggles'}"
+            try:
+                # Every toggle off first: they persist, which is the point.
+                for button in ("term-search-case", "term-search-word",
+                               "term-search-regex"):
+                    pressed = await page.get_attribute(f"#{button}", "aria-pressed")
+                    if pressed == "true":
+                        await page.click(f"#{button}")
+                for button in toggles:
+                    await page.click(f"#{button}")
+                got = await page.evaluate(
+                    "([term, text]) => { const p = window.shellmateFind.pattern(term);"
+                    " return p ? p.test(text) : null; }", [term, haystack])
+                assert got is expected, f"matched={got}"
+                ok(label)
+            except Exception as e:
+                fail(label, str(e))
+
+        try:
+            invalid = await page.evaluate(
+                "() => { document.getElementById('term-search-regex').click();"
+                " const p = window.shellmateFind.pattern('Gi1/0/2[');"
+                " document.getElementById('term-search-regex').click();"
+                " return p; }")
+            assert invalid is None, "an unfinished pattern was not refused"
+            ok("an unfinished regular expression is refused rather than thrown")
+        except Exception as e:
+            fail("an unfinished regular expression is refused rather than thrown", str(e))
+
+        try:
+            await page.click("#term-search-regex")
+            await page.wait_for_timeout(1200)      # prefs.js debounces writes
+            saved = await page.evaluate(
+                "async () => (await (await fetch('/api/settings')).json())"
+                ".interface.find_regex")
+            assert saved is True, f"settings.json says {saved!r}"
+            await page.click("#term-search-regex")
+            ok("a toggle is remembered in settings.json")
+        except Exception as e:
+            fail("a toggle is remembered in settings.json", str(e))
+
+        try:
+            await page.click("#term-search-filter")
+            await expect(page.locator("#term-filter")).to_be_visible()
+            said = await page.inner_text("#term-filter-count")
+            assert said.strip(), "the filter view said nothing at all"
+            await page.click("#term-filter-close")
+            await expect(page.locator("#term-filter")).to_be_hidden()
+            ok(f"the filter view opens and says why it is empty ({said.strip()!r})")
+        except Exception as e:
+            fail("the filter view opens and says why it is empty", str(e))
+
+        # A real xterm buffer with real output in it, so the filter is tested
+        # against the thing it actually reads. The socket is stubbed out
+        # because there is no device here and a terminal is perfectly capable
+        # of holding output without one.
+        setup_probe = """
+        () => new Promise(resolve => {
+          const RealWS = window.WebSocket;
+          function Stub() { this.readyState = 3; }
+          Stub.prototype.addEventListener = function () {};
+          Stub.prototype.send = function () {};
+          Stub.prototype.close = function () {};
+          Stub.OPEN = 1;
+          window.WebSocket = Stub;
+          const made = window.initTerminal('filter-probe');
+          window.WebSocket = RealWS;
+          made.terminal.write(
+            'Gi1/0/23  connected    trunk\\r\\n'
+            + 'Gi1/0/24  err-disabled 20\\r\\n'
+            + 'Gi1/0/25  notconnect   20\\r\\n', () => resolve(true));
+        })
+        """
+        try:
+            await page.evaluate(setup_probe)
+            lines = await page.evaluate(
+                "() => window.terminalOutputLines('filter-probe').map(l => l.text)")
+            assert any("err-disabled" in line for line in lines), lines
+            ok(f"the buffer is read line by line ({len(lines)} lines)")
+        except Exception as e:
+            fail("the buffer is read line by line", str(e))
+
+        try:
+            await page.click("#term-search-regex")
+            matched = await page.evaluate(
+                "() => window.shellmateFind.filterLines("
+                "'filter-probe', 'Gi1/0/2[45]').map(l => l.text.trim())")
+            await page.click("#term-search-regex")
+            assert len(matched) == 2, matched
+            assert all(m.startswith("Gi1/0/2") for m in matched), matched
+            ok("a pattern selects only the lines that match it")
+        except Exception as e:
+            fail("a pattern selects only the lines that match it", str(e))
+
+        try:
+            rendered = await page.evaluate("""
+              async () => {
+                const was = window.getActiveTab;
+                window.getActiveTab = () => ({ sessionId: 'filter-probe', label: 'lab-sw' });
+                document.getElementById('term-search-input').value = 'err-disabled';
+                document.getElementById('term-search-filter').click();
+                const rows = [...document.querySelectorAll('.term-filter-line')]
+                  .map(r => r.textContent);
+                const marks = [...document.querySelectorAll('#term-filter-lines mark')]
+                  .map(m => m.textContent);
+                const said = document.getElementById('term-filter-count').textContent;
+                document.getElementById('term-filter-close').click();
+                window.getActiveTab = was;
+                return { rows, marks, said };
+              }
+            """)
+            assert len(rendered["rows"]) == 1, rendered
+            assert "err-disabled" in rendered["rows"][0], rendered
+            assert rendered["marks"] == ["err-disabled"], rendered
+            assert "lab-sw" in rendered["said"], rendered
+            ok("the filter lists the matching line, marks it, and names the tab")
+        except Exception as e:
+            fail("the filter lists the matching line, marks it, and names the tab", str(e))
+        finally:
+            await page.evaluate("""() => {
+              window.forgetTerminal('filter-probe');
+              const el = document.getElementById('terminal-filter-probe');
+              if (el) el.remove();
+              document.getElementById('term-search-input').value = '';
+              document.getElementById('term-search').classList.add('hidden');
+            }""")
+
+        try:
+            regex_off = await page.get_attribute("#term-search-regex", "aria-pressed")
+            assert regex_off == "false", "the regex toggle was left on"
+            ok("the toggles are left as they were found")
+        except Exception as e:
+            fail("the toggles are left as they were found", str(e))
+
+        # ------------------------------------------------------------------
+        # Per-session logging (#534)
+        #
+        # The chip is only meaningful with a session writing to a file, which
+        # needs a device. What can be held here is the shape: it is absent
+        # until something says otherwise, and the file it points at can be
+        # opened from one place rather than three.
+        # ------------------------------------------------------------------
+        print("\n-- Logging one session --")
+
+        try:
+            await expect(page.locator("#status-logging-wrap")).to_be_hidden()
+            ok("nothing claims to be logging before anything is")
+        except Exception as e:
+            fail("nothing claims to be logging before anything is", str(e))
+
+        try:
+            has = await page.evaluate("() => typeof window.viewLogFile")
+            assert has == "function", has
+            ok("one log file can be opened by name")
+        except Exception as e:
+            fail("one log file can be opened by name", str(e))
+
         # ------------------------------------------------------------------
         print("\n-- Console errors --")
 
