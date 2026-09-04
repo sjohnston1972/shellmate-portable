@@ -79,7 +79,11 @@ Open **Session history** from the sidebar.
 
 - **Free text** searches commands *and* their output.
 - **Device** narrows to one piece of kit.
-- **Date** narrows to the last day, week, month or quarter.
+- **Date** narrows to the last day, week, month or quarter — or, with
+  **Between two dates**, to a range you type. A date on its own means the
+  whole of that day; add a time to either end to narrow it further, which
+  is how you ask what happened on the Glasgow core between 02:00 and
+  03:00 on the 14th. **Clear** empties both ends.
 
 Punctuation works: search for `10.20.30.40` or `GigabitEthernet0/2` and you
 get what you expect.

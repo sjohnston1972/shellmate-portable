@@ -6,6 +6,8 @@ exists.
 
 ## 1.1.3
 
+- Session history can be searched **between two dates**, with optional
+  times, instead of only the last day, week, month or quarter.
 - Session playback shows where it has reached: a draggable bar with the
   command number and the elapsed time, a Pause button, Space to pause and
   the arrow keys to step. The speed can be changed while it plays.

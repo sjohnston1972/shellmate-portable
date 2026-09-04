@@ -55,7 +55,20 @@
       searchTimer = setTimeout(runSearch, SEARCH_DELAY_MS);
     });
     deviceSelect.addEventListener('change', runSearch);
-    rangeSelect.addEventListener('change', runSearch);
+    rangeSelect.addEventListener('change', _onRangeChange);
+    _syncRangeControls();
+    ['history-from', 'history-from-time', 'history-to', 'history-to-time'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', runSearch);
+    });
+    const clearDates = document.getElementById('history-dates-clear');
+    if (clearDates) clearDates.addEventListener('click', () => {
+      ['history-from', 'history-from-time', 'history-to', 'history-to-time'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
+      runSearch();
+    });
 
     overlay.addEventListener('click', (e) => { if (e.target === overlay) closeHistory(); });
     replayOverlay.addEventListener('click', (e) => { if (e.target === replayOverlay) closeReplay(); });
@@ -215,9 +228,48 @@
   // Search
   // -------------------------------------------------------------------------
 
+  function _onRangeChange() {
+    _syncRangeControls();
+    runSearch();
+  }
+
   function rangeToSince(days) {
-    if (!days) return null;
+    if (!days || days === 'between') return null;
     return (Date.now() / 1000) - (Number(days) * 86400);
+  }
+
+  /**
+   * The explicit range, in epoch seconds (#575).
+   *
+   * A date with no time means the whole of that day in local time: the
+   * "from" starts at midnight, the "to" ends a moment before the next one,
+   * which is what someone typing one date for both means.
+   */
+  function explicitRange() {
+    if (rangeSelect.value !== 'between') return {};
+    const el = (id) => document.getElementById(id);
+    const from = el('history-from'), fromTime = el('history-from-time');
+    const to = el('history-to'), toTime = el('history-to-time');
+    const out = {};
+    if (from && from.value) {
+      const stamp = new Date(`${from.value}T${(fromTime && fromTime.value) || '00:00'}`);
+      if (!Number.isNaN(stamp.getTime())) out.since = stamp.getTime() / 1000;
+    }
+    if (to && to.value) {
+      const hasTime = !!(toTime && toTime.value);
+      const stamp = new Date(`${to.value}T${hasTime ? toTime.value : '00:00'}`);
+      if (!Number.isNaN(stamp.getTime())) {
+        out.until = stamp.getTime() / 1000 + (hasTime ? 60 : 86400);
+      }
+    }
+    return out;
+  }
+
+  /** Show or hide the two date fields, and remember nothing else about them. */
+  function _syncRangeControls() {
+    const row = document.getElementById('history-dates');
+    if (!row) return;
+    row.classList.toggle('hidden', rangeSelect.value !== 'between');
   }
 
   async function runSearch() {
@@ -225,8 +277,10 @@
     if (queryInput.value.trim()) params.set('q', queryInput.value.trim());
     if (deviceSelect.value) params.set('hostname', deviceSelect.value);
 
-    const since = rangeToSince(rangeSelect.value);
+    const explicit = explicitRange();
+    const since = explicit.since !== undefined ? explicit.since : rangeToSince(rangeSelect.value);
     if (since) params.set('since', String(since));
+    if (explicit.until !== undefined) params.set('until', String(explicit.until));
 
     resultsEl.innerHTML = '<div class="history-loading">Searching…</div>';
 

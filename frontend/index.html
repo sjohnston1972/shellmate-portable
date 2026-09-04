@@ -2490,7 +2490,21 @@ GigEth0/2     unassigned    YES unset  down     down
           <option value="7">Last 7 days</option>
           <option value="30">Last 30 days</option>
           <option value="90">Last 90 days</option>
+          <!-- The presets answer "lately"; a change window has a date (#575). -->
+          <option value="between">Between two dates…</option>
         </select>
+      </div>
+
+      <!-- Shown when the range is "Between two dates". Times are optional:
+           blank means the whole of that day, local time. -->
+      <div id="history-dates" class="hidden">
+        <label for="history-from">From</label>
+        <input type="date" id="history-from" />
+        <input type="time" id="history-from-time" step="60" aria-label="From time" />
+        <label for="history-to">to</label>
+        <input type="date" id="history-to" />
+        <input type="time" id="history-to-time" step="60" aria-label="To time" />
+        <button type="button" id="history-dates-clear" class="btn-tertiary">Clear</button>
       </div>
 
       <div id="history-stats"></div>

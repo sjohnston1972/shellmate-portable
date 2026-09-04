@@ -1764,6 +1764,13 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 .push-danger { margin-top: 6px; color: var(--error, #f38ba8); font-size: 12px; }
 
 /* Timed replay (#415) */
+/* The explicit date range on the history search (#575). */
+#history-dates {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 0 16px 8px; font-size: 12px; color: var(--on-surface-dim);
+}
+#history-dates input { font-size: 12px; padding: 3px 6px; }
+
 #replay-controls { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 
 /* Where the playback has reached (#573). */
