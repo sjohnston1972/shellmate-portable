@@ -203,6 +203,60 @@ async def main_async() -> None:
         check("the dot still lights through the address match", lit, str(second))
         tabs = [second]
 
+        print("\n-- Bulk delete under Ungrouped (#519) --")
+        await page.evaluate("""async (port) => {
+            for (const [n, host] of [['loose-a', '10.9.9.1'], ['loose-b', '10.9.9.2']]) {
+                await fetch('/api/profiles', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: n, hostname: host, port, username: 'eng', connection_type: 'ssh'})});
+            }
+        }""", device_port)
+        await page.goto(BASE, wait_until="networkidle")
+        await page.wait_for_selector(".tree-chip-ungrouped", timeout=5000)
+        check("the Ungrouped chip offers Delete all",
+              await page.evaluate("() => !!document.querySelector('.tree-chip-ungrouped .tree-chip-action')"))
+        if not await page.evaluate("() => !!document.querySelector('.tree-chip-ungrouped')?.closest('.tree-branch')?.querySelector('.tree-leaf')"):
+            await page.click(".tree-chip-ungrouped")
+            await page.wait_for_timeout(300)
+        loose = page.locator(".tree-chip-ungrouped").locator("xpath=ancestor::div[contains(@class,'tree-branch')]").locator(".tree-leaf")
+        n = await loose.count()
+        check("both loose connections are listed", n >= 2, str(n))
+        await loose.nth(0).click(modifiers=["Control"])
+        await loose.nth(1).click(modifiers=["Control"])
+        selected = await page.evaluate("() => document.querySelectorAll('.tree-leaf-selected').length")
+        check("Ctrl+click selects both", selected == 2, str(selected))
+        await loose.nth(1).click(button="right")
+        await page.wait_for_timeout(300)
+        menu = await page.evaluate("() => [...document.querySelectorAll('.context-menu *, .tab-context-menu *, .group-menu *')].map(e => e.textContent.trim()).filter(Boolean).join(' | ')")
+        check("the menu speaks for the selection", "Delete 2 connections" in menu, menu[:200])
+        await page.keyboard.press("Escape")
+
+        print("\n-- Bulk delete under Ungrouped (#519) --")
+        await page.evaluate("""async (port) => {
+            for (const n of ['loose-a', 'loose-b']) {
+                await fetch('/api/profiles', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name: n, hostname: '10.9.9.' + n.length, port, username: 'eng', connection_type: 'ssh'})});
+            }
+        }""", device_port)
+        await page.goto(BASE, wait_until="networkidle")
+        await page.wait_for_selector(".tree-chip-ungrouped", timeout=5000)
+        check("the Ungrouped chip offers Delete all",
+              await page.evaluate("() => !!document.querySelector('.tree-chip-ungrouped .tree-chip-action')"))
+        if not await page.evaluate("() => !!document.querySelector('.tree-chip-ungrouped')?.closest('.tree-branch')?.querySelector('.tree-leaf')"):
+            await page.click(".tree-chip-ungrouped")
+            await page.wait_for_timeout(300)
+        loose = page.locator(".tree-chip-ungrouped").locator("xpath=ancestor::div[contains(@class,'tree-branch')]").locator(".tree-leaf")
+        n = await loose.count()
+        check("both loose connections are listed", n >= 2, str(n))
+        await loose.nth(0).click(modifiers=["Control"])
+        await loose.nth(1).click(modifiers=["Control"])
+        selected = await page.evaluate("() => document.querySelectorAll('.tree-leaf-selected').length")
+        check("Ctrl+click selects both", selected == 2, str(selected))
+        await loose.nth(1).click(button="right")
+        await page.wait_for_timeout(300)
+        menu = await page.evaluate("() => [...document.querySelectorAll('.context-menu *, .tab-context-menu *, .group-menu *')].map(e => e.textContent.trim()).filter(Boolean).join(' | ')")
+        check("the menu speaks for the selection", "Delete 2 connections" in menu, menu[:200])
+        await page.keyboard.press("Escape")
+
         print("\n-- Close, and the dot goes dark --")
         await page.evaluate("(sid) => window.closeTabBySessionId(sid, {force: true})", tabs[0]["sessionId"])
         await page.wait_for_function("() => (window.getOpenTabs() || []).length === 0", timeout=10000)

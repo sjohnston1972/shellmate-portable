@@ -640,6 +640,18 @@
       if (open) expanded.delete(KEY); else expanded.add(KEY);
       _select();
     });
+    // Visible, not only behind a right-click (#519): the way to clear out
+    // what a group delete left behind.
+    if (profiles.length) {
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'tree-chip-action';
+      clear.title = `Delete all ${profiles.length} ungrouped connections…`;
+      clear.setAttribute('aria-label', clear.title);
+      clear.innerHTML = '<span class="material-symbols-outlined">delete_forever</span>';
+      clear.addEventListener('click', (e) => { e.stopPropagation(); _deleteUngrouped(profiles.length); });
+      chip.appendChild(clear);
+    }
     // One action for the aftermath of a "keep" that was meant as a delete
     // (#454): a mistaken choice over a fifty-device site should not cost
     // fifty deletions to undo.
@@ -2286,8 +2298,13 @@
    * folding, selecting — is already a left-click.
    */
   function _rootMenu(event) {
+    const loose = _ungroupedProfiles().length;
     window.shellmateMenu.open(event, [
       { icon: 'add', label: 'New group...', onClick: () => newGroup() },
+      'sep',
+      { icon: 'delete_forever', danger: true, disabled: !loose,
+        label: loose ? `Delete all ${loose} ungrouped connection${loose === 1 ? '' : 's'}…` : 'Nothing ungrouped to delete',
+        onClick: () => _deleteUngrouped(loose) },
     ], { className: 'group-menu' });
   }
 

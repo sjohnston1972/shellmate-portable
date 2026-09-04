@@ -1783,6 +1783,15 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 #status-bar .status-btn:hover,
 #status-bar .status-btn:focus-visible { color: var(--on-surface); background: var(--surface-high); }
 
+/* The action button on the Ungrouped chip (#519): quiet until hovered. */
+.tree-chip-action {
+  margin-left: auto; padding: 0 4px; border: 0; background: none; cursor: pointer;
+  color: var(--on-surface-dim); opacity: 0; display: inline-flex; align-items: center;
+}
+.tree-chip:hover .tree-chip-action, .tree-chip:focus-within .tree-chip-action { opacity: 1; }
+.tree-chip-action:hover { color: var(--error); }
+.tree-chip-action .material-symbols-outlined { font-size: 16px; }
+
 /* Exit ShellMate (#452): far right, with its word, and red only on hover so
    it is findable without being the loudest thing in the bar. */
 #status-bar .status-exit {
