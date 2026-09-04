@@ -9598,9 +9598,172 @@ body {
    Ansible view — Environments (#586)
 --------------------------------------------------------------------------- */
 
+.av-env-toolbar { margin-bottom: 14px; }
+
+/* Wider than the generic .av-grid card: a description, a four-row meta
+   list and a row of variable chips need more than 240px before any of
+   them is worth reading. */
+.av-env-list { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+
+.av-env-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.av-env-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.av-env-card-head h4 { margin: 0; flex: 1; min-width: 0; }
+
+/* Force check gets a pill rather than a line among others, because the one
+   thing a run against this environment cannot do is turn checking back
+   off — that belongs with the name, not buried in the meta list below. */
+.av-env-badge-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.av-env-badge-check .material-symbols-outlined { font-size: var(--icon-xs); }
+
+.av-env-desc {
+  margin: 0;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.av-env-meta {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+.av-env-meta-row { display: contents; }
+.av-env-meta dt { color: var(--on-surface-muted); }
+.av-env-meta dd {
+  margin: 0;
+  color: var(--on-surface);
+  overflow-wrap: anywhere;
+}
+
+.av-env-vars-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.av-env-chip {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-full);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--on-surface-dim);
+}
+
+/* The key/value editor dropped into the create/edit dialog as `content` —
+   dialog.js only collects the fixed fields it renders itself, and a set of
+   variables has no fixed count of them. */
+.av-env-vars {
+  margin: 4px 0 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--outline);
+}
+.av-env-vars-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.av-env-vars-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--on-surface);
+}
+.av-env-vars-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.av-env-var-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.av-env-var-key,
+.av-env-var-value {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+.av-env-var-key { flex: 0 0 40%; }
+
 /* ---------------------------------------------------------------------------
    Ansible view — Keys (#586)
 --------------------------------------------------------------------------- */
+
+.av-key-toolbar { margin-bottom: 14px; }
+
+/* The three limits stated plainly, once, at the top of the area — not a
+   reassurance that secrets are "safe" but what is actually true, because
+   the failure this guards against is someone assuming the vault closes a
+   door it does not. */
+.av-key-notice p { margin: 0 0 8px; }
+.av-key-notice p:last-child { margin-bottom: 0; }
+
+.av-key-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.av-key-target {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--on-surface-dim);
+  background: var(--surface-high);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.av-key-desc {
+  color: var(--on-surface-dim);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.av-key-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.av-key-status .material-symbols-outlined { font-size: var(--icon-xs); }
+
+.av-key-status-fix {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--on-surface-dim);
+}
 
 /* ---------------------------------------------------------------------------
    Ansible view — Repositories (#586)
