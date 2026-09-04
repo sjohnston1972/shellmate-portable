@@ -82,6 +82,7 @@ shellmate/
 ├── backend/
 │   ├── advanced.py              # Stockton. The settings that were constants in the source
 │   ├── alerts.py                # Things that will happen to a device unless somebody intervenes
+│   ├── ansible.py               # Driving Ansible from ShellMate, through ansible-runner-service…
 │   ├── app.py                   # FastAPI application for ShellMate
 │   ├── auth.py                  # Optional authentication, for the deployments that need it
 │   ├── branding.py              # One source for the application icon
@@ -154,6 +155,7 @@ shellmate/
 │   └── js/
 │       ├── ai_panel.js          # Provider testing, model discovery, and hiding the AI panel
 │       ├── alerts.js            # Telling someone that something is about to happen to a device
+│       ├── ansible.js           # Driving an Ansible runner, and watching it work (#585)
 │       ├── broadcast.js         # Send commands to several devices at once
 │       ├── chat.js              # AI chat panel for ShellMate
 │       ├── chat_context.js      # Choose which sessions the assistant can see
