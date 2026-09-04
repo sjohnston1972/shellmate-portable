@@ -503,6 +503,97 @@ async def run():
             fail("but not for an ordinary search term", str(e))
 
         # ------------------------------------------------------------------
+        # The pending-action row on the tab hover card (#583). On several
+        # tabs the card is where you look to ask which of them is about to
+        # go, and it said nothing. Two halves, tested apart: the phrasing
+        # and severity alerts.js decides, and the row tabtip.js draws.
+        print("\n-- Pending reload on the tab hover card --")
+
+        async def _describe(deadline_ms, awaiting=False, source="reload in 10"):
+            return await page.evaluate(
+                """([deadline, awaiting, source]) => {
+                    const id = 'tip-pending-session';
+                    window.dispatchEvent(new CustomEvent('shellmate:pending-action', {
+                      detail: { sessionId: id, pending: {
+                        kind: 'reload', source, deadline_ms: deadline,
+                        confident: deadline !== null, authoritative: true,
+                        awaiting_confirmation: awaiting,
+                        cancel_command: 'reload cancel',
+                      } },
+                    }));
+                    return window.shellmateAlerts.describePending(id);
+                }""",
+                [deadline_ms, awaiting, source])
+
+        try:
+            far = await _describe(int(time.time() * 1000) + 4 * 60 * 1000 + 12_000)
+            assert far["text"].startswith("Reload in "), far
+            assert far["text"].split()[-1].startswith("4:"), far
+            assert far["severity"] == "warning", far
+            ok(f"a reload four minutes out reads {far['text']!r}, as a warning")
+        except Exception as e:
+            fail("a reload four minutes out is described", str(e))
+
+        try:
+            near = await _describe(int(time.time() * 1000) + 30_000)
+            assert near["severity"] == "critical", near
+            assert near["cancelCommand"] == "reload cancel", near
+            ok("inside the last minute it turns critical, and carries the "
+               "cancel command")
+        except Exception as e:
+            fail("a reload in its last minute is critical", str(e))
+
+        try:
+            # Tracked but not armed (#248): a typed command the device has
+            # not yet confirmed must not produce a countdown.
+            vague = await _describe(None, awaiting=True)
+            assert "awaiting" in vague["text"].lower(), vague
+            assert vague["left"] is None, vague
+            ok("an unconfirmed reload says so rather than inventing a time")
+        except Exception as e:
+            fail("an unconfirmed reload shows no countdown", str(e))
+
+        try:
+            shown = await page.evaluate("""
+                () => {
+                    const list = document.getElementById('tab-list');
+                    const tab = document.createElement('div');
+                    tab.className = 'tab';
+                    tab.dataset.sessionId = 'tip-card-session';
+                    tab.textContent = 'core-sw';
+                    list.appendChild(tab);
+                    window.tabTooltipInfo = () => ({
+                      sessionId: 'tip-card-session', label: 'core-sw',
+                      // Telnet deliberately: the card fetches port
+                      // forwards for an SSH session, and this session does
+                      // not exist on the server — a 404 the console-error
+                      // check would rightly report.
+                      address: '10.1.1.1', port: 23, connectionType: 'telnet',
+                      username: 'admin', isConnected: true, group: '',
+                      inventory: '', hostKey: '', keepAlive: false,
+                      logging: false, profileId: 'p1', uptime: '4m',
+                      pending: { kind: 'reload', what: 'Reload', left: 252,
+                                 severity: 'critical', source: 'reload in 5',
+                                 cancelCommand: 'reload cancel',
+                                 text: 'Reload in 4:12' },
+                    });
+                    return true;
+                }
+            """)
+            assert shown
+            await page.hover('.tab[data-session-id="tip-card-session"]')
+            await page.wait_for_timeout(800)
+            card = page.locator(".tab-tip")
+            await expect(card).to_be_visible()
+            text = await card.inner_text()
+            assert "Pending" in text and "Reload in 4:12" in text, text
+            severity = await page.locator(".tab-tip .tab-tip-alert-critical").count()
+            assert severity == 1, f"the row does not carry its severity class ({severity})"
+            ok("the card shows what is pending, in the alert's severity colour")
+        except Exception as e:
+            fail("the card shows the pending reload", str(e))
+
+        # ------------------------------------------------------------------
         print("\n-- Console errors --")
 
         ignored = {"favicon"}

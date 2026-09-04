@@ -29,7 +29,12 @@ tab you are on.
 **In the status bar** — for the session you are looking at, with the kind and
 the time remaining.
 
-Neither of these is switchable. They are the information, not the
+**On the tab's hover card** — a **Pending** row naming what is scheduled and
+how long is left, in the same colour the countdown uses, with the command that
+started it underneath. On a strip of eight tabs the card is where you look to
+ask which one is about to go, and hovering answers it without switching to it.
+
+None of these is switchable. They are the information, not the
 interruption.
 
 ## How it knows the time

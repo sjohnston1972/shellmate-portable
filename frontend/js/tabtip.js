@@ -100,6 +100,23 @@
       : 'Disconnected' + (info.uptime ? ` after ${info.uptime}` : ''),
       info.isConnected ? 'tab-tip-state-up' : 'tab-tip-state-down');
 
+    // Above everything else about the session, because it outranks
+    // everything else about the session (#583). "Reload in 4:12" is the
+    // answer to the question somebody hovering four tabs is actually
+    // asking, and it carries the alert's own severity colour so it is not
+    // read as one more line of detail.
+    if (info.pending) {
+      const [k, v] = row('Pending', info.pending.text,
+                         `tab-tip-alert-${info.pending.severity}`);
+      grid.append(k, v);
+      // The command that started it. `reload at 23:00` is not the same news
+      // as `reload in 1`, and the card cannot hold a tooltip of its own —
+      // it has pointer-events: none, so a title attribute here never shows.
+      if (info.pending.source) {
+        grid.append(...row('', info.pending.source, 'tab-tip-alert-source'));
+      }
+    }
+
     // What this device is, from the saved connection (#536): it survives
     // the tab, so it is here even before this session has asked.
     if (info.inventory) add('Hardware', info.inventory);

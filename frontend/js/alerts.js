@@ -377,6 +377,46 @@
     return { info: 0, warning: 1, critical: 2 }[severity] || 0;
   }
 
+  /**
+   * What is pending on one session, in the words the interface uses (#583).
+   *
+   * The status bar and the tab badge each phrase this for themselves, which
+   * was fine while they were the only two. The hover card is the third, and
+   * three places deciding independently what "4:12" means is how the same
+   * pending ends up described three different ways. So the sentence and the
+   * severity are decided here, once, and a reader is a row rather than a
+   * fourth set of rules.
+   *
+   * Null when nothing is pending on that session — which is the ordinary
+   * case, and the reason the caller can simply skip the row.
+   */
+  function describePending(sessionId) {
+    const entry = tracked.get(sessionId);
+    if (!entry) return null;
+
+    const pending = entry.pending;
+    const left = secondsLeft(pending);
+    const what = KIND_LABEL[pending.kind] || 'Action';
+
+    return {
+      kind:      pending.kind,
+      what,
+      left,
+      severity:  severityFor(left),
+      source:    pending.source || '',
+      // Blank on a platform ShellMate has no cancel command for. The caller
+      // decides what to do about that; it must not invent one.
+      cancelCommand: pending.cancel_command || '',
+      text: pending.awaiting_confirmation
+        // Tracked but not armed (#248): the device has not yet said the
+        // schedule is real, so there is no time to show.
+        ? `${what} requested — awaiting the device`
+        : left === null
+        ? `${what} pending, time unknown`
+        : `${what} in ${formatLeft(left)}`,
+    };
+  }
+
   function severityFor(left) {
     if (left === null) return 'warning';
     if (left <= 60) return 'critical';
@@ -767,6 +807,7 @@
     raise,
     notify,
     watchHit,
+    describePending,
     pending: () => [...tracked.entries()].map(([sessionId, e]) => ({
       sessionId, ...e.pending, seconds_left: secondsLeft(e.pending),
     })),

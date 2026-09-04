@@ -3085,8 +3085,20 @@
       // after" itself, and label() already carries those words (#581).
       uptime:       (window.shellmateUptime && typeof window.shellmateUptime.duration === 'function')
                       ? window.shellmateUptime.duration(sessionId) : '',
+      // What is about to happen to this device, if anything (#583). On
+      // several tabs the card is where you look to ask which of them is the
+      // one that is going — and until now it was the one thing the card did
+      // not say. Null when nothing is pending, which is nearly always.
+      pending:      _pendingFor(sessionId),
     };
   };
+
+  /** The pending action on a session, phrased by alerts.js (#583). */
+  function _pendingFor(sessionId) {
+    const alerts = window.shellmateAlerts;
+    if (!alerts || typeof alerts.describePending !== 'function') return null;
+    return alerts.describePending(sessionId);
+  }
   /** What the tab palette (#410) searches: one plain object per tab. */
   window.listTabs = () => tabs.map((t, index) => ({
     sessionId:   t.sessionId,

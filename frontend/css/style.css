@@ -1713,6 +1713,15 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 .tab-tip-state-up { color: var(--tab-connected, #4ade80); }
 .tab-tip-state-down { color: var(--error, #f38ba8); }
 
+/* What is about to happen to the device (#583). The same three severities
+   the status bar and the tab badge use, from the same tokens — a pending
+   reload must not be one colour in the status bar and another on the card,
+   and a custom accent has to reach all three. */
+.tab-tip-alert-info     { color: var(--on-surface-dim); }
+.tab-tip-alert-warning  { color: var(--alert-accent-warning, var(--warn)); }
+.tab-tip-alert-critical { color: var(--alert-accent-critical, var(--error)); }
+.tab-tip-alert-source   { color: var(--on-surface-dim); }
+
 /* The update / what's-new modal (#442, #445). */
 /* A prerelease offered on the beta channel says so (#567). */
 .update-badge {

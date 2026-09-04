@@ -6,6 +6,13 @@ exists.
 
 ## 1.1.3
 
+- **A tab's hover card says what is about to happen to the device.** A pending
+  reload or `commit confirmed` now shows on the card as a **Pending** row —
+  "Reload in 4:12", in the countdown's own colour, with the command that
+  started it below. The countdown was already on the tab and in the status
+  bar; the card is the one you are looking at when the question is *which* of
+  eight tabs is the one that is going.
+
 - **A connection can type its own first four commands.** Expand **On-connect
   commands** in the connection dialog and give it `enable`, `terminal
   monitor`, a screen width — whatever you type on that device every time. They

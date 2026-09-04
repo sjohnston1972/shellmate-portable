@@ -288,6 +288,52 @@ def test_status_colours_read_in_both_themes() -> None:
             )
 
 
+#: The severity colours on the tab hover card (#583), and the card's own
+#: background — which is `--panel`, not the `--overlay` every other floating
+#: surface uses, so measuring it with the rest would measure the wrong thing.
+#:
+#: (rule, what it is, the token its text uses).
+TAB_TIP = [
+    (".tab-tip-alert-info", "a pending action still far off", "--on-surface-dim"),
+    (".tab-tip-alert-warning", "a pending action inside the flash window", "--warn"),
+    (".tab-tip-alert-critical", "a pending action in its last minute", "--error"),
+    (".tab-tip-alert-source", "the command that started it", "--on-surface-dim"),
+]
+
+
+def test_the_hover_card_severities_read_in_both_themes() -> None:
+    """
+    "Reload in 4:12" has to be legible on the card, not merely coloured.
+
+    The card is the third place a pending action is shown, after the status
+    bar and the tab badge, and the first on `--panel`. A colour that clears
+    AA on the overlay is not thereby cleared here.
+    """
+    print("\n-- The pending row on the tab hover card --")
+    parsed = rules(CSS.read_text(encoding="utf-8"))
+
+    dark = tokens(parsed, ":root")
+    light = dict(dark)
+    light.update(tokens(parsed, '[data-theme="light"]'))
+
+    for theme_name, table in (("dark", dark), ("light", light)):
+        card = parse_colour(resolve(table["--panel"], table))[:3]
+        for selector, label, token in TAB_TIP:
+            if token not in table:
+                check(f"{theme_name}: {selector} — {label}", False,
+                      f"undefined token {token} — an undefined var() falls "
+                      f"through to whatever follows it")
+                continue
+            colour = resolve(table[token], table)
+            ratio = contrast(over(colour, card), card)
+            check(
+                f"{theme_name}: {selector} — {label}",
+                ratio >= AA,
+                f"{ratio:.2f}:1 on the hover card, below the {AA}:1 AA ratio "
+                f"({token} = {colour})",
+            )
+
+
 def test_no_status_colour_is_written_as_a_literal() -> None:
     """
     The rule that should have stopped this, applied to foregrounds.
@@ -374,6 +420,7 @@ def main() -> int:
 
     for test in (test_no_hardcoded_overlay_backgrounds, test_overlay_text_meets_aa,
                  test_status_colours_read_in_both_themes,
+                 test_the_hover_card_severities_read_in_both_themes,
                  test_no_status_colour_is_written_as_a_literal,
                  test_the_application_icon):
         try:
