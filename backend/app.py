@@ -4437,6 +4437,100 @@ async def ansible_seed_examples() -> dict:
     return {"seeded": await asyncio.to_thread(ansible_examples.seed_if_empty)}
 
 
+class InventoryPreviewRequest(BaseModel):
+    """Body for POST /api/ansible/inventories/preview (#608)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    filename: str = ""
+    # Whether the first row is a header. None means "work it out"; the
+    # caller says otherwise when it got it wrong, which is the same
+    # arrangement as the columns.
+    headed: bool | None = None
+
+
+class InventorySaveRequest(BaseModel):
+    """Body for POST /api/ansible/inventories (#608)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = ""
+    name: str
+    description: str = ""
+    source: str = "estate"
+    filename: str = ""
+    platform: str = ""
+    mapping: dict = {}
+    headed: bool | None = None
+    hosts: list[dict] = []
+    # An upload arrives as text plus the mapping the user confirmed; the
+    # rows are parsed here rather than in the browser so one implementation
+    # decides what a file means.
+    text: str = ""
+
+
+@app.get("/api/ansible/inventories")
+async def ansible_inventories() -> dict:
+    """The custom inventories, without their rows."""
+    from backend import ansible_inventories as store
+
+    return {"inventories": await asyncio.to_thread(store.inventories),
+            "fields": list(store.FIELDS)}
+
+
+@app.get("/api/ansible/inventories/{inventory_id}")
+async def ansible_inventory(inventory_id: str) -> dict:
+    """One, with its hosts."""
+    from backend import ansible_inventories as store
+
+    found = await asyncio.to_thread(store.get, inventory_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="There is no such inventory.")
+    return found
+
+
+@app.post("/api/ansible/inventories/preview")
+async def ansible_inventory_preview(request: InventoryPreviewRequest) -> dict:
+    """
+    Read an uploaded file into rows and columns, deciding nothing.
+
+    Deliberately does not pick the host column. A header called `mgmt` and
+    one called `LAN IP` mean the same thing; one called `serial` does not,
+    and guessing produces an inventory that looks right and dials nothing.
+    """
+    from backend import ansible_inventories as store
+
+    try:
+        return await asyncio.to_thread(store.preview, request.text,
+                                       request.filename, request.headed)
+    except store.InventoryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/ansible/inventories")
+async def ansible_save_inventory(request: InventorySaveRequest) -> dict:
+    from backend import ansible_inventories as store
+
+    fields = request.model_dump()
+    try:
+        if request.text:
+            fields["hosts"] = await asyncio.to_thread(
+                store.rows_from, request.text, request.mapping, request.headed)
+            fields["source"] = "upload"
+        fields.pop("text", None)
+        return await asyncio.to_thread(store.save, fields)
+    except store.InventoryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/ansible/inventories/{inventory_id}")
+async def ansible_delete_inventory(inventory_id: str) -> dict:
+    from backend import ansible_inventories as store
+
+    return {"deleted": await asyncio.to_thread(store.delete, inventory_id)}
+
+
 @app.get("/api/ansible/catalogue")
 async def ansible_catalogue() -> dict:
     """

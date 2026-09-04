@@ -86,6 +86,7 @@ shellmate/
 │   ├── ansible_builder.py       # Getting to a first playbook without writing YAML (#586)
 │   ├── ansible_examples.py      # Templates worth starting from (#590)
 │   ├── ansible_health.py        # Is the link to the runner healthy, and is it actually secure?
+│   ├── ansible_inventories.py   # Inventories somebody built, rather than the estate (#608)
 │   ├── ansible_keys.py          # The secrets an automation needs, and where they go (#586)
 │   ├── ansible_library.py       # What ShellMate keeps for Ansible, beside the runner (#586)
 │   ├── app.py                   # FastAPI application for ShellMate
