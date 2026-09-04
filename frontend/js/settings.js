@@ -109,6 +109,15 @@
       closeSettings();
       if (typeof window.openSupport === 'function') window.openSupport();
     });
+    // Ansible (#585): the test, and the door to the panel.
+    const ansibleTest = document.getElementById('ansible-test');
+    if (ansibleTest) ansibleTest.addEventListener('click', _testAnsible);
+    const ansiblePanel = document.getElementById('ansible-open-panel');
+    if (ansiblePanel) ansiblePanel.addEventListener('click', () => {
+      closeSettings();
+      if (typeof window.openAnsible === 'function') window.openAnsible();
+    });
+
     // The Broadcast section's door to the panel the library lives in (#239).
     const broadcastOpen = document.getElementById('broadcast-open-panel');
     if (broadcastOpen) broadcastOpen.addEventListener('click', () => {
@@ -839,6 +848,19 @@
       window.highlightRulesEditor.render(
         h.rules && h.rules.length ? h.rules : window.highlightRulesEditor.DEFAULT_RULES);
     }
+    // Ansible (#585). Paths and an address, never a secret: the private key
+    // is a file with its own permissions and only its location is stored,
+    // which is why nothing here goes through the vault.
+    const ans = s.ansible || {};
+    _val('setting-ansible-url',     ans.runner_url  || '');
+    _val('setting-ansible-cert',    ans.client_cert || '');
+    _val('setting-ansible-key',     ans.client_key  || '');
+    _val('setting-ansible-ca',      ans.ca_cert     || '');
+    _checked('setting-ansible-verify', ans.verify_tls !== false);
+    _val('setting-ansible-project', ans.project_dir
+         || '/usr/share/ansible-runner-service/project');
+    _val('setting-ansible-timeout', ans.timeout ?? 30);
+
     _checked('setting-logging-enabled',   !!l.enabled);
     _checked('setting-redact-secrets',    l.redact_secrets !== false);
 
@@ -943,6 +965,72 @@
     }
     // Stash the original masked value so we can detect "no change" on save
     el.dataset.maskedOriginal = hasUserValue ? (value || '') : '';
+  }
+
+  /**
+   * The Ansible runner block (#585).
+   *
+   * Its own function because Test connection saves it alone, without the
+   * rest of the form — trying a certificate path should not commit whatever
+   * else happens to be open in Settings at the time.
+   */
+  function _collectAnsible() {
+    return {
+      runner_url:  _gval('setting-ansible-url').trim(),
+      client_cert: _gval('setting-ansible-cert').trim(),
+      client_key:  _gval('setting-ansible-key').trim(),
+      ca_cert:     _gval('setting-ansible-ca').trim(),
+      verify_tls:  _gchecked('setting-ansible-verify'),
+      project_dir: _gval('setting-ansible-project').trim()
+                   || '/usr/share/ansible-runner-service/project',
+      timeout:     _int('setting-ansible-timeout', 30),
+    };
+  }
+
+  /**
+   * Ask the runner, and say what actually came back.
+   *
+   * Honest rather than encouraging: `configured` and `reachable` are
+   * different answers, and "not set up yet" must not be reported as a
+   * failure to connect. The service's own message is passed through — it
+   * names the missing certificate, or the host that refused.
+   */
+  async function _testAnsible() {
+    const button = document.getElementById('ansible-test');
+    const result = document.getElementById('ansible-test-result');
+    if (!button || !result) return;
+    button.disabled = true;
+    result.classList.remove('ansible-note-bad');
+    result.textContent = 'Asking the runner\u2026';
+    try {
+      // Saved first, because /api/ansible/status is answered from the stored
+      // settings. Testing an address still sitting unsaved in a box would
+      // report on the previous one, which is the worst possible answer.
+      await fetch('/api/settings', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ settings: { ansible: _collectAnsible() } }),
+      });
+      await loadSettings();
+
+      const data = await (await fetch('/api/ansible/status')).json();
+      if (!data.configured) {
+        result.classList.add('ansible-note-bad');
+        result.textContent = data.detail
+          ? `Not set up yet — still needed: ${data.detail}.`
+          : 'Not set up yet.';
+      } else if (data.reachable) {
+        result.textContent = `The runner answered. ${data.detail || ''}`.trim();
+      } else {
+        result.classList.add('ansible-note-bad');
+        result.textContent = `Configured, but it did not answer: ${data.detail || ''}`.trim();
+      }
+    } catch (e) {
+      result.classList.add('ansible-note-bad');
+      result.textContent = `Could not ask: ${e.message || e}`;
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function saveSettings(opts) {
@@ -1059,6 +1147,7 @@
         foreground_override: (_isValidHex(fgHex) && fgHex.toLowerCase() !== schemeTheme.foreground.toLowerCase()) ? fgHex : null,
         background_override: (_isValidHex(bgHex) && bgHex.toLowerCase() !== schemeTheme.background.toLowerCase()) ? bgHex : null,
       },
+      ansible: _collectAnsible(),
       providers: _collectProviders(),
     };
 

@@ -60,6 +60,10 @@
         <span class="material-symbols-outlined">send</span>
         <span class="sidebar-label">Broadcast</span>
       </a>
+      <a href="#" id="sidebar-link-ansible" class="sidebar-link" title="Ansible — drive a runner and watch it work">
+        <span class="material-symbols-outlined">automation</span>
+        <span class="sidebar-label">Ansible</span>
+      </a>
       <!-- The assistant is off until asked for, so it needs somewhere to be
            asked for from. An empty third of the window is a poor
            advertisement; no hint at all means nobody finds the feature. -->
@@ -1910,6 +1914,111 @@ GigEth0/2     unassigned    YES unset  down     down
         </section>
         <div class="settings-slot" data-category="discovery"></div>
 
+        <!-- ===== Ansible (#585) =====
+             Paths, not contents. The service authenticates with mutual TLS
+             and a private key belongs in a file with its own permissions
+             rather than as a string in settings.json — which is why nothing
+             in this section is diverted into the vault: the secret here is
+             the key file, and it never moves. -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Ansible</h3>
+          <p class="settings-section-hint">ShellMate does not run Ansible. It drives an <code>ansible-runner-service</code> container over its REST API and shows what that container is doing. The service authenticates with a client certificate rather than a token, so a certificate and its key are what it needs — as paths on this machine, never as text stored here.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-ansible-url"
+                   data-tip="Where the runner service answers, scheme and port included — `https://runner.example:5001`. Nothing below works until this is set.||Left blank, the Ansible panel says the runner is not set up rather than reporting it unreachable: a thing not done and a thing gone wrong are different problems and send you looking in different places.">Runner address</label>
+            <span class="setting-value">
+              <input type="text" id="setting-ansible-url" class="setting-input"
+                     placeholder="https://runner.example:5001" autocomplete="off" />
+            </span>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-ansible-cert"
+                   data-tip="The client certificate the service demands. Mutual TLS is the only authentication it has, so this is not optional the way an API token might be.||A path, so the file keeps its own permissions. Pasting a certificate into a settings file would put it somewhere a support bundle could pick it up.">Client certificate</label>
+            <div class="setting-input-group setting-input-group-full">
+              <input type="text" id="setting-ansible-cert" class="setting-input setting-input-full"
+                     placeholder="C:\Users\you\.ansible\client.crt" />
+              <button type="button" class="btn-secondary btn-browse" data-target="setting-ansible-cert">
+                <span class="material-symbols-outlined">folder_open</span>
+                Browse
+              </button>
+            </div>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-ansible-key"
+                   data-tip="The private half of the certificate above. It is read from disk at the moment a request is made and never held anywhere else.||If this file moves or its permissions tighten past your account, the panel reports the runner as not set up and names the missing file rather than failing at the point you press Run.">Certificate key</label>
+            <div class="setting-input-group setting-input-group-full">
+              <input type="text" id="setting-ansible-key" class="setting-input setting-input-full"
+                     placeholder="C:\Users\you\.ansible\client.key" />
+              <button type="button" class="btn-secondary btn-browse" data-target="setting-ansible-key">
+                <span class="material-symbols-outlined">folder_open</span>
+                Browse
+              </button>
+            </div>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-ansible-ca"
+                   data-tip="A bundle to check the runner's own certificate against, for a service issued by your internal authority.||Leave it empty and the switch below decides: verification on uses the machine's trust store, off accepts whatever the runner presents — which is what the self-signed certificate the container ships with needs.">CA certificate</label>
+            <div class="setting-input-group setting-input-group-full">
+              <input type="text" id="setting-ansible-ca" class="setting-input setting-input-full"
+                     placeholder="(optional)" />
+              <button type="button" class="btn-secondary btn-browse" data-target="setting-ansible-ca">
+                <span class="material-symbols-outlined">folder_open</span>
+                Browse
+              </button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-ansible-verify"
+                   data-tip="Whether the runner's certificate has to check out before ShellMate will talk to it. On is right for anything issued properly.||Off accepts any certificate the far end presents, which is what the container's own self-signed one requires — and also what somebody sitting between you and it would present. Turn it off for a lab, not for an estate.">Verify TLS</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-ansible-verify" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-ansible-project"
+                   data-tip="The directory inside the container that the service reads playbooks from. It is where Send to the runner copies a playbook written in ShellMate.||Point it at the wrong directory and the copy reports success while the runner goes on saying the playbook does not exist — the file did land, just nowhere the service looks.">Project directory</label>
+            <span class="setting-value">
+              <input type="text" id="setting-ansible-project" class="setting-input"
+                     placeholder="/usr/share/ansible-runner-service/project" autocomplete="off" />
+            </span>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-ansible-timeout"
+                   data-tip="How long any single request to the runner may take before ShellMate gives up on it. Starting a play returns immediately; this covers that call, not the play.||Too short and a busy runner reads as unreachable. Too long and a dead one takes that many seconds to admit it, on every list the panel draws.">Timeout</label>
+            <div class="setting-input-group">
+              <input type="number" id="setting-ansible-timeout" class="setting-input setting-input-sm"
+                     min="1" max="600" step="1" />
+              <span class="setting-unit">s</span>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label"
+                   data-tip="Saves the rows above, then asks the runner the same question the Ansible panel asks when it opens — and reports exactly what came back, playbook count included.||Saving first is what makes it mean anything: the request is built from the stored values, so testing an address still sitting unsaved in a box would report on the previous one. Nothing reaches the runner but the request itself.">Test connection
+            </label>
+            <span class="setting-value">
+              <button type="button" id="ansible-test" class="btn-secondary">
+                <span class="material-symbols-outlined">lan</span>
+                Test connection
+              </button>
+              <button type="button" id="ansible-open-panel" class="btn-tertiary">
+                <span class="material-symbols-outlined">automation</span>
+                Open the Ansible panel
+              </button>
+            </span>
+          </div>
+          <p class="ansible-note" id="ansible-test-result"></p>
+        </section>
+
+
         <!-- ===== Licence (#446) ===== -->
         <section class="settings-section" id="licence-section">
           <h3 class="settings-section-title">Licence</h3>
@@ -2097,6 +2206,262 @@ GigEth0/2     unassigned    YES unset  down     down
       </div>
     </div>
   </div>
+
+  <!-- ================================================================
+       ANSIBLE (#585)
+
+       ShellMate does not run Ansible. It drives an ansible-runner-service
+       container over its REST API and shows what is happening. So this
+       wears the same chrome as Logs and History — a side panel, not a new
+       kind of window — and every list in it says whose it is, because
+       "the runner's playbooks" and "the ones you wrote here" are two
+       different things and the service can only run the first.
+  ================================================================ -->
+  <div id="ansible-overlay" class="panel-overlay hidden">
+    <div id="ansible-panel" class="side-panel side-panel-wide settings-like">
+      <div class="panel-header">
+        <h2 class="panel-title">Ansible</h2>
+        <button id="ansible-refresh" class="btn-tertiary" title="Ask the runner again">
+          <span class="material-symbols-outlined">refresh</span>
+          Refresh
+        </button>
+        <button id="ansible-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <div class="panel-body">
+        <!-- ===== The runner ===== -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Runner</h3>
+          <p class="settings-section-hint">ShellMate does not run Ansible itself. It drives an <code>ansible-runner-service</code> container and reports what that container is doing — so everything below depends on the runner answering.</p>
+
+          <div class="setting-row">
+            <label class="setting-label">Status</label>
+            <span class="setting-value">
+              <span id="ansible-status-pill" class="ansible-pill ansible-pill-grey">…</span>
+            </span>
+          </div>
+          <!-- The detail on its own line rather than inside the label. The
+               three answers here are long and different in kind: "still
+               needed: a client certificate" is a thing not done, and "could
+               not reach the runner" is a thing gone wrong. -->
+          <p class="ansible-note" id="ansible-status-detail">Asking the runner…</p>
+
+          <div class="setting-row">
+            <label class="setting-label">Address, certificates and timeout</label>
+            <span class="setting-value">
+              <button type="button" id="ansible-open-settings" class="btn-tertiary">
+                <span class="material-symbols-outlined">settings</span>
+                Settings &rarr; Ansible
+              </button>
+            </span>
+          </div>
+        </section>
+
+        <!-- ===== The two playbook lists ===== -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Playbooks</h3>
+          <p class="settings-section-hint">Two lists, kept apart on purpose. <strong>On the runner</strong> is what the container can actually run. <strong>In ShellMate</strong> is what has been written here — the service has no endpoint that accepts a playbook, so one of those reaches the runner by being copied over an SSH session you already have to the machine hosting it.</p>
+
+          <div class="ansible-list-head">
+            <span class="setting-label">On the runner</span>
+            <input type="search" id="ansible-search" placeholder="Search…" />
+          </div>
+          <div id="ansible-runner-list"></div>
+
+          <div class="ansible-list-head">
+            <span class="setting-label">In ShellMate</span>
+            <button type="button" id="ansible-new" class="btn-secondary">
+              <span class="material-symbols-outlined">add</span>
+              New playbook
+            </button>
+          </div>
+          <div id="ansible-library-list"></div>
+        </section>
+
+        <!-- ===== The run in front of you ===== -->
+        <section class="settings-section hidden" id="ansible-run-section">
+          <h3 class="settings-section-title">This run</h3>
+          <p class="settings-section-hint">Events as the runner reports them. Click a task to see what it actually said — a failure explains itself there and nowhere else.</p>
+
+          <div class="ansible-run-bar">
+            <span id="ansible-live-pill" class="ansible-pill ansible-pill-grey">…</span>
+            <span id="ansible-live-name" class="ansible-live-name"></span>
+            <span id="ansible-live-target" class="ansible-live-target"></span>
+            <span class="ansible-spacer"></span>
+            <button type="button" id="ansible-report" class="btn-secondary hidden" title="What ran, against what, what changed and what failed">
+              <span class="material-symbols-outlined">summarize</span>
+              Report
+            </button>
+            <button type="button" id="ansible-stop" class="btn-secondary hidden" title="Ask the runner to stop this play">
+              <span class="material-symbols-outlined">stop</span>
+              Stop
+            </button>
+          </div>
+
+          <div id="ansible-tallies" class="ansible-tallies"></div>
+          <div id="ansible-events" class="ansible-events"></div>
+        </section>
+
+        <!-- ===== What this browser has watched ===== -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Recent runs</h3>
+          <p class="settings-section-hint">What this browser has watched. The service has no endpoint that lists past runs, so this is ShellMate's own note of them rather than the runner's record — a run started from somewhere else will not be here.</p>
+          <div id="ansible-history"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       ANSIBLE — the Run dialog (#585)
+
+       Check mode is first and loud on purpose. It is Ansible's dry run and
+       the safe way to try a play against a live estate; putting it at the
+       bottom under the variables is how somebody makes real changes by
+       accident. It starts ticked for the same reason.
+  ================================================================ -->
+  <div id="ansible-run-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="ansible-run-title">
+    <div id="ansible-run-dialog">
+      <div id="ansible-run-header">
+        <span class="material-symbols-outlined" style="color:var(--primary)">automation</span>
+        <h2 id="ansible-run-title">Run a playbook</h2>
+        <span id="ansible-run-name"></span>
+        <span class="ansible-spacer"></span>
+        <button type="button" id="ansible-run-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <div id="ansible-run-body">
+        <label class="ansible-check" for="ansible-run-check">
+          <input type="checkbox" id="ansible-run-check" checked />
+          <span class="material-symbols-outlined">science</span>
+          <span class="ansible-check-text">
+            <strong>Check mode</strong>
+            <span>Ansible's dry run. It reports what it would change and changes nothing. Untick this to make the changes for real.</span>
+          </span>
+        </label>
+
+        <div class="setting-row-stack">
+          <span class="setting-label">Run it against</span>
+          <div class="ansible-target-modes">
+            <label><input type="radio" name="ansible-target" value="group" checked /> A ShellMate group</label>
+            <label><input type="radio" name="ansible-target" value="hosts" /> Specific hosts</label>
+            <label><input type="radio" name="ansible-target" value="runner" /> An inventory the runner holds</label>
+          </div>
+
+          <div id="ansible-target-group" class="ansible-target-pane">
+            <select id="ansible-group-select" class="setting-input"></select>
+            <p class="field-hint">The runner validates every host against <em>its</em> inventory, so a ShellMate host it has never heard of is refused there. Push the group across first if it is new.</p>
+            <button type="button" id="ansible-push-inventory" class="btn-secondary">
+              <span class="material-symbols-outlined">upload</span>
+              Push this group to the runner's inventory
+            </button>
+            <div id="ansible-estate-preview" class="ansible-preview"></div>
+          </div>
+
+          <div id="ansible-target-hosts" class="ansible-target-pane hidden">
+            <div id="ansible-host-list" class="ansible-hosts"></div>
+          </div>
+
+          <div id="ansible-target-runner" class="ansible-target-pane hidden">
+            <select id="ansible-runner-group" class="setting-input"></select>
+            <p class="field-hint">Groups the container already holds. Nothing of ShellMate's is sent when this is chosen.</p>
+          </div>
+        </div>
+
+        <div class="setting-row-stack">
+          <label class="setting-label" for="ansible-extra-vars">Extra variables <span class="optional">(optional)</span></label>
+          <textarea id="ansible-extra-vars" rows="4" spellcheck="false"
+                    placeholder="vlan_id=40&#10;description=Access port"></textarea>
+          <p class="field-hint">One <code>name=value</code> per line, or a JSON object. They reach the play as <code>--extra-vars</code>.</p>
+        </div>
+
+        <div class="setting-row-stack">
+          <label class="setting-label" for="ansible-tags">Tags <span class="optional">(optional)</span></label>
+          <input type="text" id="ansible-tags" class="setting-input" placeholder="config,verify" autocomplete="off" />
+          <p class="field-hint">Comma-separated. Only tasks carrying one of these run.</p>
+        </div>
+
+        <p id="ansible-run-error" class="ansible-error hidden"></p>
+      </div>
+
+      <div id="ansible-run-footer">
+        <span id="ansible-run-summary"></span>
+        <span class="ansible-spacer"></span>
+        <button type="button" id="ansible-run-cancel" class="btn-secondary">Cancel</button>
+        <button type="button" id="ansible-run-go" class="btn-primary">
+          <span class="material-symbols-outlined">bolt</span>
+          Run
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       ANSIBLE — the playbook editor (#585)
+
+       The service can list and run playbooks but has no endpoint that
+       accepts one, so a playbook written here reaches the container by
+       being copied over an SSH session ShellMate already holds. Send to
+       the runner says so, and says where it landed, rather than leaving a
+       Save that looks complete and is not.
+  ================================================================ -->
+  <div id="ansible-edit-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="ansible-edit-title">
+    <div id="ansible-edit-dialog">
+      <div id="ansible-edit-header">
+        <span class="material-symbols-outlined" style="color:var(--primary)">code</span>
+        <h2 id="ansible-edit-title">Playbook</h2>
+        <input type="text" id="ansible-edit-name" class="setting-input" placeholder="drain-access-switch.yml" autocomplete="off" spellcheck="false" />
+        <span class="ansible-spacer"></span>
+        <button type="button" id="ansible-edit-send" class="btn-secondary" title="Copy this playbook to the runner over an SSH session">
+          <span class="material-symbols-outlined">upload</span>
+          Send to the runner
+        </button>
+        <button type="button" id="ansible-edit-delete" class="btn-secondary" title="Delete this playbook">
+          <span class="material-symbols-outlined">delete</span>
+          Delete
+        </button>
+        <button type="button" id="ansible-edit-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <textarea id="ansible-edit-text" spellcheck="false" autocomplete="off"></textarea>
+      <div id="ansible-edit-footer">
+        <p id="ansible-edit-note" class="ansible-note"></p>
+        <span class="ansible-spacer"></span>
+        <button type="button" id="ansible-edit-save" class="btn-primary">
+          <span class="material-symbols-outlined">save</span>
+          Save
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       ANSIBLE — one task's own output (#585)
+  ================================================================ -->
+  <div id="ansible-event-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="ansible-event-title">
+    <div id="ansible-event-dialog">
+      <div id="ansible-event-header">
+        <span class="material-symbols-outlined" style="color:var(--primary)">article</span>
+        <h2 id="ansible-event-title">Task</h2>
+        <span id="ansible-event-meta"></span>
+        <span class="ansible-spacer"></span>
+        <button type="button" id="ansible-event-copy" class="btn-secondary" title="Copy this task's output">
+          <span class="material-symbols-outlined">content_copy</span>
+          Copy
+        </button>
+        <button type="button" id="ansible-event-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <pre id="ansible-event-content"></pre>
+    </div>
+  </div>
+
 
   <!-- ================================================================
        CONFIG DIFF MODAL
@@ -3027,6 +3392,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/sftp.js"></script>
   <script src="/static/js/jira.js"></script>
   <script src="/static/js/feedback.js"></script>
+  <script src="/static/js/ansible.js"></script>
   <script>
     // ----------------------------------------------------------------
     // Paste confirmation modal (#523)

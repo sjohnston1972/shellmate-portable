@@ -925,6 +925,279 @@ async def run():
             fail("Enter types a newline; Ctrl+Enter sends", str(e))
 
         # ------------------------------------------------------------------
+        # Ansible (#585)
+        #
+        # No runner is configured here and none will be: the endpoints answer
+        # honestly without one, and that is the state a fresh install is in.
+        # What is worth asserting is that the panel opens and says so, that a
+        # playbook written here survives a round trip through the library, and
+        # that the Run dialog opens with check mode ticked — the one default
+        # in this feature that decides whether a live estate changes.
+        print("\n-- Ansible panel --")
+
+        try:
+            await page.click("#sidebar-link-ansible")
+            await expect(page.locator("#ansible-panel")).to_be_visible()
+            ok("the Ansible panel opens from the sidebar")
+        except Exception as e:
+            fail("the Ansible panel opens from the sidebar", str(e))
+
+        try:
+            # Configured and reachable are different answers and the panel has
+            # to give the right one: with nothing set up it is "not set up",
+            # never "not answering", which would send somebody to a firewall.
+            await expect(page.locator("#ansible-status-pill")).to_have_text("Not set up")
+            detail = await page.inner_text("#ansible-status-detail")
+            assert "certificate" in detail.lower(), detail
+            ok("an unconfigured runner reads as not set up, and says what is missing")
+        except Exception as e:
+            fail("an unconfigured runner reads as not set up, and says what is missing", str(e))
+
+        try:
+            # Both lists render even though the runner is unreachable — the
+            # library has to stay usable while the container is down.
+            await expect(page.locator("#ansible-runner-list")).to_be_visible()
+            await expect(page.locator("#ansible-library-list")).to_be_visible()
+            ok("both playbook lists render with the runner unreachable")
+        except Exception as e:
+            fail("both playbook lists render with the runner unreachable", str(e))
+
+        print("\n-- The playbook library --")
+
+        try:
+            await page.click("#ansible-new")
+            await expect(page.locator("#ansible-edit-dialog")).to_be_visible()
+            # A skeleton, not an empty box: a playbook is a list of plays and
+            # the backend refuses anything else, so an empty box is a Save
+            # that fails on the first press.
+            body = await page.input_value("#ansible-edit-text")
+            assert body.strip().startswith("---"), body[:60]
+            ok("New playbook opens the editor on a skeleton")
+        except Exception as e:
+            fail("New playbook opens the editor on a skeleton", str(e))
+
+        try:
+            await page.fill("#ansible-edit-name", "phase2-check")
+            await page.click("#ansible-edit-save")
+            await page.wait_for_timeout(500)
+            # The backend adds the suffix, and the editor has to agree with
+            # the disk about the name or Send goes looking for the wrong file.
+            saved = await page.input_value("#ansible-edit-name")
+            assert saved == "phase2-check.yml", saved
+            note = await page.inner_text("#ansible-edit-note")
+            assert "phase2-check.yml" in note, note
+            ok("saving names the file and says where it would land on the runner")
+        except Exception as e:
+            fail("saving names the file and says where it would land on the runner", str(e))
+
+        try:
+            await page.click("#ansible-edit-close")
+            await page.wait_for_timeout(400)
+            listed = await page.inner_text("#ansible-library-list")
+            assert "phase2-check.yml" in listed, listed[:120]
+            ok("and it appears in the ShellMate library")
+        except Exception as e:
+            fail("and it appears in the ShellMate library", str(e))
+
+        try:
+            await page.evaluate("() => window._ansible.openEditor('phase2-check.yml')")
+            await page.wait_for_timeout(400)
+            reopened = await page.input_value("#ansible-edit-text")
+            assert reopened.strip().startswith("---"), reopened[:60]
+            ok("reopening it reads back what was written")
+        except Exception as e:
+            fail("reopening it reads back what was written", str(e))
+
+        try:
+            # YAML that will not parse comes back with the parser's own words,
+            # not with "invalid playbook" — the line and column are the only
+            # part of that message anybody can act on.
+            await page.fill("#ansible-edit-text", "- name: x\n   bad: [unclosed")
+            await page.click("#ansible-edit-save")
+            await page.wait_for_timeout(500)
+            note = await page.inner_text("#ansible-edit-note")
+            assert "YAML" in note and "line" in note, note
+            ok("bad YAML is refused in the parser's own words")
+        except Exception as e:
+            fail("bad YAML is refused in the parser's own words", str(e))
+
+        # That 400 is the thing just tested, so it is not a console error to
+        # report at the end. Dropped by exact status rather than by widening
+        # the ignore list, which would blind the check to real 400s.
+        errors[:] = [e for e in errors
+                     if "400 (Bad Request)" not in e]
+
+        await page.click("#ansible-edit-close")
+        await page.wait_for_timeout(200)
+
+        print("\n-- The Run dialog --")
+
+        try:
+            await page.evaluate(
+                "() => window._ansible.openRunDialog('phase2-check.yml', 'runner')")
+            await expect(page.locator("#ansible-run-dialog")).to_be_visible()
+            ok("the Run dialog opens")
+        except Exception as e:
+            fail("the Run dialog opens", str(e))
+
+        try:
+            # The default that matters. A dry run is the safe way to try a
+            # play against a live estate, so the box starts ticked.
+            assert await page.is_checked("#ansible-run-check"), \
+                "check mode was not ticked when the Run dialog opened"
+            ok("check mode is ticked by default")
+        except Exception as e:
+            fail("check mode is ticked by default", str(e))
+
+        try:
+            # And on every open, not merely the first: inheriting it from
+            # whatever the last run happened to be is how somebody makes real
+            # changes by accident.
+            await page.uncheck("#ansible-run-check")
+            await page.click("#ansible-run-cancel")
+            await page.wait_for_timeout(200)
+            await page.evaluate(
+                "() => window._ansible.openRunDialog('phase2-check.yml', 'runner')")
+            await page.wait_for_timeout(400)
+            assert await page.is_checked("#ansible-run-check"), \
+                "check mode stayed unticked from the previous open"
+            ok("and it is re-ticked every time the dialog opens")
+        except Exception as e:
+            fail("and it is re-ticked every time the dialog opens", str(e))
+
+        try:
+            # A choice that depends on a runner is closed off when there is no
+            # runner, rather than left there to fail on use.
+            assert await page.is_disabled(
+                'input[name="ansible-target"][value="runner"]'),                 "the runner-inventory option was offered with no runner answering"
+            ok("the runner's own inventory is not offered when it is not answering")
+        except Exception as e:
+            fail("the runner's own inventory is not offered when it is not answering", str(e))
+
+        try:
+            # Extra vars are typed as name=value far more often than as JSON,
+            # and a malformed line is refused here rather than by the runner.
+            parsed = await page.evaluate(
+                "() => window._ansible._parseExtraVars('vlan=40\\nname=core')")
+            assert parsed == {"vlan": "40", "name": "core"}, parsed
+            as_json = await page.evaluate(
+                '() => window._ansible._parseExtraVars(\'{"a": 1}\')')
+            assert as_json == {"a": 1}, as_json
+            bad = await page.evaluate(
+                "() => { try { window._ansible._parseExtraVars('nope'); return ''; }"
+                "        catch (e) { return String(e.message); } }")
+            assert bad, "a line with no = was accepted"
+            ok("extra variables take name=value lines or JSON, and refuse neither quietly")
+        except Exception as e:
+            fail("extra variables take name=value lines or JSON, and refuse neither quietly", str(e))
+
+        try:
+            await page.click("#ansible-run-cancel")
+            await page.wait_for_timeout(200)
+            # A report of a run that has not happened is still the shape the
+            # report takes, and the check-mode line is the one a change record
+            # needs to be unambiguous about.
+            markdown = await page.evaluate("""() => {
+                window._ansible.watch({uuid: 'phase2', playbook: 'phase2-check.yml',
+                                       target: 'site-004 (3)', check: true});
+                return window._ansible.buildReport();
+            }""")
+            assert "# Ansible run" in markdown, markdown[:80]
+            assert "no changes were made" in markdown, markdown[:200]
+            assert "phase2-check.yml" in markdown, markdown[:200]
+            ok("a run reports as Markdown, and says plainly that check mode changed nothing")
+        except Exception as e:
+            fail("a run reports as Markdown, and says plainly that check mode changed nothing", str(e))
+
+        try:
+            # Watching a run the runner has never heard of is the same 409 as
+            # anything else asked of an absent runner, and the panel has to
+            # say so rather than sit on an empty run for ever.
+            await expect(page.locator("#ansible-live-pill")).to_have_text("Lost the run")
+            ok("a run the runner does not know about says so, rather than hanging")
+        except Exception as e:
+            fail("a run the runner does not know about says so, rather than hanging", str(e))
+
+        # The 409s from that are the thing just tested — no runner is
+        # configured, so asking about a run is answered exactly that way.
+        # Dropped by their own status rather than by widening the ignore list.
+        errors[:] = [e for e in errors if "409 (Conflict)" not in e]
+
+        try:
+            # Escape closes the topmost thing, not everything under it. One
+            # keypress taking the dialog and the panel together reads as the
+            # dialog having done something.
+            await page.evaluate(
+                "() => window._ansible.openRunDialog('phase2-check.yml', 'runner')")
+            await page.wait_for_timeout(300)
+            await page.keyboard.press("Escape")
+            await expect(page.locator("#ansible-run-overlay")).to_be_hidden()
+            await expect(page.locator("#ansible-panel")).to_be_visible()
+            ok("Escape closes the dialog and leaves the panel open")
+        except Exception as e:
+            fail("Escape closes the dialog and leaves the panel open", str(e))
+
+        try:
+            await page.keyboard.press("Escape")
+            await expect(page.locator("#ansible-panel")).to_be_hidden()
+            ok("and closes the panel next")
+        except Exception as e:
+            fail("and closes the panel next", str(e))
+
+        try:
+            await page.click("#sidebar-link-ansible")
+            await page.click("#ansible-close")
+            await expect(page.locator("#ansible-panel")).to_be_hidden()
+            ok("the panel closes")
+        except Exception as e:
+            fail("the panel closes", str(e))
+
+        print("\n-- Settings, Ansible section --")
+
+        try:
+            await page.click("#sidebar-link-settings")
+            await page.evaluate("() => window.openSettingsSection('Ansible')")
+            await page.wait_for_timeout(300)
+            await expect(page.locator("#setting-ansible-url")).to_be_visible()
+            # The defaults settings_store declares have to reach the form, or
+            # a first save writes blanks over them.
+            assert await page.is_checked("#setting-ansible-verify")
+            assert (await page.input_value("#setting-ansible-project")).startswith("/usr/share")
+            assert await page.input_value("#setting-ansible-timeout") == "30"
+            ok("the Ansible section shows the declared defaults")
+        except Exception as e:
+            fail("the Ansible section shows the declared defaults", str(e))
+
+        try:
+            await page.fill("#setting-ansible-url", "https://runner.example:5001")
+            await page.click("#ansible-test")
+            await page.wait_for_timeout(1200)
+            said = await page.inner_text("#ansible-test-result")
+            # Honest, not encouraging: an address with no certificate is "not
+            # set up", never a connection failure.
+            assert "Not set up" in said and "certificate" in said, said
+            ok("Test connection reports what is still missing, not a failure to connect")
+        except Exception as e:
+            fail("Test connection reports what is still missing, not a failure to connect", str(e))
+
+        try:
+            # And it saved, which is the half that makes the test mean
+            # anything — the status endpoint reads stored settings.
+            stored = await page.evaluate(
+                "async () => (await (await fetch('/api/settings')).json()).ansible")
+            assert stored["runner_url"] == "https://runner.example:5001", stored
+            ok("and it saved the block before asking")
+        except Exception as e:
+            fail("and it saved the block before asking", str(e))
+
+        try:
+            await page.click("#settings-close")
+            await page.wait_for_timeout(200)
+            ok("Settings closes again")
+        except Exception as e:
+            fail("Settings closes again", str(e))
+
+        # ------------------------------------------------------------------
         print("\n-- Console errors --")
 
         ignored = {"favicon"}
