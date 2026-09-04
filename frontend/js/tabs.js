@@ -2993,6 +2993,9 @@
     profileId:      t.profileId || '',
     label:          t.label,
     hostname:       t.hostname,
+    // The dialled address, for the dashboard's fallback match (#580): a
+    // tab opened by address has no profile id to match on.
+    address:        _addressOf(t),
     // What was dialled, never rewritten — `hostname` above becomes whatever
     // the device calls itself. Anything matching a tab to a saved connection
     // by address needs this one.
@@ -3058,8 +3061,10 @@
       keepAlive:    !!(tab.keepAlive || tab.keep_alive),
       logging:      !!(tab.logging || tab.logEnabled),
       profileId:    tab.profileId || '',
-      uptime:       (window.shellmateUptime && typeof window.shellmateUptime.label === 'function')
-                      ? window.shellmateUptime.label(sessionId) : '',
+      // The bare duration: the card adds "Connected for" / "Disconnected
+      // after" itself, and label() already carries those words (#581).
+      uptime:       (window.shellmateUptime && typeof window.shellmateUptime.duration === 'function')
+                      ? window.shellmateUptime.duration(sessionId) : '',
     };
   };
   /** What the tab palette (#410) searches: one plain object per tab. */

@@ -122,6 +122,11 @@
     return days ? `${days}d ${clock}` : clock;
   }
 
+  /** The bare duration, "01:05:12", for callers that add their own words (#581). */
+  function duration(sessionId) {
+    return sessions.has(sessionId) ? format(secondsFor(sessionId)) : '';
+  }
+
   function label(sessionId) {
     const entry = sessions.get(sessionId);
     if (!entry) return '';
@@ -159,7 +164,7 @@
 
   window.shellmateUptime = {
     start, stop, restart, forget, render,
-    secondsFor, label,
+    secondsFor, label, duration,
     _test: { format },
   };
 })();

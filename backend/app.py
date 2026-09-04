@@ -807,7 +807,12 @@ async def session_drift(session_id: str) -> dict:
     lines have changed."
     """
     session = _require_session(session_id)
-    return await asyncio.to_thread(drift_report, session)
+    try:
+        return await asyncio.to_thread(drift_report, session)
+    except (OSError, ConnectionError_) as exc:
+        # The device dropped the session while the capture ran; that is a
+        # state of the world, not a server fault.
+        raise HTTPException(status_code=409, detail=f"Could not capture the configuration: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
