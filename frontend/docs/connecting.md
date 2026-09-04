@@ -439,6 +439,49 @@ Tick **start this forward with every session from the saved connection** and
 the forward is kept on the profile; the next session from that tile starts it
 automatically, and stopping one asks whether to forget it as well.
 
+## Pasting a block
+
+`Ctrl+Shift+V`, `Ctrl+V` or a right-click pastes the clipboard into the
+session. A paste of more than one line asks first — how many lines it takes
+to ask is under Stockton → Terminal Behaviour — and the question is a
+working copy of what is about to be sent, not a preview:
+
+- **Edit it.** The box is editable. Fix the line the wiki gave a smart quote,
+  delete the two commands you did not mean to copy, and what is in the box is
+  exactly what goes to the device.
+- **Strip blank lines and comments** removes empty lines and anything
+  starting `!` or `#` — most of a configuration copied out of a change record.
+  Unticking it puts them back.
+- **Choose how fast it goes.** Three answers, and the right one depends on
+  the device in front of you.
+
+| Mode | What it does | When |
+|---|---|---|
+| **All at once** | The block goes as one stream, split into byte-sized pieces if *Paste chunk size* is set under Stockton | The default, and right for anything on a healthy SSH session |
+| **As lines, N ms apart** | One line, then a wait, then the next | A boot loader, a terminal server, anything with no prompt worth waiting for |
+| **A line at a time, waiting for the prompt** | One line, then ShellMate waits for the device to come back to its prompt before sending the next | A console cable into a 2960; Junos configuration mode; anything that drops characters or outruns its own parser |
+
+The last two are paced by ShellMate itself rather than by the browser, which
+is why they work on serial, telnet and devices ShellMate could not identify —
+where [Apply configuration](#applying-configuration) cannot go.
+
+While a paced paste runs, the dialog stays and says which line it has reached,
+with **Stop**. Three things end it early, and all three say so:
+
+- **You start typing.** A keystroke stops the batch immediately, the way it
+  ends a live capture: your session is the job.
+- **A line is held at the guardrail.** A `reload` in a pasted block raises the
+  same question a typed one does, and the batch *waits* for your answer rather
+  than sending the next line past it.
+- **The device stops answering.** After the timeout ShellMate stops and says
+  where — "line 12 sent, no prompt seen" — with the rest counted as not sent.
+  It deliberately does not fire the remainder at a device that comes back
+  thirty seconds later, into whatever you have started doing.
+
+Which mode the dialog opens on, the delay and the timeout all have defaults
+under Stockton → Terminal Behaviour; the dialog can override them for the
+paste in front of you.
+
 ## Applying configuration
 
 **Apply configuration** in a tab's menu takes a block of configuration and

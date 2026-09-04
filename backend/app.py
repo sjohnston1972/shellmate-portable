@@ -66,6 +66,7 @@ from backend import advanced as advanced_settings
 from backend.advanced import get as advanced_setting
 from backend import keys as ssh_keys
 from backend.onboard import OnConnectScript, as_chosen, summarise
+from backend import pipeline as pipeline_module
 from backend.session import outbound
 from backend.session.redact import redact
 from backend.session.transcript import detect_hostname
@@ -4145,6 +4146,12 @@ async def _origin_allowed(websocket: WebSocket) -> bool:
 #: its own kind of confusion.
 CANCELLED_NOTE = "\r\n\x1b[33m[not sent: {command}]\x1b[0m\r\n"
 
+#: The most lines one paste may be sent as (#523). Not a Stockton setting: it
+#: bounds a message the browser sends rather than a behaviour anyone would
+#: want to tune, and the honest answer above it is "not like this" — a
+#: configuration that size belongs in a file, applied with a push.
+PASTE_MAX_LINES = 5000
+
 
 def _load_watch_rules(session: dict) -> None:
     """
@@ -4445,6 +4452,15 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     if data and capture is not None and capture.state != "done":
                         capture.abort("you started typing")
 
+                    # A line-paced paste stops on a keystroke for the same
+                    # reason, and it matters more here: the batch is typing
+                    # into the session, so a user reaching for the keyboard is
+                    # either stopping it or about to collide with it (#523).
+                    batch = session.get("paste_batch")
+                    if data and batch is not None and not batch.done:
+                        batch.abort("you started typing")
+                        await _paste_finished(batch)
+
                     # Typing is activity. Without this the keep-alive would
                     # measure only the device's silence, and nudge a session
                     # somebody is actively working in but which has not
@@ -4567,6 +4583,18 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                                 "data": CANCELLED_NOTE.format(command=dropped),
                             }))
 
+                    # A line-paced paste pauses at a held line rather than
+                    # skipping past it, and this is where it starts again
+                    # (#523). Confirmed, something has just gone to the device
+                    # and the batch waits for the answer; refused, nothing
+                    # reached it and there is nothing to wait for.
+                    batch = session.get("paste_batch")
+                    if batch is not None and not batch.done:
+                        if msg.get("confirmed"):
+                            batch.wait_for_device()
+                        else:
+                            batch.resume()
+
                 elif msg_type == "resize":
                     cols = int(msg.get("cols", 80))
                     rows = int(msg.get("rows", 24))
@@ -4578,7 +4606,146 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     if hasattr(handler, "send_break"):
                         await asyncio.to_thread(handler.send_break)
 
+                elif msg_type == "paste_lines":
+                    # A block the user has already seen and approved, to be
+                    # sent a line at a time (#523). Paced here rather than in
+                    # the browser because the pacing that matters is "the
+                    # device is back at its prompt", which only this side can
+                    # see — and it has to work on serial, telnet and devices
+                    # nothing could identify, which is what config push
+                    # cannot do.
+                    await _start_paste(msg)
+
+                elif msg_type == "paste_stop":
+                    stopping = session.get("paste_batch")
+                    if stopping is not None and not stopping.done:
+                        stopping.abort("you stopped it")
+                        await _paste_finished(stopping)
+
         return
+
+    async def _start_paste(msg: dict) -> None:
+        """Take a paste batch from the browser and start it."""
+        running = session.get("paste_batch")
+        if running is not None and not running.done:
+            running.abort("another paste started")
+            await _paste_finished(running)
+
+        lines = [str(line) for line in (msg.get("lines") or [])]
+        if len(lines) > PASTE_MAX_LINES:
+            # Refused rather than truncated. A configuration block cut off
+            # at line 5000 is the worst of both: it reaches the device, and
+            # nobody knows where it stopped.
+            await websocket.send_text(json.dumps({
+                "type": "paste_batch", "state": "refused",
+                "total": len(lines), "limit": PASTE_MAX_LINES}))
+            return
+        if not lines:
+            return
+
+        def bounded(key: str, value) -> int:
+            """Whatever the browser sent, inside the registry's own bounds."""
+            setting = advanced_settings.SETTINGS_BY_KEY[key]
+            return int(setting.clamp(advanced_setting(key)
+                                     if value is None else value))
+
+        wait = str(msg.get("mode") or "prompt") != "lines"
+        batch = pipeline_module.PasteBatch(
+            lines=lines,
+            wait_for_prompt=wait,
+            delay=bounded("terminal.paste_line_delay",
+                          msg.get("delay_ms")) / 1000.0,
+            timeout=float(bounded("terminal.paste_prompt_timeout",
+                                  msg.get("timeout_s"))),
+        )
+        # The clock starts now, not when the object was built: the timeout is
+        # "this line waited too long", and the first line has not waited at
+        # all yet. Nothing is typed into the session before this, so the
+        # prompt the transcript is describing is the current one and the
+        # first line may go against it.
+        batch.hold()
+        session["paste_batch"] = batch
+        logger.info("Pasting %d lines into %s (%s)", len(lines),
+                    session.get("hostname") or session_id[:8],
+                    "at the prompt" if wait else "timed")
+        await websocket.send_text(json.dumps({
+            "type": "paste_batch", "state": "start",
+            "total": len(lines), "mode": "prompt" if wait else "lines"}))
+
+    async def drive_paste_batch() -> None:
+        """
+        Send the next line of a pasted block, when the device is ready for it.
+
+        Runs on the idle path of the read loop, alongside the on-connect
+        script and live capture, and under the same two rules. **One line per
+        prompt**: nothing goes out until the device is idle at a bare prompt
+        with nothing half-typed and no guardrail question outstanding.
+        **Through the pipeline**: a `reload` in a pasted block is held for
+        confirmation exactly as a typed one is, and the batch waits for the
+        answer rather than sending the next line past it.
+        """
+        batch = session.get("paste_batch")
+        if batch is None or batch.done:
+            return
+
+        if not handler.is_connected:
+            batch.abort("the session dropped")
+            await _paste_finished(batch)
+            return
+
+        pipeline = session["pipeline"]
+        if pipeline.held_commands:
+            # Waiting on a person, not on a device: hold the clock, or the
+            # batch times out behind its own confirmation dialog.
+            batch.hold()
+            return
+
+        at_prompt = bool(getattr(session["transcript"], "idle_at_prompt", False)) \
+            and not pipeline.current_line
+
+        line = batch.next_line(at_prompt)
+        if line is None:
+            if batch.done:
+                await _paste_finished(batch)
+            return
+
+        outbound_line = pipeline.process(line + "\r")
+        if outbound_line:
+            await asyncio.to_thread(
+                handler.send, outbound_line.encode("utf-8", errors="replace"))
+
+        for held in pipeline.newly_held:
+            await websocket.send_text(json.dumps({
+                "type":    "guardrail_prompt",
+                "command": held,
+                "device":  session.get("hostname")
+                           or session.get("display_label") or "this device",
+            }))
+
+        expansion = pipeline.last_expansion
+        if expansion:
+            await websocket.send_text(json.dumps({
+                "type": "alias_expanded",
+                "typed": expansion[0], "sent": expansion[1]}))
+
+        await note_pending(
+            session["alerts"].observe_command(command)
+            for command in pipeline.completed_commands
+        )
+
+        await websocket.send_text(json.dumps({
+            "type": "paste_batch", "state": "progress",
+            **batch.summary()}))
+
+    async def _paste_finished(batch) -> None:
+        """Say how far it got. The half that did not go out is the point."""
+        session["paste_batch"] = None
+        summary = batch.summary()
+        if summary["reason"]:
+            logger.info("Paste stopped after %d of %d lines (%s)",
+                        summary["sent"], summary["total"], summary["reason"])
+        await websocket.send_text(json.dumps({
+            "type": "paste_batch", "state": "done", **summary}))
 
     async def note_pending(changes) -> None:
         """
@@ -4936,8 +5103,16 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         # See ConnectionHandler.recv: None means idle. The
                         # half-second tick is what the idle work below —
                         # onboarding, live capture, keep-alive — runs on.
+                        #
+                        # A running paste is the exception (#523): at half a
+                        # second a batch asked for a line every 200ms would
+                        # get one every 500, and a device that came back to
+                        # its prompt would sit there for the rest of the tick.
+                        # It costs one wake-up every 50ms, and only while a
+                        # paste is actually running.
+                        idle_tick = 0.05 if session.get("paste_batch") else 0.5
                         try:
-                            await asyncio.wait_for(wake.wait(), timeout=0.5)
+                            await asyncio.wait_for(wake.wait(), timeout=idle_tick)
                             wake.clear()
                             continue
                         except asyncio.TimeoutError:
@@ -4963,6 +5138,14 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         await maybe_run_on_connect()
                     except Exception as exc:
                         logger.warning("On-connect script failed for %s: %s",
+                                       session_id, exc)
+                    # And the next line of a pasted block (#523) — same idle
+                    # path, same reason: at a prompt and saying nothing is
+                    # the only safe moment to type into somebody's session.
+                    try:
+                        await drive_paste_batch()
+                    except Exception as exc:
+                        logger.warning("Paste batch failed for %s: %s",
                                        session_id, exc)
                     try:
                         await maybe_keep_alive()
@@ -5072,6 +5255,16 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     await maybe_onboard()
                 except Exception as exc:
                     logger.warning("Onboarding failed for session %s: %s", session_id, exc)
+
+                # A paste batch watches output for one thing: that the device
+                # answered the last line at all (#523). Without it the batch
+                # races its own output — see PasteBatch.
+                try:
+                    pasting = session.get("paste_batch")
+                    if pasting is not None:
+                        pasting.observe(text)
+                except Exception as exc:
+                    logger.warning("Paste batch failed for %s: %s", session_id, exc)
 
                 # The on-connect script watches output for two things: that
                 # the device answered the last line at all, and the
@@ -5188,6 +5381,14 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
     # *browser* went away — a refresh, a hidden window — not that the device
     # did. The genuine close signals are recv() returning b"" and the error
     # path in read_from_channel, and both already write the flag.
+
+    # A paste is somebody's hand on the keyboard, and the hand has gone: the
+    # browser closed, or refreshed. Nothing may go on typing into a device
+    # with nobody watching the result (#523).
+    pasting = session.get("paste_batch")
+    if pasting is not None and not pasting.done:
+        pasting.abort("the window closed")
+    session["paste_batch"] = None
 
     # The log handle is per-session now rather than per-chunk, so it has an
     # end as well as a beginning — including the partial last line.

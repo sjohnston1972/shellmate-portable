@@ -312,6 +312,18 @@
           }));
           break;
 
+        case 'paste_batch':
+          // A pasted block being sent a line at a time (#523). The dialog
+          // follows the progress; the toast is for the end — and above all
+          // for an end that was not the end of the block.
+          window.dispatchEvent(new CustomEvent('shellmate:paste-batch', {
+            detail: { sessionId, ...msg }
+          }));
+          if (msg.state === 'done' || msg.state === 'refused') {
+            _reportPaste(sessionId, msg);
+          }
+          break;
+
         case 'alias_expanded':
           window.dispatchEvent(new CustomEvent('shellmate:alias-expanded', {
             detail: { sessionId, typed: msg.typed, sent: msg.sent }
@@ -494,6 +506,76 @@
       return true;
     }
 
+    /**
+     * Send an approved paste, in whichever way was chosen (#523).
+     *
+     * "block" is the original path and the default: one stream, chunked by
+     * bytes if Stockton asks for it, which is the right shape for a serial
+     * input buffer that drops characters when a paste outruns it.
+     *
+     * The other two are lines, and they are paced by the *server* — see
+     * PasteBatch in `backend/pipeline.py`. The pacing that a sixty-line ACL
+     * needs is not a gap in milliseconds but the device being back at its
+     * prompt, and that is not visible from in here.
+     */
+    function _sendPaste(text, choice) {
+      if (websocket.readyState !== WebSocket.OPEN) return;
+      const mode = (choice && choice.mode) || 'block';
+
+      if (mode !== 'block') {
+        // One trailing newline dropped, not all of them: a blank line in the
+        // middle of a block is a bare Return the device may well need, but
+        // the newline that ended the last line is not a line of its own.
+        const lines = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
+        websocket.send(JSON.stringify({
+          type:      'paste_lines',
+          lines:     lines,
+          mode:      mode === 'lines' ? 'lines' : 'prompt',
+          delay_ms:  choice.delayMs,
+          timeout_s: choice.timeoutS,
+        }));
+        return;
+      }
+
+      // Chunked when Stockton asks for it: some devices drop characters
+      // when a paste arrives faster than their input buffer drains.
+      const size = A('terminal.paste_chunk_bytes', 0);
+      if (!size) {
+        websocket.send(JSON.stringify({ type: 'input', data: text }));
+        return;
+      }
+      // A delay of zero makes chunking inert: `index * 0` schedules every
+      // chunk at timeout 0, they all fire in one macrotask batch, and the
+      // paste reaches the device exactly as fast as it did unchunked —
+      // which is the one thing the setting exists to prevent. So setting
+      // a chunk size and leaving the delay alone now paces anyway.
+      const delay = Math.max(A('terminal.paste_chunk_delay', 20), 1);
+
+      // Split on *bytes*, not characters. The setting is named for bytes
+      // and a device's input buffer is measured in them, so a paste of
+      // box-drawing or accented text was sending up to three times the
+      // intended amount per chunk — on the kit that needs this, that is
+      // the difference between working and dropping characters.
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
+      const bytes = encoder.encode(text);
+      const chunks = [];
+      for (let at = 0; at < bytes.length; at += size) {
+        // stream: true keeps a multi-byte character split across a chunk
+        // boundary from being decoded as a replacement character.
+        chunks.push(decoder.decode(bytes.slice(at, at + size), { stream: true }));
+      }
+      chunks.push(decoder.decode());     // flush anything held back
+
+      chunks.filter(Boolean).forEach((chunk, index) => {
+        setTimeout(() => {
+          if (websocket.readyState === WebSocket.OPEN) {
+            websocket.send(JSON.stringify({ type: 'input', data: chunk }));
+          }
+        }, index * delay);
+      });
+    }
+
     function _pasteFromClipboard() {
       navigator.clipboard.readText().then(text => {
         if (!text) return;
@@ -501,52 +583,25 @@
         // multi-line paste used to ask, which somebody pasting short blocks
         // all day learns to click through.
         const lines = text.split('\n').length;
-        const send = () => {
-          if (websocket.readyState !== WebSocket.OPEN) return;
-          // Chunked when Stockton asks for it: some devices drop characters
-          // when a paste arrives faster than their input buffer drains.
-          const size = A('terminal.paste_chunk_bytes', 0);
-          if (!size) {
-            websocket.send(JSON.stringify({ type: 'input', data: text }));
-            return;
-          }
-          // A delay of zero makes chunking inert: `index * 0` schedules every
-          // chunk at timeout 0, they all fire in one macrotask batch, and the
-          // paste reaches the device exactly as fast as it did unchunked —
-          // which is the one thing the setting exists to prevent. So setting
-          // a chunk size and leaving the delay alone now paces anyway.
-          const delay = Math.max(A('terminal.paste_chunk_delay', 20), 1);
-
-          // Split on *bytes*, not characters. The setting is named for bytes
-          // and a device's input buffer is measured in them, so a paste of
-          // box-drawing or accented text was sending up to three times the
-          // intended amount per chunk — on the kit that needs this, that is
-          // the difference between working and dropping characters.
-          const encoder = new TextEncoder();
-          const decoder = new TextDecoder();
-          const bytes = encoder.encode(text);
-          const chunks = [];
-          for (let at = 0; at < bytes.length; at += size) {
-            // stream: true keeps a multi-byte character split across a chunk
-            // boundary from being decoded as a replacement character.
-            chunks.push(decoder.decode(bytes.slice(at, at + size), { stream: true }));
-          }
-          chunks.push(decoder.decode());     // flush anything held back
-
-          chunks.filter(Boolean).forEach((chunk, index) => {
-            setTimeout(() => {
-              if (websocket.readyState === WebSocket.OPEN) {
-                websocket.send(JSON.stringify({ type: 'input', data: chunk }));
-              }
-            }, index * delay);
-          });
-        };
-
         if (lines < A('terminal.paste_confirm_lines', 1) + 1) {
-          send();
+          _sendPaste(text, { mode: 'block' });
           return;
         }
-        window._showPasteModal && window._showPasteModal(text, send);
+
+        // What the dialog opens on. The pace is a decision about the device
+        // in front of you, so the setting is a starting point rather than
+        // the answer — it can be changed for this paste alone.
+        const opts = {
+          sessionId: sessionId,
+          mode:      A('terminal.paste_mode', 'block'),
+          delayMs:   A('terminal.paste_line_delay', 200),
+          timeoutS:  A('terminal.paste_prompt_timeout', 10),
+        };
+        if (window._showPasteModal) {
+          window._showPasteModal(text, opts, _sendPaste);
+        } else {
+          _sendPaste(text, { mode: 'block' });
+        }
       }).catch(err => _clipboardFailed('paste', err));
     }
 
@@ -920,6 +975,60 @@
     }
   }
 
+  /** How a batch that stopped early reads, by the server's reason code. */
+  const PASTE_STOPPED = {
+    'no-prompt':          'the device never came back to a prompt',
+    'you started typing': 'you started typing',
+    'you stopped it':     'you stopped it',
+    'the session dropped': 'the session dropped',
+    'the window closed':  'the window closed',
+    'another paste started': 'another paste was started',
+  };
+
+  /**
+   * Say how a line-paced paste ended (#523).
+   *
+   * The half that did not go out is the point. A block that stopped at line
+   * 12 of 60 reads as success unless somebody says otherwise — and the next
+   * thing anybody does is go and look at line 12, so it is named rather than
+   * left to be worked out from a count.
+   */
+  function _reportPaste(sessionId, info) {
+    if (!window.shellmateAlerts || !window.shellmateAlerts.notify) return;
+
+    if (info.state === 'refused') {
+      window.shellmateAlerts.notify({
+        severity: 'warning', icon: 'error', sessionId,
+        title: 'That paste was too long',
+        body: `${info.total} lines, and ShellMate sends at most ${info.limit} `
+              + 'this way. A configuration that size belongs in a file, '
+              + 'applied with Apply configuration.',
+      });
+      return;
+    }
+
+    const remaining = Number(info.remaining) || 0;
+    if (!info.reason && !remaining) {
+      window.shellmateAlerts.notify({
+        icon: 'content_paste', sessionId,
+        title: `Pasted ${info.sent} lines`,
+        body: 'Every line was sent and answered.',
+      });
+      return;
+    }
+
+    const where = info.stalled_at
+      ? `line ${info.stalled_at} sent, no prompt seen`
+      : `stopped after ${info.sent} of ${info.total} lines`;
+    window.shellmateAlerts.notify({
+      severity: 'warning', icon: 'content_paste', sessionId,
+      title: `Paste stopped: ${where}`,
+      body: `${PASTE_STOPPED[info.reason] || info.reason || 'it stopped'} — `
+            + `${remaining} line${remaining === 1 ? '' : 's'} not sent. `
+            + 'Nothing was queued: the rest is still on your clipboard.',
+    });
+  }
+
   /** A fit that throws is a layout bug worth a line in the console. */
   function _fitFailed(err) {
     console.warn('Terminal fit failed', err);
@@ -1143,6 +1252,21 @@
     const line = String(text).replace(/[\r\n]+/g, ' ').trim();
     if (!line) return false;
     instance.websocket.send(JSON.stringify({ type: 'input', data: line }));
+    return true;
+  };
+
+  /**
+   * Stop a line-paced paste that is part-way through (#523).
+   *
+   * The other way to stop one is to type, which is how a live capture ends
+   * too — but typing into a session mid-paste is exactly what somebody
+   * watching a block go wrong does not want to do.
+   */
+  window.stopPasteInSession = (sessionId) => {
+    const instance = _instances[sessionId];
+    if (!instance || !instance.websocket
+        || instance.websocket.readyState !== WebSocket.OPEN) return false;
+    instance.websocket.send(JSON.stringify({ type: 'paste_stop' }));
     return true;
   };
 
