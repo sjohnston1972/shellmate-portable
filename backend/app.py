@@ -3972,6 +3972,241 @@ async def ollama_models() -> list[dict]:
         return []
 
 
+# REST — Ansible (#585)
+#
+# ShellMate does not run Ansible; it drives an ansible-runner-service
+# container and shows what is happening. Everything here is a thin pass
+# through `backend/ansible.py`, which is where the service's API and its
+# envelope are understood. Two things are ShellMate's own: the inventory
+# built from the estate, and the playbook library, because the service has
+# no endpoint that accepts a playbook.
+# ---------------------------------------------------------------------------
+
+class PlaybookRunRequest(BaseModel):
+    """Body for POST /api/ansible/run."""
+
+    playbook: str
+    extra_vars: dict = {}
+    limit: list[str] = []
+    tags: str = ""
+    check: bool = False
+
+
+class PlaybookSaveRequest(BaseModel):
+    """Body for PUT /api/ansible/library/{name}."""
+
+    text: str
+
+
+class InventoryPushRequest(BaseModel):
+    """Body for POST /api/ansible/inventory/push."""
+
+    group: str = ""
+
+
+def _ansible_error(exc: Exception) -> HTTPException:
+    """The runner's own words, at a status that says whose fault it is."""
+    from backend.ansible import NotConfigured
+
+    if isinstance(exc, NotConfigured):
+        return HTTPException(status_code=409, detail=str(exc))
+    return HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/ansible/status")
+async def ansible_status() -> dict:
+    """Whether a runner is set up and answering. Never raises (#585)."""
+    from backend import ansible as ansible_module
+
+    return await asyncio.to_thread(ansible_module.ping)
+
+
+@app.get("/api/ansible/playbooks")
+async def ansible_playbooks() -> dict:
+    """What the runner holds, and what ShellMate's own library holds."""
+    from backend import ansible as ansible_module
+
+    library = await asyncio.to_thread(ansible_module.library)
+    try:
+        remote = await asyncio.to_thread(ansible_module.list_playbooks)
+        error = ""
+    except Exception as exc:
+        # The library is still worth showing when the runner is unreachable:
+        # somebody can go on writing while the container is down.
+        remote, error = [], str(exc)
+    return {"runner": remote, "library": library, "error": error}
+
+
+@app.post("/api/ansible/run")
+async def ansible_run(request: PlaybookRunRequest) -> dict:
+    """Start a playbook on the runner."""
+    from backend import ansible as ansible_module
+
+    try:
+        return await asyncio.to_thread(
+            ansible_module.start, request.playbook,
+            extra_vars=request.extra_vars, limit=request.limit,
+            check=request.check, tags=request.tags)
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+
+
+@app.get("/api/ansible/jobs/{play_uuid}")
+async def ansible_job(play_uuid: str) -> dict:
+    """What a run is doing, with a count of what it has done so far."""
+    from backend import ansible as ansible_module
+
+    try:
+        state = await asyncio.to_thread(ansible_module.status, play_uuid)
+        seen = await asyncio.to_thread(ansible_module.events, play_uuid)
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+    state["summary"] = ansible_module.summarise(seen["events"])
+    state["total_events"] = seen["total"]
+    return state
+
+
+@app.get("/api/ansible/jobs/{play_uuid}/events")
+async def ansible_job_events(play_uuid: str, since: str = "") -> dict:
+    """
+    The events of a run, or only those after `since`.
+
+    Polling with `since` is what keeps a long play cheap to watch: the
+    service returns everything it has every time, so the filtering has to
+    happen somewhere and here is nearer the wire than the browser.
+    """
+    from backend import ansible as ansible_module
+
+    try:
+        return await asyncio.to_thread(ansible_module.events, play_uuid, since)
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+
+
+@app.get("/api/ansible/jobs/{play_uuid}/events/{event_id}")
+async def ansible_job_event(play_uuid: str, event_id: str) -> dict:
+    """One task's own output — where a failure explains itself."""
+    from backend import ansible as ansible_module
+
+    try:
+        return await asyncio.to_thread(ansible_module.event, play_uuid, event_id)
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+
+
+@app.delete("/api/ansible/jobs/{play_uuid}")
+async def ansible_cancel(play_uuid: str) -> dict:
+    """Ask the runner to stop a run."""
+    from backend import ansible as ansible_module
+
+    try:
+        return await asyncio.to_thread(ansible_module.cancel, play_uuid)
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+
+
+@app.get("/api/ansible/inventory")
+async def ansible_inventory(group: str = "", source: str = "estate") -> dict:
+    """
+    The inventory a run would use.
+
+    `estate` builds it from ShellMate's own connections and groups and
+    sends nothing anywhere; `runner` reports what the container already
+    holds. Both are offered because a team that keeps its inventory on the
+    runner should not have ShellMate's view of the world imposed on it.
+    """
+    from backend import ansible as ansible_module
+
+    if source == "runner":
+        try:
+            groups = await asyncio.to_thread(ansible_module.list_groups)
+            hosts = await asyncio.to_thread(ansible_module.list_hosts, group)
+        except Exception as exc:
+            raise _ansible_error(exc) from exc
+        return {"source": "runner", "groups": groups, "hosts": hosts}
+    return {"source": "estate",
+            **await asyncio.to_thread(ansible_module.inventory_from_estate, group)}
+
+
+@app.post("/api/ansible/inventory/push")
+async def ansible_push_inventory(request: InventoryPushRequest) -> dict:
+    """Put the estate's hosts and groups into the runner's inventory."""
+    from backend import ansible as ansible_module
+
+    inventory = await asyncio.to_thread(
+        ansible_module.inventory_from_estate, request.group)
+    try:
+        result = await asyncio.to_thread(ansible_module.push_inventory, inventory)
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+    result["skipped"] = inventory["skipped"]
+    return result
+
+
+@app.get("/api/ansible/library/{name}")
+async def ansible_read_playbook(name: str) -> dict:
+    """One playbook from ShellMate's own library."""
+    from backend import ansible as ansible_module
+
+    try:
+        return {"name": name,
+                "text": await asyncio.to_thread(ansible_module.read_playbook, name),
+                "transfer": ansible_module.playbook_transfer_plan(name)}
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.put("/api/ansible/library/{name}")
+async def ansible_save_playbook(name: str, request: PlaybookSaveRequest) -> dict:
+    """Write one into the library. Refuses YAML that does not parse."""
+    from backend import ansible as ansible_module
+
+    try:
+        saved = await asyncio.to_thread(ansible_module.save_playbook, name, request.text)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    saved["transfer"] = ansible_module.playbook_transfer_plan(saved["name"])
+    return saved
+
+
+@app.delete("/api/ansible/library/{name}")
+async def ansible_delete_playbook(name: str) -> dict:
+    from backend import ansible as ansible_module
+
+    try:
+        return {"deleted": await asyncio.to_thread(ansible_module.delete_playbook, name)}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/ansible/library/{name}/send/{session_id}")
+async def ansible_send_playbook(name: str, session_id: str) -> dict:
+    """
+    Copy a playbook from the library to the runner, over an SSH session.
+
+    The service's API can list and run playbooks but cannot accept one, so
+    a playbook written here reaches the container the way any other file
+    does: over a session ShellMate already has to the machine running it.
+    Which is why this takes a session id rather than inventing a transport.
+    """
+    from backend import ansible as ansible_module
+    from backend.connections import sftp
+
+    session = _require_session(session_id)
+    try:
+        text = await asyncio.to_thread(ansible_module.read_playbook, name)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    plan = ansible_module.playbook_transfer_plan(name)
+    try:
+        await asyncio.to_thread(sftp.write_file, session, plan["target"],
+                                text.encode("utf-8"))
+    except ConnectionError_ as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info("Playbook %s copied to %s", plan["name"], plan["target"])
+    return {"sent": True, **plan}
+
+
 # REST — Session logs
 # ---------------------------------------------------------------------------
 

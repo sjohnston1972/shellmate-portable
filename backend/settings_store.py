@@ -275,6 +275,26 @@ DEFAULT_SETTINGS: dict = {
     # How loudly to say that something is about to happen to a device — a
     # pending reload, a commit waiting to be confirmed. The countdown itself is
     # not switchable: it is the information, not the interruption.
+    # Driving Ansible through an ansible-runner-service container (#585).
+    #
+    # Paths, not contents: the service authenticates with mutual TLS, and a
+    # private key belongs in a file with its own permissions rather than in
+    # settings.json. Nothing here is a secret, so nothing here is diverted
+    # into the vault; the secret is the key file, which never moves.
+    "ansible": {
+        # Where the runner answers, e.g. https://runner.example:5001
+        "runner_url": "",
+        # The client certificate and key the service demands.
+        "client_cert": "",
+        "client_key": "",
+        # A CA bundle for the runner's own certificate. Empty with
+        # verify_tls off accepts the self-signed one the service ships.
+        "ca_cert": "",
+        "verify_tls": True,
+        # Where playbooks live inside the container, for copying one across.
+        "project_dir": "/usr/share/ansible-runner-service/project",
+        "timeout": 30,
+    },
     "alerts": {
         # The tab pulses over the last five minutes.
         "flash_tab": True,
