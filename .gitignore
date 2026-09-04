@@ -41,3 +41,7 @@ Thumbs.db
 # wrangler's local state (relay deploys)
 relay/.wrangler/
 relay/**/.wrangler/
+
+# Worktrees the agents work in, and wrangler's cache wherever it lands.
+.claude/worktrees/
+.wrangler/
