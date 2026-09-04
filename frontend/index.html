@@ -367,7 +367,85 @@
               <p>The runner's own, and the ones you wrote here.</p>
             </header>
             <div class="av-area-body" id="av-playbooks-body">
-              <p class="av-empty">Nothing here yet.</p>
+      <!-- ===== The runner ===== -->
+      <section class="settings-section">
+        <h3 class="settings-section-title">Runner</h3>
+        <p class="settings-section-hint">ShellMate does not run Ansible itself. It drives an <code>ansible-runner-service</code> container and reports what that container is doing — so everything below depends on the runner answering.</p>
+
+        <div class="setting-row">
+          <label class="setting-label">Status</label>
+          <span class="setting-value">
+            <span id="ansible-status-pill" class="ansible-pill ansible-pill-grey">…</span>
+          </span>
+        </div>
+        <!-- The detail on its own line rather than inside the label. The
+             three answers here are long and different in kind: "still
+             needed: a client certificate" is a thing not done, and "could
+             not reach the runner" is a thing gone wrong. -->
+        <p class="ansible-note" id="ansible-status-detail">Asking the runner…</p>
+
+        <div class="setting-row">
+          <label class="setting-label">Address, certificates and timeout</label>
+          <span class="setting-value">
+            <button type="button" id="ansible-open-settings" class="btn-tertiary">
+              <span class="material-symbols-outlined">settings</span>
+              Settings &rarr; Ansible
+            </button>
+          </span>
+        </div>
+      </section>
+
+      <!-- ===== The two playbook lists ===== -->
+      <section class="settings-section">
+        <h3 class="settings-section-title">Playbooks</h3>
+        <p class="settings-section-hint">Two lists, kept apart on purpose. <strong>On the runner</strong> is what the container can actually run. <strong>In ShellMate</strong> is what has been written here — the service has no endpoint that accepts a playbook, so one of those reaches the runner by being copied over an SSH session you already have to the machine hosting it.</p>
+
+        <div class="ansible-list-head">
+          <span class="setting-label">On the runner</span>
+          <input type="search" id="ansible-search" placeholder="Search…" />
+        </div>
+        <div id="ansible-runner-list"></div>
+
+        <div class="ansible-list-head">
+          <span class="setting-label">In ShellMate</span>
+          <button type="button" id="ansible-new" class="btn-secondary">
+            <span class="material-symbols-outlined">add</span>
+            New playbook
+          </button>
+        </div>
+        <div id="ansible-library-list"></div>
+      </section>
+
+      <!-- ===== The run in front of you ===== -->
+      <section class="settings-section hidden" id="ansible-run-section">
+        <h3 class="settings-section-title">This run</h3>
+        <p class="settings-section-hint">Events as the runner reports them. Click a task to see what it actually said — a failure explains itself there and nowhere else.</p>
+
+        <div class="ansible-run-bar">
+          <span id="ansible-live-pill" class="ansible-pill ansible-pill-grey">…</span>
+          <span id="ansible-live-name" class="ansible-live-name"></span>
+          <span id="ansible-live-target" class="ansible-live-target"></span>
+          <span class="ansible-spacer"></span>
+          <button type="button" id="ansible-report" class="btn-secondary hidden" title="What ran, against what, what changed and what failed">
+            <span class="material-symbols-outlined">summarize</span>
+            Report
+          </button>
+          <button type="button" id="ansible-stop" class="btn-secondary hidden" title="Ask the runner to stop this play">
+            <span class="material-symbols-outlined">stop</span>
+            Stop
+          </button>
+        </div>
+
+        <div id="ansible-tallies" class="ansible-tallies"></div>
+        <div id="ansible-events" class="ansible-events"></div>
+      </section>
+
+      <!-- ===== What this browser has watched ===== -->
+      <section class="settings-section">
+        <h3 class="settings-section-title">Recent runs</h3>
+        <p class="settings-section-hint">What this browser has watched. The service has no endpoint that lists past runs, so this is ShellMate's own note of them rather than the runner's record — a run started from somewhere else will not be here.</p>
+        <div id="ansible-history"></div>
+      </section>
             </div>
           </section>
 
@@ -2393,103 +2471,6 @@ GigEth0/2     unassigned    YES unset  down     down
        "the runner's playbooks" and "the ones you wrote here" are two
        different things and the service can only run the first.
   ================================================================ -->
-  <div id="ansible-overlay" class="panel-overlay hidden">
-    <div id="ansible-panel" class="side-panel side-panel-wide settings-like">
-      <div class="panel-header">
-        <h2 class="panel-title">Ansible</h2>
-        <button id="ansible-refresh" class="btn-tertiary" title="Ask the runner again">
-          <span class="material-symbols-outlined">refresh</span>
-          Refresh
-        </button>
-        <button id="ansible-close" class="icon-btn" aria-label="Close">
-          <span class="material-symbols-outlined">close</span>
-        </button>
-      </div>
-
-      <div class="panel-body">
-        <!-- ===== The runner ===== -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Runner</h3>
-          <p class="settings-section-hint">ShellMate does not run Ansible itself. It drives an <code>ansible-runner-service</code> container and reports what that container is doing — so everything below depends on the runner answering.</p>
-
-          <div class="setting-row">
-            <label class="setting-label">Status</label>
-            <span class="setting-value">
-              <span id="ansible-status-pill" class="ansible-pill ansible-pill-grey">…</span>
-            </span>
-          </div>
-          <!-- The detail on its own line rather than inside the label. The
-               three answers here are long and different in kind: "still
-               needed: a client certificate" is a thing not done, and "could
-               not reach the runner" is a thing gone wrong. -->
-          <p class="ansible-note" id="ansible-status-detail">Asking the runner…</p>
-
-          <div class="setting-row">
-            <label class="setting-label">Address, certificates and timeout</label>
-            <span class="setting-value">
-              <button type="button" id="ansible-open-settings" class="btn-tertiary">
-                <span class="material-symbols-outlined">settings</span>
-                Settings &rarr; Ansible
-              </button>
-            </span>
-          </div>
-        </section>
-
-        <!-- ===== The two playbook lists ===== -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Playbooks</h3>
-          <p class="settings-section-hint">Two lists, kept apart on purpose. <strong>On the runner</strong> is what the container can actually run. <strong>In ShellMate</strong> is what has been written here — the service has no endpoint that accepts a playbook, so one of those reaches the runner by being copied over an SSH session you already have to the machine hosting it.</p>
-
-          <div class="ansible-list-head">
-            <span class="setting-label">On the runner</span>
-            <input type="search" id="ansible-search" placeholder="Search…" />
-          </div>
-          <div id="ansible-runner-list"></div>
-
-          <div class="ansible-list-head">
-            <span class="setting-label">In ShellMate</span>
-            <button type="button" id="ansible-new" class="btn-secondary">
-              <span class="material-symbols-outlined">add</span>
-              New playbook
-            </button>
-          </div>
-          <div id="ansible-library-list"></div>
-        </section>
-
-        <!-- ===== The run in front of you ===== -->
-        <section class="settings-section hidden" id="ansible-run-section">
-          <h3 class="settings-section-title">This run</h3>
-          <p class="settings-section-hint">Events as the runner reports them. Click a task to see what it actually said — a failure explains itself there and nowhere else.</p>
-
-          <div class="ansible-run-bar">
-            <span id="ansible-live-pill" class="ansible-pill ansible-pill-grey">…</span>
-            <span id="ansible-live-name" class="ansible-live-name"></span>
-            <span id="ansible-live-target" class="ansible-live-target"></span>
-            <span class="ansible-spacer"></span>
-            <button type="button" id="ansible-report" class="btn-secondary hidden" title="What ran, against what, what changed and what failed">
-              <span class="material-symbols-outlined">summarize</span>
-              Report
-            </button>
-            <button type="button" id="ansible-stop" class="btn-secondary hidden" title="Ask the runner to stop this play">
-              <span class="material-symbols-outlined">stop</span>
-              Stop
-            </button>
-          </div>
-
-          <div id="ansible-tallies" class="ansible-tallies"></div>
-          <div id="ansible-events" class="ansible-events"></div>
-        </section>
-
-        <!-- ===== What this browser has watched ===== -->
-        <section class="settings-section">
-          <h3 class="settings-section-title">Recent runs</h3>
-          <p class="settings-section-hint">What this browser has watched. The service has no endpoint that lists past runs, so this is ShellMate's own note of them rather than the runner's record — a run started from somewhere else will not be here.</p>
-          <div id="ansible-history"></div>
-        </section>
-      </div>
-    </div>
-  </div>
-
   <!-- ================================================================
        ANSIBLE — the Run dialog (#585)
 

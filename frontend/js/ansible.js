@@ -46,28 +46,28 @@
   let runnerReady = false;
 
   document.addEventListener('DOMContentLoaded', () => {
-    overlay = document.getElementById('ansible-overlay');
+    // The Playbooks area of the Ansible view (#586). This used to be a side
+    // panel with its own overlay, header and close button; it is now a
+    // section of a full view, so the chrome is gone and the only thing that
+    // changed here is where the content lives and who tells it to refresh.
+    overlay = document.getElementById('av-playbooks');
     if (!overlay) return;
 
-    document.getElementById('sidebar-link-ansible')
-      .addEventListener('click', (e) => { e.preventDefault(); openAnsible(); });
-
-    document.getElementById('ansible-close')
-      .addEventListener('click', closeAnsible);
-
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) closeAnsible();
+    if (window.ansibleView) {
+      window.ansibleView.area('playbooks', {
+        onShow: () => { refreshStatus(); refreshPlaybooks(); renderHistory(); },
+      });
+    }
+    // The view's own Refresh button, rather than one of this section's.
+    document.addEventListener('shellmate:ansible-refresh', () => {
+      refreshStatus();
+      refreshPlaybooks();
     });
-
-    document.getElementById('ansible-refresh')
-      .addEventListener('click', () => { refreshStatus(); refreshPlaybooks(); });
 
     document.getElementById('ansible-open-settings')
       .addEventListener('click', () => {
-        // Settings and this panel are overlays at the same level, so one has
-        // to close for the other to be reachable — the same reason the Logs
-        // panel closes before sending somebody to a setting.
-        closeAnsible();
+        // Settings is an overlay above the view, so the view stays where it
+        // is and comes back when Settings closes. Nothing to close here.
         if (typeof window.openSettingsSection === 'function') {
           window.openSettingsSection('Ansible');
         } else if (typeof window.openSettings === 'function') {
@@ -110,14 +110,21 @@
     renderHistory();
   });
 
+  /**
+   * Show the Playbooks area, from wherever somebody asked.
+   *
+   * Kept as `window.openAnsible` because several places call it — the
+   * dashboard, the tab menu, the tests. What it does now is open the view
+   * on this area rather than raise a drawer over the terminal.
+   */
   async function openAnsible() {
-    overlay.classList.remove('hidden');
+    if (window.ansibleView) window.ansibleView.open('playbooks');
     await Promise.all([refreshStatus(), refreshPlaybooks()]);
     renderHistory();
   }
 
   function closeAnsible() {
-    overlay.classList.add('hidden');
+    if (window.ansibleView) window.ansibleView.close();
   }
 
   // -------------------------------------------------------------------------

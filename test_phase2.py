@@ -936,15 +936,19 @@ async def run():
         print("\n-- Ansible panel --")
 
         try:
-            # The sidebar link now opens the Ansible *view* (#586); this
-            # suite still covers the side panel it is replacing, so it
-            # opens that directly. These checks move to the view when the
-            # Playbooks area lands and the panel is retired.
-            await page.evaluate("window.openAnsible()")
-            await expect(page.locator("#ansible-panel")).to_be_visible()
-            ok("the Ansible panel opens from the sidebar")
+            # The panel is now the Playbooks area of the Ansible view
+            # (#586). Same markup, same behaviour, different frame around
+            # it — so these checks still apply and the sidebar link is
+            # once again the way in.
+            await page.click("#sidebar-link-ansible")
+            # The view reopens on whichever area was last used, so the one
+            # under test is asked for by name rather than assumed.
+            await page.evaluate("window.ansibleView.show('playbooks')")
+            await page.wait_for_selector("#av-playbooks:not([hidden])", timeout=5000)
+            await expect(page.locator("#av-playbooks")).to_be_visible()
+            ok("the Ansible view opens from the sidebar")
         except Exception as e:
-            fail("the Ansible panel opens from the sidebar", str(e))
+            fail("the Ansible view opens from the sidebar", str(e))
 
         try:
             # Configured and reachable are different answers and the panel has
@@ -1139,29 +1143,33 @@ async def run():
             await page.wait_for_timeout(300)
             await page.keyboard.press("Escape")
             await expect(page.locator("#ansible-run-overlay")).to_be_hidden()
-            await expect(page.locator("#ansible-panel")).to_be_visible()
-            ok("Escape closes the dialog and leaves the panel open")
+            await expect(page.locator("#av-playbooks")).to_be_visible()
+            ok("Escape closes the dialog and leaves the view open")
         except Exception as e:
-            fail("Escape closes the dialog and leaves the panel open", str(e))
+            fail("Escape closes the dialog and leaves the view open", str(e))
 
         try:
             await page.keyboard.press("Escape")
-            await expect(page.locator("#ansible-panel")).to_be_hidden()
-            ok("and closes the panel next")
+            await expect(page.locator("#ansible-stage")).to_be_hidden()
+            ok("and leaves the view next")
         except Exception as e:
-            fail("and closes the panel next", str(e))
+            fail("and leaves the view next", str(e))
 
         try:
-            # The sidebar link now opens the Ansible *view* (#586); this
-            # suite still covers the side panel it is replacing, so it
-            # opens that directly. These checks move to the view when the
-            # Playbooks area lands and the panel is retired.
-            await page.evaluate("window.openAnsible()")
-            await page.click("#ansible-close")
-            await expect(page.locator("#ansible-panel")).to_be_hidden()
-            ok("the panel closes")
+            # The panel is now the Playbooks area of the Ansible view
+            # (#586). Same markup, same behaviour, different frame around
+            # it — so these checks still apply and the sidebar link is
+            # once again the way in.
+            await page.click("#sidebar-link-ansible")
+            # The view reopens on whichever area was last used, so the one
+            # under test is asked for by name rather than assumed.
+            await page.evaluate("window.ansibleView.show('playbooks')")
+            await page.wait_for_selector("#av-playbooks:not([hidden])", timeout=5000)
+            await page.click("#av-close")
+            await expect(page.locator("#ansible-stage")).to_be_hidden()
+            ok("the view closes")
         except Exception as e:
-            fail("the panel closes", str(e))
+            fail("the view closes", str(e))
 
         print("\n-- Settings, Ansible section --")
 

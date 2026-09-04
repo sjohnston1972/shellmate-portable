@@ -357,6 +357,10 @@
       refresh.addEventListener('click', async () => {
         refresh.disabled = true;
         try {
+          // Areas that keep their own state — Playbooks holds a live run —
+          // reload themselves rather than being re-rendered from the shared
+          // cache, which does not know about a job in flight.
+          document.dispatchEvent(new CustomEvent('shellmate:ansible-refresh'));
           await load(true);
           const handlers = areas.get(current);
           if (handlers && typeof handlers.onShow === 'function') {
@@ -383,9 +387,18 @@
     if (close) close.addEventListener('click', closeView);
 
     // Escape leaves the view, unless something modal is on top of it.
+    //
+    // Matched on aria-modal as well as on the overlay classes, because not
+    // every dialog in ShellMate wears one: the run dialog is a bare div
+    // with role="dialog", and without this a single Escape closed both it
+    // and the view underneath — losing the screen somebody was working on
+    // to a keystroke meant for a form.
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || !open) return;
-      if (document.querySelector('.modal-overlay:not(.hidden), .panel-overlay:not(.hidden)')) return;
+      const modal = document.querySelector(
+        '.modal-overlay:not(.hidden), .panel-overlay:not(.hidden), '
+        + '[aria-modal="true"]:not(.hidden), [role="dialog"]:not(.hidden)');
+      if (modal && modal.offsetParent !== null) return;
       closeView();
     });
 
