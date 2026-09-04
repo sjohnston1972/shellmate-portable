@@ -131,15 +131,31 @@
       // fires the event and then hides the dashboard, in that order.
       const shown = typeof window.dashboardVisible === 'function'
         ? window.dashboardVisible() : true;
-      if (!shown) return;
-      // The tiles, not a re-fetch: which sessions are open cannot change
-      // which connections are saved, and re-reading 5,000 profiles on every
-      // drop would undo #188.
-      if (typeof window.renderWelcomeTiles === 'function') {
-        window.renderWelcomeTiles();
+      // The tree lives beside the terminals as well as on the dashboard
+      // (#580): a connection opened from it hid the dashboard, this gate
+      // then skipped the redraw, and the dot stayed dark until something
+      // else redrew the tree.
+      const treeShown = _treeVisible();
+      if (!shown && !treeShown) return;
+      if (shown) {
+        // The tiles, not a re-fetch: which sessions are open cannot change
+        // which connections are saved, and re-reading 5,000 profiles on
+        // every drop would undo #188.
+        if (typeof window.renderWelcomeTiles === 'function') {
+          window.renderWelcomeTiles();
+        }
+      } else {
+        _loadLive();
+        renderTree(profileCache);
       }
     }, 120);
   });
+
+  /** Whether the tree panel is on screen, beside the terminals or the dashboard. */
+  function _treeVisible() {
+    const panel = document.getElementById('group-tree');
+    return !!panel && !panel.classList.contains('hidden') && panel.offsetParent !== null;
+  }
 
   function active() { return activeGroup; }
 

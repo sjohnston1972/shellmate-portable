@@ -130,6 +130,10 @@ async def main_async() -> None:
         # The page loaded before the profile existed; load it again as a user would.
         await page.goto(BASE, wait_until="networkidle")
         await page.wait_for_selector(".tree-chip", timeout=5000)
+        # Open the group so its leaves, and their dots, are drawn.
+        if not await page.evaluate("() => !!document.querySelector('.tree-leaf-dot')"):
+            await page.click(".tree-chip:not(.tree-chip-ungrouped)")
+            await page.wait_for_selector(".tree-leaf-dot", timeout=3000)
 
         print("\n-- Connect from the dashboard and come back (#580) --")
         await page.evaluate("""async ({pid, port}) => {
@@ -141,6 +145,19 @@ async def main_async() -> None:
         tabs = await page.evaluate("() => window.getOpenTabs()")
         check("the tab carries the profile id", tabs[0].get("profileId") == pid, str(tabs))
         check("  and reports connected", tabs[0].get("isConnected") is True, str(tabs))
+        # The tree beside the terminal, with the dashboard hidden, must light
+        # without anyone leaving the terminal (#580).
+        tree_beside = await page.evaluate("() => { const p = document.getElementById('group-tree'); return !!p && !p.classList.contains('hidden') && p.offsetParent !== null && !window.dashboardVisible(); }")
+        if tree_beside:
+            try:
+                await page.wait_for_selector(".tree-leaf-dot.tree-leaf-live", timeout=3000)
+                lit_beside = True
+            except Exception:
+                lit_beside = False
+            check("the dot lights in the tree beside the terminal", lit_beside,
+                  str(await page.evaluate("() => [...document.querySelectorAll('.tree-leaf-dot')].map(d => d.className)")))
+        else:
+            print("  (tree not shown beside the terminal in this layout; skipped)")
         await page.evaluate("() => window.showDashboard()")
         await page.wait_for_selector(".tree-chip", timeout=5000)
         # Open the group so its leaves, and their dots, are drawn.
