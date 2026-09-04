@@ -40,7 +40,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from backend import auth, config_archive, desktop, paths
 from backend import groups as groups_module
@@ -4546,13 +4546,31 @@ async def ansible_delete_key(entry_id: str) -> dict:
 
 
 class PlaybookBuildRequest(BaseModel):
-    """Body for POST /api/ansible/build — assemble from blocks."""
+    """
+    Body for POST /api/ansible/build.
+
+    ``plays`` is the nested shape the canvas sends (#600); ``blocks`` is the
+    older flat one, kept working so every caller did not have to move at
+    once.
+
+    **Extra fields are refused rather than ignored.** Pydantic drops
+    unknown keys by default, which is how this endpoint spent an afternoon
+    accepting `plays`, discarding it, falling back to an empty `blocks` and
+    answering 200 with "Play 1 has no tasks in it" — a complaint about
+    input it had thrown away itself. The runner container had the identical
+    bug twice, on its run body and its galaxy call. A typo should fail
+    loudly at the door, not become a confusing message three layers in.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str = ""
     hosts: str = "all"
     family: str = "generic"
     gather_facts: bool = False
     blocks: list[dict] = []
+    plays: list[dict] = []
+    handlers: list[dict] = []
     save_as: str = ""
 
 

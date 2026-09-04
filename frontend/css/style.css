@@ -9771,6 +9771,207 @@ body {
    Ansible view — Builder (#586)
 --------------------------------------------------------------------------- */
 
+/* The nested canvas (#600).
+
+   Boxes inside boxes, because that is what a playbook is. The nesting is
+   carried by an inset border rather than by indentation alone: at three
+   levels deep, indentation on its own stops reading as containment and
+   starts reading as a list that drifted right. */
+.av-bld-shell {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+/* Inventory. Beside the canvas, never inside it — groups are managed
+   elsewhere and referenced by plays, and drawing them within the playbook
+   would imply the playbook owns them. */
+.av-rail {
+  flex: 0 0 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.av-rail-title {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-surface-dim);
+}
+
+.av-rail-chip,
+.av-rail-add {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.av-rail-chip {
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  color: var(--on-surface);
+}
+
+.av-rail-chip:hover { border-color: var(--primary-edge); color: var(--primary); }
+
+.av-rail-add {
+  background: none;
+  border: 1px dashed var(--outline);
+  color: var(--on-surface-dim);
+}
+
+.av-rail-add:hover { border-color: var(--on-surface-muted); color: var(--on-surface); }
+
+.av-rail-note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--on-surface-muted);
+}
+
+.av-bld-main { flex: 1; min-width: 0; }
+
+/* One node at any level. The level differs in its ground and its border,
+   not in its structure, so a task inside a play inside a playbook is
+   obviously the same kind of thing three times. */
+.av-node {
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.av-node:last-child { margin-bottom: 0; }
+
+.av-node-playbook { background: var(--surface); padding: 14px 16px; }
+.av-node-play     { background: var(--panel); }
+.av-node-task     { background: var(--surface-high); cursor: pointer; }
+.av-node-task:hover { border-color: var(--primary-edge); }
+
+/* A task that changes a device wears it on its left edge, so a play with
+   one configuration step in it is readable as a shape before a word of it
+   is read. */
+.av-node-writes { border-left: 3px solid var(--warn); }
+
+.av-node-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.av-node-head { margin-bottom: 10px; }
+
+.av-node-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-surface);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.av-node-playbook-title {
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.av-node-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.av-node-button:hover { color: var(--primary); }
+
+.av-node-targets {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+  white-space: nowrap;
+}
+
+.av-node-mark { margin-left: auto; display: flex; }
+.av-node-mark .material-symbols-outlined { font-size: var(--icon-sm); }
+.av-node-mark-writes .material-symbols-outlined { color: var(--warn); }
+.av-node-mark-reads  .material-symbols-outlined { color: var(--ok); }
+
+.av-node-remove { flex: 0 0 auto; opacity: 0; transition: opacity 0.12s; }
+.av-node:hover > .av-node-row > .av-node-remove,
+.av-node-remove:focus-visible { opacity: 1; }
+
+/* What a task wakes up. Indented under it, because it is a consequence of
+   the task rather than a step of its own. */
+.av-node-sub {
+  margin: 4px 0 0 14px;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.av-node-label {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-surface-muted);
+}
+
+/* The add affordance for whatever level it sits in. Dashed, full width, so
+   it reads as a gap waiting to be filled rather than as another item. */
+.av-add {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: none;
+  border: 1px dashed var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface-dim);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.av-add:last-child { margin-bottom: 0; }
+.av-add:hover { border-color: var(--primary-edge); color: var(--primary); }
+
+.av-run {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: var(--ok-tint);
+  border: 1px solid var(--ok-edge);
+  border-radius: var(--radius-full);
+  color: var(--ok);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.av-run .material-symbols-outlined { font-size: var(--icon-xs); }
+.av-run:hover:not(:disabled) { background: var(--ok-edge); color: var(--bedrock); }
+.av-run:disabled { opacity: 0.45; cursor: not-allowed; }
+
 .av-bld-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

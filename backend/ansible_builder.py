@@ -162,86 +162,146 @@ def _lines_of(value: Any) -> list[str]:
     return [line.strip() for line in items if line.strip()]
 
 
+def _emit_task(block: dict, mods: tuple, indent: str, out: list) -> dict:
+    """
+    One task, as YAML lines. Returns what it is, for the summary.
+
+    Shared by tasks and handlers because a handler *is* a task — the only
+    difference is that it runs when notified rather than in sequence, and
+    duplicating the emitter to express that would guarantee the two drift.
+    """
+    facts_mod, command_mod, config_mod = mods
+    kind = str((block or {}).get("kind") or "")
+    meta = BLOCKS.get(kind)
+    if meta is None:
+        raise BuilderError(f"'{kind}' is not a block ShellMate can build.")
+    label = str(block.get("label") or meta["label"])
+    fields = block.get("fields") or {}
+
+    out.append(f"{indent}- name: {_yaml_scalar(label)}")
+    body_indent = indent + "  "
+
+    if kind == "facts":
+        out += [f"{body_indent}{facts_mod}:",
+                f"{body_indent}  gather_subset: min"]
+
+    elif kind == "command":
+        commands = _lines_of(fields.get("commands"))
+        if not commands:
+            raise BuilderError(f"'{label}' has no commands in it.")
+        out += [f"{body_indent}{command_mod}:", f"{body_indent}  commands:"]
+        out += [f"{body_indent}    - {_yaml_scalar(c)}" for c in commands]
+        out.append(f"{body_indent}register: shellmate_output")
+
+    elif kind == "config":
+        lines = _lines_of(fields.get("lines"))
+        if not lines:
+            raise BuilderError(f"'{label}' has no configuration lines in it.")
+        out += [f"{body_indent}{config_mod}:", f"{body_indent}  lines:"]
+        out += [f"{body_indent}    - {_yaml_scalar(line)}" for line in lines]
+        parents = _lines_of(fields.get("parents"))
+        if parents:
+            out.append(f"{body_indent}  parents:")
+            out += [f"{body_indent}    - {_yaml_scalar(x)}" for x in parents]
+
+    elif kind == "backup":
+        out += [f"{body_indent}{config_mod}:", f"{body_indent}  backup: true"]
+
+    elif kind == "save":
+        # save_when: modified rather than always. `always` rewrites
+        # startup-config on every run whether or not anything changed, which
+        # makes a no-op look like a change to everything that reads the
+        # device afterwards.
+        out += [f"{body_indent}{config_mod}:",
+                f"{body_indent}  save_when: modified"]
+
+    # What this task wakes up, if anything (#600). Handlers are the reason
+    # "restart it, but only if something changed" is expressible at all; a
+    # builder without them produces playbooks that restart unconditionally.
+    notify = [n for n in (block.get("notify") or []) if str(n).strip()]
+    if notify:
+        out.append(f"{body_indent}notify:")
+        out += [f"{body_indent}  - {_yaml_scalar(n)}" for n in notify]
+
+    return {"label": label, "writes": meta["writes"], "why": meta["why"],
+            "notify": notify}
+
+
+def _normalise(spec: dict) -> list[dict]:
+    """
+    The plays to build, whichever shape the caller used.
+
+    The canvas sends plays; the older flat form sent one list of blocks and
+    meant one play. Both are accepted rather than migrating every caller at
+    once — and the flat form is what the assistant's inspection tests and
+    the API's own smoke checks still use.
+    """
+    plays = spec.get("plays")
+    if plays:
+        return [dict(play) for play in plays]
+    return [{
+        "name": spec.get("name") or "",
+        "hosts": spec.get("hosts") or "all",
+        "gather_facts": spec.get("gather_facts", False),
+        "tasks": spec.get("blocks") or [],
+        "handlers": spec.get("handlers") or [],
+    }]
+
+
 def build(spec: dict) -> dict:
     """
-    Assemble a playbook from blocks.
+    Assemble a playbook from plays, each with its own tasks and handlers.
 
     Returns the YAML and what it would do, because the second is the part
     somebody should read. Nothing here talks to a network or a model: the
     same input produces the same output every time, which is what makes it
     the default path rather than the fallback.
+
+    Hosts belong to the play, not to the file, because that is where Ansible
+    puts them — a playbook that configures switches and then checks a
+    firewall is two plays, and a single global target cannot say so.
     """
-    name = str(spec.get("name") or "").strip() or "ShellMate playbook"
-    hosts = str(spec.get("hosts") or "").strip() or "all"
+    plays = _normalise(spec)
+    if not plays:
+        raise BuilderError("A playbook needs at least one play.")
+
     family = str(spec.get("family") or "generic").lower()
-    facts_mod, command_mod, config_mod = _modules_for(family)
-    gather = bool(spec.get("gather_facts", False))
-    blocks = spec.get("blocks") or []
-    if not blocks:
-        raise BuilderError("A playbook needs at least one task.")
+    mods = _modules_for(family)
 
-    body: list[str] = [
-        f"- name: {_yaml_scalar(name)}",
-        f"  hosts: {_yaml_scalar(hosts)}",
-        f"  gather_facts: {'true' if gather else 'false'}",
-        "  tasks:",
-    ]
+    body: list[str] = []
     does: list[dict] = []
+    step = 0
 
-    for index, raw in enumerate(blocks, start=1):
-        kind = str((raw or {}).get("kind") or "")
-        meta = BLOCKS.get(kind)
-        if meta is None:
-            raise BuilderError(f"'{kind}' is not a block ShellMate can build.")
-        label = str(raw.get("label") or meta["label"])
-        fields = raw.get("fields") or {}
+    for index, play in enumerate(plays, start=1):
+        name = str(play.get("name") or "").strip() or f"Play {index}"
+        hosts = str(play.get("hosts") or "").strip() or "all"
+        tasks = play.get("tasks") or []
+        handlers = play.get("handlers") or []
+        if not tasks:
+            raise BuilderError(f"'{name}' has no tasks in it.")
 
-        if kind == "facts":
-            body += [f"    - name: {_yaml_scalar(label)}",
-                     f"      {facts_mod}:",
-                     "        gather_subset: min"]
+        body += [
+            f"- name: {_yaml_scalar(name)}",
+            f"  hosts: {_yaml_scalar(hosts)}",
+            f"  gather_facts: {'true' if play.get('gather_facts') else 'false'}",
+            "  tasks:",
+        ]
+        for block in tasks:
+            step += 1
+            found = _emit_task(block, mods, "    ", body)
+            found.update(step=step, play=name, hosts=hosts, handler=False)
+            does.append(found)
 
-        elif kind == "command":
-            commands = _lines_of(fields.get("commands"))
-            if not commands:
-                raise BuilderError("The command block has no commands in it.")
-            body += [f"    - name: {_yaml_scalar(label)}",
-                     f"      {command_mod}:", "        commands:"]
-            body += [f"          - {_yaml_scalar(c)}" for c in commands]
-            body += ["      register: shellmate_output",
-                     "    - name: 'Show what came back'",
-                     "      ansible.builtin.debug:",
-                     "        var: shellmate_output.stdout_lines"]
-
-        elif kind == "config":
-            lines = _lines_of(fields.get("lines"))
-            if not lines:
-                raise BuilderError("The configuration block has no lines in it.")
-            body += [f"    - name: {_yaml_scalar(label)}",
-                     f"      {config_mod}:", "        lines:"]
-            body += [f"          - {_yaml_scalar(line)}" for line in lines]
-            parents = _lines_of(fields.get("parents"))
-            if parents:
-                body += ["        parents:"]
-                body += [f"          - {_yaml_scalar(p)}" for p in parents]
-
-        elif kind == "backup":
-            body += [f"    - name: {_yaml_scalar(label)}",
-                     f"      {config_mod}:", "        backup: true"]
-
-        elif kind == "save":
-            # save_when: modified rather than always. `always` rewrites
-            # startup-config on every run whether or not anything changed,
-            # which makes a no-op run look like a change in every audit
-            # that reads the device afterwards.
-            body += [f"    - name: {_yaml_scalar(label)}",
-                     f"      {config_mod}:", "        save_when: modified"]
-
-        does.append({"step": index, "label": label, "writes": meta["writes"],
-                     "why": meta["why"]})
+        if handlers:
+            body.append("  handlers:")
+            for block in handlers:
+                found = _emit_task(block, mods, "    ", body)
+                found.update(step=0, play=name, hosts=hosts, handler=True)
+                does.append(found)
 
     text = "---\n" + "\n".join(body) + "\n"
     return {"text": text, "does": does, "family": family,
+            "plays": len(plays),
             "writes": any(d["writes"] for d in does), "source": "blocks"}
 
 

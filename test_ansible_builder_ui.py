@@ -1,5 +1,5 @@
 """
-test_ansible_builder_ui.py — Assembling a playbook in the browser (#586).
+test_ansible_builder_ui.py — The nested canvas, driven (#600).
 
 The backend half is covered by test_ansible_builder.py. What this adds is
 the part a person actually touches, and specifically the part that fails
@@ -84,93 +84,91 @@ async def main() -> None:
         await page.goto(BASE)
         await page.wait_for_selector("#ansible-stage", state="attached", timeout=15000)
         await page.evaluate("window.ansibleView.open('builder')")
-        await page.wait_for_selector("#av-bld-blocks", timeout=10000)
+        await page.wait_for_selector("#av-bld-canvas", timeout=10000)
 
-        print("\n-- The form is there --")
-        for field in ("av-bld-name", "av-bld-hosts", "av-bld-family",
-                      "av-bld-ask", "av-bld-text"):
-            check(f"{field} exists", await page.query_selector(f"#{field}") is not None,
-                  "the builder did not finish rendering")
+        print("\n-- The canvas is drawn as the thing it builds --")
+        check("there is a playbook box",
+              await page.query_selector(".av-node-playbook") is not None,
+              "the canvas did not render")
+        check("with a Run button on it",
+              await page.query_selector(".av-node-playbook .av-run") is not None)
+        check("which is disabled with no plays",
+              await page.is_disabled(".av-run"),
+              "Run offered on an empty playbook would fail on the first click")
+        check("and an add affordance for a play",
+              "add play" in (await page.inner_text("#av-bld-canvas")).lower(),
+              await page.inner_text("#av-bld-canvas"))
 
-        options = await page.eval_on_selector_all(
-            "#av-bld-family option", "els => els.map(e => e.value)")
-        check("the platform picker offers the generic option first",
-              options and options[0] == "generic", str(options))
-        check("and the platforms ShellMate knows",
-              "ios" in options and "nxos" in options, str(options))
+        print("\n-- Inventory sits beside it, not inside it --")
+        check("the rail exists",
+              await page.query_selector("#av-bld-rail") is not None)
+        rail = await page.inner_text("#av-bld-rail")
+        check("it says groups are managed elsewhere",
+              "managed separately" in rail.lower(), rail[:200])
+        check("the rail is outside the playbook box",
+              await page.query_selector(".av-node-playbook #av-bld-rail") is None,
+              "drawing inventory inside the playbook implies it owns the groups")
 
-        print("\n-- Adding tasks --")
-        await page.click('#av-bld-blocks ~ .av-bld-adders button:has-text("Gather facts")')
-        await page.wait_for_timeout(120)
-        check("a block appears when added",
-              await page.locator(".av-bld-block").count() == 1,
-              "adding a block rendered nothing")
-        check("a read-only block is marked read only",
-              await page.locator('.av-bld-block:has-text("read only")').count() == 1,
-              "a safe task was not distinguished from a writing one")
-
-        await page.click('.av-bld-adders button:has-text("Push configuration lines")')
-        await page.wait_for_timeout(120)
-        check("a writing block is marked as changing the device",
-              await page.locator('.av-bld-block:has-text("changes the device")').count() == 1,
-              "a task that writes looked the same as one that reads")
-
-        print("\n-- Building it --")
-        await page.fill("#av-bld-name", "Set NTP")
-        await page.fill("#av-bld-hosts", "core")
-        await page.select_option("#av-bld-family", "ios")
-        await page.fill("textarea[id$='-lines']", "ntp server 10.0.0.1")
-        await page.click('button:has-text("Build it")')
-        await page.wait_for_timeout(700)
-
-        text = await page.input_value("#av-bld-text")
-        check("the playbook appears in the box", "cisco.ios.ios_config" in text,
+        print("\n-- Adding a play --")
+        await page.evaluate("""
+          (async () => {
+            const dlg = window.shellmateDialog;
+            window.shellmateDialog = Object.assign({}, dlg, {
+              form: async (o) => (o.title || '').includes('play')
+                ? { name: 'Configure the switches', hosts: 'switches' }
+                : { kind: 'config' },
+            });
+          })()
+        """)
+        await page.click('.av-node-playbook > .av-add')
+        await page.wait_for_timeout(500)
+        check("a play appears inside the playbook",
+              await page.query_selector(".av-node-playbook .av-node-play") is not None,
+              "the play did not nest")
+        text = await page.inner_text(".av-node-play")
+        check("the play says what it targets", "targets: switches" in text,
               text[:200])
-        check("with the play name and hosts asked for",
-              "Set NTP" in text and "core" in text, text[:200])
+        check("and carries its own add-task affordance",
+              "add task" in text.lower(), text[:200])
+        check("Run is enabled once there is a play",
+              not await page.is_disabled(".av-run"))
 
-        print("\n-- What it says the playbook would do --")
-        rows = await page.locator("#av-bld-found tbody tr").count()
-        check("the read-back lists both tasks", rows == 2, f"it listed {rows}")
+        print("\n-- Adding a task inside that play --")
+        await page.evaluate("""
+          window.shellmateDialog = Object.assign({}, window.shellmateDialog, {
+            form: async (o) => (o.title || '').includes('New task')
+              ? { kind: 'config' }
+              : { label: 'configure vlan', lines: 'vlan 20', parents: '' },
+          });
+        """)
+        await page.click('.av-node-play .av-add:has-text("add task")')
+        await page.wait_for_timeout(700)
+        check("the task nests inside the play",
+              await page.query_selector(".av-node-play .av-node-task") is not None,
+              "a task must be inside the play it belongs to")
+        task = await page.inner_text(".av-node-task")
+        check("it is numbered and named", "Task 1" in task and "configure vlan" in task,
+              task[:200])
+        check("a task that changes the device is marked as such",
+              await page.query_selector(".av-node-task.av-node-writes") is not None,
+              "pushing configuration must not look like reading")
+
+        print("\n-- The playbook it produced --")
+        await page.wait_for_timeout(800)
+        yaml_text = await page.input_value("#av-bld-text")
+        check("two levels of nesting reached the YAML",
+              "hosts: 'switches'" in yaml_text and "tasks:" in yaml_text,
+              yaml_text[:220])
+        check("the task's own name survived", "configure vlan" in yaml_text,
+              yaml_text[:220])
+
         found = await page.inner_text("#av-bld-found")
-        check("and marks the configuration task as writing", "writes" in found,
-              found[:200])
-        check("and the facts task as reading", "reads" in found, found[:200])
-        check("no draft warning on something built from blocks",
-              "This is a draft" not in found,
-              "blocks are deterministic; calling their output a draft is wrong")
-
-        print("\n-- Reading back an edit --")
-        await page.fill("#av-bld-text", """---
-- name: Hand written
-  hosts: all
-  tasks:
-    - name: Reboot it
-      ansible.builtin.reboot:
-        reboot_timeout: 600
-    - name: Something invented
-      acme.widget.frobnicate:
-        thing: 1
-""")
-        await page.click('button:has-text("Read it back")')
-        await page.wait_for_timeout(600)
-        found = await page.inner_text("#av-bld-found")
-        check("a hand edit is re-read", "ansible.builtin.reboot" in found,
-              found[:300])
-        check("an unrecognised module is named, not ignored",
-              "acme.widget.frobnicate" in found and "does not recognise" in found,
-              found[:300])
-
-        print("\n-- The assistant --")
-        check("there is somewhere to describe what you want",
-              await page.query_selector("#av-bld-ask") is not None)
-        check("and it will not ask with nothing typed",
-              await page.query_selector("#av-bld-draft") is not None)
+        check("and the read-back agrees with it",
+              "ios_config" in found or "cli_config" in found, found[:200])
 
         print("\n-- Nothing threw --")
         real = [e for e in errors if "favicon" not in e.lower()]
         check("no script errors along the way", not real, "; ".join(real[:3]))
-
         await browser.close()
 
     print("\n" + "=" * 52)
