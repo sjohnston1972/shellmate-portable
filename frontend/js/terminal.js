@@ -883,6 +883,25 @@
 
   let _searchBar, _searchInput, _searchCount;
 
+  /**
+   * The three toggles, and where they are remembered (#531).
+   *
+   * In prefs rather than in a variable, because "I always search with
+   * regular expressions" is a property of the person, not of this window —
+   * and the bar is thrown away and rebuilt on every reload.
+   */
+  const SEARCH_TOGGLES = [
+    { id: 'term-search-case',  pref: 'find_case_sensitive', option: 'caseSensitive' },
+    { id: 'term-search-word',  pref: 'find_whole_word',     option: 'wholeWord' },
+    { id: 'term-search-regex', pref: 'find_regex',          option: 'regex' },
+  ];
+
+  /** Whether one toggle is on, from settings.json via prefs.js. */
+  function _searchToggle(pref) {
+    return window.shellmatePrefs
+      ? window.shellmatePrefs.get(pref, false) === true : false;
+  }
+
   function activeSearchAddon() {
     const tab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
     if (!tab) return null;
@@ -937,9 +956,19 @@
    * @param {boolean} [opts.visibleOnly]  Just the rows on screen.
    * @param {number}  [opts.lastLines]    Only the most recent N lines.
    */
-  function copyOutput(sessionId, opts) {
+  /**
+   * The rows of a session's buffer as plain lines, each with its row number.
+   *
+   * Split out of copyOutput so that copying, the filter view (#531) and
+   * saving a scrollback (#534) all read the buffer the same way — including
+   * the part that matters and is easy to get wrong: trailing blank rows are
+   * the unused bottom of the screen, not output.
+   *
+   * @returns {Array<{row: number, text: string}>}
+   */
+  function collectLines(sessionId, opts) {
     const entry = _instances[sessionId];
-    if (!entry) return false;
+    if (!entry) return [];
     const term = entry.terminal;
     const buf  = term.buffer.active;
     let first = 0;
@@ -950,14 +979,19 @@
     } else if (opts && opts.lastLines > 0) {
       first = Math.max(0, buf.length - opts.lastLines);
     }
-    const lines = [];
+    const rows = [];
     for (let i = first; i < last; i++) {
       const line = buf.getLine(i);
-      if (line) lines.push(line.translateToString(true));
+      if (line) rows.push({ row: i, text: line.translateToString(true) });
     }
-    // Trailing blank rows are the unused part of the screen, not output.
-    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
-    const text = lines.join('\n');
+    while (rows.length && !rows[rows.length - 1].text.trim()) rows.pop();
+    return rows;
+  }
+
+  function copyOutput(sessionId, opts) {
+    const entry = _instances[sessionId];
+    if (!entry) return false;
+    const text = collectLines(sessionId, opts).map(l => l.text).join('\n');
     if (!text) {
       if (window.shellmateAlerts) {
         window.shellmateAlerts.notify({ severity: 'info', icon: 'content_copy',
@@ -985,6 +1019,22 @@
   });
 
   window.copyTerminalOutput = copyOutput;
+  window.terminalOutputLines = collectLines;
+
+  /**
+   * The find bar's own workings, for the tests and for anything that wants
+   * to ask what the toggles currently mean.
+   */
+  window.shellmateFind = {
+    pattern: (term) => _searchPattern(term),
+    options: () => _searchOptions(),
+    filterLines: (sessionId, term) => {
+      const pattern = _searchPattern(term);
+      if (!pattern) return [];
+      return collectLines(sessionId)
+        .filter(line => { pattern.lastIndex = 0; return pattern.test(line.text); });
+    },
+  };
 
   function initSearchBar() {
     _searchBar   = document.getElementById('term-search');
@@ -1005,15 +1055,25 @@
       const addon = activeSearchAddon();
       const term  = _searchInput.value;
       if (!addon || !term) { _searchCount.textContent = ''; return; }
-      const options = { decorations, incremental: false };
+      // A half-typed pattern — `Gi1/0/2[` — is a normal state of an input
+      // somebody is still typing into, not an error worth a toast. The addon
+      // builds its own RegExp from the same string, so checking here is also
+      // what keeps it from throwing on every keystroke.
+      if (_searchToggle('find_regex') && !_searchPattern(term)) {
+        _searchCount.textContent = 'not a pattern yet';
+        return;
+      }
+      const options = Object.assign({ decorations, incremental: false },
+                                    _searchOptions());
       const found = forward ? addon.findNext(term, options)
                             : addon.findPrevious(term, options);
       // The count arrives through onDidChangeResults; this is only the
       // fallback for an addon that never fires it.
       if (!found) _searchCount.textContent = 'no matches';
     };
+    _rerunSearch = () => find(true);
 
-    _searchInput.addEventListener('input', () => find(true));
+    _searchInput.addEventListener('input', () => { find(true); _refreshFilter(); });
     _searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter')  { e.preventDefault(); find(!e.shiftKey); }
       if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
@@ -1021,6 +1081,24 @@
     document.getElementById('term-search-next').addEventListener('click', () => find(true));
     document.getElementById('term-search-prev').addEventListener('click', () => find(false));
     document.getElementById('term-search-close').addEventListener('click', closeSearch);
+
+    // The toggles. Each one re-runs the search immediately: a toggle that
+    // only applies to the *next* search is a toggle you have to press and
+    // then retype to use.
+    SEARCH_TOGGLES.forEach(({ id, pref }) => {
+      const button = document.getElementById(id);
+      if (!button) return;
+      _paintToggle(button, _searchToggle(pref));
+      button.addEventListener('click', () => {
+        const now = !_searchToggle(pref);
+        if (window.shellmatePrefs) window.shellmatePrefs.set(pref, now);
+        _paintToggle(button, now);
+        find(true);
+        _refreshFilter();
+      });
+    });
+
+    initFilterView();
 
     // Focus outside a terminal — on the tab bar, say — still gets Ctrl+F,
     // because "find in this terminal" is about the visible session rather
@@ -1050,6 +1128,172 @@
     else _searchCount.textContent = `${resultIndex + 1} of ${resultCount}`;
   }
 
+  /** What the toggles mean to xterm's search addon. */
+  function _searchOptions() {
+    const options = {};
+    SEARCH_TOGGLES.forEach(({ pref, option }) => {
+      options[option] = _searchToggle(pref);
+    });
+    return options;
+  }
+
+  function _paintToggle(button, on) {
+    button.classList.toggle('on', !!on);
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+
+  /** Re-run the current search; replaced by initSearchBar with the real one. */
+  let _rerunSearch = () => {};
+
+  const _escapeForRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  /**
+   * The search term as a RegExp, or null when it cannot be one.
+   *
+   * The same three toggles, applied to a plain string search: the term is
+   * escaped unless regex is on, and whole-word wraps it in word boundaries —
+   * which is near enough to the addon's own separator test for the terms
+   * people actually type, and is what `\berr-disabled\b` already means to
+   * anybody who has typed it into `grep`.
+   *
+   * Null rather than throwing: an unfinished pattern is an ordinary state of
+   * a box somebody is typing into.
+   */
+  function _searchPattern(term) {
+    if (!term) return null;
+    let source = _searchToggle('find_regex') ? term : _escapeForRegex(term);
+    if (_searchToggle('find_whole_word')) source = `\\b(?:${source})\\b`;
+    try {
+      return new RegExp(source, _searchToggle('find_case_sensitive') ? 'g' : 'gi');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // The filter view (#531)
+  //
+  // "Show me only the lines that matched" is the one thing scrollback search
+  // never gives you — `show int status | include err-disabled` after the
+  // output has already gone past. Read-only and built from the buffer the
+  // terminal is holding, so it reaches every line xterm still has, not just
+  // the painted screen.
+  // -------------------------------------------------------------------------
+
+  let _filterPane, _filterLines, _filterCount, _filterButton;
+  let _filterText = '';
+
+  function initFilterView() {
+    _filterPane   = document.getElementById('term-filter');
+    _filterLines  = document.getElementById('term-filter-lines');
+    _filterCount  = document.getElementById('term-filter-count');
+    _filterButton = document.getElementById('term-search-filter');
+    if (!_filterPane || !_filterButton) return;
+
+    _filterButton.addEventListener('click', () => {
+      if (_filterPane.classList.contains('hidden')) openFilter();
+      else closeFilter();
+    });
+    document.getElementById('term-filter-close')
+      .addEventListener('click', closeFilter);
+    document.getElementById('term-filter-refresh')
+      .addEventListener('click', () => _refreshFilter());
+    document.getElementById('term-filter-copy').addEventListener('click', () => {
+      if (!_filterText) return;
+      navigator.clipboard.writeText(_filterText)
+        .then(() => { window._showCopyToast && window._showCopyToast(_filterText); })
+        .catch(err => _clipboardFailed('copy', err));
+    });
+
+    // Clicking a line takes the terminal to it. The list answers "is it in
+    // there"; the next question is always "what was around it".
+    _filterLines.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-row]');
+      if (!row) return;
+      const tab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+      const entry = tab && _instances[tab.sessionId];
+      if (!entry) return;
+      try { entry.terminal.scrollToLine(Number(row.dataset.row)); } catch (_) {}
+    });
+  }
+
+  function openFilter() {
+    if (!_filterPane) return;
+    _filterPane.classList.remove('hidden');
+    _paintToggle(_filterButton, true);
+    _refreshFilter();
+  }
+
+  function closeFilter() {
+    if (!_filterPane) return;
+    _filterPane.classList.add('hidden');
+    _paintToggle(_filterButton, false);
+  }
+
+  /**
+   * Rebuild the list of matching lines.
+   *
+   * Cheap enough to run on every keystroke — one pass over at most a
+   * scrollback's worth of rows, which is the same walk Copy all scrollback
+   * already does on a click.
+   */
+  function _refreshFilter() {
+    if (!_filterPane || _filterPane.classList.contains('hidden')) return;
+    const tab = typeof window.getActiveTab === 'function' ? window.getActiveTab() : null;
+    const term = _searchInput ? _searchInput.value : '';
+    _filterLines.textContent = '';
+    _filterText = '';
+
+    if (!tab || !_instances[tab.sessionId]) {
+      _filterCount.textContent = 'No session';
+      return;
+    }
+    const pattern = _searchPattern(term);
+    if (!pattern) {
+      _filterCount.textContent = term ? 'Not a pattern yet' : 'Type something to filter';
+      return;
+    }
+
+    const matches = collectLines(tab.sessionId)
+      .filter(line => { pattern.lastIndex = 0; return pattern.test(line.text); });
+    _filterText = matches.map(l => l.text).join('\n');
+    _filterCount.textContent = matches.length
+      ? `${matches.length} matching line${matches.length === 1 ? '' : 's'} in ${tab.label}`
+      : `No matching lines in ${tab.label}`;
+
+    // Built from nodes: these are lines a device printed, and the one thing
+    // they must never become is markup.
+    const fragment = document.createDocumentFragment();
+    matches.forEach(({ row, text }) => {
+      const div = document.createElement('div');
+      div.className = 'term-filter-line';
+      div.dataset.row = String(row);
+      div.title = 'Show this line in the terminal';
+      _appendMarked(div, text, pattern);
+      fragment.appendChild(div);
+    });
+    _filterLines.appendChild(fragment);
+  }
+
+  /** One line, with the matched parts wrapped so they stand out. */
+  function _appendMarked(parent, text, pattern) {
+    pattern.lastIndex = 0;
+    let at = 0;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      if (match[0] === '') { pattern.lastIndex += 1; continue; }
+      if (match.index > at) {
+        parent.appendChild(document.createTextNode(text.slice(at, match.index)));
+      }
+      const mark = document.createElement('mark');
+      mark.className = 'search-hit';
+      mark.textContent = match[0];
+      parent.appendChild(mark);
+      at = match.index + match[0].length;
+    }
+    parent.appendChild(document.createTextNode(text.slice(at)));
+  }
+
   function openSearch() {
     if (!_searchBar) return;
     _searchBar.classList.remove('hidden');
@@ -1060,6 +1304,7 @@
   function closeSearch() {
     if (!_searchBar) return;
     _searchBar.classList.add('hidden');
+    closeFilter();
     _searchCount.textContent = '';
     const addon = activeSearchAddon();
     if (addon) { try { addon.clearDecorations(); } catch (_) {} }
@@ -1070,6 +1315,23 @@
   }
 
   document.addEventListener('DOMContentLoaded', initSearchBar);
+
+  // The bar is built on DOMContentLoaded and the preferences arrive from
+  // /api/settings some milliseconds later, so the toggles have to be painted
+  // again once they are here — otherwise "I always search with regular
+  // expressions" is true in settings.json and false on screen.
+  window.addEventListener('shellmate:settings-loaded', () => {
+    SEARCH_TOGGLES.forEach(({ id, pref }) => {
+      const button = document.getElementById(id);
+      if (button) _paintToggle(button, _searchToggle(pref));
+    });
+    _rerunSearch();
+  });
+
+  // The filter lists one session's lines and says which. Switching tabs makes
+  // it a list about a device you are no longer looking at, which is the one
+  // way this could mislead somebody, so it is rebuilt against the new tab.
+  window.addEventListener('mate:tab-switched', () => _refreshFilter());
 
   // Session logging is a decision people make mid-change — "I want a record
   // of this" arrives ten minutes in, not at connect. Tell every open session

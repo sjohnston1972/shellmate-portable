@@ -7127,6 +7127,99 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
 
 #term-search .icon-btn { padding: 2px; }
 
+/* The three toggles (#531). Lettered rather than iconned — "Aa" and ".*"
+   are what every editor uses — so they need a button shape of their own
+   rather than the icon button's. */
+.term-search-toggle {
+  min-width: 24px;
+  padding: 2px 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  color: var(--on-surface-dim);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.term-search-toggle:hover { color: var(--on-surface); border-color: var(--outline); }
+.term-search-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+/* On is a state somebody has to be able to read at a glance: a regular
+   expression search that silently stayed on would quietly change what every
+   later search means. */
+.term-search-toggle.on {
+  background: var(--primary-tint);
+  border-color: var(--primary);
+  color: var(--on-surface);
+}
+
+#term-search-filter.on { color: var(--primary); }
+
+/* ---------------------------------------------------------------------------
+   Only the matching lines (#531)
+
+   `show int status | include err-disabled`, after the output has scrolled
+   past. Under the search bar it belongs to, and floating for the same
+   reason: reflowing the terminal moves the thing being looked for.
+   --------------------------------------------------------------------------- */
+#term-filter {
+  position: absolute;
+  top: 52px;
+  right: 22px;
+  z-index: 39;
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 60vw);
+  max-height: 45vh;
+  background: var(--overlay-solid);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+  color: var(--on-surface);
+}
+
+#term-filter-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--outline);
+}
+
+#term-filter-count {
+  flex: 1;
+  font-size: 11px;
+  color: var(--on-surface-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#term-filter .icon-btn { padding: 2px; }
+#term-filter .material-symbols-outlined { font-size: var(--icon-md); color: var(--on-surface-dim); }
+
+#term-filter-lines {
+  overflow: auto;
+  padding: 4px 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* pre-wrap, not nowrap: a long interface line is still one line of output,
+   and a horizontal scrollbar on a list you are scanning is a second axis to
+   drive. */
+.term-filter-line {
+  padding: 1px 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: pointer;
+}
+
+.term-filter-line:hover { background: var(--surface-high); }
+
 /* Snapshot history in the diff window (#100) */
 .diff-history-list {
   display: flex;

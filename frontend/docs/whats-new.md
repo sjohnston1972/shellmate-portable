@@ -6,6 +6,14 @@ exists.
 
 ## 1.1.3
 
+- **Ctrl+F does regular expressions, and can show you only the matching
+  lines.** Three toggles on the find bar — match case, whole word, and `.*`
+  for a regular expression — so `Gi1/0/2[0-9]` and `\berr-disabled\b` are
+  searches you can actually run; all three are remembered. The list button
+  beside them opens a filter view: every matching line of the scrollback and
+  nothing else, which is `| include` for output that has already gone past.
+  Click a line to take the terminal to it, or copy the lot.
+
 - **A connection can type its own first four commands.** Expand **On-connect
   commands** in the connection dialog and give it `enable`, `terminal
   monitor`, a screen width — whatever you type on that device every time. They

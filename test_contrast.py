@@ -155,6 +155,9 @@ SURFACES = [
     ("#paste-dialog", "the multi-line paste warning",           "--on-surface"),
     (".sm-dialog",    "confirm, prompt and alert",              "--on-surface"),
     (".tip-bubble",   "the tooltips on settings rows",          "--on-surface-dim"),
+    # Device output, floated over the terminal (#531). The one surface here
+    # whose text is not ours — so it has to be legible whatever it says.
+    ("#term-filter",  "the list of matching lines",             "--on-surface"),
 ]
 
 # Text on an overlay that is not the default colour. The warning line in a

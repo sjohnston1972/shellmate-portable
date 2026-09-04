@@ -257,6 +257,31 @@ Delete any of them and the shipped defaults come back.
 just what is painted. Enter for the next match, Shift+Enter for the previous,
 Escape to close and go back to typing.
 
+Three toggles sit on the bar:
+
+| Toggle | What it does |
+|---|---|
+| `Aa` | Match case — `Serial` stops matching `serial` |
+| `\|ab\|` | Whole word only — `err` no longer matches `error` |
+| `.*` | Treat what you typed as a regular expression |
+
+With `.*` on you can search for `Gi1/0/2[0-9]` or `\berr-disabled\b`. A
+half-typed pattern says *not a pattern yet* rather than complaining. All three
+are remembered, so a search you always run one way is set up once.
+
+### Only the matching lines
+
+The list button on the bar opens a **filter view**: every line of this
+terminal's scrollback that matches, and nothing else. It is
+`show interface status | include err-disabled` for output that has already
+gone past — the pipe you cannot add after the fact.
+
+Click a line to take the terminal to it. The copy button copies the whole
+list. It is a snapshot rather than a live view, because rebuilding it as
+output arrives would move the line you are reading; the refresh button
+rebuilds it from what is in the terminal now, and switching tabs rebuilds it
+against the tab you moved to.
+
 This is a different question from **History**. History searches completed
 commands and their output out of the database — *what did I change on the
 Glasgow core last Tuesday*. It cannot reach a `show running-config` still

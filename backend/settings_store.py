@@ -249,6 +249,14 @@ DEFAULT_SETTINGS: dict = {
         # joke one: over Remote Desktop an animation that drops frames is
         # worse than no animation.
         "panel_transition": "slide",
+        # How Ctrl+F searches the terminal (#531). Remembered because it is a
+        # property of the person rather than of the window: somebody who
+        # types `Gi1/0/2[0-9]` once types it every day, and a toggle that
+        # reset on every reload would be pressed again every time. All three
+        # off is exactly how the bar behaved before they existed.
+        "find_regex": False,
+        "find_case_sensitive": False,
+        "find_whole_word": False,
         # Per-panel widths, keyed by element id, set by dragging the handle.
         # Alongside chat_pane_fraction for the same reason: a layout
         # preference should travel with the data folder rather than live in
