@@ -195,6 +195,25 @@ def test_reset_actually_removes_from_the_file() -> None:
           advanced.get("alerts.max_toasts") == 3)
 
 
+def _a_legacy_algorithm() -> tuple[str, str, str]:
+    """
+    A setting, its group, and one legacy algorithm paramiko really offers.
+
+    Discovered rather than named. paramiko 5.0 dropped every SHA-1 key
+    exchange, so a test that hardcoded `diffie-hellman-group1-sha1` failed
+    for a change in a dependency while the code under test was correct —
+    and a test that cries wolf gets muted.
+    """
+    for setting, group in (("ssh.kex_algorithms", "kex"),
+                           ("ssh.ciphers", "ciphers"),
+                           ("ssh.macs", "macs"),
+                           ("ssh.host_key_algorithms", "keys")):
+        for name in advanced.available_algorithms(group):
+            if name in advanced.LEGACY_ALGORITHMS:
+                return setting, group, name
+    return "ssh.kex_algorithms", "kex", ""
+
+
 def test_the_settings_reach_the_code() -> None:
     """A registry nothing reads would be an elaborate no-op."""
     print("\n-- The code actually reads them --")
@@ -227,14 +246,25 @@ def test_the_settings_reach_the_code() -> None:
           and "reject unknown keys" in str(refused), repr(refused))
     advanced.reset(key="ssh.host_key_policy")
 
-    advanced.update({"ssh.kex_algorithms": "diffie-hellman-group1-sha1"})
-    overrides = ssh._algorithm_overrides()
-    check("naming a legacy key exchange disables the others",
-          bool(overrides.get("disabled_algorithms", {}).get("kex")))
-    check("and does not disable the one asked for",
-          "diffie-hellman-group1-sha1"
-          not in overrides["disabled_algorithms"]["kex"])
-    advanced.reset()
+    # The algorithm is taken from what paramiko actually offers rather than
+    # named here. paramiko 5.0 removed every SHA-1 key exchange, so a
+    # hardcoded `diffie-hellman-group1-sha1` made this test fail for a
+    # change in a dependency while the code under test was correct.
+    setting, group, legacy_name = _a_legacy_algorithm()
+    if legacy_name:
+        advanced.update({setting: legacy_name})
+        overrides = ssh._algorithm_overrides()
+        check(f"naming a legacy {group} entry disables the others",
+              bool(overrides.get("disabled_algorithms", {}).get(group)),
+              f"chose {legacy_name}")
+        check("and does not disable the one asked for",
+              legacy_name not in overrides["disabled_algorithms"][group])
+        advanced.reset()
+    else:
+        check("there is a legacy algorithm to restrict to", False,
+              "paramiko offers no legacy algorithm in any group, so the "
+              "settings that exist to reach old kit cannot be exercised — "
+              "which is worth knowing rather than skipping")
 
     check("with nothing set, paramiko's defaults are untouched",
           ssh._algorithm_overrides() == {})
@@ -270,24 +300,27 @@ def test_algorithm_settings() -> None:
           advanced.available_algorithms("nonsense") == [])
 
     # The legacy entries are the reason these settings exist, so they must be
-    # present and flagged rather than filtered out.
-    kex = advanced.available_algorithms("kex")
-    check("the legacy key exchange is offered",
-          "diffie-hellman-group1-sha1" in kex,
-          "the one algorithm the setting exists for is missing")
+    # present and flagged rather than filtered out. Which entry is legacy
+    # depends on the paramiko in use, so it is discovered.
+    setting, group, legacy_name = _a_legacy_algorithm()
+    check("a legacy algorithm is still offered somewhere",
+          bool(legacy_name),
+          "paramiko offers none in any group; the settings that exist to "
+          "reach old kit have nothing to reach it with")
     described = next(s for s in advanced.describe()["settings"]
-                     if s["key"] == "ssh.kex_algorithms")
+                     if s["key"] == setting)
     legacy = [a["name"] for a in described["algorithms"] if a["legacy"]]
-    check("and marked as legacy", "diffie-hellman-group1-sha1" in legacy,
-          f"flagged: {legacy}")
-    check("while a modern one is not",
-          "curve25519-sha256@libssh.org" not in legacy)
+    check("and it is marked as legacy", legacy_name in legacy,
+          f"{legacy_name} not in {legacy}")
+    modern = next((a["name"] for a in described["algorithms"]
+                   if not a["legacy"]), "")
+    check("while a modern one is not", modern and modern not in legacy,
+          f"{modern!r} was flagged legacy")
 
     # A name paramiko does not offer is dropped, not stored.
-    advanced.update({"ssh.kex_algorithms":
-                     "diffie-hellman-group1-sha1, not-a-real-kex, "})
+    advanced.update({setting: f"{legacy_name}, not-a-real-algorithm, "})
     check("a typo is dropped rather than kept",
-          advanced.get("ssh.kex_algorithms") == "diffie-hellman-group1-sha1",
+          advanced.get(setting) == legacy_name,
           f"got {advanced.get('ssh.kex_algorithms')!r}")
 
     advanced.update({"ssh.ciphers": ["aes256-ctr", "aes128-cbc"]})
@@ -310,16 +343,28 @@ def test_algorithms_reach_paramiko() -> None:
 
     check("nothing chosen restricts nothing", ssh._algorithm_overrides() == {})
 
-    advanced.update({
-        "ssh.kex_algorithms": "diffie-hellman-group1-sha1",
-        "ssh.macs": "hmac-sha1",
-    })
+    # Two groups, both discovered: which algorithms exist is paramiko's
+    # business and changes between versions, while "naming one restricts
+    # its group and leaves the others alone" is ShellMate's and does not.
+    picked = {}
+    for setting, group in (("ssh.kex_algorithms", "kex"),
+                           ("ssh.ciphers", "ciphers"),
+                           ("ssh.macs", "macs"),
+                           ("ssh.host_key_algorithms", "keys")):
+        have = advanced.available_algorithms(group)
+        if len(have) > 1:
+            picked[group] = (setting, have[-1])
+        if len(picked) == 2:
+            break
+    check("there are two groups to restrict", len(picked) == 2,
+          f"paramiko offers usable lists for {sorted(picked)} only")
+
+    advanced.update({setting: name for setting, name in picked.values()})
     disabled = ssh._algorithm_overrides().get("disabled_algorithms", {})
 
     check("only the groups chosen are restricted",
-          set(disabled) == {"kex", "macs"}, f"got {sorted(disabled)}")
-    for group, wanted in (("kex", "diffie-hellman-group1-sha1"),
-                          ("macs", "hmac-sha1")):
+          set(disabled) == set(picked), f"got {sorted(disabled)}")
+    for group, (_setting, wanted) in picked.items():
         check(f"{group}: the chosen algorithm is not disabled",
               wanted not in disabled[group])
         check(f"{group}: everything else is",

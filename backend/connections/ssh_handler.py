@@ -41,11 +41,17 @@ logger = logging.getLogger(__name__)
 
 # Key types to try when the user supplies a key file. Paramiko needs to be told
 # the algorithm, and the file itself does not reliably say which it is.
-KEY_CLASSES = (
-    paramiko.Ed25519Key,
-    paramiko.ECDSAKey,
-    paramiko.RSAKey,
-    paramiko.DSSKey,
+#
+# Built by asking rather than by naming, because the set shrinks: paramiko
+# 5.0 removed DSSKey, and a bare `paramiko.DSSKey` here stopped the whole
+# application importing — not SSH, everything, because app.py reaches this
+# module on the way up. A dead algorithm should cost a key type nobody can
+# load, not the process.
+KEY_CLASSES = tuple(
+    cls for cls in (
+        getattr(paramiko, name, None)
+        for name in ("Ed25519Key", "ECDSAKey", "RSAKey", "DSSKey")
+    ) if cls is not None
 )
 
 
