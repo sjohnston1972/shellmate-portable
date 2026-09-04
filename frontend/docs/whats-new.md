@@ -6,6 +6,15 @@ exists.
 
 ## 1.1.3
 
+- **A connection can type its own first four commands.** Expand **On-connect
+  commands** in the connection dialog and give it `enable`, `terminal
+  monitor`, a screen width — whatever you type on that device every time. They
+  go out after paging-off, one line per prompt, each echoed into the session,
+  with the whole list announced before anything is sent and a report of what
+  was *not* sent if the device stopped answering. A `reload` in a script is
+  still held for confirmation. An `enable` is answered from an enable password
+  kept in the vault, once, within a few seconds of the device asking.
+
 - **ShellMate remembers device host keys, and says when one changes.** The
   first connection to a device records the key it answered with; a later
   connection answering with a *different* key stops and asks, naming the old

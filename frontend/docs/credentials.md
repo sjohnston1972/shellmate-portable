@@ -200,11 +200,13 @@ remains worth having, and this is not a substitute for it.
 ## What is never stored in a saved connection
 
 `profiles.json` is plain JSON by design, so it can be read, diffed and shared.
-Four fields are stripped before anything is written, whatever the caller
-passes: the password and key passphrase for the device, and the same two for
-any jump host. They go to the vault, or to the plaintext file if you chose
-that, or nowhere. A path to a key file is fine to store; the passphrase for it
-is not.
+Five fields are stripped before anything is written, whatever the caller
+passes: the password and key passphrase for the device, the same two for any
+jump host, and the enable password an on-connect script may need. They go to
+the vault, or to the plaintext file if you chose that, or nowhere. A path to a
+key file is fine to store; the passphrase for it is not. The on-connect
+commands themselves *are* stored there, and deliberately — being able to read
+what a connection types into a device is most of what makes it safe.
 
 Nothing sensitive comes back out of ShellMate's own API either. Connection
 listings carry a "has a saved password" flag, never the password. That holds

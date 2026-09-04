@@ -614,6 +614,30 @@
           <p class="field-hint" id="remember-hint"></p>
         </div>
 
+        <!-- ===== On-connect commands (#532) =====
+             The first thirty seconds on every device are the same thirty
+             seconds. Collapsed, because most connections need none of it. -->
+        <div class="conn-fields" data-for="ssh ssh-key telnet serial">
+          <details class="conn-advanced" id="on-connect-advanced">
+            <summary>On-connect commands</summary>
+            <p class="field-hint">Sent once, after ShellMate has identified the device and turned paging off. One line per prompt, each echoed into the session as though you had typed it, and the whole script announced before anything goes out.</p>
+
+            <div class="form-group">
+              <label for="field-on-connect">Commands</label>
+              <textarea id="field-on-connect" class="setting-input" rows="4"
+                        spellcheck="false"
+                        placeholder="enable&#10;terminal monitor&#10;terminal width 200"></textarea>
+              <p class="field-hint">Up to 12 lines. Blank lines and lines starting with <code>#</code> are ignored. A destructive command still stops and asks, exactly as one you typed would. Saved with the connection, so it runs every time — a connection you have not saved yet gets it from the next time you open it.</p>
+            </div>
+
+            <div class="form-group">
+              <label for="field-enable-password">Enable password</label>
+              <input type="password" id="field-enable-password" autocomplete="off" />
+              <p class="field-hint">Typed at the <code>Password:</code> an <code>enable</code> line produces, and nowhere else. Kept in the encrypted vault with your other credentials — never in <code>profiles.json</code>, and never sent back to this dialog. Leave it blank to keep the one already saved.</p>
+            </div>
+          </details>
+        </div>
+
         <!-- ===== SSH by key, or through a jump host =====
              Was a <details> under the password form: nine fields collapsed
              beneath four, so expanding it made the dialog about the

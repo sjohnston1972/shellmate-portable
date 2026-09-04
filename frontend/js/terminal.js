@@ -303,6 +303,15 @@
           }));
           break;
 
+        case 'on_connect':
+          // The saved connection's own lines (#532): what is about to be
+          // sent, and afterwards what was and what was not. Same rule as
+          // the paging command — nothing reaches a device unannounced.
+          window.dispatchEvent(new CustomEvent('shellmate:on-connect', {
+            detail: { sessionId, ...msg }
+          }));
+          break;
+
         case 'alias_expanded':
           window.dispatchEvent(new CustomEvent('shellmate:alias-expanded', {
             detail: { sessionId, typed: msg.typed, sent: msg.sent }

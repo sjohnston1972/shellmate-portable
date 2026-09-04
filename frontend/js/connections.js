@@ -1074,8 +1074,54 @@
     _pendingCredentialRef = p.credential_ref || '';
     _applyPendingCredential();
 
+    // The connection's own logon script (#532). The enable password is
+    // deliberately not restored — nothing ever sends a stored secret back to
+    // the browser, and a blank box means "keep the one already saved".
+    setField('field-on-connect', (p.on_connect || []).join('\n'));
+    const enable = document.getElementById('field-enable-password');
+    if (enable) enable.value = '';
+
+    // Opened when there is something in it, so a script somebody saved is
+    // not hidden behind a drawer they have no reason to open.
+    const drawer = document.getElementById('on-connect-advanced');
+    if (drawer) drawer.open = Boolean((p.on_connect || []).length);
+
     // Nothing to open any more: the key form is its own connection type
     // rather than a drawer, so restoring a key profile shows its fields.
+  }
+
+  /** The on-connect script as typed, one command per line. */
+  function onConnectLines() {
+    const box = document.getElementById('field-on-connect');
+    if (!box) return [];
+    return box.value.split('\n').map(l => l.trim()).filter(Boolean);
+  }
+
+  /**
+   * Save the logon script, and the enable password it may need (#532).
+   *
+   * Two calls rather than one, because they go to two different places for
+   * one reason: the commands are not secret and belong on the profile where
+   * they can be read and diffed; the password is, and goes to the vault
+   * through the same endpoint every other credential uses.
+   */
+  async function saveOnConnect(profileId, payload, enablePassword) {
+    if (!profileId) return;
+    try {
+      await fetch(`/api/profiles/${profileId}/on-connect`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ on_connect: payload.on_connect || [] }),
+      });
+      if (enablePassword) {
+        await fetch(`/api/credentials/${profileId}/enable_password`, {
+          method:  'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ value: enablePassword,
+                                    storage: payload.credential_storage || 'vault' }),
+        });
+      }
+    } catch (_) { /* the connection is saved either way */ }
   }
 
   // -------------------------------------------------------------------------
@@ -1117,6 +1163,9 @@
       remember_credentials: !value('field-credential')
                             && (wantsPlain || Boolean(remember && remember.checked)),
       credential_storage:   wantsPlain ? 'plaintext' : 'vault',
+      // Belongs to the saved connection rather than to this session (#532);
+      // it rides along here so every caller of profileFrom() gets it.
+      on_connect:           onConnectLines(),
     };
 
     if (type === 'serial') {
@@ -1312,6 +1361,7 @@
       parity:           payload.parity || 'N',
       stop_bits:        payload.stop_bits || 1,
       flow_control:     payload.flow_control || 'none',
+      on_connect:       payload.on_connect || [],
     };
   }
 
@@ -1337,6 +1387,8 @@
       // already holds, and attaching it is the same call the connect path
       // makes.
       if (saved && saved.id) {
+        await saveOnConnect(saved.id, payload,
+                            (document.getElementById('field-enable-password') || {}).value || '');
         const ref = value('field-credential');
         if (ref) {
           await fetch(`/api/profiles/${saved.id}/credential-set`, {
@@ -1403,6 +1455,10 @@
         jump_private_key_passphrase: payload.jump_private_key_passphrase || '',
       };
       const wantsRemember = payload.remember_credentials;
+      // Read before hideConnectionDialog() resets the form, for the same
+      // reason the credentials above are.
+      const enablePassword =
+        (document.getElementById('field-enable-password') || {}).value || '';
       // Offered before the dialog closes, while the fields it prefills from
       // are still on screen (#161).
       const sharedName = wantsRemember
@@ -1416,7 +1472,8 @@
       }
 
       await autoSaveProfile(payload, wantsRemember, credentials,
-                            payload.credential_storage, sharedName);
+                            payload.credential_storage, sharedName,
+                            enablePassword);
 
     } catch (err) {
       showError(err.message || 'Could not connect. Check the address and credentials.');
@@ -1459,7 +1516,7 @@
   }
 
   async function autoSaveProfile(payload, wantsRemember, credentials, storage,
-                                 sharedName) {
+                                 sharedName, enablePassword) {
     try {
       // No duplicate check here any more. save_profile() returns the existing
       // profile rather than appending a second one, so posting unconditionally
@@ -1472,6 +1529,14 @@
         body:    JSON.stringify(profileFrom(payload)),
       });
       if (created.ok) profile = await created.json();
+
+      // The logon script and its enable password (#532). Attached here
+      // rather than in the session payload because they belong to the saved
+      // connection: this session is already open, and the script runs from
+      // the next time it is opened.
+      if (profile && profile.id) {
+        await saveOnConnect(profile.id, payload, enablePassword);
+      }
 
       // A first-time connection has no profile id when it starts, so the
       // backend had nowhere to file the credentials. Now that the profile
