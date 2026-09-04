@@ -64,17 +64,6 @@
       refreshPlaybooks();
     });
 
-    document.getElementById('ansible-open-settings')
-      .addEventListener('click', () => {
-        // Settings is an overlay above the view, so the view stays where it
-        // is and comes back when Settings closes. Nothing to close here.
-        if (typeof window.openSettingsSection === 'function') {
-          window.openSettingsSection('Ansible');
-        } else if (typeof window.openSettings === 'function') {
-          window.openSettings();
-        }
-      });
-
     const search = document.getElementById('ansible-search');
     if (search) search.addEventListener('input', renderPlaybooks);
 
@@ -140,37 +129,31 @@
    * into one red pill sends somebody checking a firewall for a certificate
    * they never chose.
    */
+  /** Paint one of this area's pills. Still used by the live run. */
+  function _pill(el, kind, text) {
+    if (!el) return;
+    el.className = `ansible-pill ansible-pill-${kind}`;
+    el.textContent = text;
+  }
+
+  /**
+   * Whether the runner is usable, for this area's own decisions.
+   *
+   * It no longer paints anything (#592). The runner's state is said once,
+   * in the view's header, alongside the security light; this area repeated
+   * the address, the state and a test button, which is a second place for
+   * the same fact to be wrong in. All that is still needed here is whether
+   * the run controls should be enabled.
+   */
   async function refreshStatus() {
-    const pill = document.getElementById('ansible-status-pill');
-    const detail = document.getElementById('ansible-status-detail');
-    if (!pill) return null;
     try {
       const data = await (await fetch('/api/ansible/status')).json();
       runnerReady = !!(data.configured && data.reachable);
-      if (!data.configured) {
-        _pill(pill, 'grey', 'Not set up');
-        detail.textContent = data.detail
-          ? `Still needed: ${data.detail}.`
-          : 'No runner has been set up yet.';
-      } else if (data.reachable) {
-        _pill(pill, 'ok', 'Answering');
-        detail.textContent = data.detail || 'The runner answered.';
-      } else {
-        _pill(pill, 'error', 'Not answering');
-        detail.textContent = data.detail || 'The runner did not answer.';
-      }
       return data;
     } catch (e) {
       runnerReady = false;
-      _pill(pill, 'error', 'Not answering');
-      detail.textContent = String(e.message || e);
       return null;
     }
-  }
-
-  function _pill(el, kind, text) {
-    el.className = `ansible-pill ansible-pill-${kind}`;
-    el.textContent = text;
   }
 
   // -------------------------------------------------------------------------

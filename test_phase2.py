@@ -951,11 +951,15 @@ async def run():
             fail("the Ansible view opens from the sidebar", str(e))
 
         try:
-            # Configured and reachable are different answers and the panel has
+            # Configured and reachable are different answers and the view has
             # to give the right one: with nothing set up it is "not set up",
             # never "not answering", which would send somebody to a firewall.
-            await expect(page.locator("#ansible-status-pill")).to_have_text("Not set up")
-            detail = await page.inner_text("#ansible-status-detail")
+            #
+            # Read from the view's header (#592). The Playbooks area used to
+            # repeat the runner's state inside itself, which was a second
+            # place for the same fact to be wrong in.
+            await expect(page.locator("#av-runner-pill")).to_have_text("Not set up")
+            detail = await page.inner_text("#av-runner-detail")
             # The address is the one thing without which there is nothing to
             # try. Auth is the deployment's choice, so its absence is not a
             # gap ShellMate reports.

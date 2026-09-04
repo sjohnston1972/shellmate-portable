@@ -160,8 +160,17 @@ async def main() -> None:
         await _accept(page, danger=True)
         await page.wait_for_timeout(200)
         after_delete = await page.inner_text("#av-environments-body")
+        # Back to the empty state, which is now the shared centred one
+        # rather than a dashed box saying "none yet" (#595). Asserted on
+        # what it is for rather than on a form of words, so rewording the
+        # copy does not fail a test about deletion.
+        # Matched case-insensitively: inner_text returns *rendered* text, and
+        # btn-primary is text-transform:uppercase, so the button reads
+        # "NEW ENVIRONMENT" however it is written in the source.
         check("the environment is gone after confirming delete",
-              "No environments yet" in after_delete, after_delete[:200])
+              "one choice" in after_delete.lower()
+              and "new environment" in after_delete.lower(),
+              after_delete[:200])
 
         # ---------------------------------------------------------------
         print("\n-- Keys: the area states its limits up front --")
@@ -232,7 +241,9 @@ async def main() -> None:
 
         keys_body = await page.inner_text("#av-keys-body")
         check("the key is gone after confirming delete",
-              "No keys yet" in keys_body, keys_body[:200])
+              "held in the vault" in keys_body.lower()
+              and "new key" in keys_body.lower(),
+              keys_body[-200:])
 
         env, extra, unreadable = key_store.resolve(["azure_secret"])
         check("and its value is gone from the vault too",

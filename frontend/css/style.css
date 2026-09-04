@@ -9527,10 +9527,70 @@ body {
   overflow-y: auto;
 }
 
+/* The full width of the pane (#587).
+
+   This carried max-width:1100px, which is a reading measure borrowed from
+   documents and wrong for everything in here: these areas are tables of
+   hosts and runs, YAML, and live task output, none of which are prose and
+   all of which are worse in a narrow column pinned to the left edge.
+   Anything that genuinely is prose asks for a measure itself. */
 .av-area {
   padding: 20px 24px 32px;
-  max-width: 1100px;
 }
+
+/* Prose inside an area, which does still want a measure. */
+.av-area-head p,
+.av-blank-line {
+  max-width: 68ch;
+}
+
+/* An area nobody has used yet. Centred, because it is the whole content of
+   the screen rather than a note beside something else, and because by the
+   time there is content nobody reads the description. */
+.av-blank {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  margin: 8vh auto 0;
+  max-width: 560px;
+  padding: 0 24px 40px;
+}
+
+.av-blank-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--primary-tint);
+  border: 1px solid var(--primary-edge);
+  margin-bottom: 4px;
+}
+
+.av-blank-mark .material-symbols-outlined {
+  font-size: var(--icon-lg);
+  color: var(--primary);
+}
+
+.av-blank-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--on-surface);
+  text-wrap: balance;
+}
+
+.av-blank-line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--on-surface-dim);
+}
+
+.av-blank-action { margin-top: 8px; }
 
 .av-area[hidden] { display: none; }
 

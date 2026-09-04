@@ -379,33 +379,6 @@
             </header>
             <div class="av-area-body" id="av-playbooks-body">
       <!-- ===== The runner ===== -->
-      <section class="settings-section">
-        <h3 class="settings-section-title">Runner</h3>
-        <p class="settings-section-hint">ShellMate does not run Ansible itself. It drives an <code>ansible-runner-service</code> container and reports what that container is doing — so everything below depends on the runner answering.</p>
-
-        <div class="setting-row">
-          <label class="setting-label">Status</label>
-          <span class="setting-value">
-            <span id="ansible-status-pill" class="ansible-pill ansible-pill-grey">…</span>
-          </span>
-        </div>
-        <!-- The detail on its own line rather than inside the label. The
-             three answers here are long and different in kind: "still
-             needed: a client certificate" is a thing not done, and "could
-             not reach the runner" is a thing gone wrong. -->
-        <p class="ansible-note" id="ansible-status-detail">Asking the runner…</p>
-
-        <div class="setting-row">
-          <label class="setting-label">Address, certificates and timeout</label>
-          <span class="setting-value">
-            <button type="button" id="ansible-open-settings" class="btn-tertiary">
-              <span class="material-symbols-outlined">settings</span>
-              Settings &rarr; Ansible
-            </button>
-          </span>
-        </div>
-      </section>
-
       <!-- ===== The two playbook lists ===== -->
       <section class="settings-section">
         <h3 class="settings-section-title">Playbooks</h3>
@@ -475,7 +448,7 @@
           <section class="av-area" id="av-templates" data-av-area="templates" hidden>
             <header class="av-area-head">
               <h3>Templates</h3>
-              <p>A parameterised play, filled in each time.</p>
+              <p>A play with named holes in it. Describe each hole once, and filling them in afterwards produces a playbook — which is what lets somebody who did not write the template still make the change correctly. Whether a template writes to a device is read off its body, not ticked in a box.</p>
             </header>
             <div class="av-area-body" id="av-templates-body">
               <p class="av-empty">Nothing here yet.</p>
@@ -486,7 +459,7 @@
           <section class="av-area" id="av-inventory" data-av-area="inventory" hidden>
             <header class="av-area-head">
               <h3>Inventory</h3>
-              <p>What a run is pointed at.</p>
+              <p>A preview of the hosts a run would be sent to, built from your own connections and groups. Nothing here is saved or pushed anywhere: the inventory is generated when a run starts and travels with it, so the runner keeps no copy of your estate. This applies only to runs that choose the estate as their source — one pointed at the runner's own inventory ignores all of it.</p>
             </header>
             <div class="av-area-body" id="av-inventory-body">
               <p class="av-empty">Nothing here yet.</p>
@@ -497,7 +470,7 @@
           <section class="av-area" id="av-environments" data-av-area="environments" hidden>
             <header class="av-area-head">
               <h3>Environments</h3>
-              <p>Named settings a run inherits.</p>
+              <p>A named set of run settings, so “run it against production” is one choice rather than six fields typed the same way every time. A run inherits whatever it left blank — except forced check mode, which an environment can turn on and no run can turn off.</p>
             </header>
             <div class="av-area-body" id="av-environments-body">
               <p class="av-empty">Nothing here yet.</p>
@@ -508,7 +481,7 @@
           <section class="av-area" id="av-keys" data-av-area="keys" hidden>
             <header class="av-area-head">
               <h3>Keys</h3>
-              <p>Credentials a run needs, held in the vault.</p>
+              <p>Credentials a playbook needs and ShellMate does not otherwise hold, kept in the encrypted vault under a name and resolved only as a run starts. No value can be read back; the only way one leaves ShellMate is with a run that needs it.</p>
             </header>
             <div class="av-area-body" id="av-keys-body">
               <p class="av-empty">Nothing here yet.</p>
@@ -519,7 +492,7 @@
           <section class="av-area" id="av-repositories" data-av-area="repositories" hidden>
             <header class="av-area-head">
               <h3>Repositories</h3>
-              <p>Where a set of playbooks came from.</p>
+              <p>A record of the remote, the branch and the revision somebody last noted — not a sync. ShellMate clones nothing and the runner has no git of its own, so files still reach it through its project directory.</p>
             </header>
             <div class="av-area-body" id="av-repositories-body">
               <p class="av-empty">Nothing here yet.</p>

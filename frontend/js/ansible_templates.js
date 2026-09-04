@@ -86,18 +86,37 @@
     const templates = ((state.library || {}).templates) || [];
     const wrap = el('div', {});
 
+    // The toolbar only when there is something to sit above. With nothing
+    // saved it duplicated the empty state's own button, so an area with no
+    // content offered the same command twice (#588).
+    if (!templates.length) {
+      wrap.appendChild(view.blank({
+        icon: 'list_alt',
+        title: 'Templates make a change repeatable',
+        lines: [
+          'A template is a play with named holes in it — "shut an interface", '
+          + '"set NTP servers". Write the body once, describe each hole, and '
+          + 'filling it in afterwards produces a playbook.',
+          'That is the point: somebody who did not write the template can '
+          + 'still make the change correctly, because the form asks them for '
+          + 'exactly what it needs and nothing else.',
+          'Holes are written {{ like_this }} in the body, and each one has to '
+          + 'be described — the form cannot ask for a value it was never told '
+          + 'about, and a run would fail on it three tasks in.',
+          'Whether a template changes a device is read off its body rather '
+          + 'than ticked in a box, so the read-only badge is something '
+          + 'ShellMate checked rather than something somebody claimed.',
+        ],
+        action: el('button', {
+          type: 'button', class: 'btn-primary', onclick: startCreate,
+        }, [icon('add'), 'New template']),
+      }));
+      return wrap;
+    }
+
     wrap.appendChild(el('div', { class: 'av-tpl-toolbar' }, [
       el('button', { type: 'button', class: 'btn-primary', onclick: startCreate }, [icon('add'), 'New template']),
     ]));
-
-    if (!templates.length) {
-      wrap.appendChild(view.empty(
-        'A template is a play with named holes in it — fill them in and it '
-        + 'becomes a playbook you can run, and keep. Nothing saved yet.',
-        el('button', { type: 'button', class: 'btn-primary', onclick: startCreate },
-           [icon('add'), 'New template'])));
-      return wrap;
-    }
 
     const grid = el('div', { class: 'av-grid' });
     templates.forEach(t => grid.appendChild(renderCard(t)));

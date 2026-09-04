@@ -274,21 +274,37 @@
       type: 'button', class: 'btn-primary', onclick: () => openForm(null),
     }, [icon('add'), 'Add repository']);
 
-    body.appendChild(el('div', { class: 'av-repo-toolbar' }, [
-      el('h4', { class: 'av-block-title', text: `${repos.length} repositor${repos.length === 1 ? 'y' : 'ies'}` }),
-      addBtn,
-    ]));
-
+    // One primary action, not two: the toolbar button and the empty state's
+    // button were the same command shown twice (#597).
     if (!repos.length) {
-      body.appendChild(empty('No repositories recorded yet.',
-        el('button', {
-          type: 'button', class: 'btn-secondary', onclick: () => openForm(null),
-        }, [icon('add'), 'Add one'])));
+      body.appendChild(view.blank({
+        icon: 'folder',
+        title: 'Where a set of playbooks came from',
+        lines: [
+          'ShellMate does not clone anything and the runner has no git of its '
+          + 'own, so this is a record rather than a sync: the remote, the '
+          + 'branch, and the revision somebody last noted.',
+          'That is enough to say "the runner is three commits behind", and '
+          + 'enough to put in a change record — which is usually what the '
+          + 'question is really about.',
+          'Files still reach the runner the ordinary way: into its project '
+          + 'directory on the container host, or by keeping that directory in '
+          + 'git and pulling it there.',
+        ],
+        action: el('button', {
+          type: 'button', class: 'btn-primary', onclick: () => openForm(null),
+        }, [icon('add'), 'Add repository']),
+      }));
       // Still offered: the runner can have playbooks and a requirements
       // file without anybody having written down where they came from.
       body.appendChild(collectionsBlock());
       return;
     }
+
+    body.appendChild(el('div', { class: 'av-repo-toolbar' }, [
+      el('h4', { class: 'av-block-title', text: `${repos.length} repositor${repos.length === 1 ? 'y' : 'ies'}` }),
+      addBtn,
+    ]));
 
     body.appendChild(el('table', { class: 'av-table' }, [
       el('thead', {}, el('tr', {}, [

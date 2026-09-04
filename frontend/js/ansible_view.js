@@ -126,6 +126,36 @@
   }
 
   /**
+   * The first thing somebody sees in an area they have never used (#588).
+   *
+   * An empty area is not an error and should not look like a failed load,
+   * but it is also the only chance to explain what the thing is for — by
+   * the time there is content, nobody reads the description. So it is
+   * centred, says what this is and why it is worth having, and carries
+   * exactly one action.
+   *
+   * One action, specifically. Templates and Repositories each rendered a
+   * toolbar button *and* an empty-state button, so an area with nothing in
+   * it offered the same command twice.
+   *
+   * @param {object} opts
+   * @param {string} opts.icon    A glyph from the committed subset.
+   * @param {string} opts.title   What this area is, in a few words.
+   * @param {string[]} opts.lines Paragraphs. The first should answer "what
+   *   is this"; later ones can carry the awkward truths.
+   * @param {Node} [opts.action]  The single primary button.
+   */
+  function blank(opts) {
+    return el('div', { class: 'av-blank' }, [
+      opts.icon ? el('div', { class: 'av-blank-mark' }, icon(opts.icon)) : null,
+      el('h3', { class: 'av-blank-title', text: opts.title || '' }),
+      ...(opts.lines || []).map(text =>
+        el('p', { class: 'av-blank-line', text })),
+      opts.action ? el('div', { class: 'av-blank-action' }, opts.action) : null,
+    ]);
+  }
+
+  /**
    * Say something went wrong, using ShellMate's own dialog.
    *
    * There is no toast system to lean on here, and a silent failure in a
@@ -422,7 +452,7 @@
 
   window.ansibleView = {
     open: openView, close: closeView, toggle, show, area, load, state,
-    json, post, del, el, icon, clear, empty, toast, paintRunner,
+    json, post, del, el, icon, clear, empty, blank, toast, paintRunner,
     get current() { return current; },
     get isOpen() { return open; },
   };

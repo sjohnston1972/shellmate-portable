@@ -259,11 +259,25 @@
     const list = (state.library && state.library.environments) || [];
 
     if (!list.length) {
-      body.appendChild(empty(
-        'No environments yet. An environment is a named set of run options, so '
-        + '"run it against production" is one choice rather than six fields '
-        + 'typed the same way every time.',
-        newButton('secondary')));
+      body.appendChild(view.blank({
+        icon: 'tune',
+        title: 'One choice instead of six fields',
+        lines: [
+          'An environment is a named set of run settings — which inventory, '
+          + 'which hosts, the variables, how many forks, how much detail. '
+          + '"Run it against production" becomes one choice rather than six '
+          + 'fields typed the same way every time.',
+          'A run inherits whatever it left blank, so an environment is a set '
+          + 'of defaults rather than a lock: anything named in the run itself '
+          + 'still wins.',
+          'With one exception. An environment can force check mode — Ansible’s '
+          + 'dry run — and that only ever works in one direction. Nothing in a '
+          + 'run request can turn it back off, because "production, and I mean '
+          + 'it" should take a second decision rather than the same click as '
+          + 'staging.',
+        ],
+        action: newButton('primary'),
+      }));
       return;
     }
 

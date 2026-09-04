@@ -215,10 +215,27 @@
     const kinds = currentKinds();
 
     if (!keys.length) {
-      body.appendChild(empty(
-        'No keys yet. A key holds one credential a playbook run needs — '
-        + 'an API token, a vault password — under a name a run refers to.',
-        newButton('secondary')));
+      body.appendChild(view.blank({
+        icon: 'key',
+        title: 'Credentials a run needs, held in the vault',
+        lines: [
+          'A key holds one credential a playbook needs and ShellMate does not '
+          + 'otherwise have — a cloud API key, an Ansible Vault password. It '
+          + 'lives in the encrypted vault under a name, and a run refers to it '
+          + 'by that name; the value is fetched only as the run starts.',
+          'Each key is delivered either as an environment variable, which '
+          + 'every task can see, or as an extra var, which a playbook has to '
+          + 'name to use. They are not the same thing.',
+          'No value can ever be read back. Listing keys returns names and '
+          + 'whether the vault can currently read them, and nothing returns a '
+          + 'value — so a key you cannot remember has to be replaced.',
+          'And the part worth being plain about: the value does reach the '
+          + 'runner, because Ansible is what uses it. What the vault buys is '
+          + 'that it is not in a playbook, not in a file on the container and '
+          + 'not in a shell history. It is not end-to-end secrecy.',
+        ],
+        action: newButton('primary'),
+      }));
       return;
     }
 
