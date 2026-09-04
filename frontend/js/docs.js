@@ -20,6 +20,7 @@
     { file: 'ssh-keys.md',          title: 'SSH keys',             icon: 'key' },
     { file: 'assistant.md',         title: 'AI assistant',         icon: 'smart_toy' },
     { file: 'automation.md',        title: 'Broadcast and the API', icon: 'list_alt' },
+    { file: 'ansible.md',           title: 'Ansible',              icon: 'automation' },
     { file: 'settings.md',          title: 'Settings',             icon: 'settings' },
     { file: 'troubleshooting.md',   title: 'Troubleshooting',      icon: 'help' },
     // Last, but it has to be here rather than only in the repository: the

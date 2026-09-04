@@ -6,6 +6,12 @@ exists.
 
 ## 1.1.3
 
+- **Ansible, from inside ShellMate.** A new panel drives an
+  `ansible-runner-service` container: list and run playbooks, watch a run
+  task by task with its tallies, stop it, and report on what it changed.
+  Your own connections and groups can be the inventory, and there is a
+  playbook library you can edit here. See the Ansible page in the manual.
+
 - **A paste can be edited before it goes, and sent a line at a time.** The
   paste question is now a working copy of the block rather than a preview cut
   off at 400 characters: edit the line that came out of the wiki wrong, strip
