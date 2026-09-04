@@ -37,6 +37,16 @@ closes that loop, including offering to download the certificate here as a
 shortcut to filling in the CA field, removes the only guarantee in it while
 appearing to add a feature.
 
+The same rule binds the other end, and this is the part that is easy to
+miss from inside this file: the runner must not serve its own certificate
+over its API either. A download endpoint there and a trust button here are
+the same circle drawn from opposite sides, and **either one alone is
+enough to close it** — a client with no prior trust anchor cannot tell a
+certificate fetched from the server apart from one supplied by whatever
+answered. So this is not a property this codebase holds on its own, and
+reading only this paragraph would leave somebody believing it is. The
+runner carries the matching note above its own health route.
+
 Expiry gets its own state. A certificate with three weeks left is working
 perfectly and is about to stop, and the only useful time to say so is
 before it does.

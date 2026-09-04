@@ -131,6 +131,10 @@ vouches for that connection is a circle, and it would trust an interceptor
 just as readily as the real container. So ShellMate shows what it sees, and
 stops there.
 
+The runner will not hand its certificate out over its API either, for the
+same reason and by the same deliberate choice. Both halves are needed:
+either one alone would close the circle.
+
 The check runs every 30 seconds while the view is open and every 5 minutes
 when it is not, and stops entirely while the window is hidden.
 
