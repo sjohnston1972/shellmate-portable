@@ -34,10 +34,16 @@
 
   /** The run being watched, if any. */
   let live = null;         // { uuid, playbook, target, check, since, timer }
+  /** Every event of that run, kept because the report is built from them. */
+  let seenEvents = [];
+  /** What the last status call said, for the report's summary line. */
+  let lastState = null;
   /** Everything the estate offered last time the Run dialog was opened. */
   let estate = { groups: {}, hosts: [], hostvars: {}, skipped: [] };
   /** The playbook the Run dialog is about, and which list it came from. */
   let running = { name: '', source: 'runner' };
+  /** Whether the last status call found a runner answering. */
+  let runnerReady = false;
 
   document.addEventListener('DOMContentLoaded', () => {
     overlay = document.getElementById('ansible-overlay');
@@ -73,6 +79,7 @@
     if (search) search.addEventListener('input', renderPlaybooks);
 
     document.getElementById('ansible-stop').addEventListener('click', stopRun);
+    document.getElementById('ansible-report').addEventListener('click', copyReport);
 
     _initRunDialog();
     _initEditor();
@@ -113,6 +120,7 @@
     if (!pill) return null;
     try {
       const data = await (await fetch('/api/ansible/status')).json();
+      runnerReady = !!(data.configured && data.reachable);
       if (!data.configured) {
         _pill(pill, 'grey', 'Not set up');
         detail.textContent = data.detail
@@ -127,6 +135,7 @@
       }
       return data;
     } catch (e) {
+      runnerReady = false;
       _pill(pill, 'error', 'Not answering');
       detail.textContent = String(e.message || e);
       return null;
@@ -309,7 +318,13 @@
     document.getElementById('ansible-run-check').checked = true;
     document.getElementById('ansible-run-overlay').classList.remove('hidden');
 
-    await Promise.all([_loadEstate(), _loadRunnerInventory()]);
+    // Only ask the runner for its own inventory when there is a runner to
+    // ask. Firing the call regardless answers 409, logs a console error, and
+    // leaves a radio offering a list that cannot arrive — a choice that is
+    // there but does not work is worse than one that says why it is not.
+    await Promise.all(runnerReady
+      ? [_loadEstate(), _loadRunnerInventory()]
+      : [_loadEstate(), _noRunnerInventory()]);
     _showTargetPane();
   }
 
@@ -406,8 +421,31 @@
     });
   }
 
+  /** No runner to ask, so the choice that depends on one is closed off. */
+  function _noRunnerInventory() {
+    const radio = document.querySelector('input[name="ansible-target"][value="runner"]');
+    if (radio) {
+      radio.disabled = true;
+      // If it was the chosen one, fall back rather than leaving the dialog on
+      // a pane with nothing in it.
+      if (radio.checked) {
+        const group = document.querySelector('input[name="ansible-target"][value="group"]');
+        if (group) group.checked = true;
+      }
+    }
+    const select = document.getElementById('ansible-runner-group');
+    select.innerHTML = '';
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'The runner is not answering';
+    select.appendChild(option);
+    return Promise.resolve();
+  }
+
   /** The groups the container already holds. */
   async function _loadRunnerInventory() {
+    const radio = document.querySelector('input[name="ansible-target"][value="runner"]');
+    if (radio) radio.disabled = false;
     const select = document.getElementById('ansible-runner-group');
     select.innerHTML = '';
     try {
@@ -587,6 +625,8 @@
   function watch(run) {
     stopPolling();
     live = { ...run, since: '' };
+    seenEvents = [];
+    lastState = null;
 
     document.getElementById('ansible-run-section').classList.remove('hidden');
     document.getElementById('ansible-live-name').textContent = run.playbook;
@@ -594,6 +634,7 @@
       `against ${run.target}${run.check ? ' · check mode' : ''}`;
     document.getElementById('ansible-events').innerHTML = '';
     document.getElementById('ansible-stop').classList.remove('hidden');
+    document.getElementById('ansible-report').classList.add('hidden');
     _pill(document.getElementById('ansible-live-pill'), 'live', 'Starting');
 
     remember(run);
@@ -615,14 +656,18 @@
     if (!live) return;
     const uuid = live.uuid;
     try {
-      const state = await (await fetch(
-        `/api/ansible/jobs/${encodeURIComponent(uuid)}`)).json();
+      // res.ok, not just the body. A 409 (no runner) and a 502 (the runner
+      // refused) both answer with `{detail: …}`, and reading one of those as
+      // a state object leaves the panel showing an empty run for ever
+      // instead of saying what went wrong.
+      const state = await _json(`/api/ansible/jobs/${encodeURIComponent(uuid)}`);
       if (!live || live.uuid !== uuid) return;
+      lastState = state;
       _renderState(state);
 
-      const fresh = await (await fetch(
+      const fresh = await _json(
         `/api/ansible/jobs/${encodeURIComponent(uuid)}/events`
-        + `?since=${encodeURIComponent(live.since)}`)).json();
+        + `?since=${encodeURIComponent(live.since)}`);
       if (!live || live.uuid !== uuid) return;
       (fresh.events || []).forEach(appendEvent);
       if (fresh.events && fresh.events.length) {
@@ -640,6 +685,20 @@
       return;
     }
     live.timer = setTimeout(poll, POLL_MS);
+  }
+
+  /**
+   * A GET whose failure is the server's own words.
+   *
+   * `detail` carries the runner's message through both error codes the
+   * Ansible endpoints raise — 409 for no runner configured, 502 for a runner
+   * that refused — and it is far more use than the status number.
+   */
+  async function _json(url) {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `the server answered ${res.status}`);
+    return data;
   }
 
   function _renderState(state) {
@@ -683,6 +742,7 @@
   };
 
   function appendEvent(entry) {
+    seenEvents.push(entry);
     const known = EVENT_KINDS[entry.event];
     if (!known) return;               // stats and internals are not rows
     const [label, kind] = known;
@@ -721,6 +781,7 @@
   function finish(state) {
     stopPolling();
     document.getElementById('ansible-stop').classList.add('hidden');
+    document.getElementById('ansible-report').classList.remove('hidden');
     if (live) {
       remember({ ...live, status: state.status, summary: state.summary,
                  finished: true });
@@ -860,6 +921,94 @@
       row.appendChild(again);
       host.appendChild(row);
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // The report
+  // -------------------------------------------------------------------------
+
+  /**
+   * What ran, against what, what changed and what failed — as Markdown.
+   *
+   * It goes to the clipboard rather than to a file. ShellMate has no
+   * Markdown report path to save through: `/api/logs/{name}/save` and
+   * `/api/scrollback/save` both write a `.log` of terminal output through
+   * the platform's folder dialog, and neither is a place a run report
+   * belongs. A browser download is worse than useless here — in the native
+   * window an `<a download>` quietly does nothing, which is the defect
+   * logs.js already carries a note about. So: the clipboard, which works in
+   * every frame ShellMate runs in, and lands straight in the change record
+   * or the ticket this is going into anyway.
+   */
+  function buildReport() {
+    const summary = (lastState && lastState.summary) || {};
+    const status = (lastState && lastState.status) || 'unknown';
+    const run = live || {};
+
+    const failures = seenEvents.filter(
+      e => e.event === 'runner_on_failed' || e.event === 'runner_on_async_failed'
+           || e.event === 'runner_on_unreachable');
+    const changes = seenEvents.filter(e => e.event === 'runner_on_changed');
+
+    const lines = [
+      `# Ansible run — ${run.playbook || 'a playbook'}`,
+      '',
+      `- **Playbook**: ${run.playbook || '(unknown)'}`,
+      `- **Ran against**: ${run.target || '(unknown)'}`,
+      // Said in words, not as a flag. "check mode" reads as a note; "no
+      // changes were made" is the sentence somebody needs in a change record.
+      `- **Mode**: ${run.check ? 'check mode — no changes were made'
+                               : 'live — changes were made'}`,
+      `- **Finished as**: ${status}`,
+      `- **Run id**: ${run.uuid || '(unknown)'}`,
+      `- **Reported**: ${new Date().toLocaleString()}`,
+      '',
+      '## Tallies',
+      '',
+      '| tasks | ok | changed | failed | unreachable | skipped |',
+      '| --- | --- | --- | --- | --- | --- |',
+      `| ${summary.tasks || 0} | ${summary.ok || 0} | ${summary.changed || 0} `
+      + `| ${summary.failed || 0} | ${summary.unreachable || 0} | ${summary.skipped || 0} |`,
+      '',
+    ];
+
+    lines.push('## What changed', '');
+    if (changes.length) {
+      changes.forEach(e => lines.push(
+        `- ${e.host || 'a host'} — ${e.task || e.event}`));
+    } else {
+      lines.push(run.check
+        ? 'Nothing. Check mode reports what would change and changes nothing.'
+        : 'Nothing reported as changed.');
+    }
+    lines.push('');
+
+    lines.push('## What failed', '');
+    if (failures.length) {
+      failures.forEach(e => lines.push(
+        `- ${e.host || 'a host'} — ${e.task || e.event} (${e.event})`));
+    } else {
+      lines.push('Nothing.');
+    }
+    lines.push('');
+
+    // The tasks in order, so the report says what ran and not only what went
+    // wrong — a play that did nothing and a play that did twelve things
+    // successfully otherwise read identically.
+    const tasks = seenEvents.filter(e => e.event === 'playbook_on_task_start');
+    if (tasks.length) {
+      lines.push('## Tasks, in order', '');
+      tasks.forEach((e, i) => lines.push(`${i + 1}. ${e.task || '(unnamed)'}`));
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  }
+
+  async function copyReport() {
+    await _copy(buildReport());
+    _notify('info', 'Report copied',
+            'Markdown, on the clipboard — paste it into the change record.');
   }
 
   // -------------------------------------------------------------------------
@@ -1102,6 +1251,10 @@
   }
 
   window.openAnsible = openAnsible;
+  // Named so the browser tests can reach the seams without a container in
+  // the loop: a runner is not something a test suite can stand up, but the
+  // dialog's defaults and the library's round trip are worth asserting
+  // whether or not one is there.
   window._ansible = { refreshPlaybooks, renderPlaybooks, watch, openEditor,
-                     _parseExtraVars };
+                      openRunDialog, buildReport, _parseExtraVars };
 })();
