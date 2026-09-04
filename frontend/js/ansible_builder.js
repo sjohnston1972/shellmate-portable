@@ -59,15 +59,6 @@
     return play.name || `Play ${plays.indexOf(play) + 1}`;
   }
 
-  /** Which provider and model to ask, from the chat panel's own selector. */
-  function assistant() {
-    const select = document.getElementById('ai-backend-select');
-    const raw = (select && select.value) || '';
-    const [backend, model] = raw.split(':');
-    return { backend: backend || '', model: model || '',
-             label: select && select.selectedOptions[0]
-               ? select.selectedOptions[0].textContent.trim() : '' };
-  }
 
   // -- Editing --------------------------------------------------------------
 
@@ -539,43 +530,6 @@
     }
   }
 
-  // -- The assistant --------------------------------------------------------
-
-  async function askAssistant() {
-    const description = (document.getElementById('av-bld-ask') || {}).value || '';
-    if (!description.trim()) {
-      view.toast('Describe what the playbook should do first.', 'error');
-      return;
-    }
-    const button = document.getElementById('av-bld-draft');
-    const status = document.getElementById('av-bld-draft-status');
-    const who = assistant();
-    if (button) button.disabled = true;
-    if (status) status.textContent = `Asking ${who.label || who.backend || 'the assistant'}…`;
-    try {
-      const drafted = await view.post('/api/ansible/draft', {
-        description,
-        hosts: (plays[0] && plays[0].hosts) || 'all',
-        family: (document.getElementById('av-bld-family') || {}).value || 'generic',
-        session_id: (document.getElementById('av-bld-context') || {}).checked
-          ? ((window.getActiveTab && window.getActiveTab()) || {}).sessionId || ''
-          : '',
-        backend: who.backend, model: who.model,
-      });
-      // A draft arrives as text and stays as text. Reading YAML back into
-      // canvas nodes would be a parser guessing at intent, and a wrong
-      // guess would silently rewrite what the model produced — so the
-      // canvas keeps what you built and the draft sits in the editor.
-      current = { text: drafted.text, found: drafted, source: 'assistant', error: '' };
-      paint();
-      if (status) status.textContent = '';
-    } catch (e) {
-      if (status) status.textContent = '';
-      view.toast(e.message || String(e), 'error');
-    } finally {
-      if (button) button.disabled = false;
-    }
-  }
 
   async function reread() {
     const box = document.getElementById('av-bld-text');
@@ -612,30 +566,6 @@
              + 'onto the playbook to add a play for it, or onto a play to '
              + 'change what that play targets.'),
           el('div', { id: 'av-bld-canvas' }),
-        ]),
-      ]),
-
-      el('section', { class: 'av-block' }, [
-        el('h4', { class: 'av-block-title' }, 'Or describe it'),
-        el('p', { class: 'av-bld-why' },
-           'Ask the assistant for a first draft. It is good at the shape of a '
-           + 'play and unreliable about the details, so what comes back is '
-           + 'read back to you before you do anything with it, and it lands '
-           + 'in the editor rather than in the canvas.'),
-        el('textarea', {
-          id: 'av-bld-ask', rows: 3, class: 'av-bld-input',
-          placeholder: 'Shut ports Gi1/0/10 to Gi1/0/20 on the access switches '
-                     + 'and leave a description saying why',
-        }),
-        el('label', { class: 'av-bld-check' }, [
-          el('input', { id: 'av-bld-context', type: 'checkbox' }),
-          ' Include the active terminal session as context (it is redacted '
-          + 'before it leaves this machine)',
-        ]),
-        el('div', { class: 'av-bld-actions' }, [
-          el('button', { type: 'button', class: 'btn-secondary', id: 'av-bld-draft',
-                         onclick: askAssistant }, [icon('smart_toy'), 'Draft it']),
-          el('span', { id: 'av-bld-draft-status', class: 'av-bld-why' }),
         ]),
       ]),
 
@@ -728,6 +658,24 @@
       return true;
     } : null);
   }
+
+  // What the assistant is told about the canvas, when it asks (#602).
+  window.ansibleBuilder = {
+    canvasState: () => ({
+      plays: plays.map(p => ({
+        name: playName(p), hosts: p.hosts,
+        tasks: p.tasks.map(t => ({ kind: t.kind, label: t.label })),
+        handlers: p.handlers.map(h => ({ kind: h.kind, label: h.label })),
+      })),
+    }),
+    /** Take a playbook the assistant offered into the editor. */
+    accept: (text) => {
+      current = { text, found: null, source: 'assistant', error: '' };
+      paint();
+      inspectText(text).then((found) => { current.found = found; renderFound(); });
+      view.show('builder');
+    },
+  };
 
   view.area('builder', {
     onShow: async (state, changed) => {

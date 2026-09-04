@@ -6396,6 +6396,12 @@ async def chat_websocket(websocket: WebSocket) -> None:
             step = msg.get("investigate_step")
             investigate_step = int(step) if isinstance(step, (int, float)) else None
 
+            # Ansible mode (#602): what the builder currently has on its
+            # canvas. Only the browser knows this — everything else about
+            # the integration is read server-side.
+            canvas = msg.get("ansible_canvas")
+            ansible_canvas = canvas if isinstance(canvas, dict) else None
+
             if not user_message:
                 continue
 
@@ -6412,6 +6418,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     mode=mode,
                     history=history,
                     investigate_step=investigate_step,
+                    ansible_canvas=ansible_canvas,
                 ):
                     if isinstance(chunk, dict) and "usage" in chunk:
                         # Real counts from the provider (#416), so the meter

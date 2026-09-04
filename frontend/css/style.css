@@ -9899,6 +9899,77 @@ body {
 .av-add:last-child { margin-bottom: 0; }
 .av-add:hover { border-color: var(--primary-edge); color: var(--primary); }
 
+/* Ansible mode (#602). The pill says which persona is answering, because
+   a persona that answers differently while looking identical is a trap. */
+#chat-context-indicator.chat-pill-ansible {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* Said in the transcript rather than as a toast: it is a fact about the
+   conversation, since the replies above it came from somewhere else. */
+.chat-mode-note {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--primary-edge);
+  border-radius: var(--radius-md);
+  background: var(--primary-tint);
+  color: var(--on-surface);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* A playbook the assistant offered. Not styled like a command block on
+   purpose — one is clicked to type into a live device and the other is
+   forty lines of YAML that must never go near a switch. */
+.chat-playbook {
+  margin: 8px 0;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.chat-playbook-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--outline);
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+.chat-playbook-head .material-symbols-outlined {
+  font-size: var(--icon-xs);
+  color: var(--primary);
+}
+
+.chat-playbook-note {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--warn);
+}
+
+.chat-playbook-body {
+  margin: 0;
+  padding: 10px;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--bedrock);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--on-surface);
+  white-space: pre;
+}
+
+.chat-playbook-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
 /* Where a drop would land. Removed by accident when the builder's own
    inventory rail was deleted, which left dragging with no feedback at all
    and made a working drop look like a dead zone (#603). */

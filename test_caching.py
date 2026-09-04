@@ -289,9 +289,14 @@ def test_the_prompt_editor_is_visible_where_it_is_advertised() -> None:
 
             modes = page.eval_on_selector(
                 "#prompt-mode-select", "e => [...e.options].map(o => o.value)")
-            check("and all three personas offered",
-                  set(modes) == {"tshoot", "learn", "investigate"},
-                  str(modes))
+            # Every persona the backend knows has to be offered here, or one
+            # of them is editable only by hand-editing prompts.json —
+            # which is exactly how the Ansible persona nearly shipped (#602).
+            from backend.ai import prompts as _prompts
+            check("and every persona is offered for editing",
+                  set(modes) == set(_prompts.MODES),
+                  f"the picker has {sorted(modes)}, the backend has "
+                  f"{sorted(_prompts.MODES)}")
 
             browser.close()
     finally:

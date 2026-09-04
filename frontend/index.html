@@ -2016,11 +2016,12 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div class="setting-row">
             <label class="setting-label" for="prompt-mode-select"
-                   data-tip="Which of the three personas you are editing. Troubleshoot is terse and assumes you know the platform; Learn explains the reasoning behind each step; Investigate plans a run of read-only steps and takes them one approved command at a time.||Editing one never touches the others. This picker does not change which persona the assistant is currently using either — that is the mode button in the chat header.">Editing</label>
+                   data-tip="Which persona you are editing. Troubleshoot is terse and assumes you know the platform; Learn explains the reasoning behind each step; Investigate plans a run of read-only steps and takes them one approved command at a time; Ansible knows how ShellMate's own Ansible integration works, and is used automatically while the Ansible view is open.||Editing one never touches the others. This picker does not change which persona the assistant is currently using either — the first three are the mode button in the chat header, and Ansible is chosen by where you are rather than by a setting.">Editing</label>
             <select id="prompt-mode-select" class="setting-input">
               <option value="tshoot">Troubleshoot — terse, fix it now</option>
               <option value="learn">Learn — explains the why</option>
               <option value="investigate">Investigate — a plan, one approved step at a time</option>
+              <option value="ansible">Ansible — the ShellMate-Ansible expert, used in the Ansible view</option>
             </select>
             <span id="prompt-modified" class="setting-value"></span>
           </div>

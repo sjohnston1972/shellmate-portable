@@ -48,6 +48,94 @@ def _session_text(session: dict, lines: int) -> str:
     return outbound.session_text(session, lines)
 
 
+def _ansible_context(canvas: dict | None) -> list[str]:
+    """
+    What the assistant needs to know about *this* Ansible setup (#602).
+
+    Read from the backend rather than sent up from the browser, because the
+    browser would be reporting what it last drew and the question is what is
+    actually there. Bounded on purpose: names, not contents. A playbook's
+    body belongs in the conversation only when somebody asks about it, and
+    an estate of five thousand connections would otherwise fill the window
+    before the question did.
+
+    Never raises. An assistant that cannot answer because the runner is
+    down is worse than one answering without it — most Ansible questions
+    are not about the runner's current mood.
+    """
+    lines: list[str] = ["=== ShellMate's Ansible integration, right now ==="]
+    try:
+        from backend import ansible as ansible_module
+
+        state = ansible_module.ping()
+        if not state.get("configured"):
+            lines.append("Runner: not set up. Settings -> Ansible.")
+        elif state.get("reachable") and state.get("authenticated") is not False:
+            lines.append(
+                f"Runner: connected at {state.get('url', '')}, "
+                f"ansible-core {state.get('ansible_core', '?')}, "
+                f"{state.get('playbooks', 0)} playbook(s) on it.")
+        elif state.get("reachable"):
+            lines.append("Runner: reachable but refusing ShellMate — the token "
+                         "is wrong or missing.")
+        else:
+            lines.append(f"Runner: unreachable. {state.get('detail', '')}")
+    except Exception:                                     # pragma: no cover
+        lines.append("Runner: could not be asked.")
+
+    try:
+        from backend import ansible as ansible_module
+
+        mine = [p["name"] for p in ansible_module.library()][:40]
+        lines.append("Playbooks written in ShellMate: "
+                     + (", ".join(mine) if mine else "none yet"))
+    except Exception:                                     # pragma: no cover
+        pass
+
+    try:
+        from backend import ansible_library, ansible_keys
+
+        templates = [t["name"] for t in ansible_library.templates()][:30]
+        envs = [e["name"] for e in ansible_library.environments()][:30]
+        keys = [k["name"] for k in ansible_keys.keys()][:30]
+        lines.append("Templates: " + (", ".join(templates) or "none"))
+        lines.append("Environments: " + (", ".join(envs) or "none"))
+        # Names only, ever. The values are in the vault and nothing reads
+        # them back — least of all something that leaves the machine.
+        lines.append("Key names available to a run: " + (", ".join(keys) or "none"))
+    except Exception:                                     # pragma: no cover
+        pass
+
+    try:
+        from backend import ansible as ansible_module
+
+        inventory = ansible_module.inventory_from_estate("")
+        names = sorted(inventory.get("group_names", {}))[:40]
+        lines.append(f"Inventory groups Ansible would see ({len(names)}): "
+                     + (", ".join(names) or "none"))
+        lines.append(f"Reachable hosts in the estate: {len(inventory.get('hosts') or [])}")
+        left_out = inventory.get("skipped") or []
+        if left_out:
+            lines.append(f"{len(left_out)} connection(s) cannot be targeted "
+                         "(no address — serial consoles).")
+    except Exception:                                     # pragma: no cover
+        pass
+
+    # What is on the builder's canvas, which only the browser knows.
+    plays = (canvas or {}).get("plays") or []
+    if plays:
+        lines.append("On the builder's canvas right now:")
+        for index, play in enumerate(plays[:10], start=1):
+            tasks = play.get("tasks") or []
+            lines.append(
+                f"  Play {index}: {play.get('name') or 'unnamed'} "
+                f"-> targets {play.get('hosts') or 'all'}, "
+                f"{len(tasks)} task(s)"
+                + (f", {len(play.get('handlers') or [])} handler(s)"
+                   if play.get("handlers") else ""))
+    return lines
+
+
 async def stream_chat(
     message: str,
     active_session_id: str | None,
@@ -60,6 +148,7 @@ async def stream_chat(
     mode: str | None = None,              # "learn" | "tshoot"
     history: list[dict] | None = None,    # earlier turns, [{role, text}]
     investigate_step: int | None = None,  # approved steps so far, in Investigate mode
+    ansible_canvas: dict | None = None,   # the plays on the builder, in Ansible mode
 ) -> AsyncIterator:
     """
     Build context from session buffers, then stream an AI response.
@@ -173,6 +262,11 @@ async def stream_chat(
         design_context = chroma_client.format_for_prompt(await design_task)
 
     effective_mode = (mode or get_settings().get("ai", {}).get("mode") or "tshoot")
+    # Ansible mode is chosen by where the user is, not by the mode toggle,
+    # so it arrives on the message rather than from settings (#602).
+    ansible_block = (await asyncio.to_thread(_ansible_context, ansible_canvas)
+                     if effective_mode == "ansible" else None)
+
     investigation = None
     if effective_mode == "investigate":
         investigation = {"step": int(investigate_step or 0),
@@ -183,7 +277,9 @@ async def stream_chat(
         active_buffer,
         active_label,
         command_history,
-        extra_contexts or None,
+        (extra_contexts or [])
+        + ([{"label": "Ansible", "text": "\n".join(ansible_block)}]
+           if ansible_block else []) or None,
         design_context=design_context,
         device_context=device_context,
         parsed_tables=parsed_tables or None,

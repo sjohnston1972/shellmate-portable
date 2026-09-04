@@ -26,6 +26,35 @@
   // sent one at a time as each reply finishes. Dropping them was silent.
   const _pendingSilent = [];
 
+  /**
+   * Ansible mode (#602).
+   *
+   * The assistant answers as a ShellMate-Ansible expert while the Ansible
+   * view is open — not a generic one, which would be confidently wrong here
+   * in specific ways ("run ansible-playbook", "add it to your inventory
+   * file") that are wrong about this integration rather than about Ansible.
+   *
+   * Chosen by where the user is rather than by the mode toggle, and given
+   * back the moment they leave. A persona that silently persisted into a
+   * terminal session would be worse than not having one — somebody would
+   * ask about a switch and be answered about a container.
+   */
+  let ansibleMode = false;
+
+  const ANSIBLE_QUICK_BTNS = [
+    'Write a play that shuts a port',
+    'What would this playbook do?',
+    'Why did my last run fail?',
+    'How do I get this to the runner?',
+    'Check mode or not?',
+  ];
+
+  const ANSIBLE_WELCOME =
+    'Ansible mode. I know how ShellMate drives your runner — the container, '
+    + 'the inventory it generates from your estate, how a playbook actually '
+    + 'reaches it, and where credentials come from. Ask for a playbook and '
+    + 'you will get one you can send straight to the builder.';
+
   const QUICK_BUTTONS_KEY  = 'mate:quick-buttons';
   const DEFAULT_QUICK_BTNS = [
     'Thoughts on this?',
@@ -46,6 +75,7 @@
     sendBtn          = document.getElementById('chat-send');
     backendSelect    = document.getElementById('ai-backend-select');
     contextIndicator = document.getElementById('chat-context-indicator');
+    watchAnsibleView();
 
     // Parse "backend:model" value from the dropdown
     function _parseSelection(val) {
@@ -350,7 +380,8 @@
         backend:           currentBackend,
         model:             currentModel,
         context_mode:      picked ? 'selected' : mode,
-        mode:              aiMode,
+        mode:              ansibleMode ? 'ansible' : aiMode,
+        ...(ansibleMode ? { ansible_canvas: canvasState() } : {}),
       }));
     } else {
       finishStreaming();
@@ -361,6 +392,78 @@
   // -----------------------------------------------------------------------
   // Message rendering
   // -----------------------------------------------------------------------
+
+  /**
+   * Say the persona changed, once, in the transcript.
+   *
+   * In the transcript rather than a toast, because it is a fact about the
+   * conversation: the replies above it came from somewhere else. Marked so
+   * a second entry is not added when somebody moves between Ansible areas.
+   */
+  function announceMode() {
+    if (!messagesEl || messagesEl.querySelector('.chat-mode-note[data-mode="ansible"]')) return;
+    const note = document.createElement('div');
+    note.className = 'chat-mode-note';
+    note.dataset.mode = 'ansible';
+    note.textContent = ANSIBLE_WELCOME;
+    messagesEl.appendChild(note);
+    scrollToBottom(true);
+  }
+
+  /**
+   * A playbook the assistant offered (#602).
+   *
+   * Deliberately not a [SUGGEST_CMD] block. Those render as something you
+   * click to type into a live device, and pasting forty lines of YAML into
+   * a switch would be a genuinely bad afternoon. This goes to the builder,
+   * where it is read back task by task before anybody can keep it — which
+   * is the same route a draft has always taken, and the reason moving the
+   * box into the chat did not move it out from behind that.
+   */
+  function buildPlaybookBlock(text) {
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-playbook';
+
+    const head = document.createElement('div');
+    head.className = 'chat-playbook-head';
+    head.innerHTML = '<span class="material-symbols-outlined">description</span>'
+                   + '<strong>Playbook</strong>'
+                   + '<span class="chat-playbook-note">a draft — read it before you keep it</span>';
+    wrap.appendChild(head);
+
+    const pre = document.createElement('pre');
+    pre.className = 'chat-playbook-body';
+    pre.textContent = text;
+    wrap.appendChild(pre);
+
+    const actions = document.createElement('div');
+    actions.className = 'chat-playbook-actions';
+
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'btn-primary';
+    open.textContent = 'Open in the builder';
+    open.addEventListener('click', () => {
+      if (window.ansibleBuilder && window.ansibleBuilder.accept) {
+        if (window.ansibleView) window.ansibleView.open('builder');
+        window.ansibleBuilder.accept(text);
+      }
+    });
+    actions.appendChild(open);
+
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn-tertiary';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', () => {
+      navigator.clipboard.writeText(text);
+      if (typeof window._showCopyToast === 'function') window._showCopyToast();
+    });
+    actions.appendChild(copy);
+
+    wrap.appendChild(actions);
+    return wrap;
+  }
 
   function appendUserBubble(text) {
     const bubble = document.createElement('div');
@@ -491,7 +594,8 @@
       backend:       currentBackend,
       model:         currentModel,
       context_mode:  picked ? 'selected' : contextMode,
-      mode:          aiMode,
+      mode:          ansibleMode ? 'ansible' : aiMode,
+      ...(ansibleMode ? { ansible_canvas: canvasState() } : {}),
     }));
   }
 
@@ -548,7 +652,9 @@
       backend:      currentBackend,
       model:        currentModel,
       context_mode: picked ? 'selected' : contextMode,
-      mode:         typeof window.getShellmateMode === 'function' ? window.getShellmateMode() : 'tshoot',
+      mode:         ansibleMode ? 'ansible'
+        : (typeof window.getShellmateMode === 'function' ? window.getShellmateMode() : 'tshoot'),
+      ...(ansibleMode ? { ansible_canvas: canvasState() } : {}),
     }));
   }
 
@@ -655,7 +761,7 @@
     // Split on [SUGGEST_CMD]...[/SUGGEST_CMD] or [SUGGEST_CMD:N]...[/SUGGEST_CMD] blocks
     // One tag only. An ADD_CMD variant was accepted here for years without
     // ever being taught to the model, so no reply carried it (#430).
-    const parts = raw.split(/(\[SUGGEST_CMD(?::\d+)?\][\s\S]*?\[\/SUGGEST_CMD\]|\[PLAN\][\s\S]*?\[\/PLAN\])/g);
+    const parts = raw.split(/(\[SUGGEST_CMD(?::\d+)?\][\s\S]*?\[\/SUGGEST_CMD\]|\[PLAN\][\s\S]*?\[\/PLAN\]|\[PLAYBOOK\][\s\S]*?\[\/PLAYBOOK\])/g);
     bubble.innerHTML = '';
 
     parts.forEach(part => {
@@ -668,6 +774,9 @@
                                              bubble.dataset.contextSession || ''));
       } else if (planMatch) {
         bubble.appendChild(buildPlanCard(planMatch[1]));
+      } else if (/^\[PLAYBOOK\]/.test(part)) {
+        bubble.appendChild(buildPlaybookBlock(
+          part.replace(/^\[PLAYBOOK\]\s*/, '').replace(/\s*\[\/PLAYBOOK\]$/, '')));
       } else if (part) {
         const textNode = document.createElement('div');
         textNode.className = 'chat-text';
@@ -943,7 +1052,39 @@
 
   // Kept in settings.json rather than localStorage, so buttons someone has
   // curated travel with the data folder — see frontend/js/prefs.js.
+  /** The plays on the builder's canvas, if it has any. */
+  function canvasState() {
+    return (window.ansibleBuilder && window.ansibleBuilder.canvasState)
+      ? window.ansibleBuilder.canvasState() : null;
+  }
+
+  /**
+   * Turn Ansible mode on or off, and show that it happened.
+   *
+   * Everything visible changes together — the pill, the greeting, the quick
+   * chats — because a persona that answers differently while looking
+   * identical is a trap.
+   */
+  function setAnsibleMode(on) {
+    if (ansibleMode === !!on) return;
+    ansibleMode = !!on;
+    document.body.classList.toggle('chat-ansible-mode', ansibleMode);
+    renderQuickButtons();
+    updateContextIndicator();
+    if (ansibleMode) announceMode();
+  }
+
+  /** The view decides, and gives the assistant back when it closes. */
+  function watchAnsibleView() {
+    document.addEventListener('shellmate:ansible-open', () => setAnsibleMode(true));
+    document.addEventListener('shellmate:ansible-close', () => setAnsibleMode(false));
+  }
+
   function loadQuickButtons() {
+    // Ansible mode brings its own, rather than offering "What's wrong
+    // here?" against a playbook. The curated set is untouched and comes
+    // back when the view closes.
+    if (ansibleMode) return [...ANSIBLE_QUICK_BTNS];
     const stored = window.shellmatePrefs
       ? window.shellmatePrefs.get('quick_buttons', null) : null;
     return (Array.isArray(stored) && stored.length)
@@ -951,6 +1092,9 @@
   }
 
   function saveQuickButtons(btns) {
+    // Never while Ansible mode is showing its own set: saving would write
+    // the borrowed buttons over the ones somebody curated (#602).
+    if (ansibleMode) return;
     if (window.shellmatePrefs) window.shellmatePrefs.set('quick_buttons', btns);
   }
 
@@ -967,7 +1111,10 @@
       const btn = document.createElement('button');
       btn.className = 'quick-btn';
       btn.textContent = label;
-      btn.title = 'Click to use · Right-click to edit';
+      btn.title = ansibleMode
+        ? 'Click to use. These are Ansible mode’s own; your usual ones '
+          + 'come back when the view closes.'
+        : 'Click to use · Right-click to edit';
 
       // Left-click: send immediately
       btn.addEventListener('click', () => {
@@ -1337,7 +1484,16 @@
     // are chosen in the picker — how many the assistant will see. Showing the
     // active tab regardless was half of #213: the choice worked, but nothing
     // on screen acknowledged it.
-    if (contextIndicator) {
+    if (contextIndicator && ansibleMode) {
+      // Which persona is answering matters more than which sessions it can
+      // see, when the persona is not the usual one (#602).
+      contextIndicator.textContent = 'Ansible mode';
+      contextIndicator.title = 'Answering as a ShellMate-Ansible expert while '
+        + 'the Ansible view is open. Close it to go back to the usual '
+        + 'assistant.';
+      contextIndicator.classList.add('chat-pill-ansible');
+    } else if (contextIndicator) {
+      contextIndicator.classList.remove('chat-pill-ansible');
       const activeTab = tab || (typeof window.getActiveTab === 'function' ? window.getActiveTab() : null);
       const picked = typeof window.getChatContextSelection === 'function'
         ? window.getChatContextSelection() : null;
@@ -1434,6 +1590,13 @@
   }
 
   // Expose for test access and for settings.js to update the backend selector
+  // Exposed so the block renderer can be exercised without a provider: the
+  // shapes it produces are a contract — a playbook must never come out as a
+  // command block, which is clicked to type into a live device (#602).
+  window.shellmateChat = {
+    renderRaw: (bubble) => { renderBubbleContent(bubble); wireCommandBlocks(bubble); },
+    ansibleMode: () => ansibleMode,
+  };
   window._chatInjectCommand  = injectCommand;
   window._chatSend           = sendMessage;
   // Used by the diff window's Explain button and the config-push review
