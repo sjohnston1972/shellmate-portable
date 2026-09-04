@@ -213,10 +213,19 @@ def _verifies(url: str, ca_cert: str, verify_tls: bool) -> tuple[bool, str]:
     except Exception as exc:
         return False, f"The CA file could not be loaded: {exc}"
 
+    # Connecting and verifying are separated on purpose. Nothing answering
+    # is not a trust verdict — there was no certificate to distrust — and
+    # collapsing the two had ShellMate report "Certificate not trusted" for
+    # a container that was simply not running, which sends somebody to a
+    # certificate file to fix a stopped service.
     try:
-        with socket.create_connection((host, port), timeout=PROBE_TIMEOUT) as raw:
-            with context.wrap_socket(raw, server_hostname=host):
-                return True, ""
+        raw = socket.create_connection((host, port), timeout=PROBE_TIMEOUT)
+    except Exception as exc:
+        return False, f"__unreachable__{exc.__class__.__name__}: {exc}"
+
+    try:
+        with raw, context.wrap_socket(raw, server_hostname=host):
+            return True, ""
     except ssl.SSLCertVerificationError as exc:
         return False, str(getattr(exc, "verify_message", "") or exc)
     except Exception as exc:
@@ -292,10 +301,20 @@ def probe() -> dict:
     # Worst first. A certificate that expired yesterday matters more than a
     # token that was refused because of it, and reporting the token would
     # send somebody to the wrong file.
+    # Nothing answered at all. Checked before the trust states, because a
+    # refused connection has no certificate to have an opinion about — and
+    # reporting one sends somebody to a file to fix a stopped service.
+    unreachable = why.startswith("__unreachable__")
+    if unreachable:
+        why = why[len("__unreachable__"):]
+
     if cert.get("expired"):
         name, detail = "expired", (
             f"The runner's certificate expired on "
             f"{cert.get('not_after', '')[:10]}.")
+    elif unreachable or not out["reachable"]:
+        name, detail = "unreachable", (
+            state.get("detail") or why or f"Nothing answered at {cfg.url}.")
     elif out["encrypted"] and not verified:
         if not cfg.verify_tls and not cfg.ca_cert:
             name, detail = "unverified", (
@@ -304,9 +323,6 @@ def probe() -> dict:
         else:
             name, detail = "untrusted", (
                 why or "The certificate was not accepted.")
-    elif not out["reachable"]:
-        name, detail = "unreachable", (
-            state.get("detail") or f"Nothing answered at {cfg.url}.")
     elif not out["encrypted"]:
         name, detail = "insecure", (
             "Plain HTTP: the token and anything a run carries cross the "

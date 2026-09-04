@@ -245,17 +245,26 @@ def what_the_light_says() -> None:
     check("and the date is in the message", "2026-01-01" in both["detail"],
           both["detail"])
 
-    # Likewise: if nothing verified the certificate, that is the story,
-    # whether or not the runner then answered.
+    # Reversed deliberately after the frozen build reported "Certificate not
+    # trusted" for a container that was simply not running. This originally
+    # asserted that verification being off outranks unreachability, on the
+    # reasoning that an unchecked connection is the more dangerous fact.
+    #
+    # It is — but only when there *is* a connection. The unverified state
+    # exists to warn about live traffic nobody is checking; with nothing
+    # answering there is no such traffic, and no certificate to have an
+    # opinion about either. Reporting trust sends somebody to a file to fix
+    # a stopped service.
     quiet = _probe_with({
         "config": config(ca_cert="", verify_tls=False),
         "ping": {"reachable": False, "detail": "Could not reach it."},
-        "cert": {"available": True, "expired": False, "expiring": False},
-        "verifies": (False, ""),
+        "cert": {"available": False, "why": "Could not read a certificate."},
+        "verifies": (False, "__unreachable__ConnectionRefusedError: refused"),
     })
-    check("verification being off is reported over unreachability",
-          quiet["state"] == "unverified",
-          "the connection is the thing that changed; say so first")
+    check("nothing answering is reported as unreachable, not as untrusted",
+          quiet["state"] == "unreachable", str(quiet["state"]))
+    check("and the message is about the connection, not a certificate",
+          "certificate" not in quiet["detail"].lower(), quiet["detail"])
 
     expiring = _probe_with({
         "config": config(),
