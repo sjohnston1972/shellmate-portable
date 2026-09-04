@@ -45,6 +45,7 @@
     ['configuration capture', 'save'],
     ['interface',           'dark_mode'],
     ['logging',             'description'],
+    ['ansible',             'automation'],
     ['broadcast',           'send'],
     ['discovery',           'radar'],
     ['diagnostics',         'info'],
