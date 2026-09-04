@@ -75,7 +75,11 @@
     document.getElementById('ansible-stop').addEventListener('click', stopRun);
 
     _initRunDialog();
+    _initEditor();
     _initEventViewer();
+
+    document.getElementById('ansible-new')
+      .addEventListener('click', () => openEditor(''));
 
     renderHistory();
   });
@@ -179,7 +183,7 @@
     if (!mine.length) {
       libList.appendChild(_empty(
         term ? 'Nothing here matches that.'
-             : 'Nothing written here yet.'));
+             : 'Nothing written here yet. New playbook starts one.'));
     }
     mine.forEach(f => libList.appendChild(_libraryRow(f)));
   }
@@ -238,6 +242,10 @@
     const row = _row('code', file.name,
                      `${when} · ${(file.bytes / 1024).toFixed(1)} KB`,
                      'ShellMate', 'library');
+
+    const edit = _button('Edit', 'edit', 'btn-secondary');
+    edit.addEventListener('click', () => openEditor(file.name));
+    row.appendChild(edit);
 
     // Runnable only once the runner holds a file by that name — the service
     // runs what is in its project directory, not what is in ours. Offering
@@ -855,6 +863,218 @@
   }
 
   // -------------------------------------------------------------------------
+  // The library editor
+  // -------------------------------------------------------------------------
+
+  /** The name the open playbook was loaded under; "" for one not saved yet. */
+  let editing = '';
+
+  /**
+   * What a new playbook starts as.
+   *
+   * Not empty. A playbook is a list of plays and the backend refuses
+   * anything that is not, so an empty box is a Save that fails on the first
+   * press — and the shape is the part somebody writing their first one is
+   * least sure of.
+   */
+  const SKELETON = [
+    '---',
+    '- name: Describe what this play is for',
+    '  hosts: all',
+    '  gather_facts: false',
+    '  tasks:',
+    '    - name: Describe the task',
+    '      ansible.builtin.debug:',
+    '        msg: "Replace me"',
+    '',
+  ].join('\n');
+
+  function _initEditor() {
+    const dialog = document.getElementById('ansible-edit-overlay');
+
+    document.getElementById('ansible-edit-close')
+      .addEventListener('click', closeEditor);
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) closeEditor();
+    });
+
+    document.getElementById('ansible-edit-save').addEventListener('click', savePlaybook);
+    document.getElementById('ansible-edit-delete').addEventListener('click', deletePlaybook);
+    document.getElementById('ansible-edit-send').addEventListener('click', sendPlaybook);
+  }
+
+  async function openEditor(name) {
+    editing = name || '';
+    const dialog = document.getElementById('ansible-edit-overlay');
+    const nameField = document.getElementById('ansible-edit-name');
+    const text = document.getElementById('ansible-edit-text');
+
+    document.getElementById('ansible-edit-title').textContent =
+      editing ? 'Playbook' : 'New playbook';
+    nameField.value = editing;
+    // Renaming an existing playbook would write a second file and leave the
+    // first, which is a copy dressed up as a rename. The name is fixed once
+    // the file exists; Delete is how one goes away.
+    nameField.readOnly = !!editing;
+    // Only for something that exists. Both act on a file on disk.
+    document.getElementById('ansible-edit-delete').classList.toggle('hidden', !editing);
+    document.getElementById('ansible-edit-send').classList.toggle('hidden', !editing);
+    text.value = editing ? 'Loading\u2026' : SKELETON;
+    _note('');
+    dialog.classList.remove('hidden');
+
+    if (!editing) { text.focus(); return; }
+    try {
+      const res = await fetch(`/api/ansible/library/${encodeURIComponent(editing)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `the server answered ${res.status}`);
+      text.value = data.text || '';
+      _describeTransfer(data.transfer);
+    } catch (e) {
+      text.value = '';
+      _note(`Could not open it: ${e.message || e}`, true);
+    }
+  }
+
+  function closeEditor() {
+    document.getElementById('ansible-edit-overlay').classList.add('hidden');
+    editing = '';
+  }
+
+  function _note(text, bad) {
+    const el = document.getElementById('ansible-edit-note');
+    el.textContent = text;
+    el.classList.toggle('ansible-note-bad', !!bad);
+  }
+
+  /** Where this playbook would land on the runner, and why it goes that way. */
+  function _describeTransfer(transfer) {
+    if (!transfer) { _note(''); return; }
+    _note(`${transfer.why} It would land at ${transfer.target}.`);
+  }
+
+  /**
+   * Save it, and show the parser's own words when it will not parse.
+   *
+   * The backend refuses YAML that does not load, and returns the message the
+   * parser produced — "line 14, column 3" and all. Rewriting that into
+   * "invalid playbook" would throw away the only part of it that helps.
+   */
+  async function savePlaybook() {
+    const name = (document.getElementById('ansible-edit-name').value || '').trim();
+    if (!name) { _note('Give it a name first.', true); return; }
+
+    const button = document.getElementById('ansible-edit-save');
+    button.disabled = true;
+    try {
+      const res = await fetch(`/api/ansible/library/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: document.getElementById('ansible-edit-text').value }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `the server answered ${res.status}`);
+      // The saved name, not the typed one: the backend adds .yml to a name
+      // without a suffix, and the editor has to agree with the disk about
+      // what this file is called or Send goes looking for the wrong one.
+      editing = data.name;
+      document.getElementById('ansible-edit-title').textContent = 'Playbook';
+      document.getElementById('ansible-edit-name').value = data.name;
+      document.getElementById('ansible-edit-name').readOnly = true;
+      document.getElementById('ansible-edit-delete').classList.remove('hidden');
+      document.getElementById('ansible-edit-send').classList.remove('hidden');
+      _describeTransfer(data.transfer);
+      await refreshPlaybooks();
+    } catch (e) {
+      _note(String(e.message || e), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function deletePlaybook() {
+    if (!editing) return;
+    if (window.shellmateDialog) {
+      const go = await window.shellmateDialog.confirm({
+        title: 'Delete this playbook?',
+        body: `${editing} will be removed from ShellMate's library.`,
+        note: 'A copy already sent to the runner stays where it is.',
+        confirmLabel: 'Delete',
+        destructive: true,
+      });
+      if (!go) return;
+    }
+    try {
+      const res = await fetch(`/api/ansible/library/${encodeURIComponent(editing)}`,
+                              { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `the server answered ${res.status}`);
+      closeEditor();
+      await refreshPlaybooks();
+    } catch (e) {
+      _note(String(e.message || e), true);
+    }
+  }
+
+  /**
+   * Copy it to the runner over an SSH session.
+   *
+   * Which session has to be asked, not guessed: the container runs on one
+   * machine and ShellMate may have a dozen tabs open to switches. Guessing
+   * writes a playbook onto a 2960's flash.
+   */
+  async function sendPlaybook() {
+    if (!editing) return;
+    let sessions = [];
+    try {
+      const all = await (await fetch('/api/sessions')).json();
+      sessions = (Array.isArray(all) ? all : (all.sessions || []))
+        .filter(s => (s.connection_type || '').toLowerCase() === 'ssh');
+    } catch (_) { /* handled by the empty case below */ }
+
+    if (!sessions.length) {
+      _note('No open SSH session to copy it over. Connect to the machine '
+            + 'running the container first.', true);
+      return;
+    }
+
+    let chosen = sessions[0].session_id;
+    if (window.shellmateDialog) {
+      const answer = await window.shellmateDialog.form({
+        title: 'Send to the runner',
+        body: 'The service has no upload API, so this copies the playbook over '
+              + 'an SSH session you already have. Choose the session on the '
+              + 'machine running the container.',
+        fields: [{
+          name: 'session', label: 'Over this session', type: 'select',
+          options: sessions.map(s => ({
+            value: s.session_id,
+            label: `${s.display_label || s.hostname} (${s.target || s.hostname})`,
+          })),
+        }],
+        confirmLabel: 'Send',
+      });
+      if (!answer) return;
+      chosen = answer.session;
+    }
+
+    try {
+      const res = await fetch(
+        `/api/ansible/library/${encodeURIComponent(editing)}`
+        + `/send/${encodeURIComponent(chosen)}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `the server answered ${res.status}`);
+      // Where it landed, in full. "Sent" on its own leaves somebody guessing
+      // which directory the runner reads, which is the whole question.
+      _note(`Copied to ${data.target}.`);
+      _notify('info', 'Playbook sent', `${editing} is now at ${data.target}.`);
+      await refreshPlaybooks();
+    } catch (e) {
+      _note(String(e.message || e), true);
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Odds and ends
   // -------------------------------------------------------------------------
 
@@ -882,5 +1102,6 @@
   }
 
   window.openAnsible = openAnsible;
-  window._ansible = { refreshPlaybooks, renderPlaybooks, watch, _parseExtraVars };
+  window._ansible = { refreshPlaybooks, renderPlaybooks, watch, openEditor,
+                     _parseExtraVars };
 })();

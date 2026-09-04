@@ -9092,6 +9092,7 @@ body {
 /* --- the Run dialog --- */
 
 #ansible-run-overlay,
+#ansible-edit-overlay,
 #ansible-event-overlay {
   position: fixed;
   inset: 0;
@@ -9104,6 +9105,7 @@ body {
 }
 
 #ansible-run-dialog,
+#ansible-edit-dialog,
 #ansible-event-dialog {
   background: var(--overlay);
   backdrop-filter: blur(20px);
@@ -9118,8 +9120,10 @@ body {
   gap: 12px;
 }
 #ansible-event-dialog { width: min(940px, 94vw); }
+#ansible-edit-dialog { width: min(940px, 94vw); height: 82vh; }
 
 #ansible-run-header,
+#ansible-edit-header,
 #ansible-event-header {
   display: flex;
   align-items: center;
@@ -9127,6 +9131,7 @@ body {
   min-width: 0;
 }
 #ansible-run-title,
+#ansible-edit-title,
 #ansible-event-title {
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 700;
@@ -9218,6 +9223,40 @@ body {
 .ansible-preview { font-size: 11px; }
 .ansible-preview-line { color: var(--on-surface-dim); padding: 2px 0; }
 .ansible-preview-skip { color: var(--warn); padding: 2px 0; }
+
+#ansible-edit-name {
+  width: 260px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+#ansible-edit-name[readonly] { color: var(--on-surface-dim); }
+
+/* Indentation is meaning in YAML, so this is monospace with two-space tab
+   stops — a proportional font makes a misaligned block look aligned. */
+#ansible-edit-text {
+  flex: 1;
+  min-height: 200px;
+  resize: none;
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--on-surface);
+  tab-size: 2;
+}
+
+#ansible-edit-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--outline);
+  padding-top: 12px;
+}
+#ansible-edit-footer .ansible-note { margin: 0; }
+.ansible-note-bad { color: var(--error); }
 
 #ansible-event-content {
   flex: 1;

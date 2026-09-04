@@ -2167,6 +2167,10 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div class="ansible-list-head">
             <span class="setting-label">In ShellMate</span>
+            <button type="button" id="ansible-new" class="btn-secondary">
+              <span class="material-symbols-outlined">add</span>
+              New playbook
+            </button>
           </div>
           <div id="ansible-library-list"></div>
         </section>
@@ -2282,6 +2286,46 @@ GigEth0/2     unassigned    YES unset  down     down
         <button type="button" id="ansible-run-go" class="btn-primary">
           <span class="material-symbols-outlined">bolt</span>
           Run
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       ANSIBLE — the playbook editor (#585)
+
+       The service can list and run playbooks but has no endpoint that
+       accepts one, so a playbook written here reaches the container by
+       being copied over an SSH session ShellMate already holds. Send to
+       the runner says so, and says where it landed, rather than leaving a
+       Save that looks complete and is not.
+  ================================================================ -->
+  <div id="ansible-edit-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="ansible-edit-title">
+    <div id="ansible-edit-dialog">
+      <div id="ansible-edit-header">
+        <span class="material-symbols-outlined" style="color:var(--primary)">code</span>
+        <h2 id="ansible-edit-title">Playbook</h2>
+        <input type="text" id="ansible-edit-name" class="setting-input" placeholder="drain-access-switch.yml" autocomplete="off" spellcheck="false" />
+        <span class="ansible-spacer"></span>
+        <button type="button" id="ansible-edit-send" class="btn-secondary" title="Copy this playbook to the runner over an SSH session">
+          <span class="material-symbols-outlined">upload</span>
+          Send to the runner
+        </button>
+        <button type="button" id="ansible-edit-delete" class="btn-secondary" title="Delete this playbook">
+          <span class="material-symbols-outlined">delete</span>
+          Delete
+        </button>
+        <button type="button" id="ansible-edit-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <textarea id="ansible-edit-text" spellcheck="false" autocomplete="off"></textarea>
+      <div id="ansible-edit-footer">
+        <p id="ansible-edit-note" class="ansible-note"></p>
+        <span class="ansible-spacer"></span>
+        <button type="button" id="ansible-edit-save" class="btn-primary">
+          <span class="material-symbols-outlined">save</span>
+          Save
         </button>
       </div>
     </div>
