@@ -2251,6 +2251,92 @@
    * The parent is prefilled and the separator applied here, so nobody has to
    * know the convention in order to use it.
    */
+  /**
+   * Copy a group, and everything under it, somewhere else (#598).
+   *
+   * Sites resemble each other — that is why the tree nests — so building
+   * the fifth one by retyping ten subgroups and their colours is work the
+   * shape of the data says nobody should have to do.
+   *
+   * Structure only unless the box is ticked. Copying the connections of
+   * site-4 into site-5 does not give somebody a head start: it gives them
+   * forty devices with real names pointing at the wrong addresses, which is
+   * worse than an empty group. When it is ticked, the existing connections
+   * are tagged into the new groups rather than duplicated — a second
+   * profile for one device is two places to change its password.
+   */
+  async function cloneGroup(group) {
+    // Every group except this one and its own descendants: cloning into
+    // your own subtree recurses, and offering it only to refuse it later
+    // is a worse conversation than not offering it.
+    const forbidden = (key) => key === group.key
+                            || key.startsWith(group.key + '/');
+    const destinations = groupCache
+      .map(g => g.key)
+      .filter(key => !forbidden(key))
+      .sort();
+
+    const leaf = group.key.split('/').pop();
+    const answer = await window.shellmateDialog.form({
+      title: `Clone "${group.name}"`,
+      body: 'Copies this group and every subgroup under it. The copy starts '
+          + 'empty unless you say otherwise.',
+      confirmLabel: 'Clone',
+      fields: [
+        { name: 'name', label: 'Name for the copy', required: true,
+          value: leaf, placeholder: leaf,
+          hint: 'Just the name — choose where it goes below rather than '
+              + 'typing a path.' },
+        { name: 'destination', label: 'Inside', type: 'select',
+          options: [{ value: '', label: 'Top level' }]
+            .concat(destinations.map(k => ({ value: k, label: k }))),
+          hint: 'Where the copy is nested. This group and its own subgroups '
+              + 'are not offered — a group cannot contain itself.' },
+        { name: 'include_connections', label: 'Also add the connections',
+          type: 'checkbox',
+          hint: 'Off by default. The same connections join the new groups as '
+              + 'well; nothing is duplicated, and they keep their addresses '
+              + '— which is usually the reason not to.' },
+      ],
+    });
+    if (!answer) return;
+
+    try {
+      // encodeURIComponent escapes the '/' that makes a subgroup a
+      // subgroup, and the route takes a path — so the separators go back.
+      const path = encodeURIComponent(group.key).replace(/%2F/g, '/');
+      const res = await fetch(`/api/groups/${path}/clone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: (answer.name || '').trim(),
+          destination: answer.destination || '',
+          include_connections: !!answer.include_connections,
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.detail || 'Could not clone it.');
+      activeGroup = result.key;
+      expanded.add(result.key);
+      _refresh();
+      const many = result.groups === 1 ? '' : 's';
+      await window.shellmateDialog.alert({
+        title: `Cloned to "${result.key}"`,
+        body: `${result.groups} group${many} created`
+            + (result.connections
+               ? `, and ${result.connections} connection`
+                 + `${result.connections === 1 ? '' : 's'} added to them.`
+               : '. The copy is empty — add connections, or clone again '
+                 + 'with the box ticked.'),
+      });
+    } catch (e) {
+      await window.shellmateDialog.alert({
+        title: 'Could not clone the group',
+        body: String(e.message || e),
+      });
+    }
+  }
+
   async function newSubgroup(parent) {
     // The parent's icon by default (#259): subgroups usually read as parts
     // of the same thing, and a different icon is one click away.
@@ -2656,6 +2742,7 @@
       // the separator by hand into the name field, which nothing explained
       // (#163).
       { icon: 'add', label: 'New subgroup...', onClick: () => newSubgroup(group) },
+      { icon: 'content_copy', label: 'Clone to…', onClick: () => cloneGroup(group) },
       // Straight into this group (#263): the dialog opens with the Groups
       // field prefilled, so the new profile lands where the click was.
       { icon: 'add_circle', label: 'New connection...', onClick: () => {

@@ -2160,6 +2160,31 @@ async def update_group_endpoint(key: str, request: GroupRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+class CloneGroupRequest(BaseModel):
+    """Body for POST /api/groups/{key}/clone (#598)."""
+
+    destination: str = ""
+    name: str = ""
+    include_connections: bool = False
+
+
+@app.post("/api/groups/{key:path}/clone")
+async def clone_group_endpoint(key: str, request: CloneGroupRequest) -> dict:
+    """
+    Copy a group and its subgroups somewhere else.
+
+    Structure only unless ``include_connections``, and then by tagging the
+    existing connections rather than duplicating them — a second profile for
+    one device is two places to change its password.
+    """
+    try:
+        return await asyncio.to_thread(
+            groups_module.clone_group, key, request.destination,
+            request.name, request.include_connections)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.delete("/api/groups/{key:path}")
 async def delete_group_endpoint(key: str, connections: str = "keep") -> dict:
     """

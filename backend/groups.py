@@ -523,6 +523,149 @@ def update_group(key: str, changes: dict) -> dict:
 
 
 @_synchronised
+def clone_group(key: str, destination: str = "", name: str = "",
+                include_connections: bool = False) -> dict:
+    """
+    Copy a group and everything nested under it, somewhere else (#598).
+
+    Sites resemble each other — that is the whole reason the tree nests —
+    so building the fifth one by retyping ten subgroups, their colours and
+    their order is work the shape of the data says nobody should have to do.
+
+    ``destination`` is the group to nest the copy under, or empty for the
+    top level. ``name`` renames the copy; without it the original's name is
+    reused, which is only legal when the destination differs.
+
+    **Structure by default.** ``include_connections`` is off because the
+    common case is "build site-5 like site-4", and forty connections all
+    pointing at site-4's addresses is not a head start — it is forty wrong
+    devices with real names, which is worse than none. Turning it on tags
+    the existing connections into the new groups as well; it copies no
+    connection records, because a second profile for one device is a
+    different and worse mistake.
+
+    Refuses rather than guesses:
+
+    - cloning into itself or into its own descendant, which would recurse;
+    - a destination that does not exist;
+    - a name already taken at the destination, because group identity *is*
+      the path and adopting a live group would silently merge two trees.
+    """
+    key = _key(key)
+    source = get_group(key)
+    if source is None and not any(
+            g.get("key", "").startswith(f"{key}/") for g in _load()):
+        raise ValueError("There is no such group.")
+
+    leaf = key.rsplit("/", 1)[-1]
+    new_leaf = _key(name) if name else leaf
+    if not new_leaf:
+        raise ValueError("The copy needs a name.")
+    if "/" in new_leaf:
+        raise ValueError("A name cannot contain '/': pick the destination "
+                         "instead of typing a path.")
+
+    destination = _key(destination) if destination else ""
+    if destination:
+        known = {g.get("key") for g in _load()}
+        implied = {t for g in _load() for t in [g.get("key", "")] if t}
+        if destination not in known and destination not in implied:
+            raise ValueError("There is no such destination group.")
+
+    target = f"{destination}/{new_leaf}" if destination else new_leaf
+
+    # Into itself, or into its own subtree. The check is on the target
+    # rather than the destination so that renaming out of the way is still
+    # allowed: site-4 → site-4/archive is a loop, site-4 → site-5 is not.
+    if target == key or target.startswith(f"{key}/"):
+        raise ValueError("A group cannot be cloned into itself or into one "
+                         "of its own subgroups.")
+
+    groups = _load()
+    existing = {g.get("key") for g in groups}
+    if target in existing:
+        raise ValueError(f"'{target}' already exists. Give the copy another "
+                         "name, or choose a different destination.")
+
+    # The subtree, stored or implied. A tag in use under the prefix is a
+    # subgroup whether or not anybody gave it a colour, and leaving those
+    # out would clone a structure with holes in it.
+    prefix = f"{key}/"
+    subtree = [g for g in groups
+               if g.get("key") == key or g.get("key", "").startswith(prefix)]
+    if not subtree:
+        raise ValueError("There is no such group.")
+
+    lowest = min((g.get("order", 1000) for g in groups), default=1000)
+    made: list[str] = []
+    for index, original in enumerate(sorted(
+            subtree, key=lambda g: g.get("key", ""))):
+        old_key = original.get("key", "")
+        tail = old_key[len(key):].lstrip("/")
+        fresh_key = f"{target}/{tail}" if tail else target
+        if fresh_key in existing:
+            continue
+        display = original.get("name") or old_key
+        # The leaf's own label is what a rename should change; the
+        # descendants keep theirs, because "core switches" means the same
+        # thing under any site.
+        if not tail:
+            display = name.strip() or display.rsplit("/", 1)[-1]
+        groups.append({
+            "id":        str(uuid.uuid4()),
+            "key":       fresh_key,
+            "name":      display,
+            "colour":    original.get("colour", DEFAULT_COLOUR),
+            "icon":      original.get("icon", ""),
+            "favourite": bool(original.get("favourite")),
+            "order":     lowest - len(subtree) + index,
+            **({"defaults": dict(original["defaults"])}
+               if original.get("defaults") else {}),
+        })
+        existing.add(fresh_key)
+        made.append(fresh_key)
+    _save(groups)
+
+    tagged = 0
+    if include_connections:
+        tagged = _tag_into_clone(key, target)
+
+    logger.info("Cloned %s to %s (%d group(s), %d connection(s) tagged)",
+                key, target, len(made), tagged)
+    return {"key": target, "created": made, "groups": len(made),
+            "connections": tagged}
+
+
+def _tag_into_clone(source: str, target: str) -> int:
+    """
+    Add the clone's tags to the connections already in the source subtree.
+
+    Deliberately tagging rather than copying. A second profile for one
+    device is two places to change its password and two rows claiming to be
+    the same switch; a connection in two groups is exactly what the tag
+    model is for, and it is what the estate already does everywhere else.
+    """
+    prefix = f"{source}/"
+    touched = 0
+    # The raw list, not get_profiles(): that decorates every connection with
+    # its credential state, which is five thousand lookups to read a tag.
+    for profile in profiles_module._load():
+        tags = profiles_module.normalise_tags(profile.get("tags"))
+        additions = []
+        for tag in tags:
+            tag_key = _key(tag)
+            if tag_key == source or tag_key.startswith(prefix):
+                tail = tag_key[len(source):].lstrip("/")
+                additions.append(f"{target}/{tail}" if tail else target)
+        fresh = [t for t in additions if t not in tags]
+        if not fresh:
+            continue
+        profiles_module.set_tags(profile["id"], tags + fresh)
+        touched += 1
+    return touched
+
+
+@_synchronised
 def delete_group(key: str, delete_connections: bool = False) -> dict:
     """
     Remove a group and everything nested beneath it. **By default the
