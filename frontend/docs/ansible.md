@@ -4,11 +4,10 @@ ShellMate does not run Ansible. It drives a container that does, and shows
 you what is happening: which playbooks exist, what a run is doing task by
 task, what it changed, and what it said when it failed.
 
-The container is [ansible-runner-service][ars], which wraps `ansible-runner`
-in a REST API. You run it wherever Docker lives — a jump host, a VM in the
-management network, a laptop. ShellMate talks to it and nothing else.
+The container wraps `ansible-runner` in a REST API. You run it wherever
+Docker lives — a jump host, a VM in the management network, a laptop.
+ShellMate talks to it and nothing else.
 
-[ars]: https://github.com/ansible/ansible-runner-service
 
 ## Why a container rather than Ansible here
 
@@ -27,29 +26,36 @@ only see through a jump host.
 
 ### The container
 
-Follow the runner service's own instructions. In short:
+The runner is a small service wrapping `ansible-runner`, built on a current
+Python base with Ansible and the AWS, Azure and Meraki collections
+installed. It publishes an API and mounts two directories from its host:
 
-```bash
-docker run -d --name ansible-runner-service -p 5001:5001 \
-  -v /srv/ansible/project:/usr/share/ansible-runner-service/project \
-  -v /srv/ansible/certs:/usr/share/ansible-runner-service/certs \
-  ansible-runner-service
-```
+| Inside the container | What it holds |
+|---|---|
+| `/runner/project` | the playbooks it can run |
+| `/runner/inventory` | its own inventory, with `group_vars` and `host_vars` |
 
-The volumes matter. The **project** directory is where playbooks live —
-the API can list and run them but cannot accept one, so this is the folder
-anything you write has to reach. The **certs** directory holds the
-certificates, including the client pair you are about to give ShellMate.
+Both are bind mounts, which matters later: a playbook written in ShellMate
+is copied to the **host** path that the container mounts, not to a path
+inside the container.
 
-### The certificates
+### The token
 
-The service authenticates with **mutual TLS**. There is no token and no
-password: a client either presents a certificate the service trusts, or it
-is refused. On first start the service generates a self-signed CA and a
-client pair in its certs directory. Copy `client.crt` and `client.key` to
-the machine running ShellMate and keep them as files — the key is a secret
-and belongs in a file with its own permissions, which is why ShellMate
-stores the *paths* rather than the contents.
+The runner requires a bearer token on every API call, and refuses to start
+bound to anything but loopback without one. The token lives in a `.env`
+file on the container's host. Put the same value in ShellMate under
+**Settings → Ansible → Token**; it goes into the encrypted vault, never
+into `settings.json`.
+
+`/health` is deliberately open, so ShellMate can tell three states apart:
+not set up, cannot be reached, and reachable but refusing us. The third
+says so and points at the token rather than sending you to a firewall.
+
+> **The token crosses the network in the clear.** The runner speaks plain
+> HTTP. On a trusted management LAN that is a reasonable trade; the day the
+> container moves anywhere else, put TLS in front of it and give ShellMate
+> the CA certificate. ShellMate supports HTTPS and, if the deployment adds
+> it, a client certificate as well.
 
 ### In ShellMate
 
@@ -57,15 +63,14 @@ Open **Settings → Ansible** and fill in:
 
 | Field | What it is |
 |---|---|
-| Runner URL | `https://runner.example:5001` — HTTPS, always |
-| Client certificate | The `client.crt` you copied |
-| Certificate key | The matching `client.key` |
-| CA certificate | The service's CA, to verify it is the runner you meant |
-| Verify TLS | Leave on with a CA; turn off only for the self-signed development certificate |
-| Project directory | Where playbooks live inside the container |
+| Runner URL | `http://runner.example:8081`, or `https://…` behind TLS |
+| Token | The bearer token from the runner's `.env` |
+| Client certificate, key, CA | Only if a deployment puts mutual TLS in front |
+| Verify TLS | Leave on with a real certificate; off only for a self-signed one |
+| Project directory | The **host** path the container mounts as `/runner/project` |
 
-**Test connection** asks the runner what it holds and tells you what came
-back, or exactly what failed. A missing certificate file is named as a
+**Test connection** asks the runner what it holds and says what came back,
+or exactly what failed. A certificate path that is not a file is named as a
 missing file rather than reported as a connection problem.
 
 ## How devices are reached
@@ -82,8 +87,9 @@ be, and the vault exists so there are not two more places.
 
 Two sets, shown together and clearly distinguished.
 
-**The runner's own** are whatever is in its project directory. They are
-listed, they can be run, and they are what a team keeping playbooks in git
+**The runner's own** are whatever is in its project directory, including
+those in subdirectories. They are listed with their size, can be opened
+read-only, and can be run. This is what a team keeping playbooks in git
 will use.
 
 **Yours** are a library kept with your ShellMate data, editable in the
@@ -93,10 +99,11 @@ start.
 
 ### Getting yours to the runner
 
-The service's API can list and run playbooks but has no endpoint that
-accepts one. So **Send to the runner** copies the file into the container's
-project directory over an SSH session ShellMate already has to that
-machine: pick the session, and the panel says where the file landed.
+The runner's API can list and run playbooks but has no endpoint that
+accepts one, and its project directory is a bind mount from the container's
+host. So **Send to the runner** copies the file to that path on the host,
+over an SSH session ShellMate already has to it: pick the session, and the
+panel says where the file landed.
 
 If ShellMate has no session to the runner's host, the alternative is the
 ordinary one — put the file in the folder yourself, or keep the project
@@ -141,15 +148,27 @@ for each run:
 - A serial connection is **left out**, and named, with the reason: there is
   no address for Ansible to reach.
 
-**Push to the runner** writes those hosts and groups into the runner's own
-inventory, one call per host because that is what the API offers. It
-reports what went and what did not. Nothing is pushed until you ask.
+Nothing is pushed anywhere. The inventory is generated when you start the
+run and **travels with it**: the runner writes it to a file for that job
+alone and never touches the inventory it holds. So there is no second copy
+of your estate to keep in step, and a run is pointed at exactly what you
+chose rather than at whatever was pushed months ago.
+
+**Show what would be sent** displays it before you start — the hosts, and
+the ones left out with their reason.
+
+If you would rather the runner held a copy permanently, put a file in its
+`/runner/inventory` directory yourself; anything there merges with the
+rest automatically.
 
 ## Reporting
 
-A finished run can be saved as a report: what ran, against what, which
-hosts changed, which failed and why. It is the same shape as the session
-reports, so it can go into a change record or a ticket.
+A finished run can be copied as a report: what ran, against what, which
+hosts changed, which failed and why, ready to paste into a change record or
+a ticket. The panel also keeps a short list of the runs you started from
+this machine — that is ShellMate's own note, so a run somebody started
+elsewhere will not be in it. **Jobs** asks the runner itself, which knows
+about every run including those from before it was last restarted.
 
 ## What can go wrong
 
@@ -168,6 +187,9 @@ development certificate, turn Verify TLS off; with a real one, check the CA.
 in its project directory — likely one of yours that has not been sent
 across yet.
 
-**Hosts refused by the limit.** The service checks a host list against its
-own inventory before it starts, so a run limited to hosts it has never
-heard of is refused. Push the inventory first.
+**"The runner is there but will not accept ShellMate."** The token is
+missing or wrong. It is the value from the runner's `.env`, and it goes
+under Settings → Ansible.
+
+**A run against the estate says nothing would run.** Every connection in
+that group is serial, or has no address. Ansible has nothing to dial.

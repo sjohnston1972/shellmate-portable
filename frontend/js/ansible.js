@@ -369,7 +369,7 @@
   /** ShellMate's own estate, shaped as an inventory. Sends nothing anywhere. */
   async function _loadEstate() {
     try {
-      estate = await (await fetch('/api/ansible/inventory?source=estate')).json();
+      estate = await (await fetch('/api/ansible/inventory')).json();
     } catch (_) {
       estate = { groups: {}, hosts: [], hostvars: {}, skipped: [] };
     }
@@ -462,58 +462,52 @@
   }
 
   /** The groups the container already holds. */
+  /**
+   * What the runner would use if ShellMate sends no inventory (#585).
+   *
+   * The service has no endpoint listing groups or hosts — its inventory is
+   * a directory it holds, with group_vars and host_vars beside it that
+   * merge automatically. So there is nothing to enumerate: the choice is
+   * its own default, or a path somebody names.
+   */
   async function _loadRunnerInventory() {
     const radio = document.querySelector('input[name="ansible-target"][value="runner"]');
     if (radio) radio.disabled = false;
     const select = document.getElementById('ansible-runner-group');
+    if (!select) return;
     select.innerHTML = '';
-    try {
-      const data = await (await fetch('/api/ansible/inventory?source=runner')).json();
-      (data.groups || []).forEach(name => {
-        const option = document.createElement('option');
-        option.value = name;
-        option.textContent = name;
-        select.appendChild(option);
-      });
-      if (!(data.groups || []).length) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'The runner holds no groups';
-        select.appendChild(option);
-      }
-    } catch (_) {
-      const option = document.createElement('option');
-      option.value = '';
-      option.textContent = 'Could not ask the runner';
-      select.appendChild(option);
-    }
+    const own = document.createElement('option');
+    own.value = '';
+    own.textContent = "the runner's own inventory";
+    select.appendChild(own);
   }
 
+  /**
+   * Show what a run against the estate would be pointed at (#585).
+   *
+   * Nothing is sent by looking, and nothing is pushed at all any more: the
+   * inventory travels with the run itself, so the runner keeps none of
+   * ShellMate's state. This is the last chance to see which hosts are in
+   * it — and which were left out, and why — before anything starts.
+   */
   async function pushInventory() {
     const group = document.getElementById('ansible-group-select').value;
     const button = document.getElementById('ansible-push-inventory');
-    button.disabled = true;
+    if (button) button.disabled = true;
     try {
-      const res = await fetch('/api/ansible/inventory/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group }),
+      const data = await _json('/api/ansible/inventory'
+        + (group ? `?group=${encodeURIComponent(group)}` : ''));
+      const left = (data.skipped || []).map(x => `${x.name} — ${x.why}`).join('\n');
+      await window.shellmateDialog.alert({
+        title: `${(data.hosts || []).length} host(s) in this inventory`,
+        body: (left ? `Left out:\n${left}\n\n` : '')
+              + 'This travels with the run. The runner keeps none of it.',
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || `the runner answered ${res.status}`);
-      // Half an inventory pushed with no report of what failed is worse than
-      // a slow answer naming the three hosts that did not go, which is why
-      // the backend collects failures rather than raising on the first.
-      const failed = (data.failed || []).length;
-      _notify(failed ? 'warning' : 'info',
-              failed ? 'Some hosts did not go' : 'Inventory pushed',
-              `${data.added} host-to-group entries added.`
-              + (failed ? ` ${failed} failed: ${data.failed[0].target} — ${data.failed[0].why}` : ''));
-      await _loadRunnerInventory();
     } catch (e) {
-      _notify('warning', 'Could not push the inventory', String(e.message || e));
+      await window.shellmateDialog.alert({ title: 'Could not build the inventory',
+                                           body: String(e.message || e) });
     } finally {
-      button.disabled = false;
+      if (button) button.disabled = false;
     }
   }
 
@@ -605,8 +599,16 @@
       const res = await fetch('/api/ansible/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playbook: running.name, extra_vars: extraVars,
-                               limit, tags, check }),
+        body: JSON.stringify({
+          playbook: running.name, extra_vars: extraVars, limit, tags, check,
+          // Where the hosts come from (#585): an estate inventory is built
+          // here and travels with the run; the runner's own is a path.
+          inventory_source: _targetMode() === 'runner' ? 'runner' : 'estate',
+          group: _targetMode() === 'group'
+            ? ((document.getElementById('ansible-group-select') || {}).value || '') : '',
+          inventory_path: _targetMode() === 'runner'
+            ? ((document.getElementById('ansible-runner-group') || {}).value || '') : '',
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -617,7 +619,7 @@
         throw new Error(data.detail || `the server answered ${res.status}`);
       }
       closeRunDialog();
-      watch({ uuid: data.play_uuid, playbook: running.name,
+      watch({ uuid: data.id, playbook: running.name,
               target: _targetDescription(limit), check });
     } catch (e) {
       error.textContent = String(e.message || e);
@@ -690,7 +692,7 @@
       if (!live || live.uuid !== uuid) return;
       (fresh.events || []).forEach(appendEvent);
       if (fresh.events && fresh.events.length) {
-        live.since = fresh.events[fresh.events.length - 1].event_id;
+        live.since = fresh.last || fresh.events[fresh.events.length - 1].counter;
       }
 
       if (state.finished) {

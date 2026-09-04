@@ -1,11 +1,11 @@
 """
-test_ansible.py — Driving ansible-runner-service (#585).
+test_ansible.py — Driving the Ansible runner (#585).
 
-The service is not here, so it is played by a mock transport that answers
-in the shapes its own source produces: the `{"status", "msg", "data"}`
-envelope, `play_uuid` on a start, events keyed by a counter-prefixed id.
-What is tested is that ShellMate reads those shapes correctly and says
-something useful when the answer is a refusal.
+The container is not here, so it is played by a mock transport answering
+in the shapes its own source produces: FastAPI's `{"detail": ...}` for a
+refusal, `{id, playbook, status, inventory}` on a launch, and
+ansible-runner's own numbered events. What is tested is that ShellMate
+reads those correctly and says something useful when the answer is no.
 
 Run: python test_ansible.py
 """
@@ -45,14 +45,22 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 # ---------------------------------------------------------------------------
 # A stand-in for the service, answering the way its source does
 # ---------------------------------------------------------------------------
-EVENTS = {
-    "1-abc": {"event": "playbook_on_start", "task": ""},
-    "2-def": {"event": "playbook_on_task_start", "task": "Gather facts"},
-    "3-ghi": {"event": "runner_on_ok", "task": "Gather facts"},
-    "4-jkl": {"event": "playbook_on_task_start", "task": "Push config"},
-    "5-mno": {"event": "runner_on_changed", "task": "Push config"},
-    "6-pqr": {"event": "runner_on_failed", "task": "Push config"},
-}
+EVENTS = [
+    {"counter": 1, "uuid": "a", "event": "playbook_on_start", "event_data": {}},
+    {"counter": 2, "uuid": "b", "event": "playbook_on_task_start",
+     "event_data": {"task": "Gather facts", "play": "all"}},
+    {"counter": 3, "uuid": "c", "event": "runner_on_ok",
+     "event_data": {"task": "Gather facts", "host": "10.1.0.1", "res": {"changed": False}}},
+    {"counter": 4, "uuid": "d", "event": "playbook_on_task_start",
+     "event_data": {"task": "Push config", "play": "all"}},
+    {"counter": 5, "uuid": "e", "event": "runner_on_ok",
+     "event_data": {"task": "Push config", "host": "10.1.0.1", "res": {"changed": True}}},
+    {"counter": 6, "uuid": "f", "event": "runner_on_failed",
+     "event_data": {"task": "Push config", "host": "10.1.0.2"}, "stdout": "auth failed"},
+]
+
+#: What the launch body carried, so a test can assert on what was sent.
+SENT: dict = {}
 
 
 def service(handler=None):
@@ -63,34 +71,44 @@ def service(handler=None):
             answer = handler(request)
             if answer is not None:
                 return answer
+        if path == "/health":
+            return httpx.Response(200, json={"status": "ok", "ansible_core": "2.21.3",
+                                             "ansible_runner": "2.4.3"})
         if path == "/api/v1/playbooks" and request.method == "GET":
-            return httpx.Response(200, json={"status": "OK", "msg": "", "data": {
-                "playbooks": ["site.yml", "backup.yml"]}})
-        if path.startswith("/api/v1/playbooks/") and request.method == "POST":
-            return httpx.Response(202, json={"status": "STARTED", "msg": "starting",
-                                             "data": {"play_uuid": "run-1"}})
+            return httpx.Response(200, json={"playbooks": [
+                {"name": "site.yml", "size": 120, "modified": "2026-09-04T10:00:00+00:00"},
+                {"name": "net/backup.yml", "size": 80, "modified": "2026-09-03T10:00:00+00:00"}]})
         if path.startswith("/api/v1/playbooks/") and request.method == "GET":
-            return httpx.Response(200, json={"status": "OK", "msg": "",
-                                             "data": {"status": "running"}})
-        if path.startswith("/api/v1/playbooks/") and request.method == "DELETE":
-            return httpx.Response(200, json={"status": "OK", "msg": "Cancel request issued",
-                                             "data": {}})
+            return httpx.Response(200, text="- hosts: all\n  tasks: []\n")
+        if path.startswith("/api/v1/playbooks/") and request.method == "POST":
+            import json as _json
+            SENT.clear()
+            SENT.update(_json.loads(request.content or b"{}"))
+            return httpx.Response(202, json={
+                "id": "abc123", "playbook": path.split("/playbooks/", 1)[1],
+                "status": "starting", "inventory": "/runner/artifacts/abc123/inventory",
+                "stdout_url": "/api/v1/jobs/abc123/stdout",
+                "job_url": "/api/v1/jobs/abc123"})
+        if path == "/api/v1/jobs" and request.method == "GET":
+            return httpx.Response(200, json={"jobs": [
+                {"id": "abc123", "status": "running", "rc": None, "playbook": "site.yml",
+                 "started": "2026-09-04T10:00:00+00:00", "source": "memory"},
+                {"id": "old999", "status": "successful", "rc": 0, "playbook": "ping.yml",
+                 "started": "2026-09-03T09:00:00+00:00", "source": "artifacts"}]})
         if path.endswith("/events"):
-            return httpx.Response(200, json={"status": "OK", "msg": "", "data": {
-                "events": EVENTS, "total_events": len(EVENTS)}})
-        if "/events/" in path:
-            return httpx.Response(200, json={"status": "OK", "msg": "", "data": {
-                "task": "Push config", "stdout": "config applied"}})
-        if path == "/api/v1/groups":
-            return httpx.Response(200, json={"status": "OK", "msg": "",
-                                             "data": {"groups": ["core", "edge"]}})
-        if path == "/api/v1/hosts":
-            return httpx.Response(200, json={"status": "OK", "msg": "",
-                                             "data": {"hosts": ["10.0.0.1"]}})
-        if path.startswith("/api/v1/hosts/") or path.startswith("/api/v1/groups/"):
-            return httpx.Response(200, json={"status": "OK", "msg": "", "data": {}})
-        return httpx.Response(404, json={"status": "NOTFOUND", "msg": "no such thing",
-                                         "data": {}})
+            return httpx.Response(200, json={"events": EVENTS})
+        if path.endswith("/stdout"):
+            return httpx.Response(200, text="PLAY [all] ***\nok: [10.1.0.1]\n")
+        if path.startswith("/api/v1/jobs/") and request.method == "GET":
+            return httpx.Response(200, json={"id": "abc123", "status": "running",
+                                             "rc": None, "playbook": "site.yml",
+                                             "started": "2026-09-04T10:00:00+00:00",
+                                             "source": "memory", "cancelled": False})
+        if path.startswith("/api/v1/jobs/") and request.method == "DELETE":
+            return httpx.Response(200, json={"id": "abc123", "cancelled": True})
+        if path == "/api/v1/galaxy/install":
+            return httpx.Response(200, json={"rc": 0, "stdout": "installed"})
+        return httpx.Response(404, json={"detail": "not found"})
     return httpx.MockTransport(route)
 
 
@@ -98,22 +116,17 @@ class Patched(httpx.Client):
     transport = None
 
     def __init__(self, *a, **kw):
-        kw.pop("cert", None)                 # no certificate to present here
-        kw["transport"] = Patched.transport
+        kw.pop("cert", None)
         kw.pop("verify", None)
+        kw["transport"] = Patched.transport
         super().__init__(*a, **kw)
 
 
-def with_runner(fn, handler=None):
+def with_runner(fn, handler=None, token: str = ""):
     """Run `fn` with a configured runner and the service standing in."""
     from backend.settings_store import update_settings
-    cert = _TEMP / "client.crt"
-    key = _TEMP / "client.key"
-    cert.write_text("x", encoding="utf-8")
-    key.write_text("x", encoding="utf-8")
-    update_settings({"ansible": {"runner_url": "https://runner.test:5001",
-                                 "client_cert": str(cert), "client_key": str(key),
-                                 "verify_tls": False}})
+    update_settings({"ansible": {"runner_url": "http://runner.test:8081",
+                                 "token": token, "client_cert": "", "client_key": ""}})
     real, Patched.transport = httpx.Client, service(handler)
     httpx.Client = Patched
     try:
@@ -144,52 +157,111 @@ def test_not_configured() -> None:
     check("a certificate that is not there is named",
           any("no such file" in m for m in ansible.config().missing()),
           str(ansible.config().missing()))
+    us({"ansible": {"client_cert": "/nope/a.crt", "client_key": ""}})
+    check("half a certificate pair is refused",
+          any("both halves" in m for m in ansible.config().missing()),
+          str(ansible.config().missing()))
 
 
 def test_playbooks_and_runs() -> None:
     print("\n-- Playbooks and runs --")
-    names = with_runner(ansible.list_playbooks)
-    check("the runner's playbooks are listed", names == ["backup.yml", "site.yml"], str(names))
+    books = with_runner(ansible.list_playbooks)
+    check("the runner's playbooks are listed with their size",
+          [b["name"] for b in books] == ["net/backup.yml", "site.yml"], str(books))
+    check("  a playbook in a subdirectory keeps its path",
+          books[0]["name"] == "net/backup.yml" and books[0]["bytes"] == 80, str(books[0]))
+    check("one can be read, read-only",
+          "hosts: all" in with_runner(lambda: ansible.read_remote_playbook("site.yml")))
 
-    started = with_runner(lambda: ansible.start("site.yml", limit=["10.0.0.1"], check=True))
-    check("a run starts and is named", started["play_uuid"] == "run-1", str(started))
+    started = with_runner(lambda: ansible.start(
+        "site.yml", limit=["10.1.0.1"], check=True, tags="config",
+        inventory_content="[all]\n10.1.0.1\n"))
+    check("a run starts and is named", started["id"] == "abc123", str(started))
+    check("  and says which inventory it used",
+          "abc123/inventory" in started["inventory"], str(started))
+    check("check mode is sent as the body field the service takes",
+          SENT.get("check") is True and "limit" in SENT and SENT["tags"] == "config", str(SENT))
+    check("an inventory generated here is sent as content, never as a name",
+          SENT.get("inventory_content", "").startswith("[all]") and "inventory" not in SENT,
+          str(sorted(SENT)))
 
     check("a path in a playbook name is refused",
           _raises(lambda: ansible.start("../etc/passwd"), ansible.AnsibleError))
+    check("an absolute playbook name is refused",
+          _raises(lambda: ansible.start("/etc/passwd"), ansible.AnsibleError))
+    check("both kinds of inventory at once is refused here, not at the runner",
+          _raises(lambda: ansible.start("site.yml", inventory="a", inventory_content="b"),
+                  ansible.AnsibleError))
 
-    state = with_runner(lambda: ansible.status("run-1"))
+    state = with_runner(lambda: ansible.status("abc123"))
     check("a running job says it is running",
           state["running"] and not state["finished"], str(state))
 
-    got = with_runner(lambda: ansible.events("run-1"))
+    history = with_runner(ansible.jobs)
+    check("past runs are listed too, not only live ones",
+          len(history) == 2 and any(j["source"] == "artifacts" for j in history), str(history))
+
+    got = with_runner(lambda: ansible.events("abc123"))
     check("events come back in counter order",
           [e["counter"] for e in got["events"]] == [1, 2, 3, 4, 5, 6],
           str([e["counter"] for e in got["events"]]))
-    later = with_runner(lambda: ansible.events("run-1", since="3-ghi"))
-    check("  and `since` returns only what came after",
+    check("  and the last counter comes back for the next poll",
+          got["last"] == 6, str(got["last"]))
+    later = with_runner(lambda: ansible.events("abc123", since=3))
+    check("`since` returns only what came after",
           [e["counter"] for e in later["events"]] == [4, 5, 6],
           str([e["counter"] for e in later["events"]]))
+    check("a task's host and name are lifted out of event_data",
+          later["events"][1]["host"] == "10.1.0.1"
+          and later["events"][1]["task"] == "Push config", str(later["events"][1]))
 
     counts = ansible.summarise(got["events"])
     check("the summary counts what the play did",
           counts["tasks"] == 2 and counts["ok"] == 1
           and counts["changed"] == 1 and counts["failed"] == 1, str(counts))
+    check("  a changed result is not counted as ok as well",
+          counts["ok"] + counts["changed"] == 2, str(counts))
 
-    one = with_runner(lambda: ansible.event("run-1", "6-pqr"))
-    check("one task's own output can be read", one.get("stdout") == "config applied", str(one))
+    check("the whole run can be read as text",
+          "PLAY [all]" in with_runner(lambda: ansible.stdout("abc123")))
 
-    stopped = with_runner(lambda: ansible.cancel("run-1"))
+    stopped = with_runner(lambda: ansible.cancel("abc123"))
     check("a run can be stopped", stopped["cancelled"], str(stopped))
 
     def gone(request):
         if request.method == "DELETE":
-            return httpx.Response(404, json={"status": "NOT ACTIVE",
-                                             "msg": "playbook with uuid run-1 is not active",
-                                             "data": {}})
+            return httpx.Response(404, json={
+                "detail": "job 'abc123' is not running in this process"})
         return None
-    late = with_runner(lambda: ansible.cancel("run-1"), handler=gone)
-    check("stopping a finished run is not an error",
-          late["cancelled"] is False and "already finished" in late["detail"], str(late))
+    late = with_runner(lambda: ansible.cancel("abc123"), handler=gone)
+    check("stopping a run it can no longer stop is not an error",
+          late["cancelled"] is False and "no longer" in late["detail"], str(late))
+
+    check("galaxy requirements can be installed",
+          with_runner(ansible.install_requirements).get("rc") == 0)
+
+
+def test_the_token_travels_when_there_is_one() -> None:
+    print("\n-- Auth, when the deployment has any --")
+    seen = {}
+
+    def note(request):
+        seen["auth"] = request.headers.get("authorization", "")
+        return None
+    with_runner(ansible.list_playbooks, handler=note)
+    check("no token, no header", not seen.get("auth"), str(seen))
+    with_runner(ansible.list_playbooks, handler=note, token="s3cret")
+    check("a configured token is sent as a bearer",
+          seen.get("auth") == "Bearer s3cret", str(seen))
+
+    def refused(request):
+        return httpx.Response(401, json={"detail": "Not authenticated"})
+    try:
+        with_runner(ansible.list_playbooks, handler=refused, token="wrong")
+        check("a refusal points at the setting", False, "no exception")
+    except ansible.AnsibleError as exc:
+        check("a refusal points at the setting",
+              "token" in str(exc) and "Settings" in str(exc), str(exc))
 
 
 def test_the_runners_words_reach_the_user() -> None:
@@ -197,16 +269,26 @@ def test_the_runners_words_reach_the_user() -> None:
 
     def missing(request):
         if request.method == "POST":
-            return httpx.Response(404, json={"status": "NOTFOUND",
-                                             "msg": "playbook file not found", "data": {}})
+            return httpx.Response(404, json={
+                "detail": "playbook 'nope.yml' not found under /runner/project"})
         return None
     try:
         with_runner(lambda: ansible.start("nope.yml"), handler=missing)
         check("its own message is what is raised", False, "no exception")
     except ansible.AnsibleError as exc:
-        check("its own message is what is raised", "playbook file not found" in str(exc), str(exc))
-        check("  with the status it gave", exc.status == "NOTFOUND" and exc.code == 404,
-              f"{exc.status} {exc.code}")
+        check("its own message is what is raised",
+              "not found under /runner/project" in str(exc), str(exc))
+        check("  with the code it gave", exc.code == 404, str(exc.code))
+
+    def invalid(request):
+        return httpx.Response(422, json={"detail": [
+            {"loc": ["body", "forks"], "msg": "Input should be a valid integer"}]})
+    try:
+        with_runner(lambda: ansible.start("site.yml"), handler=invalid)
+        check("a validation refusal names the field", False, "no exception")
+    except ansible.AnsibleError as exc:
+        check("a validation refusal names the field",
+              "forks" in str(exc) and "integer" in str(exc), str(exc))
 
     def refuse(request):
         raise httpx.ConnectError("no route to host")
@@ -215,7 +297,7 @@ def test_the_runners_words_reach_the_user() -> None:
         check("an unreachable runner says where it looked", False, "no exception")
     except ansible.AnsibleError as exc:
         check("an unreachable runner says where it looked",
-              "runner.test:5001" in str(exc), str(exc))
+              "runner.test:8081" in str(exc), str(exc))
 
 
 def test_inventory_from_the_estate() -> None:
@@ -254,8 +336,13 @@ def test_inventory_from_the_estate() -> None:
     check("one group can be asked for on its own",
           one["hosts"] == ["10.1.0.2"], str(one["hosts"]))
 
-    pushed = with_runner(lambda: ansible.push_inventory(inv))
-    check("pushing reports what went", pushed["added"] >= 2 and not pushed["failed"], str(pushed))
+    text = ansible.inventory_as_ini(inv)
+    check("it renders as INI, with the group as a section",
+          "[site_004_core_switches]" in text, text[:200])
+    check("  the host line carries its variables",
+          "ansible_network_os=cisco.ios.ios" in text, text[:300])
+    check("  and says it was sent with this run alone",
+          "Generated by ShellMate" in text and "untouched" in text, text[:120])
 
 
 def test_the_library() -> None:
@@ -296,6 +383,7 @@ def main() -> int:
     print("  Ansible")
     print("=" * 52)
     for test in (test_not_configured, test_playbooks_and_runs,
+                 test_the_token_travels_when_there_is_one,
                  test_the_runners_words_reach_the_user,
                  test_inventory_from_the_estate, test_the_library):
         try:

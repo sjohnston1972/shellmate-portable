@@ -1,75 +1,73 @@
 """
-ansible.py — Driving Ansible from ShellMate, through ansible-runner-service (#585).
+ansible.py — Driving Ansible from ShellMate, through a runner service (#585).
 
-ShellMate does not run Ansible. It talks to an **ansible-runner-service**
-container over its REST API and shows what is happening: which playbooks
-exist, what a run is doing task by task, what it changed, and what it said
-when it failed. The container does the work; this is the window onto it.
+ShellMate does not run Ansible. It talks to a container that does and shows
+what is happening: which playbooks exist, what a run is doing task by task,
+what it changed, and what it said when it failed. The container does the
+work; this is the window onto it.
 
-What the service actually offers, read from its source rather than assumed:
+The service is a small FastAPI wrapper over the ``ansible_runner`` library
+(github.com/sjohnston1972/ansible). ShellMate first targeted Red Hat's
+`ansible-runner-service`, which turned out to be archived since 2022 and
+pinned to Flask 1.x — so the container was built fresh on a current base
+and this module was rewritten to match it. What it offers:
 
-    GET    /api/v1/playbooks                    the names it holds
-    POST   /api/v1/playbooks/<name>             start one; JSON body is the
-                                                extra vars, ?limit=a,b and
-                                                ?check are the only filters
-    POST   /api/v1/playbooks/<name>/tags/<tags> start one, tags only
-    GET    /api/v1/playbooks/<play_uuid>        what that run is doing
-    DELETE /api/v1/playbooks/<play_uuid>        ask it to stop
-    GET    /api/v1/jobs/<play_uuid>/events      every event so far
-    GET    /api/v1/jobs/<play_uuid>/events/<id> one task's output
-    GET    /api/v1/groups, /api/v1/hosts        the inventory it holds
-    POST   /api/v1/hosts/<host>/groups/<group>  put a host in a group
+    GET    /health                        versions and where its data lives
+    GET    /api/v1/playbooks              what is in the project directory
+    GET    /api/v1/playbooks/<name>       that playbook's text
+    POST   /api/v1/playbooks/<name>       run it; typed JSON body
+    GET    /api/v1/jobs                   every run it knows of
+    GET    /api/v1/jobs/<id>              one run's state
+    GET    /api/v1/jobs/<id>/events       ansible-runner's own events
+    GET    /api/v1/jobs/<id>/stdout       the run as it would look in a shell
+    DELETE /api/v1/jobs/<id>              cancel a run this process started
+    POST   /api/v1/galaxy/install         install requirements.yml
 
-Every reply is the same envelope — ``{"status", "msg", "data"}`` — with the
-status mapped onto the HTTP code, so ``OK`` is 200 and ``STARTED`` is 202.
-:func:`_unwrap` is the one place that knows this.
+Three things about it shape everything here:
 
-Three consequences of the service's design that shape everything here:
-
-- **It authenticates with client certificates, not a token.** Mutual TLS is
-  the only mechanism it has. So the settings are a certificate and a key,
-  and :func:`configured` is false until both exist on disk.
+- **The inventory travels with the run.** The service takes
+  ``inventory_content`` inline and writes it to a per-job file, so
+  ShellMate generates an inventory from its own connections and groups and
+  sends it with the job. Nothing of ShellMate's accumulates on the
+  container, and there is no second inventory to keep in step. A path may
+  be given instead, for an inventory the container already holds.
 - **There is no endpoint that uploads a playbook.** Playbooks live in the
-  container's project directory and the API only lists and runs them. A
-  library edited in ShellMate therefore has to *reach* the container some
-  other way, and ShellMate already knows how to copy a file to a host it
-  has an SSH session with. :func:`playbook_transfer_plan` says exactly
-  that, rather than pretending an upload API exists.
-- **Its inventory is its own.** "Use ShellMate's estate" means pushing
-  hosts and groups into the service's inventory through the endpoints
-  above — :func:`inventory_from_estate` shapes them, and nothing is sent
-  until somebody asks for it.
+  project directory, which is a bind mount from the container's host — so
+  a library written here reaches it by being copied to that host over an
+  SSH session ShellMate already has. :func:`playbook_transfer_plan` says
+  so rather than pretending an upload exists.
+- **Authentication is the deployment's choice.** The service may run with
+  no auth on a private bridge, or behind a bearer token. ShellMate sends
+  the token when one is configured and works without one, so neither
+  choice needs a change here.
 """
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from backend import jsonfile, paths
+from backend import paths
 
 logger = logging.getLogger(__name__)
 
-#: Where a library of playbooks written in ShellMate is kept. The service
-#: cannot be sent one over its API, so these are authored here and copied
-#: across — see :func:`playbook_transfer_plan`.
+
 def library_dir() -> Path:
+    """Playbooks written in ShellMate. Copied to the runner, never uploaded."""
     return paths.data_dir() / "playbooks"
 
 
-#: What a run is called at each stage, in the service's own words. Anything
-#: outside this set is passed through rather than guessed at.
-RUNNING_STATES = ("starting", "started", "running")
-FINISHED_STATES = ("successful", "failed", "canceled", "cancelled", "timeout")
+#: ansible-runner's own vocabulary for where a run has got to.
+RUNNING_STATES = ("starting", "running")
+FINISHED_STATES = ("successful", "failed", "timeout", "canceled", "cancelled", "unknown")
 
 
 class AnsibleError(RuntimeError):
-    """The service refused, or could not be reached. Carries its own words."""
+    """The runner refused, or could not be reached. Carries its own words."""
 
-    def __init__(self, message: str, status: str = "", code: int = 0):
+    def __init__(self, message: str, code: int = 0):
         super().__init__(message)
-        self.status = status
         self.code = code
 
 
@@ -79,34 +77,32 @@ class NotConfigured(AnsibleError):
 
 @dataclass
 class RunnerConfig:
-    """Where the runner is and how to prove who we are."""
+    """Where the runner is, and how to prove who we are if it asks."""
 
     url: str = ""
-    #: Client certificate and its key: mutual TLS is the service's only
-    #: authentication. Paths, not contents — the private key stays a file
-    #: with its own permissions rather than a string in settings.json.
+    #: Sent as ``Authorization: Bearer`` when set. A service on a private
+    #: bridge may have no auth at all; one reachable from a management
+    #: network should, and ShellMate is ready for either.
+    token: str = ""
+    #: Client certificate and key, for a deployment that puts mutual TLS in
+    #: front. Optional; both are needed or neither is used.
     client_cert: str = ""
     client_key: str = ""
-    #: A CA bundle to verify the service's own certificate with. Empty and
-    #: `verify_tls` false means a self-signed development certificate is
-    #: accepted, which is what the service ships with.
     ca_cert: str = ""
     verify_tls: bool = True
     timeout: float = 30.0
 
     @property
     def ready(self) -> bool:
-        return bool(self.url and self.client_cert and self.client_key)
+        return bool(self.url)
 
     def missing(self) -> list[str]:
         """What is still needed, in words fit for the panel."""
         gaps = []
         if not self.url:
             gaps.append("the runner's address")
-        if not self.client_cert:
-            gaps.append("a client certificate")
-        if not self.client_key:
-            gaps.append("the certificate's key")
+        if bool(self.client_cert) != bool(self.client_key):
+            gaps.append("both halves of the client certificate, or neither")
         for label, value in (("client certificate", self.client_cert),
                              ("certificate key", self.client_key),
                              ("CA certificate", self.ca_cert)):
@@ -122,8 +118,23 @@ def config() -> RunnerConfig:
         block = peek("ansible") or {}
     except Exception:                                     # pragma: no cover
         block = {}
+    # A token is a secret, so it lives in the vault rather than in
+    # settings.json; the block's own field is only ever the one just typed,
+    # on its way there. The environment is the last resort, for a container
+    # and an app started by the same script.
+    token = str(block.get("token") or "")
+    if not token:
+        try:
+            from backend.vault import vault
+            token = vault.get("ansible_token", "") or ""
+        except Exception:                                 # pragma: no cover
+            token = ""
+    if not token:
+        import os as _os
+        token = _os.environ.get("ANSIBLE_RUNNER_TOKEN", "") or ""
     return RunnerConfig(
         url=str(block.get("runner_url") or "").rstrip("/"),
+        token=token,
         client_cert=str(block.get("client_cert") or ""),
         client_key=str(block.get("client_key") or ""),
         ca_cert=str(block.get("ca_cert") or ""),
@@ -140,38 +151,45 @@ def configured() -> bool:
 # Talking to it
 # ---------------------------------------------------------------------------
 def _client(cfg: RunnerConfig):
-    """An httpx client carrying the certificate the service demands."""
     import httpx
 
-    verify: Any = cfg.ca_cert if cfg.ca_cert else cfg.verify_tls
-    return httpx.Client(timeout=cfg.timeout, verify=verify,
-                        cert=(cfg.client_cert, cfg.client_key),
-                        headers={"User-Agent": "ShellMate-ansible"})
+    headers = {"User-Agent": "ShellMate-ansible"}
+    if cfg.token:
+        headers["Authorization"] = f"Bearer {cfg.token}"
+    kwargs: dict[str, Any] = {"timeout": cfg.timeout, "headers": headers}
+    if cfg.url.startswith("https://"):
+        kwargs["verify"] = cfg.ca_cert if cfg.ca_cert else cfg.verify_tls
+        if cfg.client_cert and cfg.client_key:
+            kwargs["cert"] = (cfg.client_cert, cfg.client_key)
+    return httpx.Client(**kwargs)
 
 
-def _unwrap(response, expect: tuple[int, ...] = (200, 202)) -> Any:
+def _detail(response) -> str:
     """
-    The service's envelope, or an error carrying what it said.
+    The service's own message for a refusal.
 
-    Every reply is ``{"status", "msg", "data"}``. A failure is far more
-    useful with the service's own message in it — "playbook file not found"
-    beats "the runner answered 404" — so that is what reaches the user.
+    FastAPI puts it in ``detail``; that is the sentence worth showing —
+    "playbook 'site.yml' not found under /runner/project" tells somebody
+    what to do, where "the runner answered 404" does not.
     """
     try:
         body = response.json()
     except ValueError:
-        body = {}
-    status = str(body.get("status") or "")
-    message = str(body.get("msg") or "").strip()
-    if response.status_code not in expect:
-        raise AnsibleError(
-            message or f"The runner answered {response.status_code}.",
-            status=status, code=response.status_code)
-    return body.get("data", {})
+        return ""
+    if isinstance(body, dict):
+        detail = body.get("detail")
+        if isinstance(detail, list) and detail:           # pydantic validation
+            first = detail[0]
+            if isinstance(first, dict):
+                where = ".".join(str(p) for p in (first.get("loc") or [])[1:])
+                return f"{where}: {first.get('msg', '')}".strip(": ")
+        if detail:
+            return str(detail)
+    return ""
 
 
-def _call(method: str, path: str, *, params: dict | None = None,
-          json_body: Any = None, expect: tuple[int, ...] = (200, 202)) -> Any:
+def _call(method: str, path: str, *, json_body: Any = None,
+          params: dict | None = None, text: bool = False) -> Any:
     cfg = config()
     if not cfg.ready:
         raise NotConfigured("No Ansible runner is set up yet. "
@@ -181,132 +199,209 @@ def _call(method: str, path: str, *, params: dict | None = None,
     try:
         with _client(cfg) as client:
             response = client.request(method, f"{cfg.url}{path}",
-                                      params=params or None, json=json_body)
+                                      json=json_body, params=params or None)
     except httpx.HTTPError as exc:
         raise AnsibleError(
             f"Could not reach the runner at {cfg.url} "
             f"({exc.__class__.__name__}).") from exc
-    return _unwrap(response, expect)
+    if response.status_code >= 400:
+        message = _detail(response) or f"The runner answered {response.status_code}."
+        if response.status_code in (401, 403):
+            message = (f"The runner refused ShellMate ({response.status_code}). "
+                       "Check the token under Settings → Ansible.")
+        raise AnsibleError(message, code=response.status_code)
+    if text:
+        return response.text
+    try:
+        return response.json()
+    except ValueError:
+        return {}
 
 
 # ---------------------------------------------------------------------------
-# Playbooks and runs
+# The runner, its playbooks and its runs
 # ---------------------------------------------------------------------------
 def ping() -> dict:
-    """Whether the runner answers, and what it holds. Never raises."""
+    """Whether the runner answers, and what it is. Never raises."""
     cfg = config()
     if not cfg.ready:
-        return {"reachable": False, "configured": False, "detail": ", ".join(cfg.missing())}
+        return {"reachable": False, "configured": False,
+                "detail": ", ".join(cfg.missing())}
+    gaps = cfg.missing()
+    if gaps:
+        return {"reachable": False, "configured": True, "detail": ", ".join(gaps)}
+    # /health needs no token by design, so it separates two failures that
+    # look alike from the outside: a runner that cannot be reached, and one
+    # that can be reached but will not talk to us.
     try:
-        names = list_playbooks()
+        health = _call("GET", "/health") or {}
     except AnsibleError as exc:
         return {"reachable": False, "configured": True, "detail": str(exc)}
-    return {"reachable": True, "configured": True, "playbooks": len(names),
-            "detail": f"{len(names)} playbook(s) available"}
+    try:
+        books = list_playbooks()
+    except AnsibleError as exc:
+        if exc.code in (401, 403):
+            return {"reachable": True, "configured": True, "authenticated": False,
+                    "ansible_core": health.get("ansible_core", ""),
+                    "detail": ("The runner is there but will not accept ShellMate: "
+                               "check the token under Settings → Ansible.")}
+        return {"reachable": False, "configured": True, "detail": str(exc)}
+    core = health.get("ansible_core", "")
+    return {
+        "reachable": True, "configured": True,
+        "playbooks": len(books),
+        "ansible_core": core,
+        "ansible_runner": health.get("ansible_runner", ""),
+        "authenticated": bool(cfg.token),
+        "detail": (f"{len(books)} playbook(s), ansible-core {core}" if core
+                   else f"{len(books)} playbook(s)"),
+    }
 
 
-def list_playbooks() -> list[str]:
-    """The playbooks the runner holds, by name."""
-    data = _call("GET", "/api/v1/playbooks")
-    names = data.get("playbooks") if isinstance(data, dict) else data
-    return sorted(str(n) for n in (names or []))
+def list_playbooks() -> list[dict]:
+    """What is in the runner's project directory: name, size, when changed."""
+    data = _call("GET", "/api/v1/playbooks") or {}
+    out = []
+    for entry in data.get("playbooks") or []:
+        if isinstance(entry, dict):
+            out.append({"name": str(entry.get("name") or ""),
+                        "bytes": int(entry.get("size") or 0),
+                        "modified": entry.get("modified") or ""})
+        else:                                             # a bare name
+            out.append({"name": str(entry), "bytes": 0, "modified": ""})
+    return sorted(out, key=lambda p: p["name"])
+
+
+def read_remote_playbook(name: str) -> str:
+    """A playbook on the runner, as text. Read-only: it is theirs, not ours."""
+    return _call("GET", f"/api/v1/playbooks/{name}", text=True) or ""
 
 
 def start(playbook: str, *, extra_vars: dict | None = None,
-          limit: list[str] | str = "", check: bool = False,
-          tags: str = "") -> dict:
+          limit: list[str] | str = "", check: bool = False, tags: str = "",
+          skip_tags: str = "", inventory: str = "", inventory_content: str = "",
+          verbosity: int = 0, forks: int | None = None) -> dict:
     """
-    Start a run. Returns ``{"play_uuid", "status"}``.
+    Start a run. Returns ``{"id", "playbook", "status", "inventory"}``.
 
-    ``limit`` is the service's only host filter and it validates the names
-    against its own inventory, so a limit naming a host the runner has
-    never heard of is refused there rather than here — with its message.
-    ``check`` is Ansible's dry run, which is the safe way to see what a
-    playbook would do to an estate before it does it.
+    ``inventory_content`` is how ShellMate's own estate reaches a run: the
+    service writes it to a file for that job alone and never touches the
+    inventory it holds. Only one of the two inventory arguments may be
+    given, which the service enforces and so does this.
+
+    ``check`` is Ansible's dry run. It reports what a play *would* change
+    and changes nothing, which is the honest way to try one against an
+    estate for the first time.
     """
-    if not playbook or "/" in playbook or "\\" in playbook:
+    if not playbook or playbook.startswith("/") or ".." in playbook:
         raise AnsibleError("That is not a playbook name.")
-    params: dict[str, str] = {}
+    if inventory and inventory_content:
+        raise AnsibleError("Give an inventory to use or one to send, not both.")
     hosts = limit if isinstance(limit, str) else ",".join(limit)
+    body: dict[str, Any] = {"check": bool(check), "extravars": extra_vars or {}}
     if hosts:
-        params["limit"] = hosts
-    if check:
-        params["check"] = "True"
-    path = f"/api/v1/playbooks/{playbook}"
+        body["limit"] = hosts
     if tags:
-        path += f"/tags/{tags}"
-    data = _call("POST", path, params=params, json_body=extra_vars or {},
-                 expect=(200, 202))
-    uuid = (data or {}).get("play_uuid", "")
-    if not uuid:
+        body["tags"] = tags
+    if skip_tags:
+        body["skip_tags"] = skip_tags
+    if verbosity:
+        body["verbosity"] = int(verbosity)
+    if forks:
+        body["forks"] = int(forks)
+    # Never a name ShellMate made up: ansible-runner treats an unresolvable
+    # inventory string as inline content, so a constructed name could be
+    # written over the runner's own inventory. Content is sent as content.
+    if inventory_content:
+        body["inventory_content"] = inventory_content
+    elif inventory:
+        body["inventory"] = inventory
+
+    data = _call("POST", f"/api/v1/playbooks/{playbook}", json_body=body) or {}
+    ident = str(data.get("id") or "")
+    if not ident:
         raise AnsibleError("The runner started nothing it could name.")
-    logger.info("Ansible run %s started from %s", uuid, playbook)
-    return {"play_uuid": uuid, "status": "starting"}
+    logger.info("Ansible run %s started from %s%s", ident, playbook,
+                " (check mode)" if check else "")
+    return {"id": ident, "playbook": data.get("playbook") or playbook,
+            "status": data.get("status") or "starting",
+            "inventory": data.get("inventory") or ""}
 
 
-def status(play_uuid: str) -> dict:
-    """What that run is doing now."""
-    data = _call("GET", f"/api/v1/playbooks/{play_uuid}")
-    state = str((data or {}).get("status") or "").lower()
-    return {"play_uuid": play_uuid, "status": state,
+def jobs() -> list[dict]:
+    """Every run the runner knows of, newest first — including past ones."""
+    data = _call("GET", "/api/v1/jobs") or {}
+    return list(data.get("jobs") or [])
+
+
+def status(job_id: str) -> dict:
+    """What one run is doing now."""
+    data = _call("GET", f"/api/v1/jobs/{job_id}") or {}
+    state = str(data.get("status") or "").lower()
+    return {**data, "id": data.get("id") or job_id, "status": state,
             "running": state in RUNNING_STATES,
-            "finished": state in FINISHED_STATES,
-            "raw": data}
+            "finished": state in FINISHED_STATES}
 
 
-def cancel(play_uuid: str) -> dict:
+def cancel(job_id: str) -> dict:
     """
     Ask the runner to stop a run.
 
-    The service answers 404 for a uuid it knows but is no longer running,
-    which is a normal outcome rather than an error — a run that finished
-    while somebody reached for Stop.
+    The service can only cancel a run its own process started, and answers
+    404 otherwise — a run that finished, or one from before a restart.
+    That is an outcome, not an error.
     """
     try:
-        _call("DELETE", f"/api/v1/playbooks/{play_uuid}", expect=(200,))
+        data = _call("DELETE", f"/api/v1/jobs/{job_id}") or {}
     except AnsibleError as exc:
         if exc.code == 404:
-            return {"cancelled": False, "detail": "That run had already finished."}
+            return {"cancelled": False,
+                    "detail": "That run is no longer one the runner can stop."}
         raise
-    return {"cancelled": True, "detail": "Cancellation requested."}
+    return {"cancelled": bool(data.get("cancelled", True)),
+            "detail": "Cancellation requested."}
 
 
-def events(play_uuid: str, since: str = "") -> dict:
+def events(job_id: str, since: int = 0) -> dict:
     """
-    Every event of a run, newest last, shaped for the panel.
+    A run's events, oldest first, and only those after ``since``.
 
-    The service returns them keyed by event id in its own order; the
-    counter that prefixes each id is what actually orders them, so that is
-    what is sorted on. ``since`` returns only what came after that id,
-    which is what makes polling cheap while a long play runs.
+    ansible-runner numbers its own events, so the counter orders them and
+    makes polling cheap: the panel asks for what it has not seen rather
+    than re-reading the whole play every second.
     """
-    data = _call("GET", f"/api/v1/jobs/{play_uuid}/events") or {}
-    raw = data.get("events") or {}
+    data = _call("GET", f"/api/v1/jobs/{job_id}/events") or {}
     out = []
-    for key, value in raw.items():
-        entry = dict(value or {})
-        entry["event_id"] = key
-        entry["counter"] = _counter_of(key)
-        out.append(entry)
+    for raw in data.get("events") or []:
+        if not isinstance(raw, dict):
+            continue
+        counter = int(raw.get("counter") or 0)
+        if counter <= since:
+            continue
+        payload = raw.get("event_data") or {}
+        out.append({
+            "counter": counter,
+            "uuid": raw.get("uuid") or "",
+            "event": raw.get("event") or "",
+            "task": payload.get("task") or "",
+            "host": payload.get("host") or "",
+            "play": payload.get("play") or "",
+            "changed": bool((payload.get("res") or {}).get("changed")),
+            "stdout": raw.get("stdout") or "",
+        })
     out.sort(key=lambda e: e["counter"])
-    if since:
-        mark = _counter_of(since)
-        out = [e for e in out if e["counter"] > mark]
-    return {"events": out, "total": int(data.get("total_events") or len(raw))}
+    return {"events": out, "last": out[-1]["counter"] if out else since}
 
 
-def event(play_uuid: str, event_id: str) -> dict:
-    """One task's own output, which is where a failure explains itself."""
-    return _call("GET", f"/api/v1/jobs/{play_uuid}/events/{event_id}") or {}
+def stdout(job_id: str) -> str:
+    """The whole run as it would have looked in a shell."""
+    return _call("GET", f"/api/v1/jobs/{job_id}/stdout", text=True) or ""
 
 
-_COUNTER_RE = re.compile(r"^(\d+)")
-
-
-def _counter_of(event_id: str) -> int:
-    """The number the service prefixes each event id with, or 0."""
-    found = _COUNTER_RE.match(str(event_id or ""))
-    return int(found.group(1)) if found else 0
+def install_requirements(requirements: str = "requirements.yml") -> dict:
+    """Install the runner's galaxy requirements: roles and collections."""
+    return _call("POST", "/api/v1/galaxy/install",
+                 params={"requirements": requirements}) or {}
 
 
 def summarise(event_list: list[dict]) -> dict:
@@ -315,7 +410,7 @@ def summarise(event_list: list[dict]) -> dict:
 
     Built from the event names Ansible itself emits, so it says what the
     play did rather than what ShellMate guessed. Anything unrecognised is
-    counted as "other" instead of being forced into a bucket.
+    counted as "other" rather than forced into a bucket.
     """
     counts = {"tasks": 0, "ok": 0, "changed": 0, "failed": 0,
               "unreachable": 0, "skipped": 0, "other": 0}
@@ -324,9 +419,7 @@ def summarise(event_list: list[dict]) -> dict:
         if name == "playbook_on_task_start":
             counts["tasks"] += 1
         elif name == "runner_on_ok":
-            counts["ok"] += 1
-        elif name == "runner_on_changed":
-            counts["changed"] += 1
+            counts["changed" if entry.get("changed") else "ok"] += 1
         elif name in ("runner_on_failed", "runner_on_async_failed"):
             counts["failed"] += 1
         elif name == "runner_on_unreachable":
@@ -339,23 +432,8 @@ def summarise(event_list: list[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# The inventory the runner holds
+# The estate as an inventory
 # ---------------------------------------------------------------------------
-def list_groups() -> list[str]:
-    data = _call("GET", "/api/v1/groups")
-    names = data.get("groups") if isinstance(data, dict) else data
-    return sorted(str(n) for n in (names or []))
-
-
-def list_hosts(group: str = "") -> list[str]:
-    path = f"/api/v1/groups/{group}" if group else "/api/v1/hosts"
-    data = _call("GET", path)
-    names = data.get("members") if isinstance(data, dict) else data
-    if isinstance(data, dict) and names is None:
-        names = data.get("hosts")
-    return sorted(str(n) for n in (names or []))
-
-
 #: An Ansible group name is not a ShellMate group name. Ours nest with "/"
 #: and may hold spaces ("site-004/core switches"); Ansible's may not.
 _UNSAFE = re.compile(r"[^A-Za-z0-9_]+")
@@ -369,18 +447,36 @@ def ansible_group_name(key: str) -> str:
     return cleaned if cleaned[0].isalpha() or cleaned[0] == "_" else f"g_{cleaned}"
 
 
+#: ShellMate's platform ids to Ansible's `ansible_network_os`. Only where
+#: the mapping is unambiguous; a platform absent here gets none, and
+#: Ansible's own default connection, which is the honest answer.
+ANSIBLE_NETWORK_OS = {
+    "ios": "cisco.ios.ios",
+    "iosxr": "cisco.iosxr.iosxr",
+    "nxos": "cisco.nxos.nxos",
+    "asa": "cisco.asa.asa",
+    "junos": "junipernetworks.junos.junos",
+    "arista": "arista.eos.eos",
+    "panos": "paloaltonetworks.panos.panos",
+    "aoscx": "arubanetworks.aoscx.aoscx",
+    "huawei": "community.network.ce",
+    "routeros": "community.routeros.routeros",
+    "fortios": "fortinet.fortios.fortios",
+}
+
+
 def inventory_from_estate(group: str = "") -> dict:
     """
     ShellMate's own connections and groups, shaped as an Ansible inventory.
 
-    Hosts are addresses, because that is what Ansible connects to and what
-    a saved connection actually holds; the connection's name travels as a
-    host variable so a report can say "core-1" rather than an address.
-    A serial connection has no address to reach over the network and is
-    left out with its reason — silently dropping it would leave somebody
-    hunting for a device that never ran.
+    Hosts are addresses, because that is what Ansible dials and what a
+    saved connection actually holds; the connection's name travels as a
+    variable so a report can say "core-1" rather than an address. A serial
+    connection has nothing to reach over the network and is left out with
+    its reason — silently dropping it would leave somebody hunting for a
+    device that never ran.
 
-    Nothing is sent anywhere by this function. It only says what would be.
+    Nothing is sent anywhere by this. It only says what would be.
     """
     from backend import profiles as profiles_module
 
@@ -397,27 +493,25 @@ def inventory_from_estate(group: str = "") -> dict:
             continue
         name = profile.get("name") or profile.get("hostname") or ""
         if kind != "ssh":
-            skipped.append({"name": name, "why": f"{kind} connections have no address to reach"})
+            skipped.append({"name": name,
+                            "why": f"{kind} connections have no address to reach"})
             continue
         address = (profile.get("hostname") or "").strip()
         if not address:
             skipped.append({"name": name, "why": "no address"})
             continue
-        hostvars.setdefault(address, {
+        entry = hostvars.setdefault(address, {
             "shellmate_name": name,
             "ansible_host": address,
             "ansible_port": int(profile.get("port") or 22),
         })
         if profile.get("username"):
-            hostvars[address]["ansible_user"] = profile["username"]
-        # The platform ShellMate identified picks Ansible's connection
-        # plugin: a network device answers to network_cli, not to the
-        # default ssh connection with a shell on the far end.
+            entry["ansible_user"] = profile["username"]
         platform = (profile.get("platform") or profile.get("last_seen_platform") or "").lower()
         network_os = ANSIBLE_NETWORK_OS.get(platform)
         if network_os:
-            hostvars[address]["ansible_network_os"] = network_os
-            hostvars[address]["ansible_connection"] = "ansible.netcommon.network_cli"
+            entry["ansible_network_os"] = network_os
+            entry["ansible_connection"] = "ansible.netcommon.network_cli"
         for tag in tags or ["ungrouped"]:
             key = ansible_group_name(tag)
             if key:
@@ -433,53 +527,37 @@ def inventory_from_estate(group: str = "") -> dict:
     }
 
 
-#: ShellMate's platform ids to Ansible's `ansible_network_os`. Only where
-#: the mapping is unambiguous; a platform absent here gets no network_os
-#: and Ansible's own default connection, which is the honest answer.
-ANSIBLE_NETWORK_OS = {
-    "ios": "cisco.ios.ios",
-    "iosxr": "cisco.iosxr.iosxr",
-    "nxos": "cisco.nxos.nxos",
-    "asa": "cisco.asa.asa",
-    "junos": "junipernetworks.junos.junos",
-    "arista": "arista.eos.eos",
-    "panos": "paloaltonetworks.panos.panos",
-    "aoscx": "arubanetworks.aoscx.aoscx",
-    "huawei": "community.network.ce",
-    "routeros": "community.routeros.routeros",
-    "fortios": "fortinet.fortios.fortios",
-}
-
-
-def push_inventory(inventory: dict) -> dict:
+def inventory_as_ini(inventory: dict) -> str:
     """
-    Put an estate's hosts and groups into the runner's own inventory.
+    An inventory as the text the runner is sent.
 
-    The service has no bulk endpoint: a host joins a group one call at a
-    time. Failures are collected rather than raised, because half an
-    inventory pushed and no report of what failed is worse than a slow
-    answer that says which three hosts did not go.
+    INI rather than YAML because host variables sit on the host's own line,
+    so what is sent reads the way an engineer would have written it by
+    hand — which matters when a run goes wrong and somebody wants to know
+    what it was actually pointed at.
     """
-    added: list[str] = []
-    failed: list[dict] = []
+    lines = ["# Generated by ShellMate from its own saved connections.",
+             "# Sent with this run only; the runner's own inventory is untouched.",
+             ""]
+    hostvars = inventory.get("hostvars") or {}
     for group, hosts in (inventory.get("groups") or {}).items():
-        try:
-            _call("POST", f"/api/v1/groups/{group}", expect=(200, 202))
-        except AnsibleError as exc:
-            if exc.code not in (409,):                    # already there is fine
-                failed.append({"target": group, "why": str(exc)})
-                continue
+        lines.append(f"[{group}]")
         for host in hosts:
-            try:
-                _call("POST", f"/api/v1/hosts/{host}/groups/{group}", expect=(200, 202))
-                added.append(f"{host} → {group}")
-            except AnsibleError as exc:
-                failed.append({"target": f"{host} → {group}", "why": str(exc)})
-    return {"added": len(added), "failed": failed, "detail": added[:20]}
+            pairs = " ".join(f"{k}={_ini_value(v)}"
+                             for k, v in sorted((hostvars.get(host) or {}).items())
+                             if not (k == "ansible_host" and v == host))
+            lines.append(f"{host} {pairs}".rstrip())
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _ini_value(value: Any) -> str:
+    text = str(value)
+    return f"'{text}'" if " " in text else text
 
 
 # ---------------------------------------------------------------------------
-# The playbook library, and the gap the service leaves
+# ShellMate's own playbook library, and the gap the service leaves
 # ---------------------------------------------------------------------------
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
 
@@ -555,12 +633,11 @@ def playbook_transfer_plan(name: str) -> dict:
     """
     How a playbook written here reaches the runner.
 
-    The service's API lists and runs playbooks; it has no endpoint that
-    accepts one. So a library edited in ShellMate has to reach the
-    container's project directory another way, and ShellMate already knows
-    how to write a file to a host it has an SSH session with (see
-    `connections/sftp.py`). This returns what to do rather than failing at
-    the point somebody presses Run and the runner says "not found".
+    The service lists and runs playbooks; it has no endpoint that accepts
+    one. Its project directory is a bind mount from the container's host,
+    so the file goes to a path on *that host* over an SSH session ShellMate
+    already has — which is why this names a host path rather than a path
+    inside the container.
     """
     project = ""
     try:
@@ -568,12 +645,13 @@ def playbook_transfer_plan(name: str) -> dict:
         project = str((peek("ansible") or {}).get("project_dir") or "")
     except Exception:                                     # pragma: no cover
         pass
-    project = project or "/usr/share/ansible-runner-service/project"
+    project = project or "/runner/project"
     return {
         "name": _library_path(name).name,
         "project_dir": project,
         "target": f"{project.rstrip('/')}/{_library_path(name).name}",
-        "why": ("The runner service has no API for uploading a playbook, so "
-                "ShellMate copies it over an SSH session to the machine "
-                "running the container."),
+        "why": ("The runner has no API for uploading a playbook, so ShellMate "
+                "copies it over an SSH session to the machine hosting the "
+                "container. The path is the one on that host, which the "
+                "container has mounted as its project directory."),
     }

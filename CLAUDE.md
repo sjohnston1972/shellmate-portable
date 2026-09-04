@@ -82,7 +82,7 @@ shellmate/
 ├── backend/
 │   ├── advanced.py              # Stockton. The settings that were constants in the source
 │   ├── alerts.py                # Things that will happen to a device unless somebody intervenes
-│   ├── ansible.py               # Driving Ansible from ShellMate, through ansible-runner-service…
+│   ├── ansible.py               # Driving Ansible from ShellMate, through a runner service (#585)
 │   ├── app.py                   # FastAPI application for ShellMate
 │   ├── auth.py                  # Optional authentication, for the deployments that need it
 │   ├── branding.py              # One source for the application icon

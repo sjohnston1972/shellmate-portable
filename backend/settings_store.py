@@ -291,8 +291,12 @@ DEFAULT_SETTINGS: dict = {
         # verify_tls off accepts the self-signed one the service ships.
         "ca_cert": "",
         "verify_tls": True,
-        # Where playbooks live inside the container, for copying one across.
-        "project_dir": "/usr/share/ansible-runner-service/project",
+        # A bearer token, when the runner requires one. Never written here:
+        # update_settings diverts it into the vault and blanks this.
+        "token": "",
+        # Where playbooks live on the container's host, for copying one
+        # across. The container mounts it as its project directory.
+        "project_dir": "/runner/project",
         "timeout": 30,
     },
     "alerts": {
@@ -606,6 +610,21 @@ def update_settings(partial: dict) -> dict:
         for field in SECRET_FIELDS:
             if field in merged.get("providers", {}):
                 merged["providers"][field] = ""
+
+        # The Ansible runner's token is a secret in a section of its own
+        # (#585). Same rule, same vault: it is stored under `ansible_token`
+        # and blanked here, so settings.json never carries it.
+        token = (incoming.get("ansible") or {}).get("token")
+        if token is not None:
+            try:
+                if token:
+                    vault.set("ansible_token", token)
+                else:
+                    vault.delete("ansible_token")
+            except VaultError as exc:
+                logger.warning("Could not store the Ansible token: %s", exc)
+        if isinstance(merged.get("ansible"), dict):
+            merged["ansible"]["token"] = ""
 
         jsonfile.write(paths.settings_file(), merged)
         invalidate()

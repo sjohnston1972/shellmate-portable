@@ -948,7 +948,10 @@ async def run():
             # never "not answering", which would send somebody to a firewall.
             await expect(page.locator("#ansible-status-pill")).to_have_text("Not set up")
             detail = await page.inner_text("#ansible-status-detail")
-            assert "certificate" in detail.lower(), detail
+            # The address is the one thing without which there is nothing to
+            # try. Auth is the deployment's choice, so its absence is not a
+            # gap ShellMate reports.
+            assert "address" in detail.lower(), detail
             ok("an unconfigured runner reads as not set up, and says what is missing")
         except Exception as e:
             fail("an unconfigured runner reads as not set up, and says what is missing", str(e))
@@ -1162,7 +1165,7 @@ async def run():
             # The defaults settings_store declares have to reach the form, or
             # a first save writes blanks over them.
             assert await page.is_checked("#setting-ansible-verify")
-            assert (await page.input_value("#setting-ansible-project")).startswith("/usr/share")
+            assert (await page.input_value("#setting-ansible-project")).startswith("/runner")
             assert await page.input_value("#setting-ansible-timeout") == "30"
             ok("the Ansible section shows the declared defaults")
         except Exception as e:
@@ -1170,15 +1173,17 @@ async def run():
 
         try:
             await page.fill("#setting-ansible-url", "https://runner.example:5001")
+            await page.fill("#setting-ansible-cert", "/nope/client.crt")
             await page.click("#ansible-test")
             await page.wait_for_timeout(1200)
             said = await page.inner_text("#ansible-test-result")
-            # Honest, not encouraging: an address with no certificate is "not
-            # set up", never a connection failure.
-            assert "Not set up" in said and "certificate" in said, said
-            ok("Test connection reports what is still missing, not a failure to connect")
+            # Honest, not encouraging: a certificate path that is not a file
+            # is named as a missing file, never as a connection failure —
+            # which would send somebody to a firewall.
+            assert "no such file" in said.lower() or "both halves" in said.lower(), said
+            ok("Test connection names a bad certificate path rather than blaming the network")
         except Exception as e:
-            fail("Test connection reports what is still missing, not a failure to connect", str(e))
+            fail("Test connection names a bad certificate path rather than blaming the network", str(e))
 
         try:
             # And it saved, which is the half that makes the test mean

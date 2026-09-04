@@ -3974,12 +3974,12 @@ async def ollama_models() -> list[dict]:
 
 # REST — Ansible (#585)
 #
-# ShellMate does not run Ansible; it drives an ansible-runner-service
-# container and shows what is happening. Everything here is a thin pass
-# through `backend/ansible.py`, which is where the service's API and its
-# envelope are understood. Two things are ShellMate's own: the inventory
-# built from the estate, and the playbook library, because the service has
-# no endpoint that accepts a playbook.
+# ShellMate does not run Ansible; it drives a runner container and shows
+# what is happening. Everything here is a thin pass through
+# `backend/ansible.py`, which is where the service's API is understood.
+# Two things are ShellMate's own: the inventory built from the estate, and
+# the playbook library, because the service has no endpoint that accepts a
+# playbook.
 # ---------------------------------------------------------------------------
 
 class PlaybookRunRequest(BaseModel):
@@ -3989,19 +3989,25 @@ class PlaybookRunRequest(BaseModel):
     extra_vars: dict = {}
     limit: list[str] = []
     tags: str = ""
+    skip_tags: str = ""
     check: bool = False
+    verbosity: int = 0
+    forks: int | None = None
+    #: Where the hosts come from: "estate" generates one from ShellMate's
+    #: own connections and sends it with the run, "runner" uses the
+    #: inventory the container already holds.
+    inventory_source: str = "estate"
+    #: Which ShellMate group to build the inventory from. Empty is all.
+    group: str = ""
+    #: A path on the runner, when the source is "runner". Empty is its own
+    #: default inventory.
+    inventory_path: str = ""
 
 
 class PlaybookSaveRequest(BaseModel):
     """Body for PUT /api/ansible/library/{name}."""
 
     text: str
-
-
-class InventoryPushRequest(BaseModel):
-    """Body for POST /api/ansible/inventory/push."""
-
-    group: str = ""
 
 
 def _ansible_error(exc: Exception) -> HTTPException:
@@ -4037,110 +4043,146 @@ async def ansible_playbooks() -> dict:
     return {"runner": remote, "library": library, "error": error}
 
 
-@app.post("/api/ansible/run")
-async def ansible_run(request: PlaybookRunRequest) -> dict:
-    """Start a playbook on the runner."""
+@app.get("/api/ansible/playbooks/{name:path}")
+async def ansible_read_remote(name: str) -> dict:
+    """One of the runner's own playbooks, read-only."""
     from backend import ansible as ansible_module
 
     try:
-        return await asyncio.to_thread(
-            ansible_module.start, request.playbook,
-            extra_vars=request.extra_vars, limit=request.limit,
-            check=request.check, tags=request.tags)
+        return {"name": name,
+                "text": await asyncio.to_thread(ansible_module.read_remote_playbook, name)}
     except Exception as exc:
         raise _ansible_error(exc) from exc
 
 
-@app.get("/api/ansible/jobs/{play_uuid}")
-async def ansible_job(play_uuid: str) -> dict:
+@app.post("/api/ansible/run")
+async def ansible_run(request: PlaybookRunRequest) -> dict:
+    """
+    Start a playbook on the runner.
+
+    When the inventory comes from the estate it is generated here and sent
+    with the run as text, so the container keeps none of ShellMate's state
+    and the run is pointed at exactly what was intended.
+    """
+    from backend import ansible as ansible_module
+
+    content = ""
+    skipped: list[dict] = []
+    if request.inventory_source == "estate":
+        inventory = await asyncio.to_thread(
+            ansible_module.inventory_from_estate, request.group)
+        if not inventory["hosts"]:
+            raise HTTPException(
+                status_code=400,
+                detail=("No connection in that group has an address to reach. "
+                        "Nothing would run."))
+        content = ansible_module.inventory_as_ini(inventory)
+        skipped = inventory["skipped"]
+    try:
+        started = await asyncio.to_thread(
+            ansible_module.start, request.playbook,
+            extra_vars=request.extra_vars, limit=request.limit,
+            check=request.check, tags=request.tags, skip_tags=request.skip_tags,
+            verbosity=request.verbosity, forks=request.forks,
+            inventory=request.inventory_path if request.inventory_source == "runner" else "",
+            inventory_content=content)
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+    started["skipped"] = skipped
+    return started
+
+
+@app.get("/api/ansible/jobs")
+async def ansible_jobs() -> dict:
+    """Every run the runner knows of, including ones from before a restart."""
+    from backend import ansible as ansible_module
+
+    try:
+        return {"jobs": await asyncio.to_thread(ansible_module.jobs)}
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+
+
+@app.get("/api/ansible/jobs/{job_id}")
+async def ansible_job(job_id: str) -> dict:
     """What a run is doing, with a count of what it has done so far."""
     from backend import ansible as ansible_module
 
     try:
-        state = await asyncio.to_thread(ansible_module.status, play_uuid)
-        seen = await asyncio.to_thread(ansible_module.events, play_uuid)
+        state = await asyncio.to_thread(ansible_module.status, job_id)
+        seen = await asyncio.to_thread(ansible_module.events, job_id)
     except Exception as exc:
         raise _ansible_error(exc) from exc
     state["summary"] = ansible_module.summarise(seen["events"])
-    state["total_events"] = seen["total"]
+    state["last_event"] = seen["last"]
     return state
 
 
-@app.get("/api/ansible/jobs/{play_uuid}/events")
-async def ansible_job_events(play_uuid: str, since: str = "") -> dict:
+@app.get("/api/ansible/jobs/{job_id}/events")
+async def ansible_job_events(job_id: str, since: int = 0) -> dict:
     """
-    The events of a run, or only those after `since`.
+    A run's events, or only those after `since`.
 
-    Polling with `since` is what keeps a long play cheap to watch: the
-    service returns everything it has every time, so the filtering has to
-    happen somewhere and here is nearer the wire than the browser.
+    Polling with `since` is what keeps a long play cheap to watch:
+    ansible-runner numbers its own events, so the panel asks for what it
+    has not seen rather than re-reading the whole play every second.
     """
     from backend import ansible as ansible_module
 
     try:
-        return await asyncio.to_thread(ansible_module.events, play_uuid, since)
+        return await asyncio.to_thread(ansible_module.events, job_id, since)
     except Exception as exc:
         raise _ansible_error(exc) from exc
 
 
-@app.get("/api/ansible/jobs/{play_uuid}/events/{event_id}")
-async def ansible_job_event(play_uuid: str, event_id: str) -> dict:
-    """One task's own output — where a failure explains itself."""
+@app.get("/api/ansible/jobs/{job_id}/stdout")
+async def ansible_job_stdout(job_id: str) -> dict:
+    """The whole run as it would have looked in a shell."""
     from backend import ansible as ansible_module
 
     try:
-        return await asyncio.to_thread(ansible_module.event, play_uuid, event_id)
+        return {"id": job_id,
+                "stdout": await asyncio.to_thread(ansible_module.stdout, job_id)}
     except Exception as exc:
         raise _ansible_error(exc) from exc
 
 
-@app.delete("/api/ansible/jobs/{play_uuid}")
-async def ansible_cancel(play_uuid: str) -> dict:
+@app.delete("/api/ansible/jobs/{job_id}")
+async def ansible_cancel(job_id: str) -> dict:
     """Ask the runner to stop a run."""
     from backend import ansible as ansible_module
 
     try:
-        return await asyncio.to_thread(ansible_module.cancel, play_uuid)
+        return await asyncio.to_thread(ansible_module.cancel, job_id)
     except Exception as exc:
         raise _ansible_error(exc) from exc
 
 
 @app.get("/api/ansible/inventory")
-async def ansible_inventory(group: str = "", source: str = "estate") -> dict:
+async def ansible_inventory(group: str = "") -> dict:
     """
-    The inventory a run would use.
+    The inventory a run against the estate would use, and its text.
 
-    `estate` builds it from ShellMate's own connections and groups and
-    sends nothing anywhere; `runner` reports what the container already
-    holds. Both are offered because a team that keeps its inventory on the
-    runner should not have ShellMate's view of the world imposed on it.
+    Nothing is sent anywhere by asking: this is the preview, so somebody
+    can see which hosts a run would touch — and which were left out and
+    why — before starting it.
     """
     from backend import ansible as ansible_module
 
-    if source == "runner":
-        try:
-            groups = await asyncio.to_thread(ansible_module.list_groups)
-            hosts = await asyncio.to_thread(ansible_module.list_hosts, group)
-        except Exception as exc:
-            raise _ansible_error(exc) from exc
-        return {"source": "runner", "groups": groups, "hosts": hosts}
-    return {"source": "estate",
-            **await asyncio.to_thread(ansible_module.inventory_from_estate, group)}
+    inventory = await asyncio.to_thread(ansible_module.inventory_from_estate, group)
+    inventory["text"] = ansible_module.inventory_as_ini(inventory)
+    return inventory
 
 
-@app.post("/api/ansible/inventory/push")
-async def ansible_push_inventory(request: InventoryPushRequest) -> dict:
-    """Put the estate's hosts and groups into the runner's inventory."""
+@app.post("/api/ansible/galaxy")
+async def ansible_galaxy(requirements: str = "requirements.yml") -> dict:
+    """Install the runner's roles and collections from its requirements file."""
     from backend import ansible as ansible_module
 
-    inventory = await asyncio.to_thread(
-        ansible_module.inventory_from_estate, request.group)
     try:
-        result = await asyncio.to_thread(ansible_module.push_inventory, inventory)
+        return await asyncio.to_thread(ansible_module.install_requirements, requirements)
     except Exception as exc:
         raise _ansible_error(exc) from exc
-    result["skipped"] = inventory["skipped"]
-    return result
 
 
 @app.get("/api/ansible/library/{name}")
@@ -4184,9 +4226,9 @@ async def ansible_send_playbook(name: str, session_id: str) -> dict:
     """
     Copy a playbook from the library to the runner, over an SSH session.
 
-    The service's API can list and run playbooks but cannot accept one, so
-    a playbook written here reaches the container the way any other file
-    does: over a session ShellMate already has to the machine running it.
+    The runner can list and run playbooks but cannot accept one, and its
+    project directory is a bind mount from the container's host — so the
+    file goes to a path on that host over a session ShellMate already has.
     Which is why this takes a session id rather than inventing a transport.
     """
     from backend import ansible as ansible_module

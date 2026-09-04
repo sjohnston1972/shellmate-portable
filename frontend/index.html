@@ -2354,10 +2354,10 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div id="ansible-target-group" class="ansible-target-pane">
             <select id="ansible-group-select" class="setting-input"></select>
-            <p class="field-hint">The runner validates every host against <em>its</em> inventory, so a ShellMate host it has never heard of is refused there. Push the group across first if it is new.</p>
+            <p class="field-hint">The inventory is built from these connections and travels with the run, so the runner keeps none of it and there is nothing to keep in step.</p>
             <button type="button" id="ansible-push-inventory" class="btn-secondary">
-              <span class="material-symbols-outlined">upload</span>
-              Push this group to the runner's inventory
+              <span class="material-symbols-outlined">visibility</span>
+              Show what would be sent
             </button>
             <div id="ansible-estate-preview" class="ansible-preview"></div>
           </div>
@@ -2368,7 +2368,7 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div id="ansible-target-runner" class="ansible-target-pane hidden">
             <select id="ansible-runner-group" class="setting-input"></select>
-            <p class="field-hint">Groups the container already holds. Nothing of ShellMate's is sent when this is chosen.</p>
+            <p class="field-hint">An inventory the container already holds, with its group_vars and host_vars. Nothing of ShellMate's is sent when this is chosen.</p>
           </div>
         </div>
 
