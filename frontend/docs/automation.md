@@ -248,6 +248,8 @@ curl "http://127.0.0.1:8765/api/history/search?hostname=core-sw-01&q=interface"
 | `POST` | `/api/discovery/scans/{id}/cancel` | Stop a sweep |
 | `DELETE` | `/api/discovery/scans/{id}` | Discard a finished one |
 | `POST` | `/api/discovery/save` | Save discovered devices as connections |
+| `POST` | `/api/reachability` | Probe a `group`, or `profile_ids`, on their own ports — returns at once |
+| `GET` | `/api/reachability/{id}` | Progress and results so far |
 
 ### Files and logs
 

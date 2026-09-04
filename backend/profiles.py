@@ -932,6 +932,35 @@ def retag_many(renames: dict[str, str]) -> int:
     return touched
 
 
+@_synchronised
+def record_last_seen(seen: dict[str, float]) -> int:
+    """
+    Note when each connection was last found reachable (#538).
+
+    One load and one save for the whole sweep, for the reason `retag_many()`
+    records: a fifty-device group would otherwise rewrite profiles.json fifty
+    times, once per device that answered.
+
+    Only what answered is written. Absence of an entry is not evidence that a
+    device is gone — a laptop off the VPN would rewrite the whole estate as
+    unreachable — so a failed probe leaves the last known good time alone.
+
+    Returns how many were updated.
+    """
+    if not seen:
+        return 0
+    profiles = _load()
+    touched = 0
+    for profile in profiles:
+        when = seen.get(profile.get("id", ""))
+        if when:
+            profile["last_seen"] = round(float(when))
+            touched += 1
+    if touched:
+        _save(profiles)
+    return touched
+
+
 def _clean_forward(spec: dict) -> dict | None:
     """One forward as stored: kind, listen_port, host, port — nothing else."""
     if not isinstance(spec, dict):

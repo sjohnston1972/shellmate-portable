@@ -8336,6 +8336,24 @@ body {
   box-shadow: 0 0 0 2px var(--ok-glow), 0 0 7px 1px var(--ok-glow);
 }
 
+/* The third state: answered a reachability check, but nothing is open (#538).
+   A ring rather than a filled dot, so it reads as one step short of live —
+   the device is there, you are not on it. Both colours come from the status
+   tokens for the reason the live dot's do: a green picked against the dark
+   theme is invisible on the light one. */
+.tree-leaf-dot.tree-leaf-reachable {
+  background: var(--ok-tint);
+  border-color: var(--ok);
+}
+
+/* Did not answer. Deliberately not the same weight as an error banner — a
+   site being down is information, and it is the hover text that says whether
+   the port was refused or the probe timed out. */
+.tree-leaf-dot.tree-leaf-unreachable {
+  background: var(--error-tint);
+  border-color: var(--error);
+}
+
 /* A group with something open in it (#198). The same vocabulary as the dot,
    one step quieter — a group is live *because* of what is under it, and
    should not shout louder than the device that actually is.

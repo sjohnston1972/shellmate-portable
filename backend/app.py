@@ -1660,6 +1660,68 @@ async def discovery_save(request: DiscoverySaveRequest) -> dict:
     return result
 
 
+class ReachabilityRequest(BaseModel):
+    """Body for POST /api/reachability."""
+
+    #: A group, and everything nested under it.
+    group: str = ""
+    #: Or a hand-made selection, which wins where both are given.
+    profile_ids: list[str] = []
+
+
+def _reach_target(profile: dict) -> dict:
+    """One saved connection as something the prober can take."""
+    kind = (profile.get("connection_type") or "ssh").lower()
+    address = "" if kind == "serial" else (profile.get("hostname") or "").strip()
+    return {
+        "id":      profile.get("id", ""),
+        "name":    profile.get("name") or address or profile.get("serial_port", ""),
+        "address": address,
+        "port":    int(profile.get("port") or (23 if kind == "telnet" else 22)),
+        "kind":    kind,
+        "why":     "a serial console is a cable, not an address" if kind == "serial" else "",
+    }
+
+
+@app.post("/api/reachability")
+async def start_reachability(request: ReachabilityRequest) -> dict:
+    """
+    Check whether a group, or a selection, answers on its own ports (#538).
+
+    An explicit action and never a timer: two hundred sites probed on a
+    schedule is traffic somebody's IDS will report. It reuses the discovery
+    scan's concurrency, timeout and overall deadline, so a sweep cannot be
+    harsher than a scan by accident, and it says "port open" rather than
+    "healthy" — a device with a dead control plane still answers a TCP probe.
+    """
+    def _targets() -> list[dict]:
+        if request.profile_ids:
+            wanted = set(request.profile_ids)
+            chosen = [p for p in profiles_module.get_profiles() if p.get("id") in wanted]
+        elif request.group:
+            chosen = profiles_module.profiles_tagged(request.group, include_nested=True)
+        else:
+            chosen = []
+        return [_reach_target(profile) for profile in chosen]
+
+    targets = await asyncio.to_thread(_targets)
+    if not targets:
+        raise HTTPException(status_code=400,
+                            detail="There are no connections to check.")
+    sweep = discovery.start_sweep(targets, _discovery_settings(),
+                                  on_finish=profiles_module.record_last_seen)
+    return sweep.state()
+
+
+@app.get("/api/reachability/{sweep_id}")
+async def reachability_progress(sweep_id: str) -> dict:
+    """Progress and results so far. Results appear as they arrive."""
+    sweep = discovery.get_sweep(sweep_id)
+    if sweep is None:
+        raise HTTPException(status_code=404, detail="That check is no longer held.")
+    return sweep.state()
+
+
 # ---------------------------------------------------------------------------
 # Feedback (#370)
 # ---------------------------------------------------------------------------

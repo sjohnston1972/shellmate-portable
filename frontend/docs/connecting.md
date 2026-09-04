@@ -530,6 +530,28 @@ reported by name rather than silently skipped. It is deliberately not offered
 for the whole unfiltered dashboard: opening two hundred tabs should not be
 one click away.
 
+### Is the site up?
+
+**Check reachability** is on the same group menu, on a connection's own menu,
+and on a multi-selection of connections. Every member is probed on its own
+port and the dot beside it takes a third state: a filled green dot is a
+session you have open, a green ring answered the probe, a red ring did not,
+and grey means it has not been checked. Rest on the dot for the detail —
+`port 22 open, SSH-2.0-Cisco-1.25, 38 ms`, or `port 22 refused`. A summary
+follows: "47 of 50 reachable", naming the ones that did not answer. Serial
+connections report **not probeable**: a console is a cable, not an address.
+
+Two things this deliberately does not claim. **An open port is not a healthy
+device** — a switch with a dead control plane still completes a TCP handshake,
+which is why the hover text says "port open" and stops there. And **it never
+runs on a timer**: probing two hundred sites on a schedule is traffic
+somebody's intrusion detection will report, so it happens when you ask and not
+otherwise. It uses the same concurrency and timeouts as the scanner, under
+Stockton → Discovery.
+
+Anything that answers has the time recorded against it, so a connection that
+is not open still says when it was last reachable.
+
 **Broadcast still works on open sessions only.** "Send this to everything in
 `Glasgow/access`, connecting to whatever is not open" is a genuinely different
 and more dangerous operation, so opening the group is the step you take first —

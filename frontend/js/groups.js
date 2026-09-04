@@ -1077,9 +1077,17 @@
     // disagree about what "this device" means.
     const live = _isLive(profile);
 
+    // And whether the last reachability check found it (#538). A third state
+    // on the same dot rather than a second dot: "is it open" and "is it
+    // there" are two answers about one device, and two lights side by side
+    // would need explaining every time.
+    const reach = reachability.get(profile.id);
     const dot = document.createElement('span');
-    dot.className = 'tree-leaf-dot' + (live ? ' tree-leaf-live' : '');
-    dot.title = live ? 'Connected' : 'Not open';
+    dot.className = 'tree-leaf-dot'
+      + (live ? ' tree-leaf-live'
+        : reach && reach.state === 'up' ? ' tree-leaf-reachable'
+        : reach && reach.state === 'unreachable' ? ' tree-leaf-unreachable' : '');
+    dot.title = _dotTitle(profile, live, reach);
 
     const label = document.createElement('span');
     label.className = 'tree-leaf-name';
@@ -1242,6 +1250,10 @@
         onClick: () => _moveMember(profile, node, false) },
       { icon: 'tab_duplicate', label: 'Move to group...',
         onClick: () => _moveMember(profile, node, true) },
+      { icon: 'sensors', label: 'Check reachability',
+        onClick: () => _checkReachability(
+          { profile_ids: [profile.id] },
+          profile.name || profile.hostname || 'this connection', 1) },
       'sep',
       { icon: 'backspace', label: 'Remove from "' + node.label + '"',
         onClick: () => _removeMember(profile, node) },
@@ -1330,12 +1342,135 @@
                    onClick: _bulkRemoveLeaves });
     }
     items.push(
+      // The other half of #538: a selection is as good a thing to probe as a
+      // group, and often the more useful one — the six that looked odd.
+      { icon: 'sensors', label: `Check reachability of ${n}`,
+        onClick: () => _checkReachability(
+          { profile_ids: [...leafSelection.keys()] },
+          `${n} connections`, n) },
+      'sep',
       { icon: 'delete_forever', label: `Delete ${n} connections…`, danger: true,
         onClick: _bulkDeleteLeaves },
       { icon: 'close', label: 'Clear selection', onClick: _clearLeafSelection },
     );
     window.shellmateMenu.open(event, items, { className: 'group-menu' });
   }
+
+  // -------------------------------------------------------------------------
+  // Reachability (#538)
+  //
+  // The group menu offered Connect all and Disconnect all, so the only way to
+  // learn whether a site was up was to log into all of it. This answers the
+  // morning-after-a-change question from the tree, without a session.
+  //
+  // Explicit only. Nothing here runs on a timer: two hundred sites probed on
+  // a schedule is traffic somebody's IDS will report, and a background sweep
+  // nobody asked for is the opposite of what the scanner's "no ICMP, no
+  // privileges" position was for.
+  // -------------------------------------------------------------------------
+
+  /** The last result per connection id. Session-local; a probe is a moment. */
+  let reachability = new Map();
+
+  /** The sweep in flight, so a second click cannot start a second one. */
+  let sweeping = false;
+
+  /** How often to ask how the sweep is getting on — the scan panel's cadence. */
+  const REACH_POLL_MS = 700;
+
+  /** What the dot says when you rest on it. */
+  function _dotTitle(profile, live, reach) {
+    if (live) return 'Connected';
+    if (reach) {
+      // "Port open", never "healthy". A device with an open port and a dead
+      // control plane answers this probe and must not be reported as well.
+      if (reach.state === 'up') {
+        return [`port ${reach.port} open`, reach.banner, `${reach.ms} ms`]
+          .filter(Boolean).join(', ');
+      }
+      if (reach.state === 'unreachable') return `port ${reach.port} ${reach.why}`;
+      if (reach.state === 'not-probeable') return `Not probeable — ${reach.why}`;
+      return 'Not checked';
+    }
+    if (profile.last_seen) {
+      return 'Not open. Last reachable '
+        + new Date(profile.last_seen * 1000).toLocaleString();
+    }
+    return 'Not open';
+  }
+
+  /** Probe a group, or a selection, and paint the answers as they arrive. */
+  async function _checkReachability(body, label, count) {
+    if (sweeping) return;
+    sweeping = true;
+    if (window.shellmateAlerts) {
+      window.shellmateAlerts.notify({
+        icon: 'sensors', title: `Checking ${label}`,
+        body: `${count} connection${count === 1 ? '' : 's'}, each on its own port. `
+              + 'This opens a TCP connection to every one of them.',
+      });
+    }
+
+    let state = null;
+    try {
+      const res = await fetch('/api/reachability', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+      state = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(state.detail || `Server error ${res.status}`);
+    } catch (err) {
+      sweeping = false;
+      _warn('Could not check reachability', String(err.message || err));
+      return;
+    }
+
+    _absorbReach(state);
+    while (state.running) {
+      await new Promise(resolve => setTimeout(resolve, REACH_POLL_MS));
+      try {
+        const res = await fetch('/api/reachability/' + encodeURIComponent(state.id));
+        if (!res.ok) break;
+        state = await res.json();
+        _absorbReach(state);
+      } catch (e) {
+        // A poll that fails is not a sweep that failed — it is running in the
+        // server either way. Keep asking.
+      }
+    }
+
+    sweeping = false;
+    if (window.shellmateAlerts) {
+      const short = state.unreachable ? state.results
+        .filter(r => r.state === 'unreachable')
+        .slice(0, 6).map(r => r.name).join(', ') : '';
+      window.shellmateAlerts.notify({
+        severity: state.unreachable ? 'warning' : 'info', icon: 'sensors',
+        title: `${state.up} of ${state.total} reachable`,
+        body: `${label} — ${state.up} answered, ${state.unreachable} did not`
+              + (state.not_probeable ? `, ${state.not_probeable} not probeable` : '')
+              + (short ? `. No answer from: ${short}` : '.')
+              + ' An open port is not a healthy device.',
+      });
+    }
+    // last_seen was written server-side, so the tree needs what is on disk.
+    if (typeof window.renderWelcomeProfiles === 'function') {
+      await window.renderWelcomeProfiles();
+    } else {
+      renderTree(profileCache);
+    }
+  }
+
+  /** Take the results so far and redraw the tree with them. */
+  function _absorbReach(state) {
+    (state.results || []).forEach(result => {
+      if (result.id) reachability.set(result.id, result);
+    });
+    renderTree(profileCache);
+  }
+
+
 
   /** Set or clear a group's backup schedule (#408). */
   async function _backupSchedule(group) {
@@ -2273,6 +2408,10 @@
         onClick: () => _connectAll(group) },
       { icon: 'stop_circle', label: 'Disconnect all', danger: true, disabled: empty, title: why,
         onClick: () => _disconnectAll(group) },
+      // Is the site up, without opening fifty sessions (#538).
+      { icon: 'sensors', label: 'Check reachability', disabled: empty, title: why,
+        onClick: () => _checkReachability(
+          { group: group.key }, group.name, _membersUnder(group.key).length) },
       { icon: 'bookmark_add',
         label: group.favourite ? 'Unpin from the top' : 'Pin to the top',
         onClick: () => _update(group.key, { favourite: !group.favourite }) },

@@ -14,6 +14,13 @@ exists.
   before anything is written. A file carrying a `password` column is refused
   outright rather than having the column quietly dropped.
 
+- **Check reachability** on a group, a connection, or a selection of them.
+  Every member is probed on its own port; the dot in the tree gains a third
+  state, the hover text says `port 22 open, SSH-2.0-Cisco-1.25, 38 ms` or
+  `port 22 refused`, and a summary says "47 of 50 reachable" and names the
+  ones that did not answer. It never runs on a timer, and an open port is
+  reported as an open port rather than as a healthy device.
+
 - An **update channel** under Stockton → Diagnostics: `stable` offers only
   full releases, `beta` also offers prereleases for people trying a build
   early, marked Beta in the update window. **What's new in this version**
