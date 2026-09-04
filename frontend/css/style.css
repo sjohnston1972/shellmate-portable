@@ -6056,7 +6056,7 @@ body:has(#modal-overlay:not(.hidden)) #terminals-container.tiled .pane-focused::
   /* Above the panel overlays (200) and below the modals (500+): a download
      finishing while the Logs panel is open must be readable without closing
      the panel (#244), but a toast must never sit over a dialog's buttons. */
-  z-index: 300;
+  z-index: 9250;
   display: flex;
   flex-direction: column;
   gap: 8px;
