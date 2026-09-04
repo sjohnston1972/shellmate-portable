@@ -9592,7 +9592,99 @@ body {
 
 /* ---------------------------------------------------------------------------
    Ansible view — Inventory (#586)
+
+   Two questions live here and they must not blur into one: what the
+   estate would send (built fresh, sent with a run and kept nowhere else),
+   and what the runner already holds (a directory this has no API to read,
+   said plainly rather than shown as an empty list that looks like a bug).
 --------------------------------------------------------------------------- */
+
+.av-inv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.av-inv-toolbar-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-surface-dim);
+}
+
+.av-inv-toolbar select { min-width: 220px; }
+
+.av-inv-host {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.av-inv-host .material-symbols-outlined { font-size: var(--icon-sm); color: var(--on-surface-dim); }
+
+/* A device ShellMate has not identified gets no `ansible_network_os` — the
+   honest default, so it reads as a fact rather than an error. */
+.av-inv-unmapped {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--on-surface-dim);
+}
+
+.av-inv-platform,
+.av-inv-skip-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.av-inv-platform .material-symbols-outlined,
+.av-inv-skip-name .material-symbols-outlined { font-size: var(--icon-xs); }
+
+.av-inv-skip-name .material-symbols-outlined { color: var(--error); }
+
+.av-inv-groups {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+/* The left-out count is styled to draw the eye, not tucked away — a run
+   that silently omits half a site is the failure this screen prevents. */
+.av-inv-skip-count { color: var(--error); font-weight: 600; }
+
+.av-inv-skip-why { color: var(--on-surface-dim); }
+
+.av-inv-ini-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.av-inv-note {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.av-inv-ini {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  background: var(--bedrock);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--on-surface);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
 
 /* ---------------------------------------------------------------------------
    Ansible view — Environments (#586)
@@ -9604,5 +9696,92 @@ body {
 
 /* ---------------------------------------------------------------------------
    Ansible view — Repositories (#586)
+
+   A record, not a sync — there is no clone here and nothing to poll, so
+   the styling stays close to the shared table and pill rules above it
+   rather than inventing a card layout this list does not need.
 --------------------------------------------------------------------------- */
+
+.av-repo-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.av-repo-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.av-repo-name .material-symbols-outlined { font-size: var(--icon-sm); color: var(--on-surface-dim); }
+
+.av-repo-notes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--on-surface-dim);
+}
+
+.av-repo-notes .material-symbols-outlined { font-size: var(--icon-xs); }
+
+.av-repo-remote {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+.av-repo-path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--on-surface-dim);
+}
+
+.av-repo-path .material-symbols-outlined { font-size: var(--icon-xs); }
+
+.av-repo-branch { display: inline-flex; align-items: center; gap: 4px; }
+.av-repo-branch .material-symbols-outlined { font-size: var(--icon-xs); }
+
+.av-repo-revision {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+.av-repo-when {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--on-surface-dim);
+}
+
+.av-repo-revision .material-symbols-outlined,
+.av-repo-when .material-symbols-outlined { font-size: var(--icon-xs); }
+
+.av-repo-none {
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
 

@@ -4349,6 +4349,12 @@ class RepositoryRequest(BaseModel):
     notes: str = ""
 
 
+class RepositoryNoteRequest(BaseModel):
+    """Body for POST /api/ansible/repositories/{id}/note."""
+
+    revision: str
+
+
 @app.get("/api/ansible/library")
 async def ansible_library_all() -> dict:
     """Everything the library holds, for the view's first paint."""
@@ -4442,6 +4448,25 @@ async def ansible_delete_repository(entry_id: str) -> dict:
     from backend import ansible_library as library
 
     return {"deleted": await asyncio.to_thread(library.delete_repository, entry_id)}
+
+
+@app.post("/api/ansible/repositories/{entry_id}/note")
+async def ansible_note_repository(entry_id: str, request: RepositoryNoteRequest) -> dict:
+    """
+    Record what was last seen at the remote, without touching the rest.
+
+    A separate action from the edit form on purpose: editing a name or a
+    URL is correcting the record, and noting a revision is the record —
+    "somebody looked, and this is where it was". Folding it into the same
+    save would stamp `checked` on every unrelated edit, which would make
+    the timestamp mean "last touched" rather than "last actually checked".
+    """
+    from backend import ansible_library as library
+
+    noted = await asyncio.to_thread(library.note_revision, entry_id, request.revision)
+    if noted is None:
+        raise HTTPException(status_code=404, detail="No such repository.")
+    return noted
 
 
 class AnsibleKeyRequest(BaseModel):
