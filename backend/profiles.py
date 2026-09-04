@@ -1201,14 +1201,18 @@ INVENTORY_FIELDS = ("version", "model", "serial", "last_seen_platform", "last_co
 
 
 @_synchronised
-def record_inventory(target: str, port: int, username: str, facts: dict) -> bool:
+def record_inventory(target: str, port: int, username: str, facts: dict,
+                     profile_id: str = "") -> bool:
     """
-    Note what the device said it is, against the profile used to reach it.
+    Note what the device said it is, against the connection used to reach it.
 
-    Matched by target rather than by name, for the reason
-    `record_detected_hostname()` gives: the name is rewritten when the
-    device says what it is called, and matching on something that changes
-    by itself would stop finding the profile it just renamed.
+    ``profile_id`` names it outright and is used whenever the session has
+    one. The target match behind it is the fallback for a session opened
+    straight from the dialog — and it is only a fallback, because an estate
+    where a hundred devices sit behind one address (a terminal server, a
+    lab behind one jump host) would otherwise have every one of them claim
+    the serial number of whichever was opened. A name cannot be used at
+    all: it is rewritten the moment the device says what it is called.
 
     Empty values are ignored rather than written, so a `show inventory` a
     device does not support cannot erase a serial number learned last week.
@@ -1216,7 +1220,7 @@ def record_inventory(target: str, port: int, username: str, facts: dict) -> bool
     Returns:
         True if a profile was updated.
     """
-    if not target:
+    if not target and not profile_id:
         return False
     clean = {k: str(v).strip() for k, v in (facts or {}).items()
              if k in INVENTORY_FIELDS and str(v or "").strip()}
@@ -1226,12 +1230,16 @@ def record_inventory(target: str, port: int, username: str, facts: dict) -> bool
     profiles = _load()
     changed = False
     for profile in profiles:
-        if profile.get("hostname") != target:
-            continue
-        if int(profile.get("port") or 0) != int(port or 0):
-            continue
-        if username and profile.get("username") not in ("", username):
-            continue
+        if profile_id:
+            if profile.get("id") != profile_id:
+                continue
+        else:
+            if profile.get("hostname") != target:
+                continue
+            if int(profile.get("port") or 0) != int(port or 0):
+                continue
+            if username and profile.get("username") not in ("", username):
+                continue
         for key, value in clean.items():
             if profile.get(key) != value:
                 profile[key] = value
@@ -1242,11 +1250,12 @@ def record_inventory(target: str, port: int, username: str, facts: dict) -> bool
     return changed
 
 
-def record_connected(target: str, port: int, username: str, when: str = "") -> bool:
+def record_connected(target: str, port: int, username: str, when: str = "",
+                     profile_id: str = "") -> bool:
     """When this connection was last opened (#536)."""
     import datetime as _dt
     stamp = when or _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
-    return record_inventory(target, port, username, {"last_connected": stamp})
+    return record_inventory(target, port, username, {"last_connected": stamp}, profile_id)
 
 
 def remember_platform(target: str, port: int, username: str, platform: str) -> bool:

@@ -252,3 +252,11 @@ carries them, which is how "what version is everywhere" becomes one file.
 They are facts, not settings: whatever the device says next replaces them,
 an empty answer never erases what was known, and the import deliberately
 has no column for them — only a device may state what it is.
+
+They are kept against the connection the session was opened from, not
+against the address. That matters wherever a hundred devices sit behind one
+address — a terminal server, or a lab behind one jump host — because
+otherwise every one of them would claim the serial number of whichever was
+opened. A session started straight from the dialog has no saved connection
+to name, so there the address is all there is to go on and every connection
+sharing it learns the same thing.

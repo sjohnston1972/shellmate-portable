@@ -174,7 +174,8 @@ class SessionManager:
         # a device.
         try:
             from backend.profiles import record_connected
-            record_connected(session["address"], params.port, params.username or "")
+            record_connected(session["address"], params.port, params.username or "",
+                             profile_id=profile_id or "")
         except Exception as exc:                          # pragma: no cover
             logger.debug("Could not record the connection time: %s", exc)
 

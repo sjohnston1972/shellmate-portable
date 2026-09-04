@@ -90,6 +90,23 @@ def test_recording() -> None:
     kept = profiles.find_profile(saved["id"])
     check("another device's facts land elsewhere", kept.get("model") == "WS-C3850-48P")
 
+    print("\n-- One address, many devices --")
+    # A second device behind the same address, as a terminal server or a
+    # lab behind one jump host produces. Its blank username keeps it a
+    # separate saved connection while still matching the address test.
+    twin = profiles.save_profile({"name": "sw2", "hostname": "10.1.1.1", "port": 22,
+                                  "username": "", "connection_type": "ssh"})
+    check("  it is a second connection, not a merge", twin["id"] != saved["id"], twin["id"])
+    profiles.record_inventory("10.1.1.1", 22, "eng", {"serial": "SECOND"}, profile_id=twin["id"])
+    check("a session that knows its connection writes only to that one",
+          profiles.find_profile(twin["id"]).get("serial") == "SECOND"
+          and profiles.find_profile(saved["id"]).get("serial") == "FCW2140L0GH",
+          str(profiles.find_profile(saved["id"]).get("serial")))
+    profiles.record_inventory("10.1.1.1", 22, "eng", {"model": "SHARED"})
+    check("  without one, the address match still writes to both",
+          profiles.find_profile(twin["id"]).get("model") == "SHARED"
+          and profiles.find_profile(saved["id"]).get("model") == "SHARED")
+
     profiles.record_connected("10.1.1.1", 22, "eng")
     kept = profiles.find_profile(saved["id"])
     check("the connection time is recorded", bool(kept.get("last_connected")), str(kept.get("last_connected")))
@@ -100,8 +117,9 @@ def test_recording() -> None:
           all(c in profiles.CSV_COLUMNS for c in ("version", "model", "serial", "last_connected")),
           str(profiles.CSV_COLUMNS))
     if text:
-        check("  and this device's values", "WS-C3850-48P" in text and "FCW2140L0GH" in text,
-              text.splitlines()[0] if text else "")
+        check("  and each device's own values, not one device's for all",
+              "FCW2140L0GH" in text and "SECOND" in text,
+              " / ".join(text.splitlines()[:3]))
     check("but they are never imported — only a device may state them",
           "version" not in profiles._CSV_ALIASES and "serial" not in profiles._CSV_ALIASES)
 

@@ -837,6 +837,7 @@ async def session_drift(session_id: str) -> dict:
                 profiles_module.record_inventory,
                 session.get("address") or session.get("hostname") or "",
                 int(session.get("port") or 0), session.get("username") or "", facts,
+                session.get("profile_id") or "",
             )
         return report
     except (OSError, ConnectionError_) as exc:
@@ -897,7 +898,8 @@ async def set_session_platform(session_id: str, request: IdentifyRequest) -> dic
             await asyncio.to_thread(
                 profiles_module.record_inventory,
                 session.get("address") or "", int(session.get("port") or 0),
-                session.get("username") or "", facts)
+                session.get("username") or "", facts,
+                    session.get("profile_id") or "")
     except Exception as exc:
         logger.debug("Could not record what the device is: %s", exc)
     session["pipeline"].platform = summary["platform"]
@@ -4466,7 +4468,8 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                 await asyncio.to_thread(
                     profiles_module.record_inventory,
                     session.get("address") or "", int(session.get("port") or 0),
-                    session.get("username") or "", facts)
+                    session.get("username") or "", facts,
+                    session.get("profile_id") or "")
         except Exception as exc:
             logger.debug("Could not record what the device is: %s", exc)
         session["pipeline"].platform = summary["platform"]
