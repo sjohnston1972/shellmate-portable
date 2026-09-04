@@ -190,7 +190,7 @@
         ? { label: 'Open the folder',
             onClick: () => fetch('/api/configs/archive/reveal', { method: 'POST' })
               .catch(() => { /* the folder not opening is not worth an error */ }) }
-        : { label: 'Past captures',
+        : { label: 'Capture history',
             onClick: () => showDiff(report, sessionData) },
     });
   }
