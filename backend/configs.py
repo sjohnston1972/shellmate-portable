@@ -139,7 +139,12 @@ def capture_config(session: dict) -> dict:
     platform = session_platform(session)
     profile = get_profile(platform)
     commands = {
-        "paging_off": profile.paging_off or "terminal length 0",
+        # No fallback (#524). A platform that leaves paging blank means
+        # "there is nothing safe to send here" — FortiOS changes it for
+        # every admin on the box, RouterOS has no session setting at all —
+        # and sending IOS's command anyway is a guess reaching a device,
+        # which is the one thing this codebase never does.
+        "paging_off": profile.paging_off,
         "show_run":   profile.show_run or "show running-config",
     }
 
@@ -160,8 +165,9 @@ def capture_config(session: dict) -> dict:
             # Clear the login banner before asking anything.
             _read_until_idle(channel, timeout=3.0)
 
-            channel.send((commands["paging_off"] + "\n").encode())
-            _read_until_idle(channel, timeout=5.0)
+            if commands["paging_off"]:
+                channel.send((commands["paging_off"] + "\n").encode())
+                _read_until_idle(channel, timeout=5.0)
 
             channel.send((commands["show_run"] + "\n").encode())
             raw = _read_until_idle(channel)

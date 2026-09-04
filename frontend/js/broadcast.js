@@ -294,6 +294,11 @@
     junos:    'Juniper Junos',
     panos:    'Palo Alto PAN-OS',
     arista:   'Arista EOS',
+    iosxr:    'Cisco IOS-XR',
+    fortios:  'Fortinet FortiOS',
+    routeros: 'MikroTik RouterOS',
+    huawei:   'Huawei VRP',
+    aoscx:    'Aruba AOS-CX',
     linux:    'Linux / Unix shell',
   };
 
