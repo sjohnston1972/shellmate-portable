@@ -541,3 +541,218 @@ def _within_keys_dir(path: str) -> Path:
     if not target.is_file():
         raise ValueError("There is no key at that path.")
     return target
+
+
+# ---------------------------------------------------------------------------
+# Host keys — the other half of SSH identity (#528)
+#
+# Everything above is about proving who *we* are. This is about the device
+# proving who it is, and ShellMate was quieter about it than PuTTY: the
+# default policy auto-added an unknown key and nothing ever wrote it down, so
+# a key that *changed* was never noticed. The one warning that catches a
+# man-in-the-middle, or two devices answering one address in a mis-cabled
+# lab, was absent.
+#
+# Trust on first use, warn on change. Prompting for every unknown host would
+# be unusable on the lab estate ShellMate is built for — re-imaged weekly,
+# forty devices off one scan — and it is the *change* that carries the
+# information anyway.
+#
+# The file is OpenSSH's own known_hosts format, written by paramiko, so it can
+# be read, diffed, edited and copied into ~/.ssh by anyone who wants to.
+# ---------------------------------------------------------------------------
+
+
+def known_hosts_path() -> Path:
+    """Where ShellMate keeps the host keys it has decided to trust."""
+    return paths.known_hosts_file()
+
+
+def host_entry_name(hostname: str, port: int = 22) -> str:
+    """
+    The known_hosts entry name for a host, in OpenSSH's spelling.
+
+    Port 22 is bare; anything else is bracketed. Getting this wrong means a
+    device on port 2222 is filed under a name nothing ever looks up, and
+    every connection to it looks like a first connection.
+    """
+    host = (hostname or "").strip()
+    try:
+        numeric = int(port or 22)
+    except (TypeError, ValueError):
+        numeric = 22
+    return host if numeric == 22 else f"[{host}]:{numeric}"
+
+
+def host_fingerprint(key) -> str:
+    """
+    A host key's SHA-256 fingerprint, spelled as ssh-keygen and OpenSSH do.
+
+    The same format the device prints and the same format ``ssh`` shows,
+    because the only use for this is comparing one against the other by eye.
+    """
+    import base64
+    import hashlib
+
+    if key is None:
+        return ""
+    try:
+        raw = key.asbytes()
+    except Exception:
+        return ""
+    digest = base64.b64encode(hashlib.sha256(raw).digest()).decode("ascii")
+    return "SHA256:" + digest.rstrip("=")
+
+
+def load_known_hosts():
+    """
+    ShellMate's own host keys, as a paramiko ``HostKeys``.
+
+    Never raises. A known_hosts file hand-edited into something unparseable
+    must not make devices unreachable — the worst it may do is make them look
+    new, which is a warning rather than a wall.
+    """
+    import paramiko
+
+    store = paramiko.HostKeys()
+    path = known_hosts_path()
+    if path.is_file():
+        try:
+            store.load(str(path))
+        except Exception as exc:
+            logger.warning("Could not read %s (%s); treating every host as new",
+                           path, exc)
+    return store
+
+
+def known_host_key(hostname: str, port: int = 22, key_type: str = ""):
+    """
+    The key ShellMate has stored for a host, or None.
+
+    ``key_type`` narrows it to one algorithm. A device may legitimately offer
+    Ed25519 today and RSA tomorrow, and those are two entries rather than a
+    change — comparing across types would raise the alarm on a device that
+    did nothing wrong, which is the fastest way to teach somebody to click
+    through the one warning that matters.
+    """
+    entry = load_known_hosts().lookup(host_entry_name(hostname, port))
+    if entry is None:
+        return None
+    if key_type:
+        return entry.get(key_type)
+    for name in entry.keys():          # any of them, for reporting only
+        return entry.get(name)
+    return None
+
+
+def system_host_key(hostname: str, port: int = 22, key_type: str = ""):
+    """
+    The key OpenSSH's own ``~/.ssh/known_hosts`` holds for a host, or None.
+
+    Read, never written. A device the user already trusts through ``ssh`` is
+    already trusted here, which is what keeps a managed estate from being
+    asked the same question twice — but ShellMate does not get to edit a file
+    OpenSSH owns, so anything it decides goes in its own store.
+    """
+    import paramiko
+
+    try:
+        store = paramiko.HostKeys()
+        path = Path.home() / ".ssh" / "known_hosts"
+        if not path.is_file():
+            return None
+        store.load(str(path))
+    except Exception:
+        return None
+
+    entry = store.lookup(host_entry_name(hostname, port))
+    if entry is None:
+        return None
+    if key_type:
+        return entry.get(key_type)
+    for name in entry.keys():
+        return entry.get(name)
+    return None
+
+
+def remember_host(hostname: str, port: int, key) -> bool:
+    """
+    Record a host key as trusted, replacing any earlier one of the same type.
+
+    Returns True when the file was written. A failure is logged and
+    swallowed: not being able to *remember* a key is a reason to warn again
+    next time, never a reason to be unable to reach a device.
+    """
+    if key is None:
+        return False
+    name = host_entry_name(hostname, port)
+    store = load_known_hosts()
+    try:
+        # HostKeys.add replaces the entry for this host and key type, which
+        # is exactly what "trust the new key" has to mean.
+        store.add(name, key.get_name(), key)
+        path = known_hosts_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        store.save(str(path))
+        logger.info("Remembered the %s host key for %s (%s)",
+                    key.get_name(), name, host_fingerprint(key))
+        return True
+    except Exception as exc:
+        logger.warning("Could not remember the host key for %s: %s", name, exc)
+        return False
+
+
+def forget_host(name: str) -> bool:
+    """
+    Drop every key stored for one host. True if anything went.
+
+    Takes the entry name as listed — ``switch01`` or ``[switch01]:2222`` —
+    because that is what the panel has in its hand.
+    """
+    store = load_known_hosts()
+    if store.lookup(name) is None:
+        return False
+    # Looped, because paramiko files one entry per key *type* and its
+    # __delitem__ removes only the first match. A host offering RSA and
+    # ECDSA would keep half its trust after a Forget that reported success —
+    # which is the worst of both: the warning stays suppressed by an entry
+    # nobody can see.
+    for _ in range(16):
+        if store.lookup(name) is None:
+            break
+        try:
+            del store[name]
+        except Exception:
+            return False
+    try:
+        store.save(str(known_hosts_path()))
+        logger.info("Forgot the host key(s) for %s", name)
+        return True
+    except Exception as exc:
+        logger.warning("Could not rewrite known_hosts: %s", exc)
+        return False
+
+
+def known_hosts() -> list[dict]:
+    """
+    Every host ShellMate trusts, for the Keys panel.
+
+    One row per host *and key type*, because that is the grain Forget has to
+    work at: a host offering two algorithms has two entries, and forgetting
+    "the key" while leaving the other behind would leave the warning
+    suppressed by an entry nobody could see.
+    """
+    store = load_known_hosts()
+    rows: list[dict] = []
+    for name in list(store.keys()):
+        entry = store.lookup(name)
+        if entry is None:
+            continue
+        for key_type in list(entry.keys()):
+            rows.append({
+                "host":        name,
+                "key_type":    key_type,
+                "fingerprint": host_fingerprint(entry.get(key_type)),
+            })
+    rows.sort(key=lambda row: (row["host"].lower(), row["key_type"]))
+    return rows

@@ -18,7 +18,7 @@
 (function () {
   'use strict';
 
-  let overlay, listEl, statusEl;
+  let overlay, listEl, statusEl, hostsEl;
   let meta = { types: [], rsa_sizes: [], curves: [] };
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -27,6 +27,7 @@
 
     listEl   = document.getElementById('keys-list');
     statusEl = document.getElementById('keys-status');
+    hostsEl  = document.getElementById('known-hosts-list');
 
     const link = document.getElementById('sidebar-link-keys');
     if (link) link.addEventListener('click', (e) => { e.preventDefault(); open(); });
@@ -156,6 +157,7 @@
     overlay.classList.remove('hidden');
     report('');
     await load();
+    await loadKnownHosts();
     setTimeout(() => document.getElementById('key-name').focus(), 60);
   }
 
@@ -278,6 +280,99 @@
 
     el.append(tag, text, copyBtn);
     return el;
+  }
+
+  // -------------------------------------------------------------------------
+  // Known hosts (#528)
+  //
+  // The devices ShellMate has decided to trust. Listed for the same reason
+  // the keys above are: something that decides on your behalf, silently and
+  // permanently, is something you should be able to look at and undo.
+  // -------------------------------------------------------------------------
+
+  async function loadKnownHosts() {
+    if (!hostsEl) return;
+    try {
+      const res  = await fetch('/api/keys/known-hosts');
+      const data = await res.json();
+      const where = document.getElementById('known-hosts-file');
+      if (where) where.textContent = data.file || 'known_hosts';
+      renderKnownHosts(data.hosts || []);
+    } catch (e) {
+      hostsEl.textContent = 'Could not read the known hosts file.';
+    }
+  }
+
+  function renderKnownHosts(rows) {
+    hostsEl.innerHTML = '';
+
+    if (!rows.length) {
+      const empty = document.createElement('p');
+      empty.className = 'settings-section-hint';
+      empty.textContent = 'Nothing trusted yet. The first SSH connection to a '
+        + 'device records the key it answered with.';
+      hostsEl.appendChild(empty);
+      return;
+    }
+
+    rows.forEach(row => hostsEl.appendChild(hostRow(row)));
+  }
+
+  function hostRow(host) {
+    const el = document.createElement('div');
+    el.className = 'setting-row setting-row-stack key-row';
+
+    const head = document.createElement('div');
+    head.className = 'key-head';
+
+    const name = document.createElement('span');
+    name.className = 'setting-label key-name';
+    name.textContent = host.host;
+
+    const kind = document.createElement('span');
+    kind.className = 'key-tag';
+    kind.textContent = host.key_type;
+
+    head.append(name, kind);
+    el.appendChild(head);
+
+    // The same row the keys above use, so a fingerprint looks like a
+    // fingerprint wherever it appears — including the one in the warning.
+    el.appendChild(fingerprint('SHA256', host.fingerprint));
+
+    const actions = document.createElement('div');
+    actions.className = 'key-actions';
+    const forget = button('Forget', () => forgetHost(host),
+      'The next connection to this device is treated as the first');
+    forget.classList.add('key-danger');
+    actions.appendChild(forget);
+    el.appendChild(actions);
+    return el;
+  }
+
+  async function forgetHost(host) {
+    const ok = await window.shellmateDialog.confirm({
+      title: `Forget the host key for ${host.host}?`,
+      body:  'The next connection to it is treated as a first connection: '
+             + 'whatever key it answers with is trusted and recorded, with no '
+             + 'warning. Do this when you know the device has genuinely '
+             + 'changed, not to get past a warning you cannot explain.',
+      confirmLabel: 'Forget it',
+      danger: true,
+    });
+    if (!ok) return;
+
+    try {
+      await fetch('/api/keys/known-hosts/forget', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ host: host.host }),
+      });
+      report(`Forgot the host key for ${host.host}.`);
+    } catch (e) {
+      report('Could not rewrite the known hosts file.', true);
+    }
+    await loadKnownHosts();
   }
 
   function button(label, onClick, title) {

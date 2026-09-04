@@ -46,7 +46,8 @@ from backend import auth, config_archive, desktop, paths
 from backend import groups as groups_module
 from backend import schemes as schemes_module
 from backend.configs import capture_config, diff_snapshots, drift_report
-from backend.connections.base import ConnectionError_, ConnectionParams, InteractiveRequired
+from backend.connections.base import (ConnectionError_, ConnectionParams,
+                                      HostKeyChanged, InteractiveRequired)
 from backend.connections import sftp
 from backend.connections.manager import SessionManager
 from backend.connections.serial_handler import available_ports
@@ -64,7 +65,7 @@ from backend import support
 from backend import advanced as advanced_settings
 from backend.advanced import get as advanced_setting
 from backend import keys as ssh_keys
-from backend.onboard import as_chosen, summarise
+from backend.onboard import OnConnectScript, as_chosen, summarise
 from backend.session import outbound
 from backend.session.redact import redact
 from backend.session.transcript import detect_hostname
@@ -424,6 +425,10 @@ class CreateSessionRequest(BaseModel):
     # Answers to a keyboard-interactive challenge from a previous attempt
     # (#406). Never stored; the vault does not want a one-time code.
     interactive_answers: list[str] = []
+    # The user's answer to "this device's host key has changed" (#528). Only
+    # ever True on the retry that follows the 409, and only because somebody
+    # read two fingerprints and said the new one is the device.
+    trust_new_host_key: bool = False
 
     def to_params(self) -> ConnectionParams:
         """Convert to the transport-layer parameter object."""
@@ -562,6 +567,16 @@ async def create_session(request: CreateSessionRequest) -> dict:
         # Every transport blocks while connecting, so run it off the event loop.
         session = await asyncio.to_thread(session_manager.create_session, params,
                                           request.profile_id)
+    except HostKeyChanged as exc:
+        # Not a failure either: the device is not the one we trusted (#528).
+        # 409 with both fingerprints; the interface asks, and the retry
+        # carries `trust_new_host_key`. Never accepted here — a tool that
+        # decides this on the user's behalf is quieter than PuTTY on the one
+        # warning every engineer has been saved by.
+        logger.warning("Host key changed for %s: %s is now %s",
+                       exc.hostname, exc.old_fingerprint, exc.new_fingerprint)
+        raise HTTPException(status_code=409,
+                            detail={"host_key": exc.as_dict()}) from exc
     except InteractiveRequired as exc:
         # Not a failure: the device wants an answer only the user has (#406).
         # 409 with the prompts; the interface asks and posts again with
@@ -1222,7 +1237,11 @@ async def reveal_credential(profile_id: str, field: str) -> dict:
     than GET so it cannot be reached by a link, a prefetch or a cache.
     """
     def _read() -> dict:
-        if field not in CREDENTIAL_FIELDS:
+        # STORED_SECRETS, not CREDENTIAL_FIELDS: the enable password (#532) is
+        # a secret kept for a connection without being one it logs in with,
+        # and a plaintext credential the panel lists but refuses to show is a
+        # button that does nothing.
+        if field not in profiles_module.STORED_SECRETS:
             raise HTTPException(status_code=404, detail=f"No such credential: {field}")
 
         where = profiles_module.credential_fields(profile_id).get(field, "")
@@ -1930,6 +1949,28 @@ async def set_profile_forwards(profile_id: str, request: ProfileForwardsRequest)
         return await asyncio.to_thread(profiles_module.replace_forwards, profile_id, request.forwards)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+class OnConnectRequest(BaseModel):
+    """Body for PUT /api/profiles/{profile_id}/on-connect."""
+    on_connect: list[str] = []
+
+
+@app.put("/api/profiles/{profile_id}/on-connect")
+async def set_profile_on_connect(profile_id: str, request: OnConnectRequest) -> dict:
+    """
+    Replace the commands a saved connection sends itself on connect (#532).
+
+    Its own endpoint rather than part of a profile save, because saving
+    merges and never overwrites with nothing — so emptying the box would
+    silently leave the old script in place.
+    """
+    try:
+        profile = await asyncio.to_thread(
+            profiles_module.replace_on_connect, profile_id, request.on_connect)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "ok", "on_connect": profile.get("on_connect", [])}
 
 
 class TagsRequest(BaseModel):
@@ -3671,6 +3712,30 @@ async def key_delete(request: KeyPathRequest) -> dict:
     return {"removed": removed}
 
 
+@app.get("/api/keys/known-hosts")
+async def list_known_hosts() -> dict:
+    """The host keys ShellMate has decided to trust (#528)."""
+    rows = await asyncio.to_thread(ssh_keys.known_hosts)
+    return {"hosts": rows, "file": str(ssh_keys.known_hosts_path())}
+
+
+class ForgetHostRequest(BaseModel):
+    """Body for POST /api/keys/known-hosts/forget."""
+    host: str = ""
+
+
+@app.post("/api/keys/known-hosts/forget")
+async def forget_known_host(request: ForgetHostRequest) -> dict:
+    """
+    Forget one host's keys, so the next connection is a first connection.
+
+    The way back from having trusted the wrong thing, and the way to clear an
+    entry for a device that has been decommissioned.
+    """
+    removed = await asyncio.to_thread(ssh_keys.forget_host, request.host)
+    return {"status": "ok", "removed": removed}
+
+
 class CertificateRequest(BaseModel):
     """Body for POST /api/keys/certificate."""
 
@@ -4603,6 +4668,138 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
             await asyncio.to_thread(
                 handler.send, (summary["paging_command"] + "\r").encode()
             )
+            # The on-connect script must not follow it into a device that has
+            # not answered it yet (#532). `idle_at_prompt` still describes the
+            # prompt this command was sent at until output arrives.
+            session["_on_connect_wait"] = True
+
+    async def maybe_run_on_connect() -> None:
+        """
+        Send the saved connection's own lines, once, after onboarding (#532).
+
+        The first thirty seconds on every device are the same thirty seconds,
+        so a connection may carry its own: `enable`, `terminal monitor`, a
+        screen width, entering a VDOM. It is also the only honest answer for
+        the platforms where paging-off is per-user or per-context and cannot
+        be a platform default.
+
+        Runs on the same idle path `drive_live_capture` does, and under the
+        same two rules onboarding obeys. **One line per prompt**: the device
+        must be idle at a bare prompt, with nothing half-typed and no
+        guardrail question outstanding, before anything else is sent.
+        **Through the pipeline**: a `reload` written into a script is held for
+        confirmation exactly as one that was typed, and an alias in a script
+        expands exactly as it would from the keyboard.
+        """
+        if not session.get("_on_connect_ready"):
+            # Nothing before the device has been identified and the paging
+            # command has gone out: two things typing into the session at
+            # once is the collision this whole area exists to avoid.
+            if not session["onboarder"].done:
+                return
+            session["_on_connect_ready"] = True
+            lines = await asyncio.to_thread(
+                profiles_module.on_connect_for, session.get("profile_id") or "")
+            script = OnConnectScript(lines=lines) if lines else None
+            session["on_connect"] = script
+            paging_just_sent = session.pop("_on_connect_wait", False)
+            if script is not None:
+                if paging_just_sent:
+                    script.wait_for_device()
+                # Announced before anything is sent, not after. The rule is
+                # that the user can account for everything that reached the
+                # device, and a list that arrives afterwards is a receipt
+                # rather than a warning.
+                logger.info("Running the on-connect script for %s: %s",
+                            session.get("hostname") or session_id[:8], lines)
+                await websocket.send_text(json.dumps({
+                    "type": "on_connect", "state": "start", "lines": lines}))
+
+        script = session.get("on_connect")
+        if script is None or script.done:
+            return
+
+        if not handler.is_connected:
+            script.finish("disconnected")
+            await _on_connect_finished(script)
+            return
+
+        pipeline = session["pipeline"]
+        at_prompt = bool(getattr(session["transcript"], "idle_at_prompt", False)) \
+            and not pipeline.current_line and not pipeline.held_commands
+
+        line = script.next_line(at_prompt)
+        if line is None:
+            if script.done:
+                await _on_connect_finished(script)
+            return
+
+        outbound = pipeline.process(line + "\r")
+        if outbound:
+            await asyncio.to_thread(
+                handler.send, outbound.encode("utf-8", errors="replace"))
+
+        # The guardrail held it. Same message the keyboard path sends, so the
+        # same dialog appears — and the script waits, because held_commands
+        # keeps at_prompt False until somebody answers.
+        for held in pipeline.newly_held:
+            await websocket.send_text(json.dumps({
+                "type":    "guardrail_prompt",
+                "command": held,
+                "device":  session.get("hostname")
+                           or session.get("display_label") or "this device",
+            }))
+
+        expansion = pipeline.last_expansion
+        if expansion:
+            await websocket.send_text(json.dumps({
+                "type": "alias_expanded",
+                "typed": expansion[0], "sent": expansion[1]}))
+
+        await note_pending(
+            session["alerts"].observe_command(command)
+            for command in pipeline.completed_commands
+        )
+
+    async def _on_connect_send_enable(script) -> None:
+        """
+        Answer the `Password:` an `enable` produced.
+
+        The password is read from the vault here, at the moment it is typed,
+        and held nowhere else — not on the session, not on the connection
+        parameters, which are scrubbed the instant authentication succeeds.
+
+        Sent raw rather than through the pipeline, exactly as the paging
+        command is. A password is not a command: put through the pipeline it
+        would be assembled into a line, matched against the alias table and
+        the dangerous-command list, and published as a command that was run —
+        which is how a secret ends up in a transcript.
+        """
+        secret = await asyncio.to_thread(
+            profiles_module.enable_password, session.get("profile_id") or "")
+        if not secret:
+            # Said out loud rather than left as a session that quietly never
+            # became privileged, with the rest of the script failing one
+            # unhelpful line at a time.
+            script.finish("no-enable-password")
+            await _on_connect_finished(script)
+            return
+        await asyncio.to_thread(
+            handler.send, (secret + "\r").encode("utf-8", errors="replace"))
+        script.answered()
+        await websocket.send_text(json.dumps({
+            "type": "on_connect", "state": "enable"}))
+
+    async def _on_connect_finished(script) -> None:
+        """Say what was sent and what was not. The second half is the point."""
+        summary = script.summary()
+        if summary["skipped"] or summary["reason"]:
+            logger.info("On-connect script stopped after %d of %d lines (%s)",
+                        len(summary["sent"]),
+                        len(summary["sent"]) + len(summary["skipped"]),
+                        summary["reason"] or "finished")
+        await websocket.send_text(json.dumps({
+            "type": "on_connect", "state": "done", **summary}))
 
     async def maybe_keep_alive() -> None:
         """
@@ -4759,6 +4956,14 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         await drive_live_capture()
                     except Exception as exc:
                         logger.warning("Live capture failed for %s: %s", session_id, exc)
+                    # And the saved connection's own lines (#532), for the
+                    # same reason: idle at a prompt is the only safe moment
+                    # to type into somebody's session.
+                    try:
+                        await maybe_run_on_connect()
+                    except Exception as exc:
+                        logger.warning("On-connect script failed for %s: %s",
+                                       session_id, exc)
                     try:
                         await maybe_keep_alive()
                     except Exception as exc:
@@ -4867,6 +5072,18 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     await maybe_onboard()
                 except Exception as exc:
                     logger.warning("Onboarding failed for session %s: %s", session_id, exc)
+
+                # The on-connect script watches output for two things: that
+                # the device answered the last line at all, and the
+                # `Password:` an `enable` produces (#532).
+                try:
+                    running = session.get("on_connect")
+                    if running is not None and running.observe(text):
+                        await _on_connect_send_enable(running)
+                    await maybe_run_on_connect()
+                except Exception as exc:
+                    logger.warning("On-connect script failed for %s: %s",
+                                   session_id, exc)
 
                 # The device's own word on what it is about to do. This is the
                 # authoritative timing and re-synchronises the countdown, so it

@@ -64,6 +64,11 @@
       note(`${e.detail.typed}  →  ${e.detail.sent}`, 'alias');
     });
 
+    // The saved connection's own lines (#532). Announced for exactly the
+    // reason the paging command is: a session an engineer has to account for
+    // afterwards must not contain commands nobody told them about.
+    window.addEventListener('shellmate:on-connect', (e) => announceScript(e.detail));
+
     // Tab switches are announced by tabs.js (as "mate:tab-switched"); follow
     // them so the status bar always describes the tab actually on screen.
     window.addEventListener('mate:tab-switched', (e) => {
@@ -250,6 +255,62 @@
       default:
         note(`identified ${info.profile_name} from ${from}${aliasSuffix(info)}`,
              'device');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // The on-connect script (#532)
+  // ---------------------------------------------------------------------------
+
+  /** Why a script stopped early, in the words somebody can act on. */
+  const SCRIPT_STOPPED = {
+    'no-prompt':
+      'the device stopped coming back to a prompt, so the rest was not sent',
+    'no-password-prompt':
+      'the device never asked for an enable password, so the rest was not sent',
+    'no-enable-password':
+      'no enable password is saved for this connection, so the rest was not sent',
+    'disconnected':
+      'the session dropped, so the rest was not sent',
+  };
+
+  function announceScript(info) {
+    const quoted = list => list.map(c => `"${c}"`).join(', ');
+
+    if (info.state === 'start') {
+      const lines = info.lines || [];
+      if (!lines.length) return;
+      note(`this connection has ${lines.length} on-connect command`
+           + `${lines.length === 1 ? '' : 's'}: ${quoted(lines)} — sending `
+           + 'them one at a time, at the prompt', 'device');
+      return;
+    }
+
+    if (info.state === 'enable') {
+      // Named for what it was, not what it said. The password itself is
+      // never in this message, never in the terminal, and never leaves the
+      // backend — but that something was typed has to be visible.
+      note('sent the saved enable password at the device\'s prompt', 'device');
+      return;
+    }
+
+    if (info.state !== 'done') return;
+
+    const sent = info.sent || [];
+    const skipped = info.skipped || [];
+
+    // The half that matters. A script that stopped after two of five lines
+    // reads as complete success unless somebody says otherwise — the same
+    // mistake the paging note used to make.
+    if (skipped.length || info.reason) {
+      note(`on-connect: sent ${quoted(sent) || 'nothing'} — `
+           + `${SCRIPT_STOPPED[info.reason] || 'the rest was not sent'}`
+           + `${skipped.length ? ` (${quoted(skipped)})` : ''}`, 'device');
+      return;
+    }
+
+    if (sent.length) {
+      note(`on-connect: sent ${quoted(sent)}`, 'device');
     }
   }
 

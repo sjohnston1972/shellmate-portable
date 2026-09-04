@@ -1216,6 +1216,107 @@ def test_a_bulk_edit_can_attach_and_detach_a_shared_credential() -> None:
           all("credential_ref" not in p for p in profiles._load()),
           str(profiles._load()))
 
+def test_the_on_connect_script() -> None:
+    """
+    A saved connection's own lines, and the password one of them may need.
+
+    The split is the point: the commands live on the profile in plain sight,
+    because being able to read what a connection types into a device is most
+    of what makes it safe. The enable password does not, and `SECRET_FIELDS`
+    is what stops a caller putting it there by accident.
+    """
+    print(chr(10) + "-- On-connect commands --")
+    reset()
+
+    saved = profiles.save_profile({
+        "name": "core-sw-01", "hostname": "10.1.1.1", "username": "neteng",
+        "on_connect": ["enable", "  terminal monitor  ", "", "# a note",
+                       "terminal width 200"],
+    })
+    check("a script is saved with the connection",
+          saved["on_connect"] == ["enable", "terminal monitor", "terminal width 200"],
+          str(saved.get("on_connect")))
+    check("  and blank lines and comments are dropped on the way in",
+          "# a note" not in saved["on_connect"])
+
+    check("it reads back for the session that runs it",
+          profiles.on_connect_for(saved["id"])
+          == ["enable", "terminal monitor", "terminal width 200"])
+    check("a connection with no profile has no script",
+          profiles.on_connect_for("") == [])
+
+    # Bounded, because this types into a live session. A configuration push
+    # is a different feature with a preview and a way back.
+    long_script = profiles.clean_on_connect([f"command {n}" for n in range(40)])
+    check("a script is capped", len(long_script) == profiles.MAX_ON_CONNECT_LINES,
+          str(len(long_script)))
+    check("  and so is a line",
+          len(profiles.clean_on_connect(["x" * 500])[0])
+          == profiles.MAX_ON_CONNECT_LENGTH)
+    check("a line carrying a carriage return cannot become two commands",
+          profiles.clean_on_connect(["show run\rreload"]) == ["show runreload"],
+          str(profiles.clean_on_connect(["show run\rreload"])))
+
+    # Emptying the box has to mean something. This is why it is its own
+    # function rather than a profile save, which merges and never overwrites
+    # with nothing.
+    profiles.replace_on_connect(saved["id"], [])
+    check("clearing a script clears it", profiles.on_connect_for(saved["id"]) == [])
+
+    profiles.replace_on_connect(saved["id"], ["enable"])
+    check("and replacing it replaces it",
+          profiles.on_connect_for(saved["id"]) == ["enable"])
+
+
+def test_the_enable_password_never_reaches_the_profile() -> None:
+    """
+    The enable password is a secret, and profiles.json is not for secrets.
+
+    It is also deliberately *not* a login credential: a device with an enable
+    password and no login password cannot connect unattended, and reporting
+    it as ready would send somebody clicking a tile that opens a dialog.
+    """
+    print(chr(10) + "-- The enable password --")
+    reset()
+
+    check("it is refused at the write, not trusted to be absent",
+          "enable_password" in profiles.SECRET_FIELDS)
+
+    saved = profiles.save_profile({
+        "name": "asa", "hostname": "10.2.2.2", "username": "neteng",
+        "on_connect": ["enable"], "enable_password": "sekrit",
+    })
+    check("saving a profile with one strips it", "enable_password" not in saved,
+          str(sorted(saved)))
+    on_disk = (_temp / "profiles.json").read_text(encoding="utf-8")
+    check("  and it is nowhere in the file", "sekrit" not in on_disk)
+
+    profiles.set_credential(saved["id"], "enable_password", "sekrit", "plaintext")
+    check("it can be stored per field like any other credential",
+          profiles.enable_password(saved["id"]) == "sekrit")
+    check("  and is listed as one",
+          profiles.credential_fields(saved["id"]).get("enable_password") == "plaintext")
+    check("  under a name that says what it is",
+          profiles.FIELD_LABELS["enable_password"] == "Enable password")
+
+    # An enable password is not a login. A connection carrying only one must
+    # still ask for a password when it is opened.
+    check("it does not make a connection look ready to open",
+          not profiles.has_credentials(saved["id"]),
+          "a device with only an enable password is not a device you can "
+          "connect to unattended")
+
+    # The bug this guards: save_plaintext_credentials() rewrites a profile's
+    # whole entry, so remembering a login password would have thrown the
+    # enable password away as a side effect.
+    profiles.save_plaintext_credentials(saved["id"], {"password": "login"})
+    check("remembering the login password does not lose the enable password",
+          profiles.enable_password(saved["id"]) == "sekrit")
+
+    profiles.forget_credentials(saved["id"])
+    check("and forgetting a connection's credentials forgets it too",
+          profiles.enable_password(saved["id"]) == "")
+
 
 def main() -> int:
     print("\n" + "=" * 52)
@@ -1256,7 +1357,9 @@ def main() -> int:
                  test_a_bulk_edit_leaves_alone_what_it_was_not_given,
                  test_a_bulk_edit_refuses_secrets_and_what_the_device_said,
                  test_a_bulk_edit_reports_a_merge_rather_than_making_one,
-                 test_a_bulk_edit_can_attach_and_detach_a_shared_credential):
+                 test_a_bulk_edit_can_attach_and_detach_a_shared_credential,
+                 test_the_on_connect_script,
+                 test_the_enable_password_never_reaches_the_profile):
         try:
             test()
         except Exception as exc:

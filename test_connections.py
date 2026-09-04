@@ -439,9 +439,14 @@ def test_secrets_are_scrubbed() -> None:
 
     from backend.profiles import SECRET_FIELDS, save_profile
     check(
-        "profile secret blocklist covers all credential fields",
+        "profile secret blocklist covers every secret a connection holds",
+        # The enable password (#532) is not a login credential — it is not on
+        # ConnectionParams and is never spread onto one — but it is a secret
+        # kept against a saved connection, so profiles.json must refuse it
+        # exactly as it refuses the other four.
         SECRET_FIELDS == {"password", "private_key_passphrase",
-                          "jump_password", "jump_private_key_passphrase"},
+                          "jump_password", "jump_private_key_passphrase",
+                          "enable_password"},
         f"got {SECRET_FIELDS}",
     )
 

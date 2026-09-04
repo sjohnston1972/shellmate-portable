@@ -822,13 +822,21 @@
   const failedRecently = new Set();
 
   /**
-   * POST /api/sessions, answering a keyboard-interactive challenge (#406).
+   * POST /api/sessions, answering whatever the connection stops to ask.
    *
-   * A 409 carrying `interactive` means the device asked something only the
-   * user can answer — a one-time code, a second factor. This puts the
-   * prompts up as a small form and posts again with the answers, up to
-   * three rounds, so every caller gets MFA for free. Resolves to
-   * `{ response, data }` exactly as a plain fetch would.
+   * Two things arrive as a 409 rather than as a failure, and both are
+   * questions only the person at the keyboard can answer:
+   *
+   *   `interactive` — the device wants a one-time code or a second factor
+   *     (#406). The prompts go up as a small form and the attempt is made
+   *     again with the answers.
+   *   `host_key` — the device is not the one we trusted (#528). Both
+   *     fingerprints go up, and only an explicit "trust the new key" makes
+   *     the attempt again.
+   *
+   * Three rounds, so a device that asks both gets both. Resolves to
+   * `{ response, data }` exactly as a plain fetch would, which is what gives
+   * every caller — tile, dialog, palette — the same handling for free.
    */
   async function postSession(payload) {
     let body = Object.assign({}, payload);
@@ -839,10 +847,22 @@
         body:    JSON.stringify(body),
       });
       const data = await response.json().catch(() => ({}));
-      const ask = response.status === 409 && data.detail && data.detail.interactive;
-      if (!ask) return { response, data };
+      const detail = (response.status === 409 && data.detail) || null;
 
-      const answers = await askInteractive(data.detail.interactive, body.hostname);
+      if (detail && detail.host_key) {
+        const trusted = await askHostKey(detail.host_key);
+        if (!trusted) {
+          return { response: { ok: false, status: 409 },
+                   data: { detail: 'Cancelled: the host key had changed, so '
+                                 + 'nothing was sent to the device.' } };
+        }
+        body = Object.assign({}, body, { trust_new_host_key: true });
+        continue;
+      }
+
+      if (!(detail && detail.interactive)) return { response, data };
+
+      const answers = await askInteractive(detail.interactive, body.hostname);
       if (answers === null) {
         return { response: { ok: false, status: 409 },
                  data: { detail: 'Cancelled: the device was still asking.' } };
@@ -851,6 +871,40 @@
     }
     return { response: { ok: false, status: 409 },
              data: { detail: 'The device kept asking after three attempts.' } };
+  }
+
+  /**
+   * The one warning every engineer has been saved by at least once (#528).
+   *
+   * Deliberately a dialog and not a toast: the connection has stopped,
+   * nothing has been sent to the device, no password has been offered, and
+   * the only way past is an answer. Both fingerprints are shown in full
+   * because "the key changed" is not something anybody can act on, and
+   * "SHA256:… became SHA256:…" is — it can be read out to whoever is
+   * standing next to the device.
+   *
+   * Trusting is offered plainly rather than grudgingly: an RMA or a re-image
+   * changes the key, and on the estate ShellMate is built for that is the
+   * likely answer. It is still the button styled as the destructive one.
+   */
+  async function askHostKey(info) {
+    const where = info.port && info.port !== 22
+      ? `${info.hostname}:${info.port}` : (info.hostname || 'this device');
+    return Boolean(await window.shellmateDialog.confirm({
+      title: `The host key for ${where} has changed`,
+      body:  'This is what you would expect after the device was replaced, '
+             + 're-imaged or upgraded. It is also what a machine sitting '
+             + 'between you and the device looks like. Nothing has been sent '
+             + 'to it, and no password has been offered.',
+      list: [
+        { text: info.old_fingerprint || 'unknown', detail: 'the key we trusted' },
+        { text: info.new_fingerprint || 'unknown', detail: 'what it offered just now' },
+      ],
+      note: info.key_type ? `Key type: ${info.key_type}` : '',
+      confirmLabel: 'Trust the new key',
+      cancelLabel:  'Cancel',
+      danger: true,
+    }));
   }
 
   /** Put the device's prompts to the user; null if they cancel. */
@@ -1190,8 +1244,54 @@
     _pendingCredentialRef = p.credential_ref || '';
     _applyPendingCredential();
 
+    // The connection's own logon script (#532). The enable password is
+    // deliberately not restored — nothing ever sends a stored secret back to
+    // the browser, and a blank box means "keep the one already saved".
+    setField('field-on-connect', (p.on_connect || []).join('\n'));
+    const enable = document.getElementById('field-enable-password');
+    if (enable) enable.value = '';
+
+    // Opened when there is something in it, so a script somebody saved is
+    // not hidden behind a drawer they have no reason to open.
+    const drawer = document.getElementById('on-connect-advanced');
+    if (drawer) drawer.open = Boolean((p.on_connect || []).length);
+
     // Nothing to open any more: the key form is its own connection type
     // rather than a drawer, so restoring a key profile shows its fields.
+  }
+
+  /** The on-connect script as typed, one command per line. */
+  function onConnectLines() {
+    const box = document.getElementById('field-on-connect');
+    if (!box) return [];
+    return box.value.split('\n').map(l => l.trim()).filter(Boolean);
+  }
+
+  /**
+   * Save the logon script, and the enable password it may need (#532).
+   *
+   * Two calls rather than one, because they go to two different places for
+   * one reason: the commands are not secret and belong on the profile where
+   * they can be read and diffed; the password is, and goes to the vault
+   * through the same endpoint every other credential uses.
+   */
+  async function saveOnConnect(profileId, payload, enablePassword) {
+    if (!profileId) return;
+    try {
+      await fetch(`/api/profiles/${profileId}/on-connect`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ on_connect: payload.on_connect || [] }),
+      });
+      if (enablePassword) {
+        await fetch(`/api/credentials/${profileId}/enable_password`, {
+          method:  'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ value: enablePassword,
+                                    storage: payload.credential_storage || 'vault' }),
+        });
+      }
+    } catch (_) { /* the connection is saved either way */ }
   }
 
   // -------------------------------------------------------------------------
@@ -1233,6 +1333,9 @@
       remember_credentials: !value('field-credential')
                             && (wantsPlain || Boolean(remember && remember.checked)),
       credential_storage:   wantsPlain ? 'plaintext' : 'vault',
+      // Belongs to the saved connection rather than to this session (#532);
+      // it rides along here so every caller of profileFrom() gets it.
+      on_connect:           onConnectLines(),
     };
 
     if (type === 'serial') {
@@ -1428,6 +1531,7 @@
       parity:           payload.parity || 'N',
       stop_bits:        payload.stop_bits || 1,
       flow_control:     payload.flow_control || 'none',
+      on_connect:       payload.on_connect || [],
     };
   }
 
@@ -1453,6 +1557,8 @@
       // already holds, and attaching it is the same call the connect path
       // makes.
       if (saved && saved.id) {
+        await saveOnConnect(saved.id, payload,
+                            (document.getElementById('field-enable-password') || {}).value || '');
         const ref = value('field-credential');
         if (ref) {
           await fetch(`/api/profiles/${saved.id}/credential-set`, {
@@ -1519,6 +1625,10 @@
         jump_private_key_passphrase: payload.jump_private_key_passphrase || '',
       };
       const wantsRemember = payload.remember_credentials;
+      // Read before hideConnectionDialog() resets the form, for the same
+      // reason the credentials above are.
+      const enablePassword =
+        (document.getElementById('field-enable-password') || {}).value || '';
       // Offered before the dialog closes, while the fields it prefills from
       // are still on screen (#161).
       const sharedName = wantsRemember
@@ -1532,7 +1642,8 @@
       }
 
       await autoSaveProfile(payload, wantsRemember, credentials,
-                            payload.credential_storage, sharedName);
+                            payload.credential_storage, sharedName,
+                            enablePassword);
 
     } catch (err) {
       showError(err.message || 'Could not connect. Check the address and credentials.');
@@ -1575,7 +1686,7 @@
   }
 
   async function autoSaveProfile(payload, wantsRemember, credentials, storage,
-                                 sharedName) {
+                                 sharedName, enablePassword) {
     try {
       // No duplicate check here any more. save_profile() returns the existing
       // profile rather than appending a second one, so posting unconditionally
@@ -1588,6 +1699,14 @@
         body:    JSON.stringify(profileFrom(payload)),
       });
       if (created.ok) profile = await created.json();
+
+      // The logon script and its enable password (#532). Attached here
+      // rather than in the session payload because they belong to the saved
+      // connection: this session is already open, and the script runs from
+      // the next time it is opened.
+      if (profile && profile.id) {
+        await saveOnConnect(profile.id, payload, enablePassword);
+      }
 
       // A first-time connection has no profile id when it starts, so the
       // backend had nowhere to file the credentials. Now that the profile

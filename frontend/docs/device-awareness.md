@@ -126,6 +126,21 @@ corner says the setting is off rather than implying the device refused —
 "nothing was sent" has several possible causes and they are not
 interchangeable.
 
+### Sends the connection's own lines
+
+A saved connection can carry an **on-connect script**: the four or five
+commands you type on every device before you start work. `enable`,
+`terminal monitor`, a screen width, entering a VDOM or a context. See
+*On-connect commands* on the [Connecting](#connecting) page.
+
+It runs after paging-off, under the same rules — one line per prompt, each
+echoed into the session, the whole list announced before anything goes out,
+and anything destructive still held for confirmation.
+
+It is also the honest answer for the platforms where paging-off is per user
+or per context and cannot be a platform default: FortiOS and MikroTik have
+nothing correct for ShellMate to send, and a connection does.
+
 ### Picks the right commands
 
 Retrieving a running configuration is `show running-config` on IOS,

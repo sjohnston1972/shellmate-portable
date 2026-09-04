@@ -98,6 +98,17 @@ CREDENTIAL_FIELDS = (
     "jump_private_key_passphrase",
 )
 
+#: Every secret that may be stored against a profile, login or not.
+#:
+#: The enable password (#532) is one ShellMate holds and is *not* one it can
+#: log in with, so it is deliberately outside CREDENTIAL_FIELDS: a device with
+#: an enable password and no login password must not report itself as ready to
+#: connect, and a reconnect that re-saves the login credentials must not blank
+#: it. Everything that works on a stored secret one field at a time — listing,
+#: setting, forgetting, moving into the vault — works on this wider set,
+#: because those all mean "a secret kept for this connection".
+STORED_SECRETS = CREDENTIAL_FIELDS + ("enable_password",)
+
 
 def _credential_key(owner: str, field: str) -> str:
     """
@@ -429,6 +440,28 @@ def load_credentials(profile_id: str) -> dict:
     return _read_credentials(owner)
 
 
+def enable_password(profile_id: str) -> str:
+    """
+    The enable password saved for a profile, or "" (#532).
+
+    Deliberately its own function rather than a field in
+    :func:`load_credentials`. That result is spread onto ``ConnectionParams``
+    at connect time, and params are scrubbed the moment authentication
+    succeeds — so an enable password carried there would either be gone by
+    the time the on-connect script needs it, or be kept alive in the one
+    structure that exists to stop holding secrets. This reads the vault at
+    the moment the line is typed and holds nothing.
+
+    Resolves a shared credential the same way everything else does, so a set
+    covering forty devices can carry the enable password for all of them.
+    """
+    owner = _resolve_owner(profile_id)
+    value = vault.get(_credential_key(owner, "enable_password"))
+    if value:
+        return value
+    return _load_plaintext().get(owner, {}).get("enable_password", "")
+
+
 def _read_credentials(owner: str) -> dict:
     """Read one owner's credentials directly, without resolving a reference."""
     out = {}
@@ -437,6 +470,18 @@ def _read_credentials(owner: str) -> dict:
         if value:
             out[field] = value
     return out or _load_plaintext().get(owner, {})
+
+
+def _can_log_in_with(entry: dict | None) -> bool:
+    """
+    Whether a plaintext entry holds something to authenticate *with*.
+
+    Not "is the entry non-empty". An entry may hold only an enable password
+    (#532), which is a secret kept for the connection and not a way into it —
+    and a tile that reports itself ready to connect and then asks for a
+    password is a tile that lied.
+    """
+    return any((entry or {}).get(field) for field in CREDENTIAL_FIELDS)
 
 
 def _has_for_profile(profile: dict, plaintext: dict,
@@ -453,7 +498,7 @@ def _has_for_profile(profile: dict, plaintext: dict,
     profile_id = profile.get("id", "")
     if any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS):
         return True
-    if plaintext.get(profile_id):
+    if _can_log_in_with(plaintext.get(profile_id)):
         return True
 
     # Its groups' credential counts (#545): a connection that inherits one
@@ -471,7 +516,7 @@ def _storage_for_profile(profile: dict, plaintext: dict,
     profile_id = profile.get("id", "")
     if any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS):
         return "vault"
-    if plaintext.get(profile_id):
+    if _can_log_in_with(plaintext.get(profile_id)):
         return "plaintext"
 
     reference = _reference_for(profile, table)
@@ -480,7 +525,7 @@ def _storage_for_profile(profile: dict, plaintext: dict,
     owner = set_owner(reference)
     if any(vault.has(_credential_key(owner, f)) for f in CREDENTIAL_FIELDS):
         return "vault"
-    return "plaintext" if plaintext.get(owner) else ""
+    return "plaintext" if _can_log_in_with(plaintext.get(owner)) else ""
 
 
 def has_credentials(owner: str, profiles: list[dict] | None = None,
@@ -500,7 +545,8 @@ def has_credentials(owner: str, profiles: list[dict] | None = None,
 def _has_directly(owner: str, plaintext: dict | None = None) -> bool:
     if any(vault.has(_credential_key(owner, f)) for f in CREDENTIAL_FIELDS):
         return True
-    return bool((plaintext if plaintext is not None else _load_plaintext()).get(owner))
+    store = plaintext if plaintext is not None else _load_plaintext()
+    return _can_log_in_with(store.get(owner))
 
 
 def credential_storage(owner: str, profiles: list[dict] | None = None,
@@ -509,7 +555,8 @@ def credential_storage(owner: str, profiles: list[dict] | None = None,
     resolved = owner if owner.startswith("set:") else _resolve_owner(owner, profiles, plaintext)
     if any(vault.has(_credential_key(resolved, f)) for f in CREDENTIAL_FIELDS):
         return "vault"
-    if (plaintext if plaintext is not None else _load_plaintext()).get(resolved):
+    if _can_log_in_with(
+            (plaintext if plaintext is not None else _load_plaintext()).get(resolved)):
         return "plaintext"
     return ""
 
@@ -530,7 +577,7 @@ def forget_many(profile_ids) -> None:
     if not ids:
         return
     try:
-        vault.set_many({_credential_key(pid, f): "" for pid in ids for f in CREDENTIAL_FIELDS})
+        vault.set_many({_credential_key(pid, f): "" for pid in ids for f in STORED_SECRETS})
     except VaultError:
         pass
     data = _load_plaintext()
@@ -582,14 +629,22 @@ def save_plaintext_credentials(profile_id: str, values: dict) -> bool:
     kept = {f: values.get(f, "") for f in CREDENTIAL_FIELDS if values.get(f)}
     data = _load_plaintext()
 
-    if not kept:
+    # Anything stored here that is not a login credential survives (#532).
+    # This function rewrites a profile's entry wholesale, so an enable
+    # password saved from the credentials panel would have vanished the next
+    # time somebody reconnected with "remember" ticked — losing a secret as a
+    # side effect of saving one.
+    other = {f: v for f, v in data.get(profile_id, {}).items()
+             if f not in CREDENTIAL_FIELDS and v}
+
+    if not kept and not other:
         data.pop(profile_id, None)
         _write_plaintext(data)
         return False
 
-    data[profile_id] = kept
+    data[profile_id] = {**other, **kept}
     _write_plaintext(data)
-    return True
+    return bool(kept)
 
 
 @_synchronised
@@ -618,6 +673,9 @@ FIELD_LABELS = {
     "private_key_passphrase":      "Key passphrase",
     "jump_password":               "Jump host password",
     "jump_private_key_passphrase": "Jump host key passphrase",
+    # Not a login credential: what the on-connect script types at the
+    # `Password:` an `enable` produces (#532).
+    "enable_password":             "Enable password",
 }
 
 
@@ -638,7 +696,7 @@ def credential_fields(profile_id: str,
     store = _load_plaintext() if plaintext_store is None else plaintext_store
     plaintext = store.get(profile_id, {})
 
-    for field in CREDENTIAL_FIELDS:
+    for field in STORED_SECRETS:
         if vault.has(_credential_key(profile_id, field)):
             found[field] = "vault"
         elif plaintext.get(field):
@@ -660,7 +718,7 @@ def read_plaintext_credential(profile_id: str, field: str) -> str:
     value is sitting in a JSON file the user can open. Refusing would only
     send them to the text editor.
     """
-    if field not in CREDENTIAL_FIELDS:
+    if field not in STORED_SECRETS:
         raise ValueError(f"'{field}' is not a credential ShellMate stores.")
     return _load_plaintext().get(profile_id, {}).get(field, "")
 
@@ -677,7 +735,7 @@ def set_credential(profile_id: str, field: str, value: str, storage: str) -> str
 
     Returns where it ended up, or "" if it was cleared.
     """
-    if field not in CREDENTIAL_FIELDS:
+    if field not in STORED_SECRETS:
         raise ValueError(f"'{field}' is not a credential ShellMate stores.")
 
     if not value:
@@ -709,7 +767,7 @@ def set_credential(profile_id: str, field: str, value: str, storage: str) -> str
 @_synchronised
 def forget_credential(profile_id: str, field: str) -> bool:
     """Remove one credential from wherever it is. True if anything went."""
-    if field not in CREDENTIAL_FIELDS:
+    if field not in STORED_SECRETS:
         raise ValueError(f"'{field}' is not a credential ShellMate stores.")
 
     removed = _clear_vault_credential(profile_id, field)
@@ -754,7 +812,7 @@ def move_to_vault(profile_id: str) -> list[str]:
         return []
 
     entries = {_credential_key(profile_id, f): v for f, v in stored.items()
-               if f in CREDENTIAL_FIELDS and v}
+               if f in STORED_SECRETS and v}
     if not entries:
         return []
 
@@ -767,7 +825,7 @@ def move_to_vault(profile_id: str) -> list[str]:
     data = _load_plaintext()
     data.pop(profile_id, None)
     _write_plaintext(data)
-    return [f for f in stored if f in CREDENTIAL_FIELDS and stored[f]]
+    return [f for f in stored if f in STORED_SECRETS and stored[f]]
 
 
 @_synchronised
@@ -1134,6 +1192,60 @@ def profiles_tagged(tag: str, include_nested: bool = False) -> list[dict]:
             if matches(normalise_tags(p.get("tags")))]
 
 
+#: How many lines an on-connect script may hold, and how long each may be.
+#: Bounded because this types into a live session: a script is the first
+#: thirty seconds of every connection, not a configuration push, and an
+#: unbounded one pasted by accident would take a device apart a line at a
+#: time. The push pipeline (#407) is where a long change belongs.
+MAX_ON_CONNECT_LINES = 12
+MAX_ON_CONNECT_LENGTH = 200
+
+
+def clean_on_connect(lines) -> list[str]:
+    """
+    An on-connect script as stored: plain command lines, nothing else.
+
+    Blank lines go, `#` comments go, control characters go — a stored line
+    carrying a bare carriage return would send two commands from one row and
+    the interface would announce one of them.
+    """
+    out: list[str] = []
+    for raw in (lines or []):
+        line = "".join(ch for ch in str(raw) if ch.isprintable()).strip()
+        if not line or line.startswith("#"):
+            continue
+        out.append(line[:MAX_ON_CONNECT_LENGTH])
+        if len(out) >= MAX_ON_CONNECT_LINES:
+            break
+    return out
+
+
+def on_connect_for(profile_id: str) -> list[str]:
+    """The on-connect script a saved connection carries, or []."""
+    if not profile_id:
+        return []
+    profile = find_profile(profile_id)
+    return clean_on_connect((profile or {}).get("on_connect"))
+
+
+@_synchronised
+def replace_on_connect(profile_id: str, lines) -> dict:
+    """
+    Replace a profile's on-connect script (#532).
+
+    Its own endpoint rather than riding on a profile save, because a save
+    merges and never overwrites with nothing — so clearing the script by
+    emptying the box would silently do nothing.
+    """
+    profiles = _load()
+    profile = next((p for p in profiles if p.get("id") == profile_id), None)
+    if profile is None:
+        raise ValueError("Profile not found")
+    profile["on_connect"] = clean_on_connect(lines)
+    _save(profiles)
+    return profile
+
+
 def get_profiles() -> list[dict]:
     """
     Return saved profiles, each flagged with whether credentials are stored.
@@ -1186,6 +1298,11 @@ SECRET_FIELDS = {
     "private_key_passphrase",
     "jump_password",
     "jump_private_key_passphrase",
+    # The on-connect script is stored on the profile in plain sight, because
+    # a list of commands is not a secret and being able to read it is the
+    # point. The password it types at an `enable` prompt is (#532), and it
+    # goes to the vault like every other one.
+    "enable_password",
 }
 
 
@@ -1202,6 +1319,8 @@ def save_profile(fields: dict) -> dict:
     cleaned = {k: v for k, v in fields.items() if k not in SECRET_FIELDS}
     if "tags" in cleaned:
         cleaned["tags"] = normalise_tags(cleaned["tags"])
+    if "on_connect" in cleaned:
+        cleaned["on_connect"] = clean_on_connect(cleaned["on_connect"])
 
     profiles = _load()
 

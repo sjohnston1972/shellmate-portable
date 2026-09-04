@@ -2302,16 +2302,21 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
   padding: 8px 10px;
 }
 
-/* Collapsed-by-default advanced SSH options (key auth, jump host). Most
-   connections need none of it, so it stays out of the way until asked for. */
-#ssh-advanced {
+/* Collapsed-by-default drawers in the connection dialog: the advanced SSH
+   options (key auth, jump host) and the on-connect script (#532). Most
+   connections need neither, so both stay out of the way until asked for.
+   One set of rules rather than two, or the second drawer would be a second
+   opinion about what a drawer looks like. */
+#ssh-advanced,
+.conn-advanced {
   border: 1px solid rgba(70,69,85,0.4);
   border-radius: var(--radius-md);
   padding: 10px 12px;
   background: rgba(0,0,0,0.12);
 }
 
-#ssh-advanced > summary {
+#ssh-advanced > summary,
+.conn-advanced > summary {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 12px;
   font-weight: 600;
@@ -2323,26 +2328,31 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
   list-style: none;
 }
 
-#ssh-advanced > summary::-webkit-details-marker {
+#ssh-advanced > summary::-webkit-details-marker,
+.conn-advanced > summary::-webkit-details-marker {
   display: none;
 }
 
-#ssh-advanced > summary::before {
+#ssh-advanced > summary::before,
+.conn-advanced > summary::before {
   content: '▸';
   display: inline-block;
   margin-right: 6px;
   transition: transform 0.12s;
 }
 
-#ssh-advanced[open] > summary::before {
+#ssh-advanced[open] > summary::before,
+.conn-advanced[open] > summary::before {
   transform: rotate(90deg);
 }
 
-#ssh-advanced > summary:hover {
+#ssh-advanced > summary:hover,
+.conn-advanced > summary:hover {
   color: var(--on-surface);
 }
 
-#ssh-advanced[open] > summary {
+#ssh-advanced[open] > summary,
+.conn-advanced[open] > summary {
   margin-bottom: 12px;
 }
 
@@ -2351,7 +2361,8 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
    a row no longer line up. */
 #ssh-advanced > .form-group + .form-group,
 #ssh-advanced > .form-group + .form-row,
-#ssh-advanced > .form-row + .form-group {
+#ssh-advanced > .form-row + .form-group,
+.conn-advanced > .form-group + .form-group {
   margin-top: 12px;
 }
 

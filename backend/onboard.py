@@ -20,14 +20,21 @@ have to account for — is not one worth trusting.
 **Once only, and never mid-command.**  Onboarding waits for the device to
 reach a prompt, so the paging command cannot land in the middle of something
 the user is already typing.
+
+The same three rules govern :class:`OnConnectScript` at the foot of this
+module (#532) — the lines a saved connection sends itself once the paging
+command has gone out. Same file because it is the same decision made twice:
+what may be typed into somebody's session before they have touched it.
 """
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 
 from backend.fingerprint import Fingerprint, identify
 from backend.platforms import GENERIC, get_profile
+from backend.session.ansi import strip_ansi
 
 logger = logging.getLogger(__name__)
 
@@ -256,3 +263,210 @@ class Onboarder:
             f"; sending nothing ({summary['paging_skipped']})",
         )
         return summary
+
+
+# ---------------------------------------------------------------------------
+# The on-connect script (#532)
+#
+# The first thirty seconds on every device are the same thirty seconds:
+# `enable`, `terminal monitor`, a screen width, entering a VDOM or a context.
+# SecureCRT calls it a logon script and Netmiko calls it session_preparation();
+# both exist because people were typing the same four lines forty times a day.
+#
+# It is also the honest answer for the platforms where paging-off cannot be a
+# profile default — FortiOS and MikroTik set it per user or per context, so
+# the platform profile has nothing correct to send and the connection does.
+#
+# Everything here obeys the two rules onboarding obeys, for the same reasons:
+#
+# **Nothing is sent silently.** Every line is typed into the session where the
+# user can see it and the device echoes it, and the script is announced as a
+# whole — what will be sent, what was, and anything that was not.
+#
+# **Nothing is guessed.** A line goes out only when the device is idle at a
+# bare prompt with nothing half-typed, one line per prompt, and through the
+# outbound pipeline — so the dangerous-command guardrail still holds a
+# `reload` written into a script exactly as it holds one that was typed.
+# ---------------------------------------------------------------------------
+
+#: Give up on the rest of a script after this long with no prompt. A device
+#: that stops answering mid-script is a device the rest of the script must not
+#: be fired at the moment it comes back — thirty seconds later, into whatever
+#: the user has started doing.
+ON_CONNECT_DEADLINE = 20.0
+
+#: How long to wait for the `Password:` an `enable` usually produces. Bounded
+#: and answered once, exactly as telnet auto-login is: a prompt regex that
+#: stays armed will eventually match ordinary output and type a password into
+#: a live device.
+ENABLE_ANSWER_DEADLINE = 8.0
+
+#: The line that means "and then the enable password".
+_ENABLE_RE = re.compile(r"^(?:enable|en)(?:\s+\d+)?$", re.IGNORECASE)
+
+#: What a device asks when it wants that password. Anchored to the end of the
+#: output, because it is only ever tested against the tail of what has just
+#: arrived.
+_PASSWORD_RE = re.compile(r"pass(?:word|code|phrase)\s*:\s*$", re.IGNORECASE)
+
+
+@dataclass
+class OnConnectScript:
+    """
+    A saved connection's own lines, sent once, after onboarding.
+
+    Owns only the decision of *what to send next*; the session's read loop
+    owns the sending, because that is where the pipeline and the socket are.
+    """
+
+    lines: list[str] = field(default_factory=list)
+    started_at: float = field(default_factory=time.monotonic)
+
+    sent: list[str] = field(default_factory=list, init=False)
+    _index: int = field(default=0, init=False)
+    _done: bool = field(default=False, init=False)
+    _reason: str = field(default="", init=False)
+    _last_progress: float = field(default_factory=time.monotonic, init=False)
+
+    # Waiting on the `Password:` an `enable` produces, and the tail of output
+    # to test against. Both cleared the moment a prompt appears instead.
+    _awaiting_password: bool = field(default=False, init=False)
+    _asked_at: float = field(default=0.0, init=False)
+    _tail: str = field(default="", init=False)
+
+    # Whether the device has said anything since the last line went out.
+    #
+    # Without this the script races its own output. `idle_at_prompt` is only
+    # recomputed when output arrives, so in the half-second after a line is
+    # sent it still describes the prompt *before* it — and the next idle tick
+    # would fire the next line into a device that has not answered the first,
+    # which is the whole thing this feature must not do. True to begin with,
+    # because the first line is sent at a prompt the device printed itself.
+    _saw_output: bool = field(default=True, init=False)
+
+    @property
+    def done(self) -> bool:
+        return self._done
+
+    @property
+    def remaining(self) -> list[str]:
+        return list(self.lines[self._index:])
+
+    @property
+    def awaiting_password(self) -> bool:
+        """True while an `enable` is waiting for its password prompt."""
+        return self._awaiting_password
+
+    def finish(self, reason: str = "") -> None:
+        """Stop, with a reason the interface can state."""
+        if not self._done:
+            self._done = True
+            self._reason = reason
+
+    def next_line(self, at_prompt: bool, now: float | None = None) -> str | None:
+        """
+        The next line to send, or None if it is not time.
+
+        Args:
+            at_prompt: The device is idle at a bare prompt and nothing is
+                half-typed — the caller resolves that, because it is the only
+                thing holding both the transcript and the pipeline.
+        """
+        if self._done:
+            return None
+        clock = time.monotonic() if now is None else now
+
+        # Nothing is believed about the device until it has spoken since
+        # the last line. See _saw_output.
+        settled = at_prompt and self._saw_output
+
+        if settled:
+            # A prompt after `enable` means the device did not ask for a
+            # password — the session was privileged already. Carry on rather
+            # than sitting out the deadline.
+            self._awaiting_password = False
+
+        if self._awaiting_password:
+            if clock - self._asked_at > ENABLE_ANSWER_DEADLINE:
+                self._awaiting_password = False
+                self.finish("no-password-prompt")
+            return None
+
+        if self._index >= len(self.lines):
+            self.finish("")
+            return None
+
+        if not settled:
+            if clock - self._last_progress > ON_CONNECT_DEADLINE:
+                self.finish("no-prompt")
+            return None
+
+        line = self.lines[self._index]
+        self._index += 1
+        self._last_progress = clock
+        self._saw_output = False
+        self.sent.append(line)
+        if _ENABLE_RE.match(line):
+            self._awaiting_password = True
+            self._asked_at = clock
+            self._tail = ""
+        return line
+
+    def observe(self, text: str) -> bool:
+        """
+        Feed device output. True when an enable password should be sent now.
+
+        Every chunk goes through here while the script runs, because the
+        arrival of *anything* is what says the device has answered the last
+        line. The password half is only consulted while an `enable` is
+        outstanding, and it disarms itself the moment it says yes — one
+        answer per script, at a prompt we went looking for, rather than a
+        pattern left running for the life of the session.
+        """
+        if self._done:
+            return False
+        if text:
+            self._saw_output = True
+        if not self._awaiting_password:
+            return False
+        self._tail = (self._tail + strip_ansi(text or ""))[-200:]
+        if not _PASSWORD_RE.search(self._tail.rstrip("\r\n")):
+            return False
+        self._awaiting_password = False
+        self._tail = ""
+        self._last_progress = time.monotonic()
+        return True
+
+    def wait_for_device(self) -> None:
+        """
+        Hold everything until the device has spoken again.
+
+        Told rather than inferred, because the script does not do its own
+        sending. Anything typed into the session from outside this class
+        leaves `idle_at_prompt` describing the prompt *before* it for as long
+        as the device takes to answer — so the paging command at the end of
+        onboarding, and the enable password, both have to say so, or the
+        first line of the script goes out on top of them.
+        """
+        self._saw_output = False
+        self._last_progress = time.monotonic()
+
+    def answered(self) -> None:
+        """The caller has typed the enable password."""
+        self.wait_for_device()
+
+    def summary(self) -> dict:
+        """
+        What was sent, what was not, and why — for the interface and the log.
+
+        The skipped half is the half that matters, exactly as it is for the
+        paging command: a script that stopped after two of five lines because
+        the device never came back to a prompt reads as complete success
+        unless somebody says otherwise, and the user is the one who has to
+        account for the session afterwards.
+        """
+        return {
+            "sent":    list(self.sent),
+            "skipped": self.remaining,
+            "reason":  self._reason,
+        }

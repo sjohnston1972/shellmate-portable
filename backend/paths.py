@@ -174,6 +174,21 @@ def profiles_file() -> Path:
     return data_dir() / "profiles.json"
 
 
+def known_hosts_file() -> Path:
+    """
+    Path to the host keys ShellMate has decided to trust (#528).
+
+    Its own file, in the data directory, rather than the user's
+    ``~/.ssh/known_hosts``. Two reasons, and both are the portable rule:
+    a stick carried to another machine has to carry what it trusts with it,
+    and ShellMate must never rewrite a file OpenSSH also owns — an entry
+    added here is a decision made in ShellMate, and it stays where the rest
+    of ShellMate's data is. The system file is still *read*, so a host
+    already known to OpenSSH is already known here.
+    """
+    return data_dir() / "known_hosts"
+
+
 def logs_dir() -> Path:
     """Directory holding session log files.  Created on demand."""
     return data_dir() / "logs"

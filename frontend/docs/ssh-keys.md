@@ -335,6 +335,53 @@ password you also gave is never tried. ShellMate detects that case and says
 so. The behaviour is **Try keys in ~/.ssh** in Stockton, the advanced
 settings, and is off for any connection that has a password but no key.
 
+## Known hosts — the device's own key
+
+Everything above is about proving who *you* are. The device proves who it is
+the same way, with a host key of its own, and ShellMate keeps a record of the
+ones it has seen.
+
+**Trust on first use, warn on change.** The first time you reach a device its
+host key is recorded, without asking — an estate of forty lab switches that
+are re-imaged weekly would otherwise be forty questions nobody can answer, and
+a prompt everybody clicks through protects nothing. From then on, a device
+that answers with a *different* key stops the connection and asks:
+
+> **The host key for switch01 has changed**
+>
+> Was  `SHA256:9Xy…`  — the key we trusted
+> Now  `SHA256:1Qb…`  — what it offered just now
+
+That is the warning PuTTY raises and the one every engineer has been saved by
+at least once. It is what you would expect after an RMA, a re-image or an
+upgrade — and it is also exactly what a machine sitting between you and the
+device looks like. Only you can tell which, so **nothing is sent**: no
+password is offered and no command reaches the far end until you answer.
+
+If the device genuinely changed, choose **Trust the new key**. The new key
+replaces the old one and the change is written to the log, because trusting a
+changed key is a decision you may have to account for later.
+
+**Where the record lives.** `known_hosts` in your data folder, in OpenSSH's
+own format, so it travels with the stick and can be read, diffed or copied
+into `~/.ssh` if you want it there. Your own `~/.ssh/known_hosts` is read as
+well and **never written to** — a device that `ssh` already trusts is not
+asked about here.
+
+**Keys → Known hosts** lists everything trusted, one row per device and key
+type, with the fingerprint and a **Forget** button. Forgetting makes the next
+connection to that device a first connection: whatever key it answers with is
+trusted silently. Use it after a replacement you would rather not be asked
+about again — not to get past a warning you cannot explain.
+
+The fingerprint of the key the device actually used is on the tab's hover
+card, next to the address, so "what am I really connected to" has an answer
+without opening a panel.
+
+**On a managed estate** where every key is already known, **Unknown host
+keys** in Stockton can be set to `reject`. Then a device whose key is not in
+either store is refused outright rather than trusted on sight.
+
 ## Keys and a second factor
 
 A bastion that takes a key *and* a code asks for the code through the

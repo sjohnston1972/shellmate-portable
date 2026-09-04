@@ -63,6 +63,14 @@ Three things worth knowing:
 The same happens on a reconnect, and when a connection is opened straight
 from a tile.
 
+### When the device's key has changed
+
+The other thing that stops a connection to ask. ShellMate records the host key
+of every device the first time it reaches it, and warns when one changes —
+both fingerprints are shown, nothing is sent to the device, and the connection
+only continues if you say the new key is the device. See *Known hosts* on the
+[SSH keys](#ssh-keys) page for what it means and how to clear an entry.
+
 ### Jump hosts
 
 Fill in **Jump host** to reach a device through a bastion. This is the same
@@ -211,6 +219,64 @@ the same columns, so it re-imports as itself. It never contains a password:
 the credential column holds the name of a shared credential and nothing else.
 Cells beginning `=`, `+`, `-` or `@` are written with a leading apostrophe, so
 a device named after a spreadsheet formula cannot run when the file is opened.
+
+## On-connect commands
+
+The first thirty seconds on every device are the same thirty seconds. A saved
+connection can carry its own list of commands and type them for you: open the
+connection dialog, expand **On-connect commands**, and put one command on each
+line.
+
+```
+enable
+terminal monitor
+terminal width 200
+```
+
+They are sent once, after ShellMate has identified the device and turned
+paging off, and they run every time you open that connection. A connection you
+have not saved yet gets its script from the next time you open it, since there
+is nothing to save it against until it exists.
+
+**What you can rely on.** This is code typing into a live session, so it obeys
+the same rules the paging command does:
+
+- **One line per prompt.** Nothing is sent until the device is idle at a bare
+  prompt with nothing half-typed, and the next line waits for the device to
+  answer the last one. A device that stops coming back to a prompt stops the
+  script — the rest is not fired at it thirty seconds later, into whatever you
+  have started doing by then.
+- **Nothing silently.** The list is announced before the first line goes out,
+  each line is echoed into the session as though you had typed it, and when
+  the script ends you are told what was sent and — the half that matters —
+  what was not, and why.
+- **The guardrail still applies.** A `reload` in a script is held for
+  confirmation exactly as one you typed would be. So is an alias: it expands,
+  and the expansion is what is announced.
+- **It is bounded.** Twelve lines, 200 characters each. A long change belongs
+  in *Applying configuration* below, which has a preview and a way back.
+
+Blank lines are ignored, and so is anything starting with `#`, so you can
+leave yourself a note.
+
+### The enable password
+
+A line that is exactly `enable` is the one case ShellMate watches the output
+for. If the device answers with a password prompt, the **Enable password**
+saved with the connection is typed, once, within a few seconds — and then the
+watch is switched off for the rest of the session. A pattern left running
+would eventually match ordinary output and type a password into a live device.
+
+If the device comes straight back to a prompt instead — the session was
+privileged already — the script simply carries on. If no enable password is
+saved, the script stops there and says so, rather than working its way through
+the rest of the list at a device that never let it in.
+
+The password itself goes to the encrypted vault with your other credentials.
+It is never written to `profiles.json`, never sent back to the dialog, and
+never appears in the terminal, the transcript or the session log. What *is*
+recorded is that it was sent. Leave the box blank to keep the one already
+saved; **Settings → Credentials** lists it and can remove it.
 
 ## Remembering passwords
 

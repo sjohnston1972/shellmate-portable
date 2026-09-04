@@ -620,6 +620,30 @@
           <p class="field-hint" id="remember-hint"></p>
         </div>
 
+        <!-- ===== On-connect commands (#532) =====
+             The first thirty seconds on every device are the same thirty
+             seconds. Collapsed, because most connections need none of it. -->
+        <div class="conn-fields" data-for="ssh ssh-key telnet serial">
+          <details class="conn-advanced" id="on-connect-advanced">
+            <summary>On-connect commands</summary>
+            <p class="field-hint">Sent once, after ShellMate has identified the device and turned paging off. One line per prompt, each echoed into the session as though you had typed it, and the whole script announced before anything goes out.</p>
+
+            <div class="form-group">
+              <label for="field-on-connect">Commands</label>
+              <textarea id="field-on-connect" class="setting-input" rows="4"
+                        spellcheck="false"
+                        placeholder="enable&#10;terminal monitor&#10;terminal width 200"></textarea>
+              <p class="field-hint">Up to 12 lines. Blank lines and lines starting with <code>#</code> are ignored. A destructive command still stops and asks, exactly as one you typed would. Saved with the connection, so it runs every time — a connection you have not saved yet gets it from the next time you open it.</p>
+            </div>
+
+            <div class="form-group">
+              <label for="field-enable-password">Enable password</label>
+              <input type="password" id="field-enable-password" autocomplete="off" />
+              <p class="field-hint">Typed at the <code>Password:</code> an <code>enable</code> line produces, and nowhere else. Kept in the encrypted vault with your other credentials — never in <code>profiles.json</code>, and never sent back to this dialog. Leave it blank to keep the one already saved.</p>
+            </div>
+          </details>
+        </div>
+
         <!-- ===== SSH by key, or through a jump host =====
              Was a <details> under the password form: nine fields collapsed
              beneath four, so expanding it made the dialog about the
@@ -2318,6 +2342,16 @@ GigEth0/2     unassigned    YES unset  down     down
           <h3 class="settings-section-title">Your keys</h3>
           <p class="settings-section-hint">Kept in <code id="keys-folder"></code>, so they travel with your data folder. On Windows the file permissions are tightened as each is written — OpenSSH refuses a private key other accounts can read.</p>
           <div id="keys-list"></div>
+        </section>
+
+        <!-- The other half of SSH identity (#528): the keys devices proved
+             themselves with. Trusted on the first connection, warned about
+             when one changes. -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Known hosts</h3>
+          <p class="settings-section-hint">The host keys ShellMate has trusted, in <code id="known-hosts-file"></code>. A device is trusted the first time you reach it; if its key ever changes after that, the connection stops and asks. <strong>Forget</strong> makes the next connection to that device a first connection — use it after a genuine replacement you would rather not be asked about again.</p>
+          <p class="settings-section-hint">Your own <code>~/.ssh/known_hosts</code> is read as well and never written to, so a device OpenSSH already trusts is not asked about here.</p>
+          <div id="known-hosts-list"></div>
         </section>
       </div>
     </div>
