@@ -13,12 +13,17 @@ Everything between one prompt and the next is one command and its output.
 Doing that reliably rests on recognising a prompt across vendors, which is
 where the previous Cisco-only pattern fell down.  The regex below covers:
 
-    switch01#                     IOS / IOS-XE / NX-OS
+    switch01#                     IOS / IOS-XE / NX-OS / Aruba AOS-CX
     switch01(config-if)#          IOS configuration modes
     ASA-FW/pri/act#               ASA failover context
+    RP/0/RSP0/CPU0:edge-xr#       IOS-XR, node id and all
+    FGT-01 (global) #             FortiOS, with the current object named
     neteng@srx-edge>              Junos operational
     neteng@srx-edge#              Junos configuration
     admin@PA-VM(active)>          PAN-OS
+    <core-sw1>                    Huawei VRP user view
+    [core-sw1-GigabitEthernet0/0/1]  Huawei VRP system view
+    [admin@MikroTik] >            MikroTik RouterOS
     [edit interfaces]             Junos edit banner (not itself a prompt)
     neteng@jump:~$                Linux jump hosts
 
@@ -43,15 +48,35 @@ PROMPT_RE = re.compile(
     r"""
     ^[ \t]*                          # leading space some devices emit
     (?P<prompt>
+        # MikroTik RouterOS: [admin@MikroTik] > and, inside a menu,
+        # [admin@MikroTik] /ip address> — the path may carry a space.
+        (?:
+            \[[A-Za-z0-9._-]+@[A-Za-z0-9._-]{1,63}\]
+            [ \t]*(?:/[A-Za-z0-9 ._-]{0,60})?[ \t]*
+        )
+      | # Huawei VRP, which closes its own prompt rather than ending in a
+        # sigil: <core-sw1> is the user view, [core-sw1] the system view,
+        # and [core-sw1-GigabitEthernet0/0/1] an interface within it. The
+        # ~ and * are VRP's uncommitted-change markers.
+        (?P<vrp>
+            \[[~*]?[A-Za-z0-9._/-]{1,80}\]
+          | <[A-Za-z0-9._-]{1,63}>
+        )
+      | # Everything else: a hostname with the shapes vendors hang off it.
         (?:[A-Za-z0-9._-]+@)?        # optional user@ (Junos, PAN-OS, Linux)
         [A-Za-z0-9._-]{1,63}         # hostname
         (?:/[A-Za-z0-9._-]+)*        # ASA failover context: /pri/act
-        (?:\([^)\n]{0,40}\))?        # mode: (config), (config-if), (active)
-        (?::[^\s#>$%]{0,40})?        # Linux path after a colon
+                                     # IOS-XR node id: RP/0/RSP0/CPU0
+        (?:[ \t]*\([^)\n]{0,40}\))?  # mode: (config), (config-if), (active)
+                                     # FortiOS puts a space first: (global)
+        (?::[^\s#>$%]{0,40})?        # Linux path, or the IOS-XR hostname
     )
     [ \t]*
-    (?P<sigil>[#>$%])                # the prompt character itself
-    [ \t]?                           # single space devices put after it
+    # The prompt character itself — but the bracketed forms above have
+    # already consumed their own closing bracket, and requiring a sigil
+    # after one would reject every Huawei prompt there is.
+    (?P<sigil>(?(vrp)|[#>$%]))
+    (?(vrp)|[ \t]?)                  # single space devices put after it
     """,
     re.VERBOSE,
 )
@@ -61,14 +86,31 @@ PROMPT_RE = re.compile(
 EDIT_BANNER_RE = re.compile(r"^\[edit[^\]]*\]$")
 
 # Lines that are never a prompt, however much they resemble one.
+#
+# The bracketed vendor forms above cost something here. `[HUAWEI]` and `[OK]`
+# are the same shape, and `[OK]` is what IOS prints after `write memory`;
+# `<core-sw1>` and `<html>` are the same shape too. Nothing in the text
+# separates them — only what the word means — so the words that are never a
+# hostname are listed. The trade is that a device named `ok` or `html` is not
+# recognised from its prompt, which is the right way round: a missed prompt
+# merges two records, a false one files configuration under the wrong command.
 _NOT_A_PROMPT = re.compile(
     r"""
     ^\s*(?:
         [-=*_]{3,}                   # rule / separator lines
       | \d+[:.]                      # numbered output
+      | \[\d+\]                      # a shell job number
+      | \[edit\b                     # a Junos configuration banner
+      | \[(?:ok|fail|failed|error|err|warn|warning|info|debug|notice
+            |crit|critical|alert|emerg|done|pass|passed|yes|no|y/n
+            |confirm|abort|aborted|skipped|none)\]
+      | <\s*[/!?]                    # a closing or declaring markup tag
+      | <(?:html|head|body|title|div|span|table|thead|tbody|tr|td|th
+           |ul|ol|li|br|hr|pre|code|script|style|meta|link|form|input
+           |img|xml|rpc|rpc-reply|data|configuration|nc|soap)\s*/?>
     )
     """,
-    re.VERBOSE,
+    re.VERBOSE | re.IGNORECASE,
 )
 
 
@@ -175,6 +217,71 @@ def match_prompt(line: str) -> tuple[str, str] | None:
     return match.group("prompt") + match.group("sigil"), remainder
 
 
+#: Huawei VRP names the current view in the prompt, after the hostname:
+#: ``[core-sw1-GigabitEthernet0/0/1]``, ``[core-sw1-ospf-1]``. A hostname may
+#: contain hyphens too, so the only way to find where it ends is to recognise
+#: the view. Best effort, and only for a tab label — an unrecognised view
+#: leaves the whole string, which is ugly rather than wrong.
+_VRP_VIEWS = (
+    "GigabitEthernet", "XGigabitEthernet", "Ethernet", "Eth-Trunk", "GE",
+    "25GE", "40GE", "100GE", "Vlanif", "LoopBack", "NULL", "Tunnel", "Pos",
+    "Serial", "MEth", "Virtual-Template", "Dialer", "Bridge-Domain",
+    "aaa", "acl", "bfd", "bgp", "dhcp", "hwtacacs", "ike", "ipsec", "isis",
+    "lacp", "mpls", "nqa", "ospf", "ospfv3", "pki", "policy", "radius",
+    "rip", "ripng", "route-policy", "snmp", "stp", "ui-", "user-interface",
+    "vlan", "vpn-instance", "vrrp", "wlan",
+)
+
+
+def _strip_vrp_view(name: str) -> str:
+    """``core-sw1-GigabitEthernet0/0/1`` -> ``core-sw1``."""
+    for index, character in enumerate(name):
+        if character != "-":
+            continue
+        rest = name[index + 1:]
+        if any(rest.startswith(view) for view in _VRP_VIEWS):
+            return name[:index] or name
+    return name
+
+
+def hostname_from_prompt(prompt: str) -> str:
+    """
+    The device name inside one prompt, whatever shape it arrived in.
+
+    Separate from :func:`detect_hostname` because the shapes disagree about
+    where the name is: Junos puts it after an ``@``, Linux before a colon,
+    and IOS-XR after one — ``RP/0/RSP0/CPU0:edge-xr#`` is the node the
+    session landed on, then the hostname. Splitting that on the *first*
+    colon, as the Linux case wants, names every XR tab "RP".
+    """
+    text = (prompt or "").strip()
+    if not text:
+        return ""
+
+    # Huawei VRP user view: <core-sw1>
+    if text.startswith("<") and text.endswith(">"):
+        return _strip_vrp_view(text[1:-1])
+
+    # A bracketed prompt: Huawei's system view, or RouterOS with its menu
+    # path trailing after the bracket.
+    if text.startswith("["):
+        inner = text[1:].split("]", 1)[0].lstrip("~*")
+        if "@" in inner:                            # [admin@MikroTik] >
+            return inner.split("@")[-1]
+        return _strip_vrp_view(inner)
+
+    if text[-1] in "#>$%":
+        text = text[:-1]                            # drop the sigil
+    text = text.split("@")[-1]                      # user@host -> host
+    head = text.split(":")[0]
+    if ":" in text and "/" in head:
+        text = text.rsplit(":", 1)[-1]              # RP/0/RSP0/CPU0:host
+    else:
+        text = head                                 # host:~ -> host
+    text = re.sub(r"\(.*\)$", "", text).strip()     # host(config) -> host
+    return text.split("/")[0]                       # host/pri/act -> host
+
+
 def detect_hostname(text: str) -> str | None:
     """
     Return the device hostname parsed from the most recent prompt.
@@ -187,13 +294,9 @@ def detect_hostname(text: str) -> str | None:
         found = match_prompt(line)
         if not found:
             continue
-        prompt = found[0][:-1]                      # drop the sigil
-        prompt = prompt.split("@")[-1]              # user@host -> host
-        prompt = prompt.split(":")[0]               # host:~ -> host
-        prompt = re.sub(r"\(.*\)$", "", prompt)     # host(config) -> host
-        prompt = prompt.split("/")[0]               # host/pri/act -> host
-        if len(prompt) >= 2 and not prompt.isdigit():
-            hostname = prompt
+        name = hostname_from_prompt(found[0])
+        if len(name) >= 2 and not name.isdigit():
+            hostname = name
     return hostname
 
 

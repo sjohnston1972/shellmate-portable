@@ -13,9 +13,15 @@ announces itself, Junos prints its version, PAN-OS names itself.  Enough on its
 own most of the time.
 
 **The prompt shape.**  Weaker but always present.  ``user@host>`` is Junos or
-PAN-OS; ``host(config-if)#`` is Cisco-like; ``host:~$`` is a shell.  Used to
-narrow things down when the banner says nothing, which is common on devices
-configured with a legal warning instead of a version string.
+PAN-OS; ``host(config-if)#`` is Cisco-like; ``host:~$`` is a shell;
+``RP/0/RSP0/CPU0:host#`` is IOS-XR and nothing else.  Used to narrow things
+down when the banner says nothing, which is common on devices configured with
+a legal warning instead of a version string.
+
+How much each shape is worth differs, and for one reason: whether it names
+the *platform* or only the family.  ``<host>`` is Huawei VRP — and equally HP
+Comware, which wants a different paging command — so it stays below the gate,
+while the XR node id above it does not.
 
 **A version command.**  Definitive, but costs a round trip and can only run
 where a second channel is available.  Used to confirm and to capture the exact
@@ -97,6 +103,13 @@ def version_from(text: str, platform_id: str = "") -> str:
 
 # Ordered: the first pattern that matches wins, so the most specific come first.
 VERSION_PATTERNS: list[tuple[str, re.Pattern]] = [
+    # IOS-XR before IOS, and not for tidiness: an XR banner reads "Cisco IOS
+    # XR Software, Version 7.3.2", which the IOS pattern below matches
+    # perfectly well. First match wins *and* sets the platform, so the order
+    # of these two lines is the difference between an XR router being
+    # identified as XR and being identified as IOS at confidence 0.9 —
+    # confident, wrong, and above the gate that sends commands.
+    ("iosxr", re.compile(r"Cisco IOS ?XR Software.*?Version\s+([\w.()]+)", re.IGNORECASE)),
     ("ios",   re.compile(r"Cisco IOS.*?Version\s+([\w.()]+)", re.IGNORECASE)),
     ("nxos",  re.compile(r"NXOS:?\s*version\s+([\w.()]+)", re.IGNORECASE)),
     ("nxos",  re.compile(r"system:\s+version\s+([\w.()]+)", re.IGNORECASE)),
@@ -104,6 +117,21 @@ VERSION_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("junos", re.compile(r"JUNOS\s+(?:Software\s+Release\s+)?\[?([\w.\-]+)\]?", re.IGNORECASE)),
     ("panos", re.compile(r"sw-version:\s*([\w.\-]+)", re.IGNORECASE)),
     ("arista", re.compile(r"Software image version:\s*([\w.\-]+)", re.IGNORECASE)),
+    # FortiOS: "Version: FortiGate-100F v7.2.5,build1517,230606 (GA.F)".
+    ("fortios", re.compile(r"Version:\s*Forti[\w-]*\s+v([\w.]+)", re.IGNORECASE)),
+    # Huawei VRP: "VRP (R) software, Version 5.170 (S5720 V200R019C10SPC500)".
+    ("huawei", re.compile(r"VRP \(R\) software,\s*Version\s+([\w.]+)", re.IGNORECASE)),
+    # RouterOS announces itself on login; `/system resource print` does not,
+    # and gives "version: 7.11.2 (stable)" instead. The release channel in
+    # brackets is what keeps the second pattern from matching every other
+    # vendor's "version:" line.
+    ("routeros", re.compile(r"RouterOS\s+v?(\d[\w.]*)", re.IGNORECASE)),
+    ("routeros", re.compile(
+        r"version:\s*(\d[\w.]*)\s*\((?:stable|long-term|testing|development)\)",
+        re.IGNORECASE)),
+    # AOS-CX: "Version      : FL.10.09.1010". The two-letter branch prefix is
+    # the distinctive part — a bare "Version :" belongs to half the industry.
+    ("aoscx", re.compile(r"Version\s*:\s*([A-Z]{2}\.[\w.]+)")),
 ]
 
 MODEL_PATTERNS: list[re.Pattern] = [
@@ -111,6 +139,12 @@ MODEL_PATTERNS: list[re.Pattern] = [
     re.compile(r"Model:\s*([\w.\-]+)", re.IGNORECASE),
     re.compile(r"model:\s*([\w.\-]+)", re.IGNORECASE),
     re.compile(r"Hardware:\s*([\w.\-]+)", re.IGNORECASE),
+    # After the generic ones, so nothing above changes meaning (#524).
+    re.compile(r"Version:\s*(Forti[\w-]+)\s+v", re.IGNORECASE),
+    re.compile(r"board-name:\s*([\w.\-/]+)", re.IGNORECASE),
+    re.compile(r"\bHuawei\s+(S\d{3,4}[\w-]*|AR\d+[\w-]*|CE\d+[\w-]*"
+               r"|NE\d+[\w-]*|USG\d+[\w-]*)", re.IGNORECASE),
+    re.compile(r"\b(J[LG]\d{3,4}[A-Z])\b"),
 ]
 
 
@@ -182,6 +216,30 @@ def _from_prompt(prompt: str) -> tuple[str, float]:
     if not prompt:
         return GENERIC, 0.0
 
+    stripped = prompt.rstrip()
+
+    # RouterOS, before the "@" test below claims it for Junos. Nothing else
+    # prints [user@host] >, and RouterOS has no paging command to get wrong,
+    # so this is the same bargain the shell prompt gets: unmistakable, and it
+    # fails safely.
+    if stripped.startswith("[") and "@" in stripped and stripped.endswith(">"):
+        return "routeros", 0.7
+
+    # Huawei VRP: <host> is the user view, [host] the system view. Below the
+    # gate on purpose — HP Comware, which came from the same lineage, prints
+    # both identically and wants `screen-length disable` rather than VRP's
+    # `screen-length 0 temporary`. Family, not platform.
+    if stripped.startswith("<") and stripped.endswith(">"):
+        return "huawei", 0.5
+    if stripped.startswith("[") and stripped.endswith("]"):
+        return "huawei", 0.5
+
+    # IOS-XR names the node it landed on: RP/0/RSP0/CPU0:hostname#. Nothing
+    # else prints that, and it picks the platform rather than the family, so
+    # unlike hostname(config)# it is worth acting on.
+    if re.match(r"^(?:RP|LC|SP|DRP|RSP)/[\w./-]*:", stripped):
+        return "iosxr", 0.7
+
     if ":~" in prompt:
         return "linux", 0.7          # unmistakable, and nothing is sent anyway
     if prompt.rstrip().endswith("$"):
@@ -194,6 +252,10 @@ def _from_prompt(prompt: str) -> tuple[str, float]:
         return "asa", 0.6            # failover context is distinctive
     if re.search(r"\(config[^)]*\)\s*#", prompt):
         return "ios", 0.5            # Cisco-shaped — but so are NX-OS and ASA
+    # FortiOS names the current VDOM or object in the prompt: "FGT (global) #".
+    # Weak, and it need not be stronger: the FortiOS profile sends nothing.
+    if re.search(r"\((?:global|vdom[^)]*|root)\)\s*#", prompt, re.IGNORECASE):
+        return "fortios", 0.5
     if prompt.rstrip().endswith(("#", ">")):
         return "ios", 0.35           # the commonest, but barely evidence
     return GENERIC, 0.0
@@ -217,10 +279,13 @@ def _from_prompt(prompt: str) -> tuple[str, float]:
 
 SSH_VERSION_SIGNATURES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"SSH-2\.0-Cisco", re.IGNORECASE), "ios"),
-    (re.compile(r"SSH-\d\.\d-.*NX-?OS", re.IGNORECASE), "nxos"),
-    (re.compile(r"SSH-\d\.\d-.*Arista", re.IGNORECASE), "arista"),
-    (re.compile(r"SSH-\d\.\d-.*Juniper", re.IGNORECASE), "junos"),
-    (re.compile(r"SSH-\d\.\d-.*PaloAlto", re.IGNORECASE), "panos"),
+    (re.compile(r"SSH-\d\.\d-.*\bNX-?OS\b", re.IGNORECASE), "nxos"),
+    (re.compile(r"SSH-\d\.\d-.*\bArista\b", re.IGNORECASE), "arista"),
+    (re.compile(r"SSH-\d\.\d-.*\bJuniper\b", re.IGNORECASE), "junos"),
+    (re.compile(r"SSH-\d\.\d-.*\bPaloAlto\b", re.IGNORECASE), "panos"),
+    # RouterOS answers "SSH-2.0-ROSSSH"; Huawei VRP "SSH-2.0-HUAWEI-1.5".
+    (re.compile(r"SSH-\d\.\d-ROSSSH", re.IGNORECASE), "routeros"),
+    (re.compile(r"SSH-\d\.\d-HUAWEI", re.IGNORECASE), "huawei"),
     # OpenSSH is on everything from a Linux host to a modern switch, so it
     # narrows nothing on its own — but on a discovery sweep, "this is a host
     # running OpenSSH" is still more than "port 22 is open".

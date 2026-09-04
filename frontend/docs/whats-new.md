@@ -6,6 +6,17 @@ exists.
 
 ## 1.1.3
 
+- **Five more platforms: IOS-XR, FortiOS, MikroTik RouterOS, Huawei VRP and
+  Aruba AOS-CX** — with the prompt shapes to match, which is the half that
+  matters. ShellMate reads a prompt to name the tab, cut the session into
+  commands, expand aliases and hold destructive ones, and on a device whose
+  prompt it did not recognise all of that quietly did nothing. It now knows
+  `RP/0/RSP0/CPU0:edge-xr#`, `FGT-01 (global) #`, `<core-sw1>`, `[core-sw1]`
+  and `[admin@MikroTik] >`. Paging is turned off with `terminal length 0` on
+  XR, `screen-length 0 temporary` on VRP and `no page` on AOS-CX; FortiOS and
+  RouterOS are sent nothing, because neither has a command that turns paging
+  off for one session and nothing else.
+
 - **Import and export the estate as CSV.** Right-click the group tree's
   background for **Import connections…** — paste rows from a spreadsheet or
   choose a file — and **Export all as CSV…**; any group's own menu exports
