@@ -9699,6 +9699,177 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
    Ansible view — Templates (#586)
 --------------------------------------------------------------------------- */
 
+.av-tpl-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+/* A card is flex-column so the action row sits at the bottom regardless of
+   how many lines the description takes — a short one and a long one must
+   not leave "Fill in" at two different heights next to each other. */
+.av-tpl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.av-tpl-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.av-tpl-card-head h4 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* Whether a template writes to a device is the one fact worth seeing before
+   the YAML — a read-only template is safe to try, a writing one is not. */
+.av-tpl-writes {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.av-tpl-writes .material-symbols-outlined { font-size: var(--icon-xs); }
+
+.av-tpl-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--on-surface-dim);
+}
+
+.av-tpl-card-actions { margin-top: auto; padding-top: 6px; }
+
+#av-templates-body .icon-btn .material-symbols-outlined { font-size: var(--icon-md); }
+
+.av-tpl-form { max-width: 640px; }
+
+.av-tpl-panel-head { margin-bottom: 12px; }
+
+/* Label + checkbox on one line, control first — matches the dialog's own
+   checkbox rows (#439) rather than inventing a second convention. */
+.av-tpl-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--on-surface);
+  cursor: pointer;
+}
+
+.av-tpl-body-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.av-tpl-body-label .material-symbols-outlined {
+  font-size: var(--icon-xs);
+  color: var(--on-surface-dim);
+}
+
+.av-tpl-body-input {
+  width: 100%;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.av-tpl-body-input:focus {
+  outline: none;
+  border-color: var(--primary-edge);
+}
+
+.av-tpl-body-error { margin-top: 10px; }
+
+.av-tpl-vars { margin-top: 6px; }
+
+.av-tpl-vars-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+/* One box per variable rather than a table row — a table would need every
+   field to be one line, and Help text is the one meant to be read, not
+   skimmed. */
+.av-tpl-var-row {
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.av-tpl-var-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.av-tpl-var-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.av-tpl-form-actions {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.av-tpl-preview-yaml {
+  max-height: 400px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The confirmation after "Save as playbook". Not `.av-notice` — that family
+   only speaks info/warn/bad, and "it worked" needs its own colour rather
+   than borrowing info's for a result that is not merely informational. */
+.av-tpl-notice-ok {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--ok-edge);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--on-surface);
+  background: var(--ok-tint);
+}
+
+.av-tpl-notice-ok .material-symbols-outlined { font-size: var(--icon-sm); color: var(--ok); flex: 0 0 auto; }
+.av-tpl-notice-ok > div { flex: 1; min-width: 0; }
+
 /* ---------------------------------------------------------------------------
    Ansible view — Inventory (#586)
 --------------------------------------------------------------------------- */
