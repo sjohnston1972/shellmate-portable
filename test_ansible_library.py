@@ -133,6 +133,30 @@ def templates() -> None:
     check("a value outside the choices is refused", "up, down" in why,
           f"it said: {why!r}")
 
+    print("\n-- Whether it writes is read, not asserted --")
+    reads = ansible_library.save_template({
+        "name": "Just look", "writes": True,
+        "body": "- name: Look" + chr(10) + "  cisco.ios.ios_facts:" + chr(10)
+                + "    gather_subset: min" + chr(10)})
+    check("a template that only gathers facts is read-only",
+          reads["writes"] is False, str(reads.get("modules")))
+
+    writes_anyway = ansible_library.save_template({
+        "name": "Says it is safe", "writes": False,
+        "body": "- name: Change" + chr(10) + "  cisco.ios.ios_config:" + chr(10)
+                + "    lines: [ntp server 1.1.1.1]" + chr(10)})
+    check("a template that pushes configuration is marked as writing "
+          "however it was declared",
+          writes_anyway["writes"] is True,
+          "a checkbox must not be able to make something look safer than it is")
+
+    opaque = ansible_library.save_template({
+        "name": "Nothing readable", "writes": False, "body": "{{ hole }}",
+        "variables": [{"name": "hole"}]})
+    check("a body with no readable task counts as writing",
+          opaque["writes"] is True,
+          "'could not tell' and 'safe' are not the same claim")
+
     check("a template can be deleted",
           ansible_library.delete_template(saved["id"]) is True)
     check("deleting one that is gone says so",

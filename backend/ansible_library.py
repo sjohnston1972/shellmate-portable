@@ -110,6 +110,11 @@ def save_template(fields: dict) -> dict:
     """
     Store a parameterised playbook.
 
+    Whether it writes to a device is read off the body rather than
+    accepted from the caller — see below. A template with no recognisable
+    task in it counts as writing, because "ShellMate could not tell" and
+    "it is safe" are not the same claim.
+
     ``body`` is YAML with ``{{ variable }}`` holes; ``variables`` describes
     each hole so the form that fills it can be drawn — a label, a default,
     whether it is required, and optionally the values it may take. A hole
@@ -156,9 +161,22 @@ def save_template(fields: dict) -> dict:
         "body": body,
         "variables": variables,
         "platform": str(fields.get("platform") or "").strip(),
-        "writes": bool(fields.get("writes", True)),
         "updated": _now(),
     }
+
+    # Whether a template changes a device is read off its body, not taken
+    # from a checkbox. It was a checkbox, and a badge saying "read only"
+    # sitting next to badges that are actually verified is worse than no
+    # badge: it is one honest mistake away from making something look safer
+    # than it is. The scan is conservative — a module it does not recognise
+    # counts as a write — so the badge can be wrong in the direction that
+    # makes somebody look, and not in the direction that stops them.
+    from backend.ansible_builder import inspect as read_back
+
+    found = read_back(body)
+    entry["writes"] = bool(found["writes"]) or not found["tasks"]
+    entry["modules"] = [t["module"] for t in found["tasks"]]
+    entry["unknown_modules"] = found["unknown_modules"]
     logger.info("Ansible template saved: %s (%d variable(s))", name, len(variables))
     return _replace("templates", entry)
 
