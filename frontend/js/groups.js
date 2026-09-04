@@ -244,6 +244,23 @@
    * pretending every click is one of them.
    */
   let groupsStale = true;
+
+  /**
+   * Somebody else's answer to a plain click, while they are on screen (#603).
+   *
+   * The Ansible builder wants a click on a device to target it rather than
+   * connect to it. Rather than that view reaching in and rebinding these
+   * handlers — where a stale interceptor would leave the tree unable to
+   * connect to anything — it registers a claim, and the tree asks. The
+   * claim returns true when it handled the click, so an unrecognised one
+   * still falls through to connecting.
+   */
+  let clickClaim = null;
+
+  function claimClicks(fn) {
+    clickClaim = typeof fn === 'function' ? fn : null;
+    document.body.classList.toggle('tree-claimed', !!clickClaim);
+  }
   let liveStale = true;
 
   window.addEventListener('shellmate:groups-changed', () => { groupsStale = true; });
@@ -1037,6 +1054,17 @@
       // The dashboard has to come forward to show what was just selected —
       // with a terminal on screen, the tiles were painted into a hidden
       // layer and the click read as doing nothing (#232).
+      //
+      // Unless somebody else has claimed the click (#603). While the Ansible
+      // builder is open, clicking a group targets it — and bringing the
+      // dashboard forward would close the very view the click was meant for.
+      // Expansion still happens either way, or the tree would stop being
+      // navigable exactly when somebody needs to reach a device inside a
+      // site.
+      if (clickClaim && node.group
+          && clickClaim({ kind: 'group', key: node.key, name: node.label })) {
+        return;
+      }
       if (typeof window.showDashboard === 'function') window.showDashboard();
     });
 
@@ -1143,6 +1171,11 @@
       }
       // A plain click lets a selection go, the way it does everywhere else.
       _clearLeafSelection();
+      // Asked, not assumed: while the Ansible builder is on screen a click
+      // on a device means "target this", and opening a terminal to it
+      // would be the wrong answer to the same gesture (#603).
+      if (clickClaim && clickClaim({ kind: 'host', id: profile.id,
+                                     name: profile.name })) return;
       if (typeof window.connectProfile === 'function') window.connectProfile(profile);
       else if (typeof window.showConnectionDialog === 'function') {
         window.showConnectionDialog(profile);
@@ -3008,6 +3041,6 @@
 
   window.shellmateGroups = {
     render, active, activeName, activePath, activeIcon, showsTiles,
-    open, clear, newGroup, editGroup, deleteGroup,
+    open, clear, newGroup, editGroup, deleteGroup, claimClicks,
   };
 })();

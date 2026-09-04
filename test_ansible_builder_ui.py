@@ -224,6 +224,63 @@ async def main() -> None:
               "dropping a site should target the site, which Ansible knows as "
               "a group of groups")
 
+        print("\n-- Clicking, which used to open a terminal --")
+        # The synthetic drag above cannot test what the browser owns, so the
+        # click path is checked for real: this is the gesture that was
+        # opening an SSH session instead of targeting (#603).
+        # Devices only exist in the DOM once their site is expanded, and
+        # clicking a group both expands it and targets it — so this walks
+        # down the way a person would.
+        await page.click('#group-tree .tree-chip[data-key="site-1"]')
+        await page.wait_for_timeout(300)
+        await page.click('#group-tree .tree-chip[data-key="site-1/routers"]')
+        await page.wait_for_timeout(400)
+        check("expanding still works while clicks are claimed",
+              await page.locator("#group-tree .tree-leaf").count() > 0,
+              "the tree stopped being navigable, so no device can be reached")
+
+        was = await page.locator(".av-node-play").count()
+        connected = await page.evaluate("""
+          (() => {
+            window.__connected = null;
+            window.connectProfile = (p) => { window.__connected = p.name; };
+            document.querySelector('#group-tree .tree-leaf').click();
+            return window.__connected;
+          })()
+        """)
+        check("clicking a device no longer opens a session",
+              connected is None,
+              f"it connected to {connected!r} while a playbook was open")
+        await page.wait_for_timeout(500)
+        check("it added a play for that device instead",
+              await page.locator(".av-node-play").count() == was + 1,
+              "the click was swallowed rather than acted on")
+
+        check("the tree says the gesture means something different",
+              await page.evaluate(
+                  "document.body.classList.contains('tree-claimed')"),
+              "an unannounced change of meaning is a surprise either way")
+
+        print("\n-- And gives the tree back on the way out --")
+        await page.evaluate("window.ansibleView.show('dashboard')")
+        await page.wait_for_timeout(400)
+        check("leaving the builder withdraws the claim",
+              not await page.evaluate(
+                  "document.body.classList.contains('tree-claimed')"),
+              "a claim left behind would stop somebody connecting to anything")
+        again = await page.evaluate("""
+          (() => {
+            window.__connected = null;
+            window.connectProfile = (p) => { window.__connected = p.name; };
+            const leaf = document.querySelector('#group-tree .tree-leaf');
+            if (leaf) leaf.click();
+            return window.__connected;
+          })()
+        """)
+        check("and clicking a device connects again",
+              again is not None, "the tree stopped connecting, which is worse "
+              "than the bug being fixed")
+
         print("\n-- A serial console cannot be a target --")
         refused = await page.evaluate("""
           (() => {

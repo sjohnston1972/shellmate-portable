@@ -9899,6 +9899,31 @@ body {
 .av-add:last-child { margin-bottom: 0; }
 .av-add:hover { border-color: var(--primary-edge); color: var(--primary); }
 
+/* Where a drop would land. Removed by accident when the builder's own
+   inventory rail was deleted, which left dragging with no feedback at all
+   and made a working drop look like a dead zone (#603). */
+.av-node-over {
+  border-color: var(--primary);
+  background: var(--primary-tint);
+}
+
+/* While the builder has claimed clicks in the tree (#603). The gesture
+   means something different from usual, so the tree says so rather than
+   surprising somebody who expected a terminal. */
+body.tree-claimed .tree-chip,
+body.tree-claimed .tree-leaf {
+  cursor: copy;
+}
+
+body.tree-claimed #group-tree-title::after {
+  content: ' — click to target';
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
 .av-run {
   margin-left: auto;
   display: inline-flex;

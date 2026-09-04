@@ -231,9 +231,11 @@
       ondragover: (event) => {
         if (!window.ansibleEstate
             || !window.ansibleEstate.isEstateDrag(event)) return;
-        // Copy, not move: dragging a site onto a play points the play at it
-        // and leaves the site exactly where it was in the tree.
-        event.dataTransfer.dropEffect = 'copy';
+        // dropEffect is left alone deliberately (#603). The tree declares
+        // effectAllowed='move' for its own purpose, and 'copy' is not one
+        // of the effects that allows — so setting it made the browser
+        // reset the effect to none and never fire drop at all. Nothing
+        // here moves anything regardless of what the effect is called.
         event.preventDefault();
         event.stopPropagation();
         event.currentTarget.classList.add('av-node-over');
@@ -282,8 +284,7 @@
       ondragover: (event) => {
         if (!window.ansibleEstate
             || !window.ansibleEstate.isEstateDrag(event)) return;
-        event.dataTransfer.dropEffect = 'copy';
-        event.preventDefault();
+        event.preventDefault();          // and not dropEffect — see #603
         event.currentTarget.classList.add('av-node-over');
       },
       ondragleave: (event) => event.currentTarget.classList.remove('av-node-over'),
@@ -692,5 +693,52 @@
     renderCanvas();
   }
 
-  view.area('builder', { onShow: render });
+  /**
+   * While this area is showing, the tree means "target this" (#603).
+   *
+   * A plain click on a device in the tree connects to it, which is right
+   * everywhere else and wrong here — the obvious meaning of clicking a
+   * switch while a playbook is open is not "open a terminal to it".
+   *
+   * The tree asks before acting rather than this reaching in and rebinding
+   * its handlers: a click interceptor left behind by a view that has since
+   * closed would stop somebody connecting to anything, which is a far worse
+   * bug than the one being fixed. So the claim is withdrawn the moment this
+   * area stops showing, and the tree falls back to connecting on its own.
+   */
+  function claimTreeClicks(active) {
+    if (!window.shellmateGroups || !window.shellmateGroups.claimClicks) return;
+    window.shellmateGroups.claimClicks(active ? (picked) => {
+      if (!window.ansibleEstate) return false;
+      const resolved = picked.kind === 'group'
+        ? { kind: 'group', label: picked.key,
+            target: window.ansibleEstate.ansibleGroup(picked.key) }
+        : (() => {
+            const found = window.ansibleEstate.host(picked.id);
+            return found
+              ? { kind: 'host', label: found.label, target: found.address }
+              : { why: 'That connection has no address Ansible can dial.' };
+          })();
+      if (!resolved.target) {
+        refuse(resolved.why
+          || `"${picked.key}" has no connections Ansible can reach.`);
+        return true;
+      }
+      addPlayFor(resolved);
+      return true;
+    } : null);
+  }
+
+  view.area('builder', {
+    onShow: async (state, changed) => {
+      await render();
+      claimTreeClicks(true);
+    },
+  });
+
+  // Withdrawn whenever the builder is not what is on screen.
+  document.addEventListener('shellmate:ansible-area', (event) => {
+    if (event.detail && event.detail.area !== 'builder') claimTreeClicks(false);
+  });
+  document.addEventListener('shellmate:ansible-close', () => claimTreeClicks(false));
 })();
