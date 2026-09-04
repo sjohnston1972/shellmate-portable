@@ -226,6 +226,34 @@ version's notes; the same text is on the What's new page of this manual.
 
 ## Diagnostics
 
+**Run checks** answers the question nothing answered before: is this copy
+healthy? A row of chips appears, one per check, green, amber or red; picking
+one says what it found and what to do about it, and anything that failed is
+picked for you. It reads state and changes nothing.
+
+| Check | What it is looking at |
+|---|---|
+| Window | Which frame took it — the native window, a chromeless browser window or your default browser — and the WebView2 version behind it |
+| Data folder | Where settings really live, whether it is writable, and whether the fallback location is in use |
+| Free space | Room for the history database to grow |
+| Vault | A DPAPI seal-and-read-back on this account, or whether a master-password vault is unlocked |
+| History database | FTS5 or the LIKE fallback, and how much is recorded |
+| Port | Which port was bound, and whether the preferred one was taken |
+| Last update | A leftover previous executable, and what the last swap said |
+| Feedback outbox | Reports queued because the relay could not be reached |
+| Environment file | Whether a `.env` is in play, since it changes where keys come from |
+| Logging | The level, and the size of the log behind it |
+
+Two of the checks go over the network — whether GitHub and the licence
+service answer — and they run **only** when *also check the internet* is
+ticked, per press. ShellMate promises to work air-gapped, and a Settings
+panel that reached out the moment it opened would spend that promise on your
+behalf. On a machine with no internet, "could not be reached" is the correct
+answer, not a fault.
+
+The same checks go into the support bundle as `checks.txt`, without the
+network probes.
+
 **Version** names the release, the commit it was built from and when — the
 three things to quote in a bug report, and the way to tell whether the copy
 you double-clicked is the one you updated. A portable executable can be

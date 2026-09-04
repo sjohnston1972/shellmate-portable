@@ -116,6 +116,22 @@ def _about(_ctx: dict) -> str:
     return "\n".join(lines)
 
 
+def _checks(_ctx: dict) -> str:
+    """
+    The Diagnostics self-checks, in the bundle for free (#562).
+
+    The four questions a support reply always opens with — which window, which
+    data folder, is the vault readable, is FTS5 there — are exactly what the
+    checks answer, and they were being answered by reading three other files
+    in the bundle and inferring. Without the network probes: a bundle is often
+    assembled on the machine that has no internet, and "GitHub unreachable" in
+    that context is noise rather than a finding.
+    """
+    from backend import diagnostics
+
+    return diagnostics.as_text(probes=False)
+
+
 def _versions(_ctx: dict) -> str:
     """What the third-party libraries actually are, which pins most bug reports."""
     from importlib.metadata import PackageNotFoundError, version
@@ -252,6 +268,9 @@ SECTIONS: list[Section] = [
     Section("versions", "Library versions",
             "What paramiko, pywebview and the rest actually are here.",
             True, False, "versions.txt", _versions),
+    Section("checks", "Self-checks",
+            "Whether the window, data folder, vault, history and port are healthy.",
+            True, False, "checks.txt", lambda _ctx: _checks(_ctx)),
     Section("log", "Application log",
             "What ShellMate itself did this run. Not your session contents.",
             True, False, "shellmate.log", _log),

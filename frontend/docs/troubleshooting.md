@@ -10,6 +10,14 @@ interface: which build this is, where the data folder and log are, and what
 the history database holds. `GET http://127.0.0.1:8765/api/system/info`
 reports the same from outside it.
 
+**Run checks**, in the same section, is the quickest first move. It reads the
+things that go wrong quietly — which window frame took it, whether the data
+folder beside the executable was writable, whether the vault can seal and
+read back a value, whether SQLite has FTS5, which port was bound, a leftover
+copy from an update, anything queued in the feedback outbox — and says what
+to do about each. Nothing leaves the machine unless you tick *also check the
+internet*. `GET /api/system/checks` returns the same rows.
+
 ## It will not start
 
 **A message box appears about the server.** Something else holds the port, or

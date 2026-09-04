@@ -21,6 +21,14 @@ exists.
   would undo it. Nothing is sent to the device, and the preview stays open
   beside the answer.
 
+- **Run checks** in Settings → Diagnostics. A row of chips saying whether
+  this installation is healthy: which window frame took it, whether the data
+  folder is the one beside the executable, whether the vault seals and reads
+  back, FTS5, the port that was bound, a leftover copy from an update, and
+  the feedback outbox — with what to do about anything amber or red. The two
+  network checks are opt-in, per press. The same checks go into the support
+  bundle as `checks.txt`.
+
 - An **update channel** under Stockton → Diagnostics: `stable` offers only
   full releases, `beta` also offers prereleases for people trying a build
   early, marked Beta in the update window. **What's new in this version**

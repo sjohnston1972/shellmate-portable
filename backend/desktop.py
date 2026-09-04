@@ -50,6 +50,20 @@ MIN_HEIGHT = 560
 _active_window = None
 _active_desktop = None
 
+# Which rung of the ladder actually won (#562).
+#
+# The fallbacks are deliberately silent — a missing WebView2 runtime is not a
+# reason to be unable to reach a device — but silent is not the same as
+# unknowable. "It opened in Chrome" is one of the two things people report
+# about a copy on a stick, and until now the only record of which frame took
+# it was a line in a log nobody reads. Diagnostics asks this.
+_frame = "not started"
+
+
+def frame_in_use() -> str:
+    """The window frame this process ended up with, in the user's words."""
+    return _frame
+
 
 def has_native_window() -> bool:
     """True when a real OS file dialog can be raised."""
@@ -388,6 +402,8 @@ def open_app_window(port: int) -> bool:
             "--no-default-browser-check",
         ])
         logger.info("Opened a chromeless window using %s", os.path.basename(browser))
+        global _frame
+        _frame = f"chromeless window ({os.path.basename(browser)})"
         return True
     except Exception as exc:
         logger.info("Could not open a chromeless window: %s", exc)
@@ -433,6 +449,8 @@ class Desktop:
         # No native window: fall back, then park the main thread so the tray
         # (and the server behind it) stay alive.
         if not open_app_window(self.port):
+            global _frame
+            _frame = "default browser"
             webbrowser.open(f"http://localhost:{self.port}")
 
         if not has_tray:
@@ -763,6 +781,8 @@ class Desktop:
             if icon:
                 start_args["icon"] = str(icon)
 
+            global _frame
+            _frame = "native window"
             try:
                 webview.start(**start_args)
             except TypeError:
@@ -776,6 +796,7 @@ class Desktop:
             # Most likely the WebView2 runtime is missing on an older machine.
             logger.info("Native window unavailable (%s); falling back", exc)
             self._window = None
+            _frame = "not started"
             return False
 
     def _on_closing(self) -> bool:

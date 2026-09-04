@@ -2402,6 +2402,23 @@ async def system_info() -> dict:
     }
 
 
+@app.get("/api/system/checks")
+async def system_checks(probes: bool = False) -> dict:
+    """
+    Run the self-checks and say whether this install is healthy (#562).
+
+    `probes=true` adds the two that go over the network. They are opt-in and
+    per request rather than on every Settings open, because ShellMate promises
+    to work air-gapped and a panel that reaches out the moment it is opened
+    spends that promise on the user's behalf.
+    """
+    from backend import diagnostics
+
+    rows = await asyncio.to_thread(diagnostics.run, probes)
+    return {"checks": rows, "summary": diagnostics.summarise(rows),
+            "probed": bool(probes)}
+
+
 @app.get("/api/system/update")
 async def update_check() -> dict:
     """
