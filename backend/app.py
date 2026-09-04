@@ -28,6 +28,7 @@ from collections import deque
 import httpx
 import sys
 import os
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -3553,6 +3554,48 @@ async def list_logs() -> list[dict]:
         })
     files.sort(key=lambda entry: entry["modified"], reverse=True)
     return files
+
+
+def _log_path(filename: str) -> Path:
+    """The log file a request names, or a 400/404 (see download_log)."""
+    if ("/" in filename or "\\" in filename or filename in (".", "..")
+            or not filename.endswith(".log")):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    directory = log_directory().resolve()
+    log_path = (directory / filename).resolve()
+    if log_path.parent != directory:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if not log_path.exists():
+        raise HTTPException(status_code=404, detail="Log file not found")
+    return log_path
+
+
+@app.post("/api/logs/{filename}/save")
+async def save_log_copy(filename: str) -> dict:
+    """
+    Save a copy of a log where the user chooses, through the platform's own
+    folder dialog, and open that folder (#578).
+
+    In the native window the browser's download machinery does nothing
+    visible, so Download appeared to do nothing at all. Without a native
+    window this answers 409 and the page falls back to a browser download.
+    """
+    source = _log_path(filename)
+    if not desktop.has_native_window():
+        raise HTTPException(status_code=409, detail="No native window; use the browser download.")
+    folder = await asyncio.to_thread(desktop.pick_directory, "Save the log to…")
+    if not folder:
+        return {"cancelled": True}
+    target = Path(folder) / filename
+    try:
+        await asyncio.to_thread(shutil.copyfile, source, target)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save the copy: {exc}") from exc
+    try:
+        await asyncio.to_thread(desktop.reveal, str(Path(folder)))
+    except Exception:
+        pass
+    return {"path": str(target)}
 
 
 @app.get("/api/logs/{filename}")

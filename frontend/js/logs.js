@@ -179,6 +179,34 @@
    * assumed.
    */
   async function downloadLog(filename) {
+    // In the native window, save through the platform's folder dialog and
+    // open the folder (#578): a browser download there did nothing anyone
+    // could see. Without a native window the server answers 409 and the
+    // browser download below is the right shape.
+    try {
+      const saved = await fetch(`/api/logs/${encodeURIComponent(filename)}/save`, { method: 'POST' });
+      if (saved.ok) {
+        const data = await saved.json();
+        if (data.cancelled) return;
+        if (window.shellmateAlerts && window.shellmateAlerts.notify) {
+          window.shellmateAlerts.notify({
+            global: true, icon: 'download', title: 'Log saved',
+            body: `Saved to ${data.path}. The folder has been opened.`,
+          });
+        }
+        return;
+      }
+      if (saved.status !== 409) {
+        const err = await saved.json().catch(() => ({}));
+        throw new Error(err.detail || `server returned ${saved.status}`);
+      }
+    } catch (e) {
+      if (window.shellmateAlerts && window.shellmateAlerts.notify) {
+        window.shellmateAlerts.notify({ global: true, severity: 'warning', icon: 'error',
+                                        title: 'Could not save the log', body: String(e.message || e) });
+      }
+      return;
+    }
     try {
       const res = await fetch(`/api/logs/${encodeURIComponent(filename)}`);
       if (!res.ok) throw new Error(`server returned ${res.status}`);
@@ -193,9 +221,10 @@
       setTimeout(() => URL.revokeObjectURL(url), 4000);
       if (window.shellmateAlerts && window.shellmateAlerts.notify) {
         window.shellmateAlerts.notify({
+          global: true,
           icon:  'download',
-          title: 'Download complete',
-          body:  `${filename} — check your downloads folder.`,
+          title: 'Download started',
+          body:  `${filename} — check your browser's downloads folder.`,
           // Somewhere to click (#245). The browser's downloads folder is
           // not ours to open; the originals' folder is.
           action: {
@@ -208,6 +237,7 @@
     } catch (e) {
       if (window.shellmateAlerts && window.shellmateAlerts.notify) {
         window.shellmateAlerts.notify({
+          global: true,
           severity: 'warning',
           icon:  'error',
           title: 'Download failed',
