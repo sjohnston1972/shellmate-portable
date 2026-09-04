@@ -6,6 +6,23 @@ exists.
 
 ## 1.1.3
 
+- **Edit, connect or disconnect a selection of connections.** Ctrl+click
+  several in the tree and the menu now offers **Edit N connections…** —
+  username, port, connection type, platform, shared credential, jump host and
+  authentication, each starting at "leave as they are" — along with
+  **Connect N** and **Disconnect N**. Passwords are never edited in bulk, and
+  an edit that would give two connections the same identity skips that one and
+  says "would merge with sw1" rather than merging it and losing a credential.
+
+- **Group defaults.** A group can now hold the username, shared credential,
+  platform, port and jump host that everything in it uses — **Group
+  defaults…** on its menu — and every connection whose own field is blank
+  inherits them, subgroups included. Two hundred sites behind two hundred
+  bastions is two hundred edits when one moves; this makes it one. A
+  connection's own value always wins, nothing is written onto it, and where
+  two groups disagree the field is inherited by nobody and the dialog names
+  the two groups rather than guessing.
+
 - **Import and export the estate as CSV.** Right-click the group tree's
   background for **Import connections…** — paste rows from a spreadsheet or
   choose a file — and **Export all as CSV…**; any group's own menu exports

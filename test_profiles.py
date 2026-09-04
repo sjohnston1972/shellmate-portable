@@ -1057,6 +1057,166 @@ def test_a_file_with_no_header_is_read_in_column_order() -> None:
           semicolons["new"] == 1, str(semicolons))
 
 
+# ---------------------------------------------------------------------------
+# Editing many at once (#537)
+#
+# The interesting half is what it refuses. A bulk edit that merged two
+# connections would lose a credential without saying so, and one that
+# accepted a password column would have somebody believing fifty devices
+# had been given a password they had not.
+# ---------------------------------------------------------------------------
+
+def _estate(count: int = 3, **fields) -> list[dict]:
+    reset()
+    profiles.save_many([{"name": f"sw{n}", "hostname": f"10.9.0.{n}",
+                         "port": 22, "connection_type": "ssh",
+                         "username": "old-account", **fields}
+                        for n in range(1, count + 1)])
+    return profiles._load()
+
+
+def test_a_bulk_edit_is_one_write() -> None:
+    print("\n-- Editing fifty at once --")
+    saved = _estate(50)
+
+    writes = []
+    original = profiles._save
+    profiles._save = lambda entries: (writes.append(len(entries)), original(entries))[1]
+    try:
+        result = profiles.update_many([p["id"] for p in saved],
+                                      {"username": "svc-neteng"})
+    finally:
+        profiles._save = original
+
+    check("fifty connections cost one write", writes == [50], str(writes))
+    check("and all fifty changed", len(result["updated"]) == 50,
+          str(len(result["updated"])))
+    check("nothing was skipped", not result["skipped"], str(result["skipped"]))
+    check("the file says so",
+          {p.get("username") for p in profiles._load()} == {"svc-neteng"},
+          str({p.get("username") for p in profiles._load()}))
+
+
+def test_a_bulk_edit_leaves_alone_what_it_was_not_given() -> None:
+    print("\n-- Leave as they are --")
+    saved = _estate(2, platform="ios", jump_host="bastion-1")
+
+    profiles.update_many([p["id"] for p in saved], {"username": "svc-neteng"})
+    after = profiles._load()
+    check("a field not named is untouched",
+          all(p.get("platform") == "ios" for p in after), str(after))
+    check("and so is the jump host",
+          all(p.get("jump_host") == "bastion-1" for p in after), str(after))
+
+    # An empty value is the only way to say "take this off all of them".
+    profiles.update_many([p["id"] for p in saved], {"jump_host": ""})
+    check("an empty value clears the field",
+          all("jump_host" not in p for p in profiles._load()),
+          str(profiles._load()))
+
+    try:
+        profiles.update_many([p["id"] for p in saved], {})
+        check("an edit that changes nothing is refused", False, "it was accepted")
+    except ValueError:
+        check("an edit that changes nothing is refused", True)
+
+
+def test_a_bulk_edit_refuses_secrets_and_what_the_device_said() -> None:
+    print("\n-- What a bulk edit will not write --")
+    saved = _estate(2)
+    ids = [p["id"] for p in saved]
+
+    try:
+        profiles.update_many(ids, {"password": CSV_SECRET_VALUE})
+        check("a password is refused", False, "it was accepted")
+    except ValueError as exc:
+        check("a password is refused", True)
+        check("and it says to use a shared credential instead",
+              "shared credential" in str(exc), str(exc))
+    check("nothing of it reached the file",
+          CSV_SECRET_VALUE not in (_temp / "profiles.json").read_text(encoding="utf-8"))
+
+    # Inventory facts are what the device said about itself (#536). A user
+    # editing fifty connections is not the device.
+    for field in ("version", "model", "serial", "last_connected"):
+        try:
+            profiles.update_many(ids, {field: "made up"})
+            check(f"'{field}' is refused", False, "it was accepted")
+        except ValueError:
+            check(f"'{field}' is refused", True)
+
+    try:
+        profiles.update_many(ids, {"hostname": "somewhere-else"})
+        check("a field outside the list is refused", False, "it was accepted")
+    except ValueError:
+        check("a field outside the list is refused", True)
+
+    try:
+        profiles.update_many(ids, {"port": "70000"})
+        check("a port out of range is refused", False, "it was accepted")
+    except ValueError:
+        check("a port out of range is refused", True)
+
+
+def test_a_bulk_edit_reports_a_merge_rather_than_making_one() -> None:
+    """
+    The risk the issue names: username and port are part of what makes two
+    saved connections the same connection, so setting one username across a
+    selection can push two of them onto the same identity. dedupe_existing()
+    merges those deliberately and loses a credential doing it (#73); here it
+    would be an accident.
+    """
+    print("\n-- Would merge with --")
+    reset()
+    profiles.save_many([
+        {"name": "sw1", "hostname": "10.9.1.1", "port": 22,
+         "connection_type": "ssh", "username": "admin"},
+        {"name": "sw1-as-neteng", "hostname": "10.9.1.1", "port": 22,
+         "connection_type": "ssh", "username": "neteng"},
+        {"name": "sw2", "hostname": "10.9.1.2", "port": 22,
+         "connection_type": "ssh", "username": "neteng"},
+    ])
+    saved = profiles._load()
+    result = profiles.update_many([p["id"] for p in saved], {"username": "admin"})
+
+    check("nothing was merged", len(profiles._load()) == 3,
+          str(len(profiles._load())))
+    check("the one that would have collided was skipped",
+          [s["name"] for s in result["skipped"]] == ["sw1-as-neteng"],
+          str(result["skipped"]))
+    check("and it says what it would have merged with",
+          result["skipped"][0]["why"] == "would merge with sw1",
+          str(result["skipped"][0]))
+    check("it keeps the username it had",
+          next(p for p in profiles._load()
+               if p["name"] == "sw1-as-neteng")["username"] == "neteng")
+    check("the ones that could change did",
+          {s["name"] for s in result["updated"]} == {"sw1", "sw2"},
+          str(result["updated"]))
+
+
+def test_a_bulk_edit_can_attach_and_detach_a_shared_credential() -> None:
+    print("\n-- A credential across a selection --")
+    saved = _estate(3)
+    ids = [p["id"] for p in saved]
+    shared = profiles.save_credential_set("Glasgow", "svc-neteng", "hunter2",
+                                          storage="plaintext")
+
+    profiles.update_many(ids, {"credential_ref": shared["id"]})
+    listed = profiles.get_profiles()
+    check("all three now reference it",
+          all(p.get("credential_ref") == shared["id"] for p in listed), str(listed))
+    check("and all three report a saved credential",
+          all(p["has_saved_credentials"] for p in listed), str(listed))
+    check("the credential itself resolves",
+          profiles.load_credentials(ids[0]).get("password") == "hunter2")
+
+    profiles.update_many(ids, {"credential_ref": ""})
+    check("and one edit detaches them all",
+          all("credential_ref" not in p for p in profiles._load()),
+          str(profiles._load()))
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Connection profiles")
@@ -1091,7 +1251,12 @@ def main() -> int:
                  test_the_export_carries_no_secret,
                  test_the_export_can_be_one_group,
                  test_an_export_re_imports_as_itself,
-                 test_a_file_with_no_header_is_read_in_column_order):
+                 test_a_file_with_no_header_is_read_in_column_order,
+                 test_a_bulk_edit_is_one_write,
+                 test_a_bulk_edit_leaves_alone_what_it_was_not_given,
+                 test_a_bulk_edit_refuses_secrets_and_what_the_device_said,
+                 test_a_bulk_edit_reports_a_merge_rather_than_making_one,
+                 test_a_bulk_edit_can_attach_and_detach_a_shared_credential):
         try:
             test()
         except Exception as exc:

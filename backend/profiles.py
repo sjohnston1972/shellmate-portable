@@ -273,6 +273,97 @@ def attach_credential_set(profile_id: str, set_id: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# What a connection inherits from its groups (#545)
+#
+# The rule is one function, used by everything that connects and by everything
+# that says whether a connection *can* connect. Two readings of "which jump
+# host does this device use" is how the padlock on a tile comes to disagree
+# with what happens when it is clicked.
+# ---------------------------------------------------------------------------
+
+
+def _blank(value) -> bool:
+    """Whether a profile field is empty enough to be filled from a group."""
+    return value in (None, "", 0, [], {})
+
+
+def _defaults_table(table: dict | None = None) -> dict:
+    """The group defaults, loaded once. Imported late: groups imports us."""
+    if table is not None:
+        return table
+    from backend import groups
+    return groups.default_table()
+
+
+def inherited_for(profile: dict, table: dict | None = None) -> dict:
+    """
+    Which of this connection's blank fields its groups fill in, and from
+    where.
+
+    Only blank fields: a value on the connection is a decision somebody made
+    about that device and is never overridden. A field two groups disagree
+    about is reported in ``conflicts`` and inherited by nobody - see
+    ``groups.defaults_for``.
+
+    Returns:
+        ``{"values": {field: value}, "from": {field: group_key},
+        "conflicts": {field: [group_key, ...]}}``
+    """
+    tags = normalise_tags(profile.get("tags"))
+    if not tags:
+        return {"values": {}, "from": {}, "conflicts": {}}
+
+    from backend import groups
+    resolved = groups.defaults_for(tags, _defaults_table(table))
+
+    values: dict = {}
+    sources: dict = {}
+    for field, value in resolved["values"].items():
+        if not _blank(profile.get(field)):
+            continue
+        # A jump port belongs to a jump host. Lending one to a connection
+        # that dials its own bastion would send it to the right machine on
+        # the wrong port, which fails in a way nobody would think to look
+        # at the group for.
+        if field == "jump_port" and not _blank(profile.get("jump_host")):
+            continue
+        values[field] = value
+        sources[field] = resolved["from"][field]
+
+    # A conflict about a field the connection fills in itself is not a
+    # conflict about anything: it has an answer already.
+    conflicts = {field: keys for field, keys in resolved["conflicts"].items()
+                 if _blank(profile.get(field))}
+    return {"values": values, "from": sources, "conflicts": conflicts}
+
+
+def effective(profile: dict, table: dict | None = None) -> dict:
+    """
+    A connection as it will actually be dialled: its own fields, with the
+    blanks filled from its groups (#545).
+
+    **Every connect path goes through this** - the API, connect_tag and the
+    scheduler - and so does ``ready_to_connect``, through the credential
+    resolution below. Anything that resolved inheritance for itself would
+    eventually resolve it differently, and the tile would then say a device
+    is reachable that is not.
+    """
+    return {**profile, **inherited_for(profile, table)["values"]}
+
+
+def _reference_for(profile: dict, table: dict | None = None) -> str:
+    """
+    The shared credential a connection uses: its own, or its groups' (#545).
+
+    Its own first, for the same reason a profile's own password beats the
+    set it references - somebody who attached a credential to this device
+    meant it for this device.
+    """
+    return (profile.get("credential_ref") or ""
+            or inherited_for(profile, table)["values"].get("credential_ref", ""))
+
+
 def _resolve_owner(profile_id: str, profiles: list[dict] | None = None,
                    plaintext: dict | None = None) -> str:
     """
@@ -288,7 +379,7 @@ def _resolve_owner(profile_id: str, profiles: list[dict] | None = None,
         own = any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS)
         if own or (plaintext if plaintext is not None else _load_plaintext()).get(profile_id):
             return profile_id
-        reference = profile.get("credential_ref") or ""
+        reference = _reference_for(profile)
         return set_owner(reference) if reference else profile_id
     return profile_id
 
@@ -348,7 +439,8 @@ def _read_credentials(owner: str) -> dict:
     return out or _load_plaintext().get(owner, {})
 
 
-def _has_for_profile(profile: dict, plaintext: dict) -> bool:
+def _has_for_profile(profile: dict, plaintext: dict,
+                     table: dict | None = None) -> bool:
     """
     Whether this profile can connect without being asked, given the profile.
 
@@ -364,14 +456,17 @@ def _has_for_profile(profile: dict, plaintext: dict) -> bool:
     if plaintext.get(profile_id):
         return True
 
-    reference = profile.get("credential_ref") or ""
+    # Its groups' credential counts (#545): a connection that inherits one
+    # opens on a click, so the padlock has to say so.
+    reference = _reference_for(profile, table)
     if not reference:
         return False
     owner = set_owner(reference)
     return _has_directly(owner, plaintext)
 
 
-def _storage_for_profile(profile: dict, plaintext: dict) -> str:
+def _storage_for_profile(profile: dict, plaintext: dict,
+                         table: dict | None = None) -> str:
     """Which store holds this profile's credentials, without re-scanning."""
     profile_id = profile.get("id", "")
     if any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS):
@@ -379,7 +474,7 @@ def _storage_for_profile(profile: dict, plaintext: dict) -> str:
     if plaintext.get(profile_id):
         return "plaintext"
 
-    reference = profile.get("credential_ref") or ""
+    reference = _reference_for(profile, table)
     if not reference:
         return ""
     owner = set_owner(reference)
@@ -756,7 +851,8 @@ def _absorb(kept: dict, duplicate: dict, overwrite: bool = False) -> None:
     than a duplicate.
     """
     for key, value in duplicate.items():
-        if key in ("id", "has_saved_credentials", "credential_storage"):
+        if key in ("id", "has_saved_credentials", "credential_storage",
+                   "inherited", "inherited_from", "inherit_conflicts"):
             continue
         if value in (None, "", [], {}):
             continue
@@ -1062,11 +1158,23 @@ def get_profiles() -> list[dict]:
     # _load() for every connection, so listing 5,000 of them parsed a 1.6 MB
     # file 5,000 times — 63 seconds, and quadratic in the size of the estate.
     plaintext = _load_plaintext()
+    # The same rule for the group defaults (#545): read once here rather than
+    # once per connection.
+    table = _defaults_table()
     for profile in profiles:
-        profile["has_saved_credentials"] = _has_for_profile(profile, plaintext)
+        profile["has_saved_credentials"] = _has_for_profile(profile, plaintext, table)
         # Which store, so the dialog can show the right option already ticked
         # and not quietly move a password from one to the other.
-        profile["credential_storage"] = _storage_for_profile(profile, plaintext)
+        profile["credential_storage"] = _storage_for_profile(profile, plaintext, table)
+        # What its groups lend it, and what they disagree about (#545). Sent
+        # rather than merged in, so the dialog can say "inherited from
+        # site-004" beside a blank field — and so saving that connection
+        # cannot quietly write the group's value onto it.
+        borrowed = inherited_for(profile, table)
+        if borrowed["values"] or borrowed["conflicts"]:
+            profile["inherited"] = borrowed["values"]
+            profile["inherited_from"] = borrowed["from"]
+            profile["inherit_conflicts"] = borrowed["conflicts"]
     return profiles
 
 
@@ -1120,6 +1228,180 @@ def save_profile(fields: dict) -> dict:
     profiles.append(profile)
     _save(profiles)
     return profile
+
+
+# ---------------------------------------------------------------------------
+# Editing many at once (#537)
+#
+# "The service account on all of Glasgow changed" was fifty dialogs, because
+# every field change is one save_profile() call and each of those parses and
+# rewrites the whole file. One load and one save, the shape retag_many() and
+# save_many() established.
+#
+# Two things this refuses rather than does quietly, and both are the point:
+#
+# **A secret is refused, not stripped.** SECRET_FIELDS would drop a password
+# and report success, leaving somebody believing fifty devices had been given
+# one.
+#
+# **A merge is refused, not performed.** Username and port are part of what
+# makes two saved connections the same connection, so setting one username
+# across a selection can push two of them onto the same identity. dedupe
+# merges those deliberately and loses a credential doing it (#73); here it
+# would be an accident, so the connection is skipped and named instead.
+# ---------------------------------------------------------------------------
+
+#: What a bulk edit may set. Everything a person chose; nothing a device
+#: said. INVENTORY_FIELDS are facts the device states about itself and are
+#: overwritten by whatever it says next, so a user writing them would be
+#: recording an opinion where an observation belongs.
+BULK_FIELDS = (
+    "username",
+    "port",
+    "connection_type",
+    "platform",
+    "auth_method",
+    "credential_ref",
+    "jump_host",
+    "jump_port",
+    "jump_username",
+)
+
+#: Transports a connection can be changed to. Serial is deliberately here:
+#: a batch wrongly imported as SSH is exactly what somebody would want to fix.
+_BULK_TYPES = ("ssh", "telnet", "serial")
+
+
+def _clean_bulk_changes(changes: dict) -> tuple[dict, set]:
+    """
+    One bulk edit as fields to set and fields to clear.
+
+    An absent key means *leave it alone* - that is what makes editing five
+    connections at once safe. An explicitly empty one means clear it, which
+    is the only way to detach a shared credential from a selection.
+
+    Raises:
+        ValueError: A secret, an inventory fact, an unknown field, or a value
+            that is not one. Said plainly, because it is shown in the dialog.
+    """
+    if not isinstance(changes, dict):
+        raise ValueError("There is nothing to change.")
+
+    if set(changes) & SECRET_FIELDS:
+        raise ValueError(
+            "Passwords are not edited in bulk. Point the connections at a "
+            "shared credential instead, and change it in one place.")
+
+    stated = set(changes) & set(INVENTORY_FIELDS)
+    if stated:
+        raise ValueError(
+            f"{', '.join(sorted(stated))} is what the device said about "
+            f"itself. Only the device may state it.")
+
+    unknown = sorted(set(changes) - set(BULK_FIELDS))
+    if unknown:
+        raise ValueError(f"{', '.join(unknown)} is not a field a bulk edit sets.")
+
+    sets: dict = {}
+    clears: set = set()
+    for field in BULK_FIELDS:
+        if field not in changes:
+            continue
+        value = changes[field]
+        if value is None or (isinstance(value, str) and not value.strip()):
+            clears.add(field)
+            continue
+        if field in ("port", "jump_port"):
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"'{value}' is not a port number.") from None
+            if not 1 <= number <= 65535:
+                raise ValueError(f"{number} is not a port number.")
+            sets[field] = number
+        elif field == "connection_type":
+            kind = str(value).strip().lower()
+            if kind not in _BULK_TYPES:
+                raise ValueError(f"'{value}' is not a connection type ShellMate has.")
+            sets[field] = kind
+        else:
+            sets[field] = " ".join(str(value).split())
+
+    if not sets and not clears:
+        raise ValueError("There is nothing to change.")
+    return sets, clears
+
+
+def _label(profile: dict) -> str:
+    """What to call a connection when reporting on it."""
+    return (profile.get("name") or profile.get("hostname")
+            or profile.get("serial_port") or profile.get("id", "?"))
+
+
+@_synchronised
+def update_many(profile_ids, changes: dict) -> dict:
+    """
+    Set the same fields on many saved connections, in one load and one save.
+
+    Returns:
+        ``{"updated": [{id, name}], "skipped": [{id, name, why}]}``. A
+        connection is skipped rather than merged when the edit would give it
+        the same identity as another saved connection - see ``identity()``.
+
+    Raises:
+        ValueError: The change itself is unusable. A single *connection* that
+            cannot take it is not this: it is reported in ``skipped``, and
+            the rest go through.
+    """
+    sets, clears = _clean_bulk_changes(changes)
+
+    wanted = [pid for pid in (profile_ids or []) if pid]
+    if not wanted:
+        raise ValueError("No connections were named.")
+
+    profiles = _load()
+    by_id = {p.get("id"): p for p in profiles if p.get("id")}
+    targets = [by_id[pid] for pid in dict.fromkeys(wanted) if pid in by_id]
+    if not targets:
+        raise ValueError("None of those connections are saved any more.")
+
+    # Every identity that will still exist and is not being edited. A target
+    # is added back as it is resolved, with whichever identity it ends up
+    # holding, so two targets cannot be moved onto each other either.
+    editing = {p.get("id") for p in targets}
+    taken: dict[tuple, dict] = {}
+    for profile in profiles:
+        if profile.get("id") not in editing:
+            taken.setdefault(identity(profile), profile)
+
+    updated: list[dict] = []
+    skipped: list[dict] = []
+
+    for profile in targets:
+        proposed = {**profile, **sets}
+        for field in clears:
+            proposed.pop(field, None)
+
+        clash = taken.get(identity(proposed))
+        if clash is not None:
+            skipped.append({"id": profile.get("id", ""), "name": _label(profile),
+                            "why": f"would merge with {_label(clash)}"})
+            # Unchanged, so it keeps the identity it had - and nothing else
+            # in the batch may be moved onto that either.
+            taken.setdefault(identity(profile), profile)
+            continue
+
+        profile.update(sets)
+        for field in clears:
+            profile.pop(field, None)
+        taken[identity(profile)] = profile
+        updated.append({"id": profile.get("id", ""), "name": _label(profile)})
+
+    if updated:
+        _save(profiles)
+
+    missing = len(dict.fromkeys(wanted)) - len(targets)
+    return {"updated": updated, "skipped": skipped, "missing": missing}
 
 
 def _looks_like_an_address(name: str) -> bool:
@@ -1325,7 +1607,10 @@ def remembered_platform(hostname: str, port: int, username: str) -> str:
             continue
         if username and profile.get("username") not in ("", username):
             continue
-        remembered = (profile.get("platform") or "").strip()
+        # Its groups' platform counts too (#545): "everything in this site is
+        # NX-OS" is exactly the kind of fact a group is for, and a device
+        # that inherits it must be onboarded as one.
+        remembered = (effective(profile).get("platform") or "").strip()
         if remembered:
             return remembered
     return ""

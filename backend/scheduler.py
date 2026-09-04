@@ -263,7 +263,11 @@ def _open_session_for(profile: dict):
 def _connect(profile: dict) -> dict:
     """A headless session from a saved profile, credentials filled in server-side."""
     from backend.connections.base import ConnectionParams
-    from backend.profiles import load_credentials
+    from backend.profiles import effective, load_credentials
+    # The third connect path, through the same resolution as the other two
+    # (#545): a group's jump host has to apply to a backup taken at 3 a.m.
+    # as much as to a session somebody opens.
+    profile = effective(profile)
     fields = {k: profile.get(k) for k in (
         "hostname", "port", "username", "private_key_path", "private_key_username",
         "jump_host", "jump_port", "jump_username", "jump_private_key_path") if profile.get(k)}

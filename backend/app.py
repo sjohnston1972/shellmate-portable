@@ -521,6 +521,28 @@ async def create_session(request: CreateSessionRequest) -> dict:
                 if field == "password":
                     params.credential_source = "saved"
 
+        # What this connection's groups lend it (#545). Done here, on the one
+        # path every session goes through, because the browser sends what is
+        # on the profile — and an inherited jump host is by definition not on
+        # it. `load_credentials()` above has already resolved an inherited
+        # shared credential, so only the transport fields are left.
+        saved = profiles_module.find_profile(request.profile_id)
+        borrowed = profiles_module.inherited_for(saved)["values"] if saved else {}
+        for field in ("username", "jump_host", "jump_username"):
+            if borrowed.get(field) and not getattr(params, field, ""):
+                setattr(params, field, borrowed[field])
+        # A port is only lent where nobody chose one: the profile has none and
+        # what arrived is the bare transport default. Anything else is a
+        # number somebody typed, and a group must not overrule that.
+        if borrowed.get("port") and int(params.port or 0) in (
+                0, profiles_module.DEFAULT_PORTS.get(params.connection_type, 22)):
+            params.port = int(borrowed["port"])
+        # The jump port belongs with the jump host, so it travels only when
+        # the host it dials came from the group as well.
+        if (borrowed.get("jump_port") and params.jump_host == borrowed.get("jump_host")
+                and int(params.jump_port or 0) in (0, 22)):
+            params.jump_port = int(borrowed["jump_port"])
+
     # Captured before connecting because the handler scrubs them from params
     # the moment authentication succeeds.
     #
@@ -1933,6 +1955,10 @@ class GroupRequest(BaseModel):
     order: int | None = None
     # A backup schedule (#408): {enabled, every, at, day}. None leaves it.
     backup: dict | None = None
+    # What the group lends its connections (#545): {username, port, platform,
+    # credential_ref, jump_host, jump_port, jump_username}. None leaves them;
+    # {} clears them. A secret here is refused, not stripped.
+    defaults: dict | None = None
 
 
 class GroupOrderRequest(BaseModel):
@@ -2005,6 +2031,20 @@ async def list_groups_endpoint() -> dict:
             # the frontend, so there is one place a name can be added and it
             # is the place the font is subsetted from (#180).
             "icons": list(groups_module.ICONS)}
+
+
+@app.get("/api/groups/defaults")
+async def group_defaults_endpoint(tags: str = "") -> dict:
+    """
+    What a connection in these groups would inherit, and from where (#545).
+
+    Declared before the /{key:path} routes for the reason set out there, and
+    answered by the same function every connect path uses - the dialog must
+    not work out inheritance for itself, or it will eventually say one thing
+    while the connection does another.
+    """
+    wanted = profiles_module.normalise_tags((tags or "").split(","))
+    return await asyncio.to_thread(groups_module.defaults_for, wanted)
 
 
 @app.post("/api/groups")
@@ -2106,49 +2146,46 @@ async def set_profile_tags(profile_id: str, request: TagsRequest) -> dict:
                 profiles_module.set_tags, profile_id, request.tags)}
 
 
-# Same reason as the group routes above: a tag is a group key, and a
-# nested one carries a slash.
-@app.post("/api/tags/{tag:path}/connect")
-async def connect_tag(tag: str) -> dict:
+async def _open_profiles(targets: list[dict]) -> list[dict]:
     """
-    Open a session to every connection carrying a tag.
+    Open a session to each of these saved connections, and report on each.
 
     Bounded concurrency, for the same reason broadcast has it: forty
     simultaneous SSH handshakes through one bastion buries it, and a fleet is
     exactly where somebody would use this.
 
     Each result comes back individually. A partial failure has to be visible
-    rather than assumed — the same reasoning broadcast already records, and it
+    rather than assumed - the same reasoning broadcast already records, and it
     matters more here because the whole point is not watching each one.
-    """
-    # Everything beneath it too (#207). A site holds no devices directly —
-    # they carry their subgroup's tag only — so an exact match found nothing
-    # and "Connect all" on a site reported it was empty, while the tree
-    # beside it showed a count of fifty.
-    targets = await asyncio.to_thread(
-        profiles_module.profiles_tagged, tag, True)
-    if not targets:
-        raise HTTPException(status_code=404,
-                            detail=f"Nothing is tagged '{tag}'.")
 
+    Shared by the tag route and by a hand-picked selection (#537), so the
+    pacing and the per-device reporting cannot come to differ between them.
+    """
     # The same reading of broadcast.concurrency as broadcast itself (#333):
     # 0 is documented as "no limit". max(1, 0) turned the default into
     # Semaphore(1), and "Connect all" on fifty devices opened them strictly
-    # one at a time — worst case fifty connect timeouts end to end.
+    # one at a time - worst case fifty connect timeouts end to end.
     concurrency = int(advanced_setting("broadcast.concurrency"))
     limit = asyncio.Semaphore(concurrency) if concurrency else None
     results: list[dict] = []
 
     async def open_one(profile: dict) -> None:
         async with (limit or contextlib.nullcontext()):
-            kind = profile.get("connection_type") or "ssh"
+            # Every connect path resolves what the groups lend the same way
+            # (#545): what a tile says and what a tab does must agree.
+            dialled = profiles_module.effective(profile)
+            kind = dialled.get("connection_type") or "ssh"
             params = ConnectionParams(
                 connection_type=kind,
-                hostname=profile.get("hostname", ""),
-                port=int(profile.get("port") or (22 if kind == "ssh" else 23)),
-                username=profile.get("username", ""),
-                display_label=profile.get("name", ""),
-                serial_port=profile.get("serial_port", ""),
+                hostname=dialled.get("hostname", ""),
+                port=int(dialled.get("port") or (22 if kind == "ssh" else 23)),
+                username=dialled.get("username", ""),
+                display_label=dialled.get("name", ""),
+                serial_port=dialled.get("serial_port", ""),
+                jump_host=dialled.get("jump_host", ""),
+                jump_port=int(dialled.get("jump_port") or 22),
+                jump_username=dialled.get("jump_username", ""),
+                private_key_path=dialled.get("private_key_path", ""),
             )
             for field, value in load_credentials(profile.get("id", "")).items():
                 if not getattr(params, field, ""):
@@ -2162,18 +2199,69 @@ async def connect_tag(tag: str) -> dict:
                 results.append({"ok": True, "name": profile.get("name", ""),
                                 "session": session})
             except Exception as exc:
-                logger.info("Tag connect failed for %s: %s",
+                logger.info("Batch connect failed for %s: %s",
                             profile.get("name", ""), exc)
                 results.append({"ok": False, "name": profile.get("name", ""),
                                 "error": str(exc)})
 
     await asyncio.gather(*(open_one(p) for p in targets))
+    return results
+
+
+# Same reason as the group routes above: a tag is a group key, and a
+# nested one carries a slash.
+@app.post("/api/tags/{tag:path}/connect")
+async def connect_tag(tag: str) -> dict:
+    """
+    Open a session to every connection carrying a tag.
+
+    Paced and reported per device by ``_open_profiles``.
+    """
+    # Everything beneath it too (#207). A site holds no devices directly —
+    # they carry their subgroup's tag only — so an exact match found nothing
+    # and "Connect all" on a site reported it was empty, while the tree
+    # beside it showed a count of fifty.
+    targets = await asyncio.to_thread(
+        profiles_module.profiles_tagged, tag, True)
+    if not targets:
+        raise HTTPException(status_code=404,
+                            detail=f"Nothing is tagged '{tag}'.")
+
+    results = await _open_profiles(targets)
 
     opened = sum(1 for r in results if r["ok"])
     logger.info("Connected %s of %s devices tagged '%s'",
                 opened, len(targets), tag)
     return {"tag": tag, "opened": opened, "total": len(targets),
             "results": results}
+
+
+class ConnectManyRequest(BaseModel):
+    """Body for POST /api/sessions/many."""
+
+    profile_ids: list[str] = []
+
+
+@app.post("/api/sessions/many")
+async def connect_many(request: ConnectManyRequest) -> dict:
+    """
+    Open a session to each of a hand-picked set of connections (#537).
+
+    The tag route above answers "connect this group"; this answers "connect
+    these six", which is the question somebody actually has after looking at
+    a tree. Same pacing, same per-device reporting.
+    """
+    wanted = [pid for pid in request.profile_ids if pid]
+    saved = {p.get("id"): p for p in await asyncio.to_thread(get_profiles)}
+    targets = [saved[pid] for pid in dict.fromkeys(wanted) if pid in saved]
+    if not targets:
+        raise HTTPException(status_code=404,
+                            detail="None of those connections are saved any more.")
+
+    results = await _open_profiles(targets)
+    opened = sum(1 for r in results if r["ok"])
+    logger.info("Connected %s of %s selected devices", opened, len(targets))
+    return {"opened": opened, "total": len(targets), "results": results}
 
 
 @app.get("/api/serial/ports")
@@ -2584,6 +2672,32 @@ async def save_profiles_csv(request: ProfileExportRequest) -> dict:
     with contextlib.suppress(Exception):
         await asyncio.to_thread(desktop.reveal, str(Path(folder)))
     return {"path": str(target)}
+
+
+class BulkProfileRequest(BaseModel):
+    """Body for PUT /api/profiles/bulk."""
+
+    profile_ids: list[str] = []
+    #: Only the fields being changed. An absent one is left alone; one sent
+    #: empty is cleared. profiles.BULK_FIELDS says which are allowed, and a
+    #: secret or an inventory fact is refused rather than dropped.
+    changes: dict = {}
+
+
+@app.put("/api/profiles/bulk")
+async def update_profiles_bulk(request: BulkProfileRequest) -> dict:
+    """
+    Change the same fields on many saved connections at once (#537).
+
+    Declared **before** any /api/profiles/{id} route for the reason the group
+    routes record: FastAPI matches in declaration order, and "bulk" would
+    otherwise be read as a profile id.
+    """
+    try:
+        return await asyncio.to_thread(
+            profiles_module.update_many, request.profile_ids, request.changes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.delete("/api/profiles/untagged")
