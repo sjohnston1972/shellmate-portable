@@ -128,6 +128,164 @@ def guess_icon(name: str) -> str:
     return DEFAULT_ICON
 
 
+# ---------------------------------------------------------------------------
+# Defaults a group lends its connections (#545)
+#
+# Two hundred sites, each behind its own bastion with its own TACACS realm,
+# is 200 x N connections to edit the day a bastion moves. A group is the one
+# place that fact can be stated once, so it is stated here and every
+# connection in the group borrows it.
+#
+# **Borrowed, never written.** A default fills a field the connection leaves
+# blank; nothing is copied onto the profile, so changing the group changes
+# every device relying on it. A field the connection sets itself always wins
+# - somebody who typed a jump host on one switch meant it for that switch.
+#
+# And **ambiguity inherits nothing**. A device in `glasgow` and in `core`
+# where the two disagree about the jump host has no answer that is not a
+# guess, so it gets none and the dialog says which groups disagree. Guessing
+# here means dialling the wrong bastion with the wrong credential, which is
+# how a tool ends up authenticating against somebody else's realm.
+# ---------------------------------------------------------------------------
+
+#: What a group may lend. Deliberately none of the identifying fields: a
+#: group cannot lend a hostname or a COM port, because those are what make a
+#: connection that connection.
+DEFAULT_FIELDS = (
+    "username",
+    "port",
+    "platform",
+    "credential_ref",
+    "jump_host",
+    "jump_port",
+    "jump_username",
+)
+
+#: The ones that are numbers, and have to be in range.
+_PORT_FIELDS = ("port", "jump_port")
+
+
+def _clean_defaults(values) -> dict:
+    """
+    One group's defaults as stored: known fields only, ports in range.
+
+    Raises:
+        ValueError: A secret was passed. Refused rather than stripped, for
+            the reason profiles.SECRET_FIELDS exists - groups.json is plain
+            JSON on disk, and a caller that believes it stored a password
+            there is worse off than one told it cannot.
+    """
+    if values is None:
+        values = {}
+    if not isinstance(values, dict):
+        raise ValueError("Group defaults have to be a set of fields.")
+
+    offered = set(values) & profiles_module.SECRET_FIELDS
+    if offered:
+        raise ValueError(
+            "A group cannot hold a password. Make a shared credential and "
+            "give the group that instead."
+        )
+
+    out: dict = {}
+    for field in DEFAULT_FIELDS:
+        raw = values.get(field)
+        if raw is None or raw == "":
+            continue
+        if field in _PORT_FIELDS:
+            try:
+                number = int(raw)
+            except (TypeError, ValueError):
+                raise ValueError(f"'{raw}' is not a port number.") from None
+            if not 1 <= number <= 65535:
+                raise ValueError(f"{number} is not a port number.")
+            out[field] = number
+        else:
+            out[field] = " ".join(str(raw).split())
+    return out
+
+
+# The defaults of every group, kept until groups.json changes. Listing five
+# thousand connections asks for them once per connection, and re-reading the
+# file each time is the shape of mistake profiles._cache exists to record.
+_defaults_cache: dict = {"key": None, "table": None}
+
+
+def default_table() -> dict[str, dict]:
+    """Every group that lends something, keyed by group key."""
+    path = _file()
+    try:
+        stat = path.stat()
+        stamp = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        stamp = None
+
+    with _lock:
+        if _defaults_cache["key"] != stamp or _defaults_cache["table"] is None:
+            _defaults_cache["key"] = stamp
+            _defaults_cache["table"] = {
+                entry["key"]: entry["defaults"]
+                for entry in _load()
+                if entry.get("key") and isinstance(entry.get("defaults"), dict)
+                and entry["defaults"]
+            }
+        # A copy: callers read this beside a profile they are about to
+        # change, and a shared dict would let one of them edit the store.
+        return {key: dict(value)
+                for key, value in _defaults_cache["table"].items()}
+
+
+def _ancestry(tag: str) -> list[str]:
+    """A tag and the groups above it, nearest first: a/b/c, a/b, a."""
+    parts = [part for part in (tag or "").split("/") if part]
+    return ["/".join(parts[:depth]) for depth in range(len(parts), 0, -1)]
+
+
+def defaults_for(tags, table: dict | None = None) -> dict:
+    """
+    What a connection in these groups inherits, and from where.
+
+    The nearest ancestor wins within one branch - `site-004/access` before
+    `site-004` - because the subgroup is the more specific statement. Across
+    *different* branches there is no nearer and no further, so two groups
+    that disagree about a field cancel it out entirely and the field is
+    reported in ``conflicts`` instead. Two that happen to agree are not a
+    conflict: there is still only one answer.
+
+    Returns:
+        ``{"values": {field: value}, "from": {field: group_key},
+        "conflicts": {field: [group_key, ...]}}``
+    """
+    table = default_table() if table is None else table
+    if not table:
+        return {"values": {}, "from": {}, "conflicts": {}}
+
+    values: dict = {}
+    sources: dict = {}
+    conflicts: dict = {}
+
+    for tag in tags or []:
+        # One branch resolved first, so the nearer group wins before anything
+        # is compared against another branch.
+        claimed: dict = {}
+        for key in _ancestry(tag):
+            for field, value in (table.get(key) or {}).items():
+                claimed.setdefault(field, (value, key))
+
+        for field, (value, key) in claimed.items():
+            if field in conflicts:
+                if key not in conflicts[field]:
+                    conflicts[field].append(key)
+            elif field not in values:
+                values[field] = value
+                sources[field] = key
+            elif values[field] != value:
+                conflicts[field] = [sources.pop(field), key]
+                values.pop(field)
+
+    return {"values": values, "from": sources, "conflicts": conflicts}
+
+
 def _file():
     return paths.data_dir() / "groups.json"
 
@@ -188,6 +346,9 @@ def list_groups() -> list[dict]:
             # the interface can offer to give it a colour rather than treating
             # it as already configured.
             "implicit":  key not in stored,
+            # What this group lends its connections (#545). Always a dict,
+            # so the editor has something to render either way.
+            "defaults":    entry.get("defaults") if isinstance(entry.get("defaults"), dict) else {},
             # Scheduled backups (#408): the schedule, and how the last one went.
             "backup":      entry.get("backup") or None,
             "backup_last": entry.get("backup_last") or None,
@@ -283,6 +444,15 @@ def update_group(key: str, changes: dict) -> dict:
             entry["backup"] = kept
         else:
             entry.pop("backup", None)
+    if "defaults" in changes:
+        # Cleaned rather than trusted, and the empty case removes the key
+        # rather than storing {} - a group that lends nothing should read
+        # as one in the file too. _clean_defaults raises on a secret.
+        cleaned = _clean_defaults(changes["defaults"])
+        if cleaned:
+            entry["defaults"] = cleaned
+        else:
+            entry.pop("defaults", None)
     if "backup_last" in changes and isinstance(changes["backup_last"], dict):
         entry["backup_last"] = changes["backup_last"]
     if "order" in changes:

@@ -113,6 +113,11 @@
 
     typeSelect.addEventListener('change', () => applyConnectionType(typeSelect.value));
 
+    // Changing the groups changes what is inherited (#545), so the notice
+    // follows the field rather than only what the dialog opened with.
+    const tagsField = document.getElementById('field-tags');
+    if (tagsField) tagsField.addEventListener('input', refreshInherited);
+
     ['field-baud', 'field-databits', 'field-parity', 'field-stopbits', 'field-flow']
       .forEach(id => {
         const el = document.getElementById(id);
@@ -153,6 +158,14 @@
     applyConnectionType(type);
 
     if (prefill) fillFromProfile(prefill);
+    // What the groups named in the field lend (#545). Painted from what the
+    // listing already resolved where there is one, then re-asked as the
+    // Groups field is edited.
+    paintInherited(prefill && prefill.inherited
+      ? { values: prefill.inherited, from: prefill.inherited_from,
+          conflicts: prefill.inherit_conflicts }
+      : { values: {}, from: {}, conflicts: {} });
+    refreshInherited();
     updateRememberHint();
     overlay.classList.remove('hidden');
 
@@ -165,6 +178,102 @@
       const el = document.getElementById(target);
       if (el) el.focus();
     }, 50);
+  }
+
+  // -------------------------------------------------------------------------
+  // What the groups lend this connection (#545)
+  //
+  // A blank field is not necessarily empty: a connection in `site-004` whose
+  // jump host field is blank still goes through the site's bastion. Saying so
+  // where the blank is, rather than leaving somebody to wonder why a field
+  // they never filled in works, is the whole of this.
+  //
+  // Resolved by the server, never here. `/api/groups/defaults` answers with
+  // the same function every connect path uses, so what the dialog says and
+  // what the connection does cannot drift apart.
+  // -------------------------------------------------------------------------
+
+  /** Which input shows which inherited field. */
+  const INHERITED_FIELDS = {
+    username:      'field-username',
+    port:          'field-port',
+    jump_host:     'field-jump-host',
+    jump_port:     'field-jump-port',
+    jump_username: 'field-jump-username',
+  };
+
+  /** What each field is called in a sentence. */
+  const INHERITED_LABELS = {
+    username:       'username',
+    port:           'port',
+    platform:       'platform',
+    credential_ref: 'shared credential',
+    jump_host:      'jump host',
+    jump_port:      'jump host port',
+    jump_username:  'jump host username',
+  };
+
+  let inheritTimer = null;
+
+  /** Ask what the groups currently named in the field lend, and show it. */
+  function refreshInherited() {
+    clearTimeout(inheritTimer);
+    inheritTimer = setTimeout(async () => {
+      const tags = value('field-tags');
+      if (!tags) { paintInherited({ values: {}, from: {}, conflicts: {} }); return; }
+      try {
+        const res = await fetch('/api/groups/defaults?tags=' + encodeURIComponent(tags));
+        paintInherited(await res.json());
+      } catch (_) {
+        // A failed lookup says nothing rather than something wrong.
+        paintInherited({ values: {}, from: {}, conflicts: {} });
+      }
+    }, 150);
+  }
+
+  /** Draw the notice, and the placeholder in each blank field it fills. */
+  function paintInherited(resolved) {
+    const values    = (resolved && resolved.values) || {};
+    const from      = (resolved && resolved.from) || {};
+    const conflicts = (resolved && resolved.conflicts) || {};
+
+    Object.entries(INHERITED_FIELDS).forEach(([field, id]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      // The placeholder the markup shipped with, kept so it can come back
+      // when the connection leaves the group.
+      if (el.dataset.ownPlaceholder === undefined) {
+        el.dataset.ownPlaceholder = el.placeholder || '';
+      }
+      el.placeholder = (values[field] !== undefined && from[field])
+        ? values[field] + ' \u2014 from ' + from[field]
+        : el.dataset.ownPlaceholder;
+    });
+
+    const notice = document.getElementById('inherit-notice');
+    if (notice) {
+      const lines = Object.keys(values).map(field =>
+        (INHERITED_LABELS[field] || field) + ' ' + values[field]
+        + ' (from ' + from[field] + ')');
+      notice.textContent = lines.length
+        ? 'Left blank, this connection inherits: ' + lines.join(', ') + '.'
+        : '';
+      notice.classList.toggle('hidden', !lines.length);
+    }
+
+    const warn = document.getElementById('inherit-conflict');
+    if (warn) {
+      // Named in full. "Some fields conflict" would leave somebody opening
+      // every group in the list to find out which two disagree.
+      const lines = Object.entries(conflicts).map(([field, keys]) =>
+        keys.join(' and ') + ' disagree about the '
+        + (INHERITED_LABELS[field] || field));
+      warn.textContent = lines.length
+        ? lines.join('; ') + ' \u2014 so nothing is inherited for '
+          + (lines.length === 1 ? 'it' : 'them') + '. Fill it in here.'
+        : '';
+      warn.classList.toggle('hidden', !lines.length);
+    }
   }
 
   function hideConnectionDialog() {

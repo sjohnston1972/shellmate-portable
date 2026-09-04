@@ -2175,6 +2175,96 @@
     }
   }
 
+  /**
+   * What this group lends the connections in it (#545).
+   *
+   * Every field is optional and blank means "lends nothing", so the dialog
+   * is also how a default is taken back. Nothing is written onto the
+   * connections: they read these at connect time, which is what makes moving
+   * a bastion one edit rather than fifty.
+   */
+  async function groupDefaults(group) {
+    const current = group.defaults || {};
+
+    // The two lists this borrows from. A failed fetch leaves an empty list
+    // rather than blocking the dialog - the rest of it still works.
+    let sets = [];
+    let platforms = [];
+    try {
+      const data = await (await fetch('/api/credential-sets')).json();
+      sets = data.sets || [];
+    } catch (_) { /* none offered */ }
+    try {
+      const data = await (await fetch('/api/platforms')).json();
+      platforms = Object.entries(data.platforms || {})
+        .map(([id, spec]) => ({ value: id, label: spec.name || id }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+    } catch (_) { /* none offered */ }
+
+    const NONE = { value: '', label: 'Not set' };
+    const answer = await window.shellmateDialog.form({
+      title: 'Defaults for ' + group.name,
+      body:  'Every connection in this group, and in the groups under it, '
+             + 'uses these wherever its own field is blank. Its own value '
+             + 'always wins, nothing is copied onto it, and a field two '
+             + 'groups disagree about is inherited by nobody.',
+      confirmLabel: 'Save defaults',
+      fields: [
+        { name: 'username', label: 'Username', type: 'text',
+          value: current.username || '',
+          hint: 'The login these devices share. Left blank on a connection, '
+                + 'this is what it dials with.' },
+        { name: 'credential_ref', label: 'Shared credential', type: 'select',
+          options: [NONE, ...sets.map(set => ({
+            value: set.id,
+            label: (set.username ? set.name + ' (' + set.username + ')' : set.name)
+                   + (set.has_credentials ? '' : ' \u2014 no password saved yet'),
+          }))],
+          value: current.credential_ref || '',
+          hint: 'The password itself stays in the vault. Change it once and '
+                + 'every device in the group is fixed.' },
+        { name: 'platform', label: 'Platform', type: 'select',
+          options: [NONE, ...platforms], value: current.platform || '',
+          hint: 'What these devices are, where ShellMate cannot tell on its own.' },
+        { name: 'port', label: 'Port', type: 'text', value: current.port || '',
+          placeholder: '22' },
+        { name: 'jump_host', label: 'Jump host / bastion', type: 'text',
+          value: current.jump_host || '', placeholder: 'bastion.example.com',
+          hint: 'The site\u2019s bastion. This is the field that makes the '
+                + 'difference: moving it is one edit here rather than one per '
+                + 'connection.' },
+        { name: 'jump_port', label: 'Jump host port', type: 'text',
+          value: current.jump_port || '', placeholder: '22' },
+        { name: 'jump_username', label: 'Jump host username', type: 'text',
+          value: current.jump_username || '' },
+      ],
+      validate: (values) => {
+        // Checked here as well as on the server, so a typo is corrected in
+        // the dialog rather than reported after it closes.
+        const bad = ['port', 'jump_port'].find(name => {
+          const raw = values[name];
+          if (!raw) return false;
+          const number = Number(raw);
+          return !Number.isInteger(number) || number < 1 || number > 65535;
+        });
+        return bad ? 'A port has to be a number between 1 and 65535.' : '';
+      },
+    });
+    if (!answer) return;
+
+    // Sent whole, blanks included: the absence of a field is how a default
+    // is removed, and a partial body would make that impossible to express.
+    await _update(group.key, { defaults: {
+      username:       answer.username,
+      credential_ref: answer.credential_ref,
+      platform:       answer.platform,
+      port:           answer.port,
+      jump_host:      answer.jump_host,
+      jump_port:      answer.jump_port,
+      jump_username:  answer.jump_username,
+    } });
+  }
+
   async function editGroup(group) {
     const answer = await window.shellmateDialog.form({
       title: `Edit "${group.name}"`,
@@ -2400,6 +2490,10 @@
     const items = [
       { icon: 'tune', label: 'Rename or recolour…', onClick: () => editGroup(group) },
       { icon: 'palette', label: 'Change the icon...', onClick: () => pickIcon(group) },
+      // What every connection in the group borrows (#545). On the group menu
+      // because the group is the thing that knows it - a bastion belongs to
+      // a site, not to each of the fifty switches behind it.
+      { icon: 'lock', label: 'Group defaults…', onClick: () => groupDefaults(group) },
       // Nesting was already rendered - a group named "site-3/access" becomes
       // a branch under "site-3" - but the only way to make one was typing
       // the separator by hand into the name field, which nothing explained

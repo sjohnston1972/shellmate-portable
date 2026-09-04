@@ -521,6 +521,28 @@ async def create_session(request: CreateSessionRequest) -> dict:
                 if field == "password":
                     params.credential_source = "saved"
 
+        # What this connection's groups lend it (#545). Done here, on the one
+        # path every session goes through, because the browser sends what is
+        # on the profile — and an inherited jump host is by definition not on
+        # it. `load_credentials()` above has already resolved an inherited
+        # shared credential, so only the transport fields are left.
+        saved = profiles_module.find_profile(request.profile_id)
+        borrowed = profiles_module.inherited_for(saved)["values"] if saved else {}
+        for field in ("username", "jump_host", "jump_username"):
+            if borrowed.get(field) and not getattr(params, field, ""):
+                setattr(params, field, borrowed[field])
+        # A port is only lent where nobody chose one: the profile has none and
+        # what arrived is the bare transport default. Anything else is a
+        # number somebody typed, and a group must not overrule that.
+        if borrowed.get("port") and int(params.port or 0) in (
+                0, profiles_module.DEFAULT_PORTS.get(params.connection_type, 22)):
+            params.port = int(borrowed["port"])
+        # The jump port belongs with the jump host, so it travels only when
+        # the host it dials came from the group as well.
+        if (borrowed.get("jump_port") and params.jump_host == borrowed.get("jump_host")
+                and int(params.jump_port or 0) in (0, 22)):
+            params.jump_port = int(borrowed["jump_port"])
+
     # Captured before connecting because the handler scrubs them from params
     # the moment authentication succeeds.
     #
@@ -1933,6 +1955,10 @@ class GroupRequest(BaseModel):
     order: int | None = None
     # A backup schedule (#408): {enabled, every, at, day}. None leaves it.
     backup: dict | None = None
+    # What the group lends its connections (#545): {username, port, platform,
+    # credential_ref, jump_host, jump_port, jump_username}. None leaves them;
+    # {} clears them. A secret here is refused, not stripped.
+    defaults: dict | None = None
 
 
 class GroupOrderRequest(BaseModel):
@@ -2005,6 +2031,20 @@ async def list_groups_endpoint() -> dict:
             # the frontend, so there is one place a name can be added and it
             # is the place the font is subsetted from (#180).
             "icons": list(groups_module.ICONS)}
+
+
+@app.get("/api/groups/defaults")
+async def group_defaults_endpoint(tags: str = "") -> dict:
+    """
+    What a connection in these groups would inherit, and from where (#545).
+
+    Declared before the /{key:path} routes for the reason set out there, and
+    answered by the same function every connect path uses - the dialog must
+    not work out inheritance for itself, or it will eventually say one thing
+    while the connection does another.
+    """
+    wanted = profiles_module.normalise_tags((tags or "").split(","))
+    return await asyncio.to_thread(groups_module.defaults_for, wanted)
 
 
 @app.post("/api/groups")
@@ -2141,14 +2181,22 @@ async def connect_tag(tag: str) -> dict:
 
     async def open_one(profile: dict) -> None:
         async with (limit or contextlib.nullcontext()):
-            kind = profile.get("connection_type") or "ssh"
+            # The second connect path, through the same resolution as the
+            # other two (#545): what a group lends applies here or the tile
+            # and the tab disagree about which bastion was used.
+            dialled = profiles_module.effective(profile)
+            kind = dialled.get("connection_type") or "ssh"
             params = ConnectionParams(
                 connection_type=kind,
-                hostname=profile.get("hostname", ""),
-                port=int(profile.get("port") or (22 if kind == "ssh" else 23)),
-                username=profile.get("username", ""),
-                display_label=profile.get("name", ""),
-                serial_port=profile.get("serial_port", ""),
+                hostname=dialled.get("hostname", ""),
+                port=int(dialled.get("port") or (22 if kind == "ssh" else 23)),
+                username=dialled.get("username", ""),
+                display_label=dialled.get("name", ""),
+                serial_port=dialled.get("serial_port", ""),
+                jump_host=dialled.get("jump_host", ""),
+                jump_port=int(dialled.get("jump_port") or 22),
+                jump_username=dialled.get("jump_username", ""),
+                private_key_path=dialled.get("private_key_path", ""),
             )
             for field, value in load_credentials(profile.get("id", "")).items():
                 if not getattr(params, field, ""):

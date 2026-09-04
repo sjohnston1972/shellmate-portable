@@ -443,6 +443,12 @@
                  placeholder="glasgow, glasgow/access" autocomplete="off" />
           <datalist id="known-groups"></datalist>
           <p class="field-hint">Comma-separated, and it completes as you type. A connection can be in several — they overlap on purpose. Use <code>parent/child</code> for a subgroup. Prefilled when you create a connection from inside a group.</p>
+          <!-- What the groups above lend this connection, and what they
+               disagree about (#545). Filled by connections.js from
+               /api/groups/defaults as the field is typed in, so it always
+               describes the groups actually named here. -->
+          <p class="field-hint hidden" id="inherit-notice"></p>
+          <p class="field-hint field-warn hidden" id="inherit-conflict"></p>
         </div>
 
         <!-- Transport picker. Switching this shows/hides the field groups

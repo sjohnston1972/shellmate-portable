@@ -273,6 +273,97 @@ def attach_credential_set(profile_id: str, set_id: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# What a connection inherits from its groups (#545)
+#
+# The rule is one function, used by everything that connects and by everything
+# that says whether a connection *can* connect. Two readings of "which jump
+# host does this device use" is how the padlock on a tile comes to disagree
+# with what happens when it is clicked.
+# ---------------------------------------------------------------------------
+
+
+def _blank(value) -> bool:
+    """Whether a profile field is empty enough to be filled from a group."""
+    return value in (None, "", 0, [], {})
+
+
+def _defaults_table(table: dict | None = None) -> dict:
+    """The group defaults, loaded once. Imported late: groups imports us."""
+    if table is not None:
+        return table
+    from backend import groups
+    return groups.default_table()
+
+
+def inherited_for(profile: dict, table: dict | None = None) -> dict:
+    """
+    Which of this connection's blank fields its groups fill in, and from
+    where.
+
+    Only blank fields: a value on the connection is a decision somebody made
+    about that device and is never overridden. A field two groups disagree
+    about is reported in ``conflicts`` and inherited by nobody - see
+    ``groups.defaults_for``.
+
+    Returns:
+        ``{"values": {field: value}, "from": {field: group_key},
+        "conflicts": {field: [group_key, ...]}}``
+    """
+    tags = normalise_tags(profile.get("tags"))
+    if not tags:
+        return {"values": {}, "from": {}, "conflicts": {}}
+
+    from backend import groups
+    resolved = groups.defaults_for(tags, _defaults_table(table))
+
+    values: dict = {}
+    sources: dict = {}
+    for field, value in resolved["values"].items():
+        if not _blank(profile.get(field)):
+            continue
+        # A jump port belongs to a jump host. Lending one to a connection
+        # that dials its own bastion would send it to the right machine on
+        # the wrong port, which fails in a way nobody would think to look
+        # at the group for.
+        if field == "jump_port" and not _blank(profile.get("jump_host")):
+            continue
+        values[field] = value
+        sources[field] = resolved["from"][field]
+
+    # A conflict about a field the connection fills in itself is not a
+    # conflict about anything: it has an answer already.
+    conflicts = {field: keys for field, keys in resolved["conflicts"].items()
+                 if _blank(profile.get(field))}
+    return {"values": values, "from": sources, "conflicts": conflicts}
+
+
+def effective(profile: dict, table: dict | None = None) -> dict:
+    """
+    A connection as it will actually be dialled: its own fields, with the
+    blanks filled from its groups (#545).
+
+    **Every connect path goes through this** - the API, connect_tag and the
+    scheduler - and so does ``ready_to_connect``, through the credential
+    resolution below. Anything that resolved inheritance for itself would
+    eventually resolve it differently, and the tile would then say a device
+    is reachable that is not.
+    """
+    return {**profile, **inherited_for(profile, table)["values"]}
+
+
+def _reference_for(profile: dict, table: dict | None = None) -> str:
+    """
+    The shared credential a connection uses: its own, or its groups' (#545).
+
+    Its own first, for the same reason a profile's own password beats the
+    set it references - somebody who attached a credential to this device
+    meant it for this device.
+    """
+    return (profile.get("credential_ref") or ""
+            or inherited_for(profile, table)["values"].get("credential_ref", ""))
+
+
 def _resolve_owner(profile_id: str, profiles: list[dict] | None = None,
                    plaintext: dict | None = None) -> str:
     """
@@ -288,7 +379,7 @@ def _resolve_owner(profile_id: str, profiles: list[dict] | None = None,
         own = any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS)
         if own or (plaintext if plaintext is not None else _load_plaintext()).get(profile_id):
             return profile_id
-        reference = profile.get("credential_ref") or ""
+        reference = _reference_for(profile)
         return set_owner(reference) if reference else profile_id
     return profile_id
 
@@ -348,7 +439,8 @@ def _read_credentials(owner: str) -> dict:
     return out or _load_plaintext().get(owner, {})
 
 
-def _has_for_profile(profile: dict, plaintext: dict) -> bool:
+def _has_for_profile(profile: dict, plaintext: dict,
+                     table: dict | None = None) -> bool:
     """
     Whether this profile can connect without being asked, given the profile.
 
@@ -364,14 +456,17 @@ def _has_for_profile(profile: dict, plaintext: dict) -> bool:
     if plaintext.get(profile_id):
         return True
 
-    reference = profile.get("credential_ref") or ""
+    # Its groups' credential counts (#545): a connection that inherits one
+    # opens on a click, so the padlock has to say so.
+    reference = _reference_for(profile, table)
     if not reference:
         return False
     owner = set_owner(reference)
     return _has_directly(owner, plaintext)
 
 
-def _storage_for_profile(profile: dict, plaintext: dict) -> str:
+def _storage_for_profile(profile: dict, plaintext: dict,
+                         table: dict | None = None) -> str:
     """Which store holds this profile's credentials, without re-scanning."""
     profile_id = profile.get("id", "")
     if any(vault.has(_credential_key(profile_id, f)) for f in CREDENTIAL_FIELDS):
@@ -379,7 +474,7 @@ def _storage_for_profile(profile: dict, plaintext: dict) -> str:
     if plaintext.get(profile_id):
         return "plaintext"
 
-    reference = profile.get("credential_ref") or ""
+    reference = _reference_for(profile, table)
     if not reference:
         return ""
     owner = set_owner(reference)
@@ -756,7 +851,8 @@ def _absorb(kept: dict, duplicate: dict, overwrite: bool = False) -> None:
     than a duplicate.
     """
     for key, value in duplicate.items():
-        if key in ("id", "has_saved_credentials", "credential_storage"):
+        if key in ("id", "has_saved_credentials", "credential_storage",
+                   "inherited", "inherited_from", "inherit_conflicts"):
             continue
         if value in (None, "", [], {}):
             continue
@@ -1062,11 +1158,23 @@ def get_profiles() -> list[dict]:
     # _load() for every connection, so listing 5,000 of them parsed a 1.6 MB
     # file 5,000 times — 63 seconds, and quadratic in the size of the estate.
     plaintext = _load_plaintext()
+    # The same rule for the group defaults (#545): read once here rather than
+    # once per connection.
+    table = _defaults_table()
     for profile in profiles:
-        profile["has_saved_credentials"] = _has_for_profile(profile, plaintext)
+        profile["has_saved_credentials"] = _has_for_profile(profile, plaintext, table)
         # Which store, so the dialog can show the right option already ticked
         # and not quietly move a password from one to the other.
-        profile["credential_storage"] = _storage_for_profile(profile, plaintext)
+        profile["credential_storage"] = _storage_for_profile(profile, plaintext, table)
+        # What its groups lend it, and what they disagree about (#545). Sent
+        # rather than merged in, so the dialog can say "inherited from
+        # site-004" beside a blank field — and so saving that connection
+        # cannot quietly write the group's value onto it.
+        borrowed = inherited_for(profile, table)
+        if borrowed["values"] or borrowed["conflicts"]:
+            profile["inherited"] = borrowed["values"]
+            profile["inherited_from"] = borrowed["from"]
+            profile["inherit_conflicts"] = borrowed["conflicts"]
     return profiles
 
 
@@ -1325,7 +1433,10 @@ def remembered_platform(hostname: str, port: int, username: str) -> str:
             continue
         if username and profile.get("username") not in ("", username):
             continue
-        remembered = (profile.get("platform") or "").strip()
+        # Its groups' platform counts too (#545): "everything in this site is
+        # NX-OS" is exactly the kind of fact a group is for, and a device
+        # that inherits it must be onboarded as one.
+        remembered = (effective(profile).get("platform") or "").strip()
         if remembered:
             return remembered
     return ""

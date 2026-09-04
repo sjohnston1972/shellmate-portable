@@ -496,6 +496,177 @@ def test_deleting_a_group_can_take_its_connections_too() -> None:
           "site" not in {g["key"] for g in gm.list_groups()})
 
 
+# ---------------------------------------------------------------------------
+# What a group lends its connections (#545)
+#
+# The whole risk here is ambiguity, so most of this is about what is *not*
+# inherited: a field the connection sets itself, a field two groups disagree
+# about, and a jump port with no jump host to belong to. A wrong answer here
+# dials the wrong bastion with the wrong credential.
+# ---------------------------------------------------------------------------
+
+def _connection(name: str, tags: list[str], **fields) -> dict:
+    saved = pm.save_profile({"name": name, "hostname": name + ".example",
+                             "port": 22, "connection_type": "ssh",
+                             "tags": tags, **fields})
+    return pm.find_profile(saved["id"])
+
+
+def test_a_group_fills_in_what_a_connection_leaves_blank() -> None:
+    print("\n-- Group defaults: the blanks --")
+    _reset()
+
+    gm.create_group("site-004")
+    gm.update_group("site-004", {"defaults": {
+        "jump_host": "bastion-4", "username": "neteng", "jump_port": "2222"}})
+
+    borrowed = pm.effective(_connection("sw1", ["site-004"]))
+    check("the jump host comes from the group",
+          borrowed.get("jump_host") == "bastion-4", str(borrowed.get("jump_host")))
+    check("so does the username",
+          borrowed.get("username") == "neteng", str(borrowed.get("username")))
+    check("a port is stored as a number",
+          borrowed.get("jump_port") == 2222, repr(borrowed.get("jump_port")))
+
+    # Nothing is written onto the connection: that is what makes moving the
+    # bastion one edit rather than fifty.
+    stored = pm.find_profile(borrowed["id"])
+    check("nothing was copied onto the connection",
+          "jump_host" not in stored, str(stored))
+
+    gm.update_group("site-004", {"defaults": {"jump_host": "bastion-4b"}})
+    check("moving the bastion moves every connection with it",
+          pm.effective(pm.find_profile(borrowed["id"])).get("jump_host") == "bastion-4b")
+
+
+def test_a_connection_own_value_always_wins() -> None:
+    print("\n-- Group defaults: the connection wins --")
+    _reset()
+
+    gm.create_group("site-004")
+    gm.update_group("site-004", {"defaults": {
+        "jump_host": "bastion-4", "jump_port": "2222", "username": "neteng"}})
+
+    own = pm.effective(_connection("sw2", ["site-004"], username="steven",
+                                   jump_host="my-own-bastion"))
+    check("the username it was saved with stands",
+          own.get("username") == "steven", str(own.get("username")))
+    check("so does its own jump host",
+          own.get("jump_host") == "my-own-bastion", str(own.get("jump_host")))
+    # A port belongs to the host it dials. Lending 2222 to somebody else's
+    # bastion reaches the right machine on the wrong port, and nobody would
+    # think to look at the group for that.
+    check("the group's jump port does not attach to its own jump host",
+          "jump_port" not in own, repr(own.get("jump_port")))
+
+
+def test_the_nearest_group_wins_and_disagreement_inherits_nothing() -> None:
+    print("\n-- Group defaults: nearest, and conflicts --")
+    _reset()
+
+    gm.create_group("site-004")
+    gm.update_group("site-004", {"defaults": {"jump_host": "site-bastion",
+                                              "username": "neteng"}})
+    gm.create_group("site-004/access")
+    gm.update_group("site-004/access", {"defaults": {"jump_host": "access-bastion"}})
+
+    nested = pm.effective(_connection("sw3", ["site-004/access"]))
+    check("the subgroup beats the site it sits in",
+          nested.get("jump_host") == "access-bastion", str(nested.get("jump_host")))
+    check("and the site still lends what the subgroup does not",
+          nested.get("username") == "neteng", str(nested.get("username")))
+
+    # Two branches, no nearer and no further. There is no answer that is not
+    # a guess, so there is no answer.
+    gm.create_group("core")
+    gm.update_group("core", {"defaults": {"jump_host": "core-bastion"}})
+    both = _connection("sw4", ["site-004", "core"])
+    resolved = pm.inherited_for(both)
+    check("a field two groups disagree about is inherited by nobody",
+          "jump_host" not in resolved["values"], str(resolved["values"]))
+    check("and both groups are named",
+          sorted(resolved["conflicts"].get("jump_host", [])) == ["core", "site-004"],
+          str(resolved["conflicts"]))
+    check("a field only one of them sets is unaffected",
+          resolved["values"].get("username") == "neteng", str(resolved["values"]))
+
+    # Agreement is not a conflict: there is still only one answer.
+    gm.update_group("core", {"defaults": {"jump_host": "site-bastion"}})
+    agreed = pm.inherited_for(pm.find_profile(both["id"]))
+    check("two groups that agree still lend it",
+          agreed["values"].get("jump_host") == "site-bastion", str(agreed["values"]))
+
+
+def test_an_inherited_credential_makes_the_padlock_honest() -> None:
+    print("\n-- Group defaults: the credential --")
+    _reset()
+
+    shared = pm.save_credential_set("Site 4 TACACS", "neteng", "hunter2",
+                                    storage="plaintext")
+    gm.create_group("site-004")
+    gm.update_group("site-004", {"defaults": {"credential_ref": shared["id"]}})
+
+    saved = _connection("sw5", ["site-004"])
+    listed = next(p for p in pm.get_profiles() if p["id"] == saved["id"])
+    # ready_to_connect is decided from this, so a connection that will open
+    # on a click has to say so - or the tile lies about the device.
+    check("a connection inheriting a credential reports one",
+          listed["has_saved_credentials"] is True, str(listed))
+    check("and the credential resolves for real",
+          pm.load_credentials(saved["id"]).get("password") == "hunter2",
+          str(pm.load_credentials(saved["id"])))
+    check("the username comes with it",
+          pm.load_credentials(saved["id"]).get("username") == "neteng")
+    check("the listing says where it came from",
+          listed.get("inherited_from", {}).get("credential_ref") == "site-004",
+          str(listed.get("inherited_from")))
+
+    # A connection outside the group is unaffected.
+    loose = _connection("sw6", ["elsewhere"])
+    outside = next(p for p in pm.get_profiles() if p["id"] == loose["id"])
+    check("a connection in another group inherits nothing",
+          outside["has_saved_credentials"] is False, str(outside))
+
+
+def test_defaults_refuse_secrets_and_survive_a_rename() -> None:
+    print("\n-- Group defaults: refusals and renames --")
+    _reset()
+
+    gm.create_group("site-004")
+    try:
+        gm.update_group("site-004", {"defaults": {"password": "hunter2"}})
+        check("a password in a group's defaults is refused", False,
+              "it was accepted")
+    except ValueError as exc:
+        check("a password in a group's defaults is refused", True)
+        check("and the refusal says what to do instead",
+              "shared credential" in str(exc), str(exc))
+
+    try:
+        gm.update_group("site-004", {"defaults": {"port": "99999"}})
+        check("a port out of range is refused", False, "it was accepted")
+    except ValueError:
+        check("a port out of range is refused", True)
+
+    gm.update_group("site-004", {"defaults": {"jump_host": "bastion-4"}})
+    check("an unknown field is dropped rather than stored",
+          gm.get_group("site-004")["defaults"] == {"jump_host": "bastion-4"},
+          str(gm.get_group("site-004")["defaults"]))
+
+    connection = _connection("sw7", ["site-004"])
+    gm.update_group("site-004", {"name": "Site 44"})
+    check("the defaults move with the group when it is renamed",
+          pm.effective(pm.find_profile(connection["id"])).get("jump_host") == "bastion-4",
+          str(pm.find_profile(connection["id"])))
+
+    gm.update_group("site 44", {"defaults": {}})
+    check("and an empty set takes them away",
+          not gm.get_group("site 44")["defaults"],
+          str(gm.get_group("site 44")["defaults"]))
+    check("so the connection goes back to having no jump host",
+          "jump_host" not in pm.effective(pm.find_profile(connection["id"])))
+
+
 def main() -> int:
     print("\n" + "=" * 52)
     print("  Groups")
@@ -515,6 +686,11 @@ def main() -> int:
         test_renaming_carries_implicit_subgroups_and_child_names_survive,
         test_deleting_a_group_takes_its_subtree_with_it,
         test_deleting_a_group_can_take_its_connections_too, test_an_order_does_not_resurrect_a_deleted_group,
+        test_a_group_fills_in_what_a_connection_leaves_blank,
+        test_a_connection_own_value_always_wins,
+        test_the_nearest_group_wins_and_disagreement_inherits_nothing,
+        test_an_inherited_credential_makes_the_padlock_honest,
+        test_defaults_refuse_secrets_and_survive_a_rename,
     )
     for test in tests:
         try:

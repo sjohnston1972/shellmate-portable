@@ -587,6 +587,42 @@ reported by name rather than silently skipped. It is deliberately not offered
 for the whole unfiltered dashboard: opening two hundred tabs should not be
 one click away.
 
+### What a group lends its connections
+
+Right-click a group for **Group defaults…**. A username, a shared credential,
+a platform, a port, and a jump host with its own port and username: every
+connection in that group — and in the groups beneath it — uses these wherever
+its own field is blank.
+
+This is what makes two hundred sites behind two hundred bastions manageable.
+The bastion belongs to the site, so it is stated once on the site; the day it
+moves, that is one edit rather than one per device. Nothing is copied onto the
+connections, so they all follow.
+
+Three rules keep it honest, and they are worth knowing before you rely on it:
+
+- **A connection's own value always wins.** Typing a jump host on one switch
+  means it for that switch, and the group never overrules it. The connection
+  dialog shows what is being inherited under the **Groups** field and in the
+  placeholder of each blank box — `bastion-4 — from site-004`.
+- **Disagreement inherits nothing.** A device in both `site-004` and `core`,
+  where the two name different bastions, has no answer that is not a guess, so
+  it gets none. The dialog names the two groups and asks you to fill the field
+  in yourself. Two groups that happen to *agree* are not a disagreement.
+- **The nearest group wins.** `site-004/access` is a more specific statement
+  than `site-004`, so it is the one that applies — and the site still lends
+  anything the subgroup does not mention.
+
+A group cannot hold a password: the field offers your **shared credentials**
+by name and the password itself stays in the vault, so rotating it is still
+one change in one place. Passing a password here is refused outright rather
+than quietly dropped.
+
+Everything that opens a session reads these — clicking a connection, **Connect
+all** on a group, and the scheduled configuration backups — so the padlock on
+a tile means the same thing whether the credential is the connection's own or
+its group's.
+
 ### Is the site up?
 
 **Check reachability** is on the same group menu, on a connection's own menu,
