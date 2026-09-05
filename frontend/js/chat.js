@@ -295,7 +295,7 @@
   // Sending messages
   // -----------------------------------------------------------------------
 
-  function sendMessage() {
+  async function sendMessage() {
     if (isStreaming) return;
     const text = inputEl.value.trim();
     if (!text) return;
@@ -364,6 +364,11 @@
     // Start streaming AI bubble. The bubble remembers which session the
     // question was asked about (#308), so the command blocks in the answer
     // can be sent to that session however many tabs are switched meanwhile.
+    // Asked before anything is drawn (#556), so declining leaves the
+    // question in the box rather than a half-started reply on screen.
+    if (!(await _budgetAllows())) return;
+    if (!(await _largeRequestAllows(_estimateTokens()))) return;
+
     startStreamingBubble();
     if (streamingBubble && sessionId) {
       streamingBubble.dataset.contextSession = sessionId;
@@ -1040,6 +1045,101 @@
       ta.remove();
     }
     if (typeof window._showCopyToast === 'function') window._showCopyToast();
+  }
+
+  // -------------------------------------------------------------------------
+  // What this is costing (#556)
+  //
+  // Two questions, and they are asked by different people. The lead's is
+  // "what does an incident cost"; the engineer's is "did I just ship forty
+  // thousand tokens without noticing". Both are answered from counts the
+  // provider itself reported — never from an estimate, and never from a
+  // price ShellMate guessed.
+  //
+  // **No price ships as a default.** Published rates go stale, differ by
+  // region and by contract, and a wrong number is worse than no number
+  // because somebody would plan against it. Zero means the prices are
+  // simply not shown.
+  //
+  // **The budget is per conversation in this browser.** It cannot see what
+  // anything else spends against the same key, and clearing the chat starts
+  // a new one. Labelled that way, because a budget that sounds like a
+  // spending cap and is not one is worse than no budget at all.
+  // -------------------------------------------------------------------------
+
+  /** Whether the engineer has been asked about this conversation already. */
+  let budgetAcknowledged = false;
+
+  /** A line of money for the meter's tooltip, or "" when no price is set. */
+  function _conversationCost() {
+    const inRate = Number(A('ai.price_per_million_in', 0)) || 0;
+    const outRate = Number(A('ai.price_per_million_out', 0)) || 0;
+    if (!inRate && !outRate) return '';
+    // Cache reads are input the provider counted separately and usually
+    // charges less for. Priced at the input rate rather than at a guessed
+    // discount: overstating slightly is honest, and inventing a cache rate
+    // ShellMate was never told is not.
+    const cost = (totalUsage.input / 1_000_000) * inRate
+               + (totalUsage.output / 1_000_000) * outRate;
+    return `About ${cost.toFixed(cost < 1 ? 4 : 2)} for this conversation, `
+         + 'at the rates you entered.';
+  }
+
+  /**
+   * Ask once when the budget is passed, and once more if it is doubled.
+   *
+   * Once, because a dialog on every message after the first overrun is a
+   * dialog people click through without reading — at which point the budget
+   * has stopped meaning anything. Again at double, because "you are over"
+   * and "you are twice over" are different facts.
+   */
+  async function _budgetAllows() {
+    const budget = Number(A('ai.conversation_token_budget', 0)) || 0;
+    if (!budget) return true;
+
+    const spent = totalUsage.input + totalUsage.output;
+    if (spent < budget) return true;
+    if (budgetAcknowledged && spent < budget * 2) return true;
+
+    const over = Math.round((spent / budget) * 100);
+    const yes = await window.shellmateDialog.confirm({
+      title: 'This conversation is over its budget',
+      body: `It has used ${spent.toLocaleString()} tokens against a budget of `
+          + `${budget.toLocaleString()} — ${over}%. Clearing the chat starts a `
+          + 'new conversation and a fresh budget; carrying on keeps the '
+          + 'history, which is what makes each further question cost more '
+          + 'than the last.',
+      confirmLabel: 'Ask anyway',
+    });
+    if (yes) budgetAcknowledged = true;
+    return yes;
+  }
+
+  /**
+   * Warn before an unusually large request, once.
+   *
+   * `/context all` across a dozen busy tabs is the case: nothing about
+   * typing a short question suggests it is about to send two hundred
+   * thousand tokens, and the bill arrives a month later.
+   */
+  async function _largeRequestAllows(estimate) {
+    const budget = Number(A('ai.conversation_token_budget', 0)) || 0;
+    // Half a budget in a single request is the threshold, because a request
+    // that size makes the budget unreachable in two more questions. With no
+    // budget set there is no threshold and nothing is asked.
+    if (!budget || estimate < budget / 2) return true;
+    if (budgetAcknowledged) return true;
+
+    const yes = await window.shellmateDialog.confirm({
+      title: 'That is a large request',
+      body: `This question would send roughly ${estimate.toLocaleString()} `
+          + `tokens — about ${Math.round((estimate / budget) * 100)}% of the `
+          + 'whole conversation budget in one go. Narrowing the tab selection, '
+          + 'or asking about one device, sends far less.',
+      confirmLabel: 'Send it',
+    });
+    if (yes) budgetAcknowledged = true;
+    return yes;
   }
 
   // -----------------------------------------------------------------------
@@ -2260,11 +2360,33 @@
         + (totalUsage.cache_read ? `, ${totalUsage.cache_read.toLocaleString()} served from cache.` : '.');
     }
     title += '\nGreen <25% · Amber 25–65% · Red >65%';
+
+    // The conversation's own budget (#556), which is a different
+    // question from the context window: one asks whether this request
+    // fits, the other what the whole conversation has cost.
+    const budget = Number(A('ai.conversation_token_budget', 0)) || 0;
+    const spent = totalUsage.input + totalUsage.output;
+    let budgetPct = 0;
+    if (budget > 0) {
+      budgetPct = Math.round((spent / budget) * 100);
+      statusEl.textContent += ` · ${budgetPct}% of budget`;
+      title += `\nBudget: ${spent.toLocaleString()} of `
+        + `${budget.toLocaleString()} tokens this conversation `
+        + '(cleared with the chat).';
+    }
+
+    const money = _conversationCost();
+    if (money) title += `\n${money}`;
+
     statusEl.title = title;
 
-    statusEl.className = pct < 25 ? 'ctx-green'
-                       : pct < 65 ? 'ctx-amber'
-                       :            'ctx-red';
+    // Whichever is worse. A conversation inside its context window
+    // but past its budget is not green, and the reverse is equally
+    // true — the meter has one colour and two things to say with it.
+    const worst = Math.max(pct, budgetPct);
+    statusEl.className = worst < 25 ? 'ctx-green'
+                       : worst < 65 ? 'ctx-amber'
+                       :             'ctx-red';
   }
 
   window.updateContextStatus = updateContextIndicator;
@@ -2282,6 +2404,9 @@
     // conversation would be analysed with no conversation to belong to.
     _pendingSilent.length = 0;
     _resetUsage();
+    // A fresh conversation is a fresh budget, and a fresh chance to
+    // be asked about it (#556).
+    budgetAcknowledged = false;
     _investigation.steps = 0;
     // Reset Jira chat history so context estimate resets too
     if (typeof window._clearJiraChatHistory === 'function') window._clearJiraChatHistory();

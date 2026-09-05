@@ -826,6 +826,37 @@ SETTINGS: tuple[Setting, ...] = (
             "The relay files each report as a GitHub issue. Emptied, "
             "reports are saved to feedback-outbox.json in the data folder "
             "instead of being sent anywhere."),
+    Setting("ai.conversation_token_budget", "Budget for one conversation",
+            0, "int",
+            "Tokens a single conversation may spend before ShellMate asks. "
+            "Zero turns it off.",
+            "The lead's question is what an incident costs; the engineer's "
+            "is whether they just shipped forty thousand tokens without "
+            "noticing. The meter turns amber and then red against this, and "
+            "the send button asks once when it is passed.||A budget per "
+            "*conversation in this browser*, not per API key — clearing the "
+            "chat starts a new one. It cannot see what anything else spends "
+            "against the same key.",
+            minimum=0, maximum=10_000_000, unit="tokens"),
+    Setting("ai.price_per_million_in", "Price per million input tokens",
+            0.0, "float",
+            "What your provider charges you, in whatever currency you pay "
+            "in. Zero shows no prices.",
+            "Entered rather than guessed, and never shipped with a default: "
+            "published prices go stale, differ by region and by contract, "
+            "and a wrong number here is worse than no number because "
+            "somebody would plan against it.||Only ever multiplied by the "
+            "counts the provider itself reported.",
+            minimum=0, maximum=1000),
+    Setting("ai.price_per_million_out", "Price per million output tokens",
+            0.0, "float",
+            "The same for tokens the model writes, which usually cost more.",
+            "Two numbers rather than one because the two rates differ by a "
+            "factor of three to five on most providers, and a single "
+            "average would be wrong in both directions depending on the "
+            "conversation.||Zero on either one shows no prices at all.",
+            minimum=0, maximum=1000),
+
     Setting("ai.attachment_max_chars", "Largest thing you can point at",
             40000, "int",
             "How much selected or pasted text is sent with a question.",

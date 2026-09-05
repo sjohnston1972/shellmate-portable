@@ -249,3 +249,30 @@ worth knowing.
 
 `python test_chat_tables.py` — 22 passed. 97 of 97 test files pass.
 
+## 2026-09-05 13:31 — #556 closed
+
+Three settings, all defaulting to zero. A budget nobody asked for that
+interrupts, or a price ShellMate guessed, would both be worse than the
+feature not existing.
+
+The meter takes the **worse** of the context percentage and the budget
+percentage — one colour, two things to say with it, and a conversation
+inside its window but past its budget is not green.
+
+Two price rates rather than one, because input and output differ by three
+to five times on most providers. Nothing shown unless entered, the figure
+hedged as "at the rates you entered", and cache reads priced at the input
+rate rather than a guessed discount: overstating slightly is honest,
+inventing a rate nobody supplied is not.
+
+Asked once at the budget and again at double — a dialog on every message
+after the first overrun is one people click through without reading.
+Asked *before* anything is drawn, so declining leaves the question in the
+box rather than a half-started reply on screen.
+
+Labelled as a budget per conversation in this browser, not per API key,
+because one that sounds like a spending cap and is not one is worse than
+none.
+
+`python test_budget.py` — 25 passed. 98 of 98 test files pass.
+
