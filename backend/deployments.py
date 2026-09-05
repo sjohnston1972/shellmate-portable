@@ -465,3 +465,80 @@ def apply_allowed(record: dict) -> str:
         return "The definition changed after the last plan. Plan again, so " \
                "the apply matches what you have read."
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Publishing — one commit, two PUTs
+# ---------------------------------------------------------------------------
+
+def publish(deployment_id: str, plan_text: str, apply_text: str,
+            message: str = "", git=None, runner=None) -> dict:
+    """
+    Commit the four files to the repository, then send them to the runner.
+
+    In that order, and the order is the design. A commit without its PUT is
+    a deployment that is not yet on the runner, which the record says. A
+    PUT without its commit is a drift — bytes on the runner that no
+    revision describes — and the only way to make that impossible is to
+    refuse to send anything the repository has not already accepted.
+
+    Two routes on the runner side, chosen by file name: the playbooks go to
+    `/playbooks`, the data files to `/files`. The runner validates the
+    difference and refuses a data file on the playbook route, so this
+    never has to discover it at the second file.
+
+    `git` and `runner` are the modules by default and injectable for the
+    test, which proves the same bytes reach both under their two paths
+    without a GitHub account or a container.
+
+    Returns ``{"commit": {...}, "sent": [runner paths], "skipped_git": str}``
+    where ``skipped_git`` names why the commit was not made — the only
+    permitted reason being that GitHub is not configured at all, in which
+    case the deployment is sent to the runner anyway and the record says
+    it is uncommitted. Not configured is a state; a configured GitHub that
+    refuses is an error, and nothing is sent.
+    """
+    from backend import ansible as runner_module
+    from backend import ansible_git as git_module
+
+    git = git or git_module
+    runner = runner or runner_module
+
+    record = get(deployment_id)
+    if record is None:
+        raise DeploymentError("No such deployment.")
+    if not (plan_text or "").strip() or not (apply_text or "").strip():
+        raise DeploymentError(
+            "A deployment needs both its plan and its apply playbook before "
+            "it can be published.")
+
+    files = files_for(record, plan_text, apply_text)
+    tree = as_git_tree(files)
+    text = message or (f"Deployment {record['slug']}: "
+                       f"{len(record.get('sites') or [])} sites ({record['provider']})")
+
+    commit = None
+    skipped_git = ""
+    configured = bool(git.config().get("has_token")) and bool(git.config().get("repo"))
+    if configured:
+        commit = git.commit_tree(tree, text)
+        record_commit(deployment_id, commit["sha"], commit.get("url", ""))
+    else:
+        skipped_git = ("GitHub is not set up under Settings → Ansible, so this "
+                       "was sent to the runner without a commit. The runner's "
+                       "copy is the only copy until it is.")
+
+    sent: list[str] = []
+    for name in FILES:
+        path = runner_paths(record["slug"])[name]
+        content = files[path].decode("utf-8")
+        if name in PLAYBOOKS:
+            runner.upload_playbook(path, content, overwrite=True)
+        else:
+            runner.upload_file(path, content, overwrite=True)
+        sent.append(path)
+
+    logger.info("Published deployment %s: %s, %d file(s) to the runner",
+                record["slug"], commit["sha"] if commit else "uncommitted",
+                len(sent))
+    return {"commit": commit, "sent": sent, "skipped_git": skipped_git}

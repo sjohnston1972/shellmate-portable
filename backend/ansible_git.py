@@ -304,6 +304,99 @@ def commit_playbook(name: str, text: str, message: str = "",
             "sha": commit.get("sha", "")[:7]}
 
 
+def commit_tree(files: dict[str, bytes], message: str,
+                owner: str = "", repo: str = "", branch: str = "") -> dict:
+    """
+    Put several files in the repository in **one** commit (Deployments).
+
+    The contents API takes one file per commit, which for a deployment of
+    four files would be four commits — and a history where `sites.yml`
+    changed in one and `scheme.yml` in the next is a history in which no
+    single revision is the deployment as it was run. The Trees API builds
+    the whole set against the branch head and commits once.
+
+    Steps, each a request: read the branch head, read its tree, create a
+    blob per file, create a tree on top of the base, create a commit, move
+    the branch. The branch is moved last and without force, so a commit
+    that landed on the branch between reading the head and moving it is
+    refused by GitHub rather than overwritten — and reported as such.
+
+    Args:
+        files: ``{repository path: bytes}`` — paths already carry
+            `runner/project/`; this function knows nothing about layout.
+        message: the commit message.
+    Returns:
+        ``{"sha", "url", "files"}``.
+    Raises:
+        GitError: no token, no repository, or GitHub refused.
+    """
+    auth = token()
+    if not auth:
+        raise GitError("No GitHub token is saved.", "no-token")
+    stored = config()
+    owner = (owner or stored["owner"]).strip()
+    repo = (repo or stored["repo"]).strip()
+    if not owner or not repo:
+        raise GitError("No repository is set for playbooks.", "no-repo")
+    if not files:
+        raise GitError("There is nothing to commit.", "refused")
+
+    base = f"/repos/{owner}/{repo}"
+    if not branch:
+        response = _call("GET", base, auth)
+        if response.status_code != 200:
+            raise GitError(_why(response), "refused")
+        branch = response.json().get("default_branch") or "main"
+
+    response = _call("GET", f"{base}/git/ref/heads/{branch}", auth)
+    if response.status_code != 200:
+        raise GitError(_why(response), "refused")
+    head_sha = response.json()["object"]["sha"]
+
+    response = _call("GET", f"{base}/git/commits/{head_sha}", auth)
+    if response.status_code != 200:
+        raise GitError(_why(response), "refused")
+    base_tree = response.json()["tree"]["sha"]
+
+    entries = []
+    for path, content in files.items():
+        response = _call("POST", f"{base}/git/blobs", auth, json={
+            "content": base64.b64encode(content).decode("ascii"),
+            "encoding": "base64",
+        })
+        if response.status_code != 201:
+            raise GitError(f"{path}: {_why(response)}", "refused")
+        entries.append({"path": path, "mode": "100644", "type": "blob",
+                        "sha": response.json()["sha"]})
+
+    response = _call("POST", f"{base}/git/trees", auth,
+                     json={"base_tree": base_tree, "tree": entries})
+    if response.status_code != 201:
+        raise GitError(_why(response), "refused")
+    tree_sha = response.json()["sha"]
+
+    response = _call("POST", f"{base}/git/commits", auth, json={
+        "message": message, "tree": tree_sha, "parents": [head_sha]})
+    if response.status_code != 201:
+        raise GitError(_why(response), "refused")
+    commit = response.json()
+    commit_sha = commit["sha"]
+
+    # No force: a commit that landed on the branch since the head was read
+    # makes this a 422, which is the right answer — the alternative is
+    # silently discarding somebody else's commit.
+    response = _call("PATCH", f"{base}/git/refs/heads/{branch}", auth,
+                     json={"sha": commit_sha, "force": False})
+    if response.status_code != 200:
+        raise GitError("The branch moved while this commit was being built; "
+                       "nothing was overwritten. Try again.", "refused")
+
+    logger.info("Committed %d file(s) to %s/%s@%s as %s",
+                len(files), owner, repo, branch, commit_sha[:7])
+    return {"sha": commit_sha[:7], "url": commit.get("html_url", ""),
+            "files": sorted(files), "branch": branch}
+
+
 def publish(name: str, text: str, message: str = "") -> dict:
     """
     Commit a saved playbook, reporting rather than raising.

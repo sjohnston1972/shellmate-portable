@@ -1,0 +1,59 @@
+{
+  "_": "Real results from the runner (f5531d4) against Steven's Meraki org on 2026-09-05, from deployments/deploy-test/. The renderer and its test are written against these, not the contract text.",
+  "plan": {
+    "plan": {
+      "provider": "meraki",
+      "deployment": "deploy-test",
+      "org_id": "923103",
+      "counts": {"create": 2, "update": 0, "unchanged": 1, "conflict": 0},
+      "truncated": false,
+      "sites": [
+        {"name": "deploy-test-001", "action": "create",
+         "detail": "no network with this name", "network_id": "",
+         "changes": ["create network deploy-test-001 (appliance)", "add vlan data", "add vlan voice"]},
+        {"name": "deploy-test-002", "action": "create",
+         "detail": "no network with this name", "network_id": "",
+         "changes": ["create network deploy-test-002 (appliance)", "add vlan data", "add vlan voice"]},
+        {"name": "API Navigator DEV", "action": "unchanged",
+         "detail": "network N_706502191543919612 already matches the scheme",
+         "network_id": "N_706502191543919612", "changes": []}
+      ]
+    }
+  },
+  "apply": {
+    "apply": {
+      "provider": "meraki",
+      "deployment": "deploy-test",
+      "plan_job": "6617e1232f48",
+      "counts": {"created": 2, "updated": 0, "skipped": 1, "failed": 0},
+      "truncated": false,
+      "sites": [
+        {"name": "deploy-test-001", "outcome": "created", "reason": "",
+         "ids": {"network_id": "N_706502191543928065"}},
+        {"name": "deploy-test-002", "outcome": "created", "reason": "",
+         "ids": {"network_id": "N_706502191543928066"}},
+        {"name": "API Navigator DEV", "outcome": "skipped",
+         "reason": "already matches the scheme",
+         "ids": {"network_id": "N_706502191543919612"}}
+      ]
+    }
+  },
+  "apply_with_failure": {
+    "apply": {
+      "provider": "meraki",
+      "deployment": "deploy-test",
+      "plan_job": "6617e1232f48",
+      "counts": {"created": 1, "updated": 0, "skipped": 3, "failed": 1},
+      "truncated": false,
+      "sites": [
+        {"name": "deploy-test-001", "outcome": "skipped", "reason": "already exists", "ids": {"network_id": "N_706502191543928065"}},
+        {"name": "deploy-test-002", "outcome": "skipped", "reason": "already exists", "ids": {"network_id": "N_706502191543928066"}},
+        {"name": "API Navigator DEV", "outcome": "skipped", "reason": "already matches the scheme", "ids": {"network_id": "N_706502191543919612"}},
+        {"name": "deploy-test-bad", "outcome": "failed",
+         "reason": "Meraki API error 400: Validation failed: Product types must be a valid product type", "ids": {}},
+        {"name": "deploy-test-003", "outcome": "created", "reason": "", "ids": {"network_id": "N_706502191543928067"}}
+      ]
+    }
+  },
+  "no_result": {"has_result": false, "result": null}
+}

@@ -909,6 +909,40 @@ def upload_playbook(name: str, text: str, overwrite: bool = False) -> dict:
     return data or {}
 
 
+def upload_file(path: str, text: str, overwrite: bool = True) -> dict:
+    """
+    Put a data file on the runner — a site list, a scheme (Deployments).
+
+    Its own route, `/api/v1/files/{path}`, because the playbook route
+    validates that the body is a list of plays and refuses a dict with a
+    422. The runner parses the file on upload, so a broken `sites.yml`
+    fails here, in front of the person who uploaded it, rather than when
+    a plan runs. Never executed by the runner.
+
+    `overwrite` defaults on, unlike a playbook: ShellMate is the writer of
+    record for these files — they are rendered from the deployment and
+    committed to git first — so a stale copy on the runner is the thing
+    being corrected, not a thing to protect.
+    """
+    clean = str(path or "").strip().lstrip("/")
+    if not clean or ".." in clean.split("/"):
+        raise AnsibleError("That is not a file path on the runner.")
+    data = _call("PUT", f"/api/v1/files/{clean}",
+                 params={"overwrite": "true" if overwrite else "false"},
+                 body=text.encode("utf-8"))
+    logger.info("Uploaded %s to the runner", clean)
+    return data or {}
+
+
+def supports_files() -> bool:
+    """Whether this runner has the data-file route. Probed, like upload."""
+    try:
+        spec = _call("GET", "/openapi.json") or {}
+        return "/api/v1/files/{path}" in (spec.get("paths") or {})
+    except AnsibleError:
+        return False
+
+
 def supports_upload() -> bool:
     """
     Whether this runner accepts a playbook over its API.

@@ -28,3 +28,22 @@ and report both as created), and deleting a deployment deletes the record
 and nothing in the cloud — tearing down is an apply of its own.
 
 `python test_deployments.py` — 42 passed.
+
+## 2026-09-05 21:35 — step 4 done: one commit, two PUTs
+
+`ansible_git.commit_tree()` — the Trees API, one commit for all four files,
+the branch moved without force so a commit that landed meanwhile is a
+refusal rather than an overwrite. `ansible.upload_file()` for the two data
+files on the runner's new `/files/{path}` route (a data file on the
+playbook route is a 422 — decided by file name here, not discovered at the
+second file). `deployments.publish()` orders them: commit, then send. A
+configured GitHub that refuses sends nothing; GitHub not configured at all
+is a state, said in the result, and the runner's copy is the only copy.
+
+The runner's Meraki plan and apply are built and proven against the real
+org (runner `f5531d4`); real result payloads are in
+`test_fixtures/deploy_results.json` and the renderer is written against
+them. Three `deploy-test-*` networks now exist in Steven's org.
+
+`python test_deployments_publish.py` — 24 passed. Guards: ansible 79,
+ansible_github 29, ansible_library 83, deployments 42.
