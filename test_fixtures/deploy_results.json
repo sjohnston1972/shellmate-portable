@@ -243,5 +243,75 @@
       "create": 4,
       "unchanged": 1
     }
+  },
+  "destroy_plan_meraki": {
+    "_": "Real dry-run destroy plan on the live estate: four removals and one skip with its reason.",
+    "destroy": {
+      "provider": "meraki",
+      "deployment": "deploy-test",
+      "org_id": "923103",
+      "dry_run": true,
+      "counts": {
+        "remove": 4,
+        "skip": 1,
+        "failed": 0
+      },
+      "truncated": false,
+      "sites": [
+        {
+          "name": "deploy-test-001",
+          "action": "remove",
+          "reason": "",
+          "ids": {
+            "network_id": "N_706502191543928065"
+          },
+          "elements": [
+            "network deploy-test-001"
+          ]
+        },
+        {
+          "name": "deploy-test-002",
+          "action": "remove",
+          "reason": "",
+          "ids": {
+            "network_id": "N_706502191543928066"
+          },
+          "elements": [
+            "network deploy-test-002"
+          ]
+        },
+        {
+          "name": "deploy-test-003",
+          "action": "remove",
+          "reason": "",
+          "ids": {
+            "network_id": "N_706502191543928067"
+          },
+          "elements": [
+            "network deploy-test-003"
+          ]
+        },
+        {
+          "name": "deploy-test-004",
+          "action": "remove",
+          "reason": "",
+          "ids": {
+            "network_id": "N_706502191543928068"
+          },
+          "elements": [
+            "network deploy-test-004"
+          ]
+        },
+        {
+          "name": "API Navigator DEV",
+          "action": "skip",
+          "reason": "outside manage_prefix",
+          "ids": {
+            "network_id": "N_706502191543919612"
+          },
+          "elements": []
+        }
+      ]
+    }
   }
 }

@@ -61,3 +61,15 @@ that built anything offers Destroy first rather than only forgetting.
 
 Documented under Ansible → Deployments → Tearing down. Tests: api 36,
 ui 41, deployments 69, ansible_view 44, startup 154, publish 34.
+
+## 2026-09-06 05:10 — step 1's done-condition met; close-out begins
+
+The runner shipped `dry_run` on all three destroys as the extra var — one
+file that knows the ordering — and proved it: each dry run reported
+changed=0 and the Meraki networks were listed afterwards, all still
+there. Then it ran all three destroys for real and the mirror test after
+each: every site `create` on the apply plan afterwards. Estate back to
+baseline. The real dry-run payload (four removals, one skip with its
+reason) is in the fixtures and the table's skip-row rendering is asserted.
+
+Full suite: 116 of 116. Tests: ui 43.

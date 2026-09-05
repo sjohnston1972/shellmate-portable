@@ -137,6 +137,12 @@ def test_teardown_is_behind_its_own_plan_and_a_typed_name() -> None:
           "r[key] === 'failed'" in JS and "elements || []" in JS,
           "the runner's first version listed what was attempted as removed")
     check("failures first", "DESTROY_ORDER = { failed: 0" in JS)
+    check("skip rows are shown with their reason, never hidden",
+          "DESTROY_ORDER = { failed: 0, remove: 1, removed: 1, skip: 2, skipped: 2 }" in JS
+          and "el('td', { text: r.reason || '' })" in JS,
+          "a plan that lists only removals hides the fact that a site was excluded")
+    check("elements are shown in removal order",
+          "(r.elements || []).join(' → ')" in JS)
     check("a built site missing from a re-upload is named as orphaned",
           "no longer in the list" in JS and "orphaned" in JS,
           "destroy removes only what is in sites.yml")
