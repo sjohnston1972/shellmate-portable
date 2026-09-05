@@ -2200,7 +2200,7 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div class="setting-row">
             <label class="setting-label" for="setting-jira-email"
-                   data-tip="The e-mail address of the Atlassian account the token belongs to. Jira Cloud authenticates with this and the token together, not with the token alone.">Account e-mail</label>
+                   data-tip="The e-mail address of the Atlassian account the token belongs to. Jira Cloud authenticates with this and the token together, not with the token alone.||Wrong here and the token is blamed: Jira answers a mismatched pair with the same 401 it gives a bad token, so the obvious move is to make a new token, which does not help and costs an hour.">Account e-mail</label>
             <span class="setting-value">
               <input type="text" id="setting-jira-email" class="setting-input"
                      placeholder="you@example.com" autocomplete="off" />
@@ -2215,7 +2215,7 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div class="setting-row">
             <label class="setting-label" for="setting-jira-project"
-                   data-tip="The project key issues are raised in — the short prefix on every issue number, e.g. `NET` in `NET-1042`.">Project key</label>
+                   data-tip="The project key issues are raised in — the short prefix on every issue number, e.g. `NET` in `NET-1042`.||It also bounds the issue search, so the picker on Conclude Session only ever offers tickets from this project. A key for a project the account cannot see fails at the point of raising, not here.">Project key</label>
             <span class="setting-value">
               <input type="text" id="setting-jira-project" class="setting-input"
                      placeholder="NET" autocomplete="off" />

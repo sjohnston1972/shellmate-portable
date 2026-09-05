@@ -106,3 +106,14 @@ to edit .env.
 `python test_ticketing.py` — 24 passed, 0 failed. test_settings, test_vault
 and test_report still pass.
 
+## 2026-09-05 07:50 — full suite green after #540
+
+83 of 83 test files pass (81 before; test_report.py and test_ticketing.py
+are the two new ones).
+
+test_tooltips caught both new Settings tooltips carrying only one half. The
+convention is two, separated by ||: what it is, and what follows from it.
+The second halves are worth having — a wrong account e-mail gets the same
+401 from Jira that a bad token does, so the obvious move is to make a new
+token, which does not help.
+
