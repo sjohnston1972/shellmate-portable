@@ -7664,6 +7664,12 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     resume=resume,
                     attachment=attachment,
                 ):
+                    if isinstance(chunk, dict) and "tables" in chunk:
+                        # Parsed rows, for a real table rather than the
+                        # fixed-width text the model reads (#554).
+                        await websocket.send_text(json.dumps({
+                            "type": "tables", "tables": chunk["tables"]}))
+                        continue
                     if isinstance(chunk, dict) and "context" in chunk:
                         # What this reply rests on (#553). To the browser
                         # only — it never goes back to a provider, and it

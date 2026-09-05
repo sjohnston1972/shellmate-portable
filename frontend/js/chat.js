@@ -260,6 +260,9 @@
 
     if (msg.type === 'chunk') {
       appendChunk(msg.data);
+    } else if (msg.type === 'tables') {
+      // Parsed rows for a real table (#554).
+      handleTables(msg.tables);
     } else if (msg.type === 'context') {
       // Exactly what this reply was built from (#553).
       attachContext(msg.text || '');
@@ -878,6 +881,167 @@
     return out ? { kind: out.kind, text: out.text } : null;
   }
 
+  // -------------------------------------------------------------------------
+  // Real tables, and proper Markdown (#554)
+  //
+  // `formatText` rendered code, bold and line breaks. Everything else the
+  // model wrote — headings, lists, and above all tables — arrived as prose
+  // with the pipes still in it. Meanwhile `markdown.js` has rendered all of
+  // that for the manual since the manual existed, and escapes before it
+  // produces any markup, which is what makes it safe to point at model
+  // output.
+  //
+  // The parsed rows are the other half. A 48-port interface table is the
+  // example the assistant documentation gives of what models get wrong;
+  // read as line-wrapped prose the engineer gets it wrong too. So the model
+  // keeps the fixed-width text it reads best and the browser gets columns.
+  // -------------------------------------------------------------------------
+
+  /** Tables waiting for the reply they belong to. */
+  let pendingTables = [];
+
+  function handleTables(list) {
+    pendingTables = Array.isArray(list) ? list : [];
+  }
+
+  /**
+   * Attach whatever tables arrived with this reply.
+   *
+   * After the text, because the model's own words are the answer and the
+   * rows are the evidence under it — and because a table above the first
+   * sentence pushes the answer off the screen on a short panel.
+   */
+  function attachTables(bubble) {
+    if (!bubble || !pendingTables.length) { pendingTables = []; return; }
+    pendingTables.forEach(t => bubble.appendChild(buildTable(t)));
+    pendingTables = [];
+    scrollToBottom();
+  }
+
+  function buildTable(spec) {
+    const wrap = document.createElement('details');
+    wrap.className = 'chat-table';
+    wrap.open = true;
+
+    const summary = document.createElement('summary');
+    summary.textContent = `${spec.command} — ${spec.rows.length} row`
+      + `${spec.rows.length === 1 ? '' : 's'}`
+      // Said, because a table quietly showing sixty of four hundred rows
+      // is a table somebody will count on being complete.
+      + (spec.truncated ? ` of ${spec.total}` : '');
+    wrap.appendChild(summary);
+
+    const tools = document.createElement('div');
+    tools.className = 'chat-table-tools';
+
+    const filter = document.createElement('input');
+    filter.type = 'search';
+    filter.className = 'chat-table-filter';
+    filter.placeholder = 'Filter rows…';
+
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn-tertiary';
+    copy.textContent = 'Copy CSV';
+    copy.addEventListener('click', () => copyCsv(spec));
+
+    tools.append(filter, copy);
+    wrap.appendChild(tools);
+
+    const scroller = document.createElement('div');
+    scroller.className = 'chat-table-scroll';
+    const table = document.createElement('table');
+
+    const head = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    spec.columns.forEach((name, index) => {
+      const th = document.createElement('th');
+      th.textContent = name;
+      th.title = 'Sort by this column';
+      th.addEventListener('click', () => sortBy(table, index, th));
+      headRow.appendChild(th);
+    });
+    head.appendChild(headRow);
+
+    const body = document.createElement('tbody');
+    spec.rows.forEach(row => {
+      const tr = document.createElement('tr');
+      row.forEach(cell => {
+        const td = document.createElement('td');
+        // textContent throughout: these are device values, and an
+        // interface description is the user's text on somebody else's box.
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+
+    filter.addEventListener('input', () => {
+      const needle = filter.value.trim().toLowerCase();
+      [...body.rows].forEach(tr => {
+        tr.hidden = needle
+          ? !tr.textContent.toLowerCase().includes(needle)
+          : false;
+      });
+    });
+
+    table.append(head, body);
+    scroller.appendChild(table);
+    wrap.appendChild(scroller);
+    return wrap;
+  }
+
+  /**
+   * Sort, alternating direction, numerically where the column is numbers.
+   *
+   * Interface counters and VLAN ids sorted as text put 10 before 9, which
+   * is precisely the wrong answer for the columns anybody sorts.
+   */
+  function sortBy(table, index, th) {
+    const body = table.tBodies[0];
+    const rows = [...body.rows];
+    const descending = th.dataset.sort === 'asc';
+
+    const numeric = rows.every(r => {
+      const v = (r.cells[index].textContent || '').trim();
+      return v === '' || !Number.isNaN(Number(v));
+    });
+
+    rows.sort((a, b) => {
+      const x = (a.cells[index].textContent || '').trim();
+      const y = (b.cells[index].textContent || '').trim();
+      const result = numeric ? Number(x || 0) - Number(y || 0)
+                             : x.localeCompare(y);
+      return descending ? -result : result;
+    });
+
+    [...table.tHead.rows[0].cells].forEach(c => { delete c.dataset.sort; });
+    th.dataset.sort = descending ? 'desc' : 'asc';
+    rows.forEach(r => body.appendChild(r));
+  }
+
+  async function copyCsv(spec) {
+    // Quoted properly: an interface description with a comma in it would
+    // otherwise silently become two columns in whatever this is pasted into.
+    const escape = (v) => {
+      const s = String(v == null ? '' : v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [spec.columns.map(escape).join(','),
+                 ...spec.rows.map(r => r.map(escape).join(','))].join('\n');
+    try {
+      await navigator.clipboard.writeText(csv);
+    } catch (_) {
+      const ta = document.createElement('textarea');
+      ta.value = csv;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (_) { /* give up */ }
+      ta.remove();
+    }
+    if (typeof window._showCopyToast === 'function') window._showCopyToast();
+  }
+
   // -----------------------------------------------------------------------
   // Message rendering
   // -----------------------------------------------------------------------
@@ -1012,6 +1176,7 @@
         }
         renderBubbleContent(streamingBubble);
         wireCommandBlocks(streamingBubble);
+        attachTables(streamingBubble);
       }
       streamingBubble = null;
     }
@@ -1276,7 +1441,20 @@
   }
 
   function formatText(text) {
-    // Minimal markdown: fenced code blocks, inline code, bold
+    // The renderer the manual already uses (#554). It escapes before
+    // it produces any markup, which is what makes it safe to point at
+    // model output — and it renders headings, lists and tables, which
+    // the four replaces below never did. The [SUGGEST_CMD] and [PLAN]
+    // splitting happens before this, in renderBubbleContent, so a
+    // command block is never handed to a Markdown parser.
+    if (window.shellmateMarkdown && window.shellmateMarkdown.render) {
+      try {
+        return window.shellmateMarkdown.render(text);
+      } catch (_) {
+        // Fall through: a renderer that threw on one odd reply must
+        // not lose the reply.
+      }
+    }
     return text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')

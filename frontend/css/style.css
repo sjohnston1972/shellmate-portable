@@ -3628,6 +3628,86 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 }
 
 /* ---------------------------------------------------------------------------
+   Real tables in the chat (#554)
+
+   A 48-port interface table read as line-wrapped prose is the example the
+   assistant documentation gives of what models get wrong. The engineer gets
+   it wrong too, for the same reason — so the rows get columns.
+--------------------------------------------------------------------------- */
+.chat-table {
+  margin: 10px 0 4px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  background: var(--surface-high);
+}
+
+.chat-table > summary {
+  padding: 6px 10px;
+  color: var(--on-surface-dim);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.chat-table-tools {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px 8px;
+}
+
+.chat-table-filter {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  color: var(--on-surface);
+  font-size: 11.5px;
+}
+
+/* Its own scroller: a wide table must not make the chat panel scroll
+   sideways, which moves everything else with it. */
+.chat-table-scroll {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.chat-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.chat-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 5px 8px;
+  background: var(--surface-highest);
+  color: var(--on-surface-dim);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.chat-table th:hover { color: var(--primary); }
+
+.chat-table th[data-sort="asc"]::after  { content: ' ▲'; }
+.chat-table th[data-sort="desc"]::after { content: ' ▼'; }
+
+.chat-table td {
+  padding: 3px 8px;
+  border-top: 1px solid var(--outline);
+  color: var(--on-surface);
+  white-space: nowrap;
+}
+
+.chat-table tbody tr:hover { background: var(--surface-highest); }
+
+/* ---------------------------------------------------------------------------
    Pointing at something (#551)
 
    The chip sits above the input, so what is going with the question is

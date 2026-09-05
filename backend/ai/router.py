@@ -326,6 +326,25 @@ async def stream_chat(
     yield {"context": (context_block + "\n\n" + attachment_text
                        if attachment_text else context_block)}
 
+    # The same parse, as rows, for the browser (#554). A 48-port table
+    # as line-wrapped prose is what the assistant documentation warns
+    # models get wrong — and what the engineer gets wrong too. The
+    # model keeps the fixed-width text; this is the other half of one
+    # parse, not a second one.
+    if active_session is not None:
+        try:
+            from backend.configs import session_platform
+            from backend.session import parsed as parsed_module
+
+            table_rows = await asyncio.to_thread(
+                parsed_module.rows_for,
+                session_platform(active_session),
+                active_session.get("recent_records") or [])
+            if table_rows:
+                yield {"tables": table_rows}
+        except Exception as exc:              # never worth failing chat
+            logger.debug("Parsed rows unavailable: %s", exc)
+
     # The persona, then the part of the context that holds still between
     # questions — the tab list and the steady device facts — so the cached
     # prefix is long enough to be cached at all (#498). Only what changes

@@ -219,3 +219,33 @@ Two mistakes of mine, both worth recording:
 
 `python test_attachment.py` — 29 passed. 96 of 96 test files pass.
 
+## 2026-09-05 13:12 — #554 closed
+
+`formatText` defers to `markdown.js` — a deletion rather than an addition.
+It escapes before producing markup, which is the property that makes it
+safe on model output, and this issue asked for that to be checked before
+reuse. The tag splitting still runs first, so a command block never
+reaches a Markdown parser.
+
+`parsed.rows_for()` gives the browser columns from the same parse the
+model's fixed-width text comes from. Sortable numerically where the column
+is numbers — sorted as text, 10 comes before 9, which is wrong for exactly
+the columns anybody sorts — filterable, and Copy CSV quotes values with
+commas in them.
+
+**The best catch was not mine.** `test_outbound` guards that nothing
+shapes a record's output without redacting it, and failed on `rows_for`
+immediately. It looks over-strict, because these rows go to a browser that
+already has the unmasked terminal on screen — but the chat panel is a
+different surface, and a conversation gets exported, sent to Jira and
+pasted into tickets. A clean table is where a masked value would come back
+unmasked. Redacted, with a comment saying why it is not obvious.
+
+Two of my own mistakes: `rows_for` used `outbound` without importing it —
+which the source-scanning guard could not catch, because it never executes
+the function — and my test used `cisco_ios` as a platform id where
+ShellMate's own is `ios`. The wrong id parses nothing, silently, which is
+worth knowing.
+
+`python test_chat_tables.py` — 22 passed. 97 of 97 test files pass.
+

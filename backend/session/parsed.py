@@ -138,6 +138,56 @@ def table_for(platform_id: str, record) -> str | None:
     return table
 
 
+def rows_for(platform_id: str, records, limit: int = 3) -> list[dict]:
+    """
+    The same recent records as *rows*, for the browser (#554).
+
+    `tables_for` renders fixed-width text, which is what a model reads best
+    and what a person reads worst. A 48-port interface table as line-wrapped
+    prose is exactly the thing the assistant documentation warns models get
+    wrong — and the engineer gets it wrong too, for the same reason.
+
+    So the model keeps the text and the browser gets the rows, from one
+    parse. Two parses would be two chances to disagree about what the device
+    said.
+
+    Returns:
+        ``[{"command", "columns", "rows"}]``, newest last, at most ``limit``.
+    """
+    from backend.session import outbound
+
+    out: list[dict] = []
+    for record in reversed(list(records or [])):
+        if len(out) >= limit:
+            break
+        command = str(getattr(record, "command", "") or "").strip()
+        # Through the same door as everything else that leaves a
+        # record, and for a reason that is not obvious: these rows go
+        # to the browser, which already has the unmasked text on the
+        # terminal. But the *chat panel* is a different surface — a
+        # conversation gets exported (#558), sent to Jira, pasted into
+        # a ticket — and a clean table is exactly where a masked value
+        # would come back unmasked. test_outbound caught this.
+        output = outbound.redact_text(getattr(record, "output", "") or "")
+        parsed_rows = parse(platform_id, command, output)
+        if not parsed_rows:
+            continue
+        # The keys of the first row, in order: TextFSM gives every row the
+        # same keys, and taking the union would put a column at the end
+        # whenever one row happened to carry a field the others did not.
+        columns = list(parsed_rows[0].keys())
+        out.append({
+            "command": command,
+            "columns": columns,
+            "rows": [[str(row.get(c, "")) for c in columns]
+                     for row in parsed_rows[:MAX_ROWS]],
+            "truncated": len(parsed_rows) > MAX_ROWS,
+            "total": len(parsed_rows),
+        })
+    out.reverse()
+    return out
+
+
 def tables_for(platform_id: str, records, limit: int = 3) -> list[str]:
     """
     Rendered tables for the most recent records that parse, newest last.
