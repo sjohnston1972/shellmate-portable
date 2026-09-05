@@ -7710,6 +7710,13 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     "text": text,
                 }
 
+            # The runbook being walked (#552). Only the browser knows which
+            # step somebody is on, because only the browser knows which
+            # steps they approved — the approval is a click, and the server
+            # never sees one.
+            book = msg.get("runbook")
+            runbook = book if isinstance(book, dict) and book.get("steps") else None
+
             resume = None
             handoff = msg.get("tool_result")
             if isinstance(handoff, dict) and handoff.get("calls"):

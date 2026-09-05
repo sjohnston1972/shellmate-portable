@@ -64,9 +64,12 @@ def test_defaults() -> None:
     # Asserted as a set rather than a count, so adding a persona is a
     # deliberate edit here rather than a number that quietly goes stale.
     # Ansible (#602) is chosen by which view is open rather than by the mode
-    # toggle, but it is edited and reset through the same machinery.
+    # toggle, and Runbook (#552) is entered by running one and left when it
+    # concludes — neither is on the toggle, and both are edited and reset
+    # through the same machinery.
     check("every persona exists",
-          set(prompts.MODES) == {"tshoot", "learn", "investigate", "ansible"},
+          set(prompts.MODES) == {"tshoot", "learn", "investigate",
+                                 "ansible", "runbook"},
           f"got {prompts.MODES}")
     check("the file is written on first run", prompt_store.prompts_path().exists())
 

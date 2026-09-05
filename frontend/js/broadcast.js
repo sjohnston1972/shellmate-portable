@@ -513,7 +513,25 @@
       await loadLibrary();
     });
 
-    row.append(load, quick, add, del);
+    // Run it with the assistant (#552): the same commands, but walked one
+    // approved step at a time with the model reading each result — as
+    // against Broadcast, which fires them all and interprets nothing.
+    const walk = document.createElement('button');
+    walk.type = 'button';
+    walk.className = 'snippet-walk';
+    walk.title = 'Run this with the assistant, one approved step at a time';
+    const walkIcon = document.createElement('span');
+    walkIcon.className = 'material-symbols-outlined';
+    walkIcon.textContent = 'smart_toy';
+    walk.appendChild(walkIcon);
+    walk.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!window.shellmateChat || !window.shellmateChat.startRunbook) return;
+      close();
+      window.shellmateChat.startRunbook(snippet);
+    });
+
+    row.append(load, walk, quick, add, del);
     return row;
   }
 

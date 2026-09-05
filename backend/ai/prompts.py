@@ -201,6 +201,51 @@ You may also suggest a single CLI command when checking something by hand is the
 
 
 #: Mode -> the shipped persona body. What "Reset to defaults" restores.
+# ---------------------------------------------------------------------------
+# Runbook persona (#552)
+#
+# Investigate decides what to do next; a runbook has already been decided.
+# That is the whole difference, and it is why this is a fourth body rather
+# than a flag on the third: the two personas want opposite things from the
+# model. Investigate is asked to form a hypothesis and choose the next
+# step. A runbook is asked to follow somebody else's steps, in order,
+# without improving on them — because the value of a vetted sequence is
+# that a junior gets the same one a lead wrote, and a model that reorders
+# it has quietly given them a different runbook.
+#
+# It may still add a step, and the prompt says when: only when a result
+# makes the remaining steps unsafe or pointless. That exception exists
+# because a runbook written last quarter cannot know what the device says
+# today, and a model that ploughs on through a device that is not what the
+# runbook assumed is worse than one that stops and says so.
+# ---------------------------------------------------------------------------
+_RUNBOOK_BODY = """You are an expert network engineer and AI copilot embedded in ShellMate, running a RUNBOOK — a sequence somebody has already written and vetted.
+
+Mode: RUNBOOK
+- The steps are given to you in the RUNBOOK block. They are not suggestions to improve on. Follow them in the order given.
+- Propose ONLY the next unticked step, as a single command, with one short line on what it will show. The engineer approves every step; you never run anything.
+- After each result, say in one or two sentences what it showed, then propose the next step.
+- Do NOT reorder the steps, do NOT skip a step because you think you know the answer, and do NOT merge two steps into one command. A vetted sequence is worth having because it is the same every time; changing it hands somebody a different runbook without telling them.
+- You MAY stop early or add a step, in exactly one circumstance: a result makes the remaining steps unsafe or pointless — the device is not what the runbook assumed, or something is already broken in a way the runbook does not cover. Say plainly that you are departing from the runbook and why, before you do it.
+- When the last step is done, finish with **Conclusion:** — what the runbook established, and anything that looked wrong along the way.
+- Never invent output you did not see. If a step's output is missing or truncated, say so and propose re-running it.
+
+Always include the checklist, in exactly this form, at the end of every reply until you conclude:
+[PLAN]
+1. [x] show ip interface brief — which ports are down
+2. [ ] show interfaces Gi0/2 — errors and last state change
+3. [-] show spanning-tree — skipped, and say why in the text above
+[/PLAN]
+Marks: [ ] not yet, [x] done, [-] departed from. Keep the numbering and the wording of the steps as the runbook gave them.
+
+Your capabilities:
+- You can see the live terminal session output for the active tab, what ShellMate has established about the device, and the earlier turns of this conversation.
+- Deep expertise in Cisco IOS, IOS-XE, NX-OS, ASA, Junos, PAN-OS, EOS and Linux hosts.
+{command_rules}
+
+You must not make up device output or invent configurations you cannot see."""
+
+
 DEFAULT_BODIES: dict[str, str] = {
     "tshoot":      _TSHOOT_BODY,
     "learn":       _LEARN_BODY,
@@ -208,6 +253,11 @@ DEFAULT_BODIES: dict[str, str] = {
     # Not offered by the mode toggle: chosen by where the user is, not by
     # what they picked, and switched back the moment they leave the view.
     "ansible":     _ANSIBLE_BODY,
+    # Also not on the toggle (#552): entered by running a runbook and
+    # left when it concludes. A mode somebody can select and forget
+    # they are in would have the assistant refusing to think for the
+    # rest of the afternoon.
+    "runbook":     _RUNBOOK_BODY,
 }
 
 MODES = tuple(DEFAULT_BODIES)
@@ -458,6 +508,8 @@ def build_context_prompt(
     # Where the visible window starts (#553). The model is told to say
     # when it cannot see enough and was never told where enough ends.
     horizon: dict | None = None,
+    # The steps a runbook laid down, and how many are done (#552).
+    runbook: dict | None = None,
 ) -> str:
     """
     Build the context block prepended to every user message.
@@ -471,6 +523,19 @@ def build_context_prompt(
 
     # Where an investigation stands (#403): how many approved steps have
     # been taken against the budget, so the model plans within it.
+    # The steps a runbook laid down (#552). Given to the model as data
+    # rather than folded into the prose of the question, so it can see
+    # which are done and which are left without having to re-read the
+    # whole conversation and count.
+    if runbook and runbook.get("steps"):
+        lines.append("=== RUNBOOK ===")
+        lines.append(f"  Name: {runbook.get('name', '')}")
+        lines.append("  Follow these in order. Do not reorder or merge them.")
+        for index, step in enumerate(runbook["steps"], start=1):
+            mark = "x" if index <= int(runbook.get("done", 0)) else " "
+            lines.append(f"  {index}. [{mark}] {step}")
+        lines.append("")
+
     if investigation:
         step = int(investigation.get("step", 0))
         budget = int(investigation.get("max", 0))

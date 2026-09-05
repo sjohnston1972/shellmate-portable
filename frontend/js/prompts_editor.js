@@ -111,7 +111,10 @@
   }
 
   async function reset(mode) {
-    const which = mode ? 'this prompt' : 'both prompts';
+    // 'every prompt', not 'both': there were two when this was written
+    // and there are five now (#552). A count in a sentence is a thing
+    // that goes quietly wrong every time one is added.
+    const which = mode ? 'this prompt' : 'every prompt';
     const ok = await window.shellmateDialog.confirm({
       title: `Restore ${which} to the shipped text?`,
       body: 'Anything you have written is discarded.',

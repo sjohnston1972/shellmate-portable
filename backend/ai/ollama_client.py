@@ -38,6 +38,49 @@ def _options() -> dict:
     return options
 
 
+def _usage(event: dict, num_ctx: int) -> dict:
+    """
+    Ollama's done event, read as the usage dict every provider returns (#555).
+
+    The first four keys are the contract the chat panel and the router share
+    across providers and must not move. The two additions are what only a
+    local model can tell you:
+
+    - **tokens_per_second**, from `eval_duration` — nanoseconds spent
+      generating — which Ollama has always sent and this client always threw
+      away. It is the one number that answers "is this model too big for
+      this machine?", and there is nowhere else to get it: a local run has
+      no bill and no dashboard.
+    - **context_full**, when the prompt reached the window. Ollama does not
+      refuse an over-long prompt; it truncates it from the front and answers
+      confidently about output it never read. Silence here is the bug.
+
+    *num_ctx* is what this request actually asked for, so a window changed
+    in Stockton mid-session cannot be reported against the old figure.
+    A zero means the request left Ollama's own default in force — the limit
+    is then whatever the model was built with, which the response does not
+    say, so nothing is claimed rather than a number invented.
+    """
+    output = int(event.get("eval_count", 0) or 0)
+    prompt = int(event.get("prompt_eval_count", 0) or 0)
+    usage = {
+        "provider": "ollama",
+        "input":    prompt,
+        "output":   output,
+        "cache_read": 0,
+    }
+    # Guarded rather than assumed: a cached prompt, a cancelled generation or
+    # an older Ollama can all leave the duration absent or zero, and dividing
+    # by it would replace a missing figure with a crash.
+    elapsed = int(event.get("eval_duration", 0) or 0)
+    if elapsed > 0:
+        usage["tokens_per_second"] = round(output / (elapsed / 1_000_000_000), 1)
+    if num_ctx > 0 and prompt >= num_ctx:
+        usage["context_full"] = True
+        usage["context_limit"] = num_ctx
+    return usage
+
+
 def _arguments_as_text(arguments) -> str:
     """
     Ollama returns tool arguments as an object; the collector expects the
@@ -136,14 +179,11 @@ async def stream_response(
                             tool_registry.remember_support(
                                 "ollama", payload["model"])
                             yield {"tool_calls": calls}
-                        # Ollama's counts: what it read and what it wrote.
+                        # Ollama's counts: what it read, what it wrote, how
+                        # fast, and whether it read all of what it was sent.
                         if "prompt_eval_count" in event or "eval_count" in event:
-                            yield {"usage": {
-                                "provider": "ollama",
-                                "input":    event.get("prompt_eval_count", 0),
-                                "output":   event.get("eval_count", 0),
-                                "cache_read": 0,
-                            }}
+                            yield {"usage": _usage(
+                                event, int(payload["options"].get("num_ctx", 0)))}
                         break
                 except json.JSONDecodeError:
                     continue

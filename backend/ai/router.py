@@ -160,6 +160,10 @@ async def stream_chat(
     # rather than in the browser — the browser is where the unmasked
     # text already is, and the promise is about what leaves the machine.
     attachment: dict | None = None,
+    # The runbook being walked, if any (#552): its steps and how many
+    # are done, so the model can see what is left without re-reading
+    # the conversation and counting.
+    runbook: dict | None = None,
 ) -> AsyncIterator:
     """
     Build context from session buffers, then stream an AI response.
@@ -320,6 +324,7 @@ async def stream_chat(
         investigation=investigation,
         stable_in_system=True,
         horizon=horizon,
+        runbook=runbook,
     )
 
     # The exact block this reply rests on, to the browser only (#553).

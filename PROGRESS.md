@@ -359,3 +359,41 @@ fast machine. Asserts the ordering property now.
 
 `python test_conversations.py` — 54 passed. 101 of 101 test files pass.
 
+## 2026-09-05 14:58 — #552 closed
+
+A fourth persona, a runbook block in the context, `/run <name>`, a Run
+with the assistant button, and Save as a runbook on any plan card.
+
+**A persona rather than a flag on Investigate.** Investigate decides what
+to do next; a runbook has already been decided, and the two want opposite
+things from the model. The prompt forbids reordering, skipping and merging
+— with one named exception for a result that makes the remaining steps
+unsafe or pointless, which must be announced rather than done quietly.
+
+The step count lives in the browser and moves only where a command is
+sent. A server-side count would advance on a proposal and report a step
+done that nobody ran.
+
+Save-as-runbook reads the plan card's own elements rather than re-parsing
+the reply: the card is what was approved, and anything that renders
+differently from what gets saved is a runbook nobody reviewed. Offered on
+any plan with commands, because an investigation that found the answer at
+step two is a better runbook than one that ran all six.
+
+Also fixed a stale sentence: the editor offered to reset "both prompts".
+There were two when that was written and there are five now.
+
+`python test_runbook.py` — 43 passed. 104 of 104 test files pass.
+
+### On the parallel agents
+
+Three ran against fixed contracts, each owning files nobody else touched:
+`backend/knowledge.py` (68 tests), `backend/broadcast_collect.py` (55),
+and `backend/ollama_pull.py` + the ollama_client changes (36). All three
+pass. Integration — routes, Settings, chat.js — stays serial, because
+every one of those lands in files all four issues share.
+
+A full-suite run *while* they were writing showed two spurious failures.
+Both passed alone. Worth remembering: a suite that reads repo source
+cannot be trusted while something else is editing it.
+

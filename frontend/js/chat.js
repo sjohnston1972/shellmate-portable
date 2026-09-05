@@ -303,6 +303,15 @@
     const text = inputEl.value.trim();
     if (!text) return;
 
+    // /run <snippet> (#552): start a saved sequence with the assistant.
+    // Matched by name rather than id, because a person types the name.
+    const runMatch = text.match(/^\/run\s+(.+)$/i);
+    if (runMatch) {
+      inputEl.value = '';
+      runByName(runMatch[1].trim());
+      return;
+    }
+
     // Jira shortcut — "send to jira" / "/jira" opens the conclude-session modal
     if (/^\/jira\b|send\s+to\s+jira|log\s+to\s+jira|create\s+jira/i.test(text)) {
       inputEl.value = '';
@@ -396,6 +405,8 @@
         // What the engineer pointed at, if anything (#551). Redacted
         // server-side, and cleared once it has gone.
         attachment: takeAttachment(),
+        // The runbook being walked, if any (#552).
+        runbook: runbookPayload(),
         investigate_step:  _investigation.steps,
         session_id:        sessionId,
         // Always the real tab order. The selection used to be sent *as* this
@@ -1403,6 +1414,195 @@
                      conversation_id: conversationId }));
   }
 
+  // -------------------------------------------------------------------------
+  // Runbooks (#552)
+  //
+  // Investigate decides what to do next. A runbook has already been
+  // decided — that is the whole difference, and it is why the assistant
+  // runs one under a persona of its own rather than a flag on Investigate.
+  // The value of a vetted sequence is that a junior gets the same one a
+  // lead wrote; a model that reorders it has quietly handed them a
+  // different runbook.
+  //
+  // The approval gate is unchanged. Every step is still a command block
+  // somebody clicks, and the step count only moves when they do — which is
+  // why the browser owns it and the server is told, rather than the other
+  // way round.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Find a saved snippet by name and run it.
+   *
+   * Case-insensitive and forgiving of a partial name: somebody typing
+   * `/run bgp` means the one called "Check BGP health", and making them
+   * get the capitals right is a command-line affectation.
+   */
+  async function runByName(name) {
+    let library = [];
+    try {
+      const res = await fetch('/api/snippets');
+      const data = await res.json();
+      library = data.snippets || [];
+    } catch (_) {
+      appendErrorBubble('Could not read the snippet library.');
+      return;
+    }
+
+    const needle = name.toLowerCase();
+    const exact = library.find(s => (s.name || '').toLowerCase() === needle);
+    const partial = library.filter(s => (s.name || '').toLowerCase().includes(needle));
+
+    if (exact) { startRunbook(exact); return; }
+    if (partial.length === 1) { startRunbook(partial[0]); return; }
+    if (partial.length > 1) {
+      // Named rather than guessed at. Picking one of several would run
+      // somebody a sequence they did not ask for, which for a runbook is
+      // the whole thing going wrong at once.
+      appendErrorBubble(`Several runbooks match "${name}": `
+        + partial.map(s => s.name).join(', ') + '. Be more specific.');
+      return;
+    }
+    appendErrorBubble(`No saved snippet matches "${name}". `
+      + 'The library is in the Broadcast panel.');
+  }
+
+  /** The runbook being walked, or null. */
+  let runbook = null;
+
+  /** Steps approved so far. Only a click moves this. */
+  let runbookDone = 0;
+
+  /**
+   * Start a runbook from a saved snippet.
+   *
+   * A snippet that writes is confirmed first, and named as such: the whole
+   * point of a runbook is that somebody trusted it enough to save it, and
+   * that trust should not silently extend to a sequence that changes
+   * configuration.
+   */
+  async function startRunbook(snippet) {
+    if (!snippet || !(snippet.commands || []).length) {
+      appendErrorBubble('That snippet has no commands in it.');
+      return;
+    }
+
+    if (snippet.writes) {
+      const yes = await window.shellmateDialog.confirm({
+        title: `"${snippet.name}" changes the device`,
+        body: 'This runbook is marked as making changes. Every step is still '
+            + 'approved one at a time, and nothing is sent until you click — '
+            + 'but a sequence that writes is worth reading before you start.',
+        confirmLabel: 'Start it',
+        danger: true,
+      });
+      if (!yes) return;
+    }
+
+    runbook = { name: snippet.name, steps: snippet.commands.slice() };
+    runbookDone = 0;
+    if (typeof window.setShellmateMode === 'function') {
+      window.setShellmateMode('runbook');
+    }
+    inputEl.value = `Run the runbook "${snippet.name}".`;
+    sendMessage();
+  }
+
+  /** What travels with each question while a runbook is being walked. */
+  function runbookPayload() {
+    if (!runbook) return null;
+    return { name: runbook.name, steps: runbook.steps, done: runbookDone };
+  }
+
+  /**
+   * Turn a finished plan card back into a saved snippet.
+   *
+   * The commands are read out of the card's own `<code>` elements rather
+   * than re-parsed from the reply text: the card is what the engineer
+   * looked at and approved, and anything that renders differently from
+   * what gets saved is a runbook nobody has actually reviewed.
+   */
+  async function saveAsRunbook(card) {
+    const steps = [...card.querySelectorAll('.plan-step code')]
+      .map(el => el.textContent.trim())
+      .filter(Boolean);
+
+    if (!steps.length) {
+      appendErrorBubble('There are no commands in that plan to save.');
+      return;
+    }
+
+    const answer = await window.shellmateDialog.form({
+      title: 'Save this as a runbook',
+      body: `${steps.length} step${steps.length === 1 ? '' : 's'} will be `
+          + 'saved to the snippet library, in this order. Anyone can then run '
+          + 'it with the assistant, approving each step as you did.',
+      fields: [
+        { name: 'name', label: 'Name it', placeholder: 'Check BGP health' },
+        { name: 'description', label: 'What is it for? (optional)',
+          placeholder: 'Run before and after an edge maintenance.' },
+      ],
+      confirmLabel: 'Save',
+    });
+    if (!answer || !(answer.name || '').trim()) return;
+
+    try {
+      const res = await fetch('/api/snippets/new', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: answer.name.trim(),
+          description: answer.description || '',
+          commands: steps,
+          // Read-only until somebody says otherwise. An investigation is
+          // made of show commands, and a runbook saved as writing would
+          // carry a confirmation it never earned.
+          writes: false,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      window.dispatchEvent(new CustomEvent('shellmate:snippets-changed'));
+      if (window.shellmateAlerts) window.shellmateAlerts.notify({
+        global: true, icon: 'bookmark_add', title: 'Saved as a runbook',
+        body: `"${answer.name.trim()}" — ${steps.length} step`
+            + `${steps.length === 1 ? '' : 's'}, in the snippet library.`,
+      });
+    } catch (e) {
+      appendErrorBubble(`Could not save the runbook: ${e.message || e}`);
+    }
+  }
+
+  /**
+   * A Save-as-runbook button on any plan card that has commands in it.
+   *
+   * Offered on every plan rather than only a concluded one: an
+   * investigation that found the answer at step two is a *better* runbook
+   * than one that ran all six, and waiting for a conclusion would hide the
+   * good ones.
+   */
+  function wirePlanCards(bubble) {
+    if (!bubble) return;
+    bubble.querySelectorAll('.plan-card').forEach(card => {
+      if (card.dataset.savable) return;
+      card.dataset.savable = '1';
+      if (!card.querySelector('.plan-step code')) return;
+
+      const save = document.createElement('button');
+      save.type = 'button';
+      save.className = 'btn-tertiary plan-save';
+      save.innerHTML =
+        '<span class="material-symbols-outlined">bookmark_add</span> '
+        + 'Save as a runbook';
+      save.addEventListener('click', () => saveAsRunbook(card));
+      card.appendChild(save);
+    });
+  }
+
+  /** Stop walking, without pretending the runbook finished. */
+  function endRunbook() {
+    runbook = null;
+    runbookDone = 0;
+  }
+
   // -----------------------------------------------------------------------
   // Message rendering
   // -----------------------------------------------------------------------
@@ -1545,6 +1745,7 @@
         wireCitations(streamingBubble,
                       streamingBubble.dataset.contextSession || '');
         attachTables(streamingBubble);
+        wirePlanCards(streamingBubble);
       }
       streamingBubble = null;
     }
@@ -1989,6 +2190,11 @@
     // budget the result is not fed back: the model was told to conclude,
     // and a loop that keeps feeding it is how "one more step" never ends.
     const aiMode = typeof window.getShellmateMode === 'function' ? window.getShellmateMode() : 'tshoot';
+    // A runbook step is done when somebody approved it, never before
+    // (#552). The browser owns the count because the browser is where
+    // the click happens.
+    if (runbook && aiMode === 'runbook') runbookDone += 1;
+
     if (aiMode === 'investigate') {
       _investigation.steps += 1;
       const budget = Number(A('ai.investigate_max_steps', 8)) || 8;
@@ -2678,6 +2884,9 @@
     // A new conversation, so the old one keeps its own trail
     // rather than having the next one appended to it (#558).
     conversationId = newConversationId();
+    // Not a concluded runbook — just a cleared chat. Ending it here
+    // stops the next question carrying steps nobody is walking.
+    endRunbook();
     _investigation.steps = 0;
     // Reset Jira chat history so context estimate resets too
     if (typeof window._clearJiraChatHistory === 'function') window._clearJiraChatHistory();
@@ -2721,6 +2930,8 @@
   window.shellmateChatMessage = handleWsMessage;
 
   window.shellmateChat = {
+    startRunbook,
+    endRunbook,
     openConversations,
     exportConversation,
     conversationId: () => conversationId,
