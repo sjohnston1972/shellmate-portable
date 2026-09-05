@@ -31,6 +31,10 @@ CSS = Path(__file__).with_name("frontend") / "css" / "style.css"
 
 # WCAG AA for normal-size text. Everything measured here is body copy.
 AA = 4.5
+#: The high-contrast set exists to clear the *enhanced* ratio. Holding
+#: it to AA would be holding it to the bar the other two already meet,
+#: which is no bar at all for the one set whose whole purpose is this.
+AAA = 7.0
 
 passed = 0
 failed: list[str] = []
@@ -253,6 +257,120 @@ STATUS = [
 ]
 
 
+def test_high_contrast_clears_aaa() -> None:
+    """
+    The third token set (#569), measured at 7:1 rather than eyeballed.
+
+    Two things are checked that the other themes do not need. Every
+    foreground clears AAA against the panel — which is the whole reason the
+    set exists. And --overlay is opaque: a panel at 96% over the terminal
+    takes its contrast from whatever device output happens to be behind it,
+    which is unknowable, and "high contrast except when the output is pale"
+    is not a promise anybody can rely on.
+    """
+    print("\n-- High contrast (AAA) --")
+    text = CSS.read_text(encoding="utf-8")
+    parsed = rules(text)
+
+    base = tokens(parsed, ":root")
+    hc = dict(base)
+    hc.update(tokens(parsed, '[data-theme="high-contrast"]'))
+
+    check("the set exists at all",
+          bool(tokens(parsed, '[data-theme="high-contrast"]')),
+          "no [data-theme=\"high-contrast\"] block in the stylesheet")
+
+    overlay = resolve(hc["--overlay"], hc)
+    check("the overlay is opaque",
+          parse_colour(overlay)[3] == 1.0,
+          f"--overlay is {overlay} — a translucent panel takes its contrast "
+          f"from the device output behind it")
+
+    page = parse_colour(resolve(hc["--bedrock"], hc))[:3]
+    panel = over(overlay, page)
+
+    check("the page itself is pure black",
+          page == (0.0, 0.0, 0.0), str(page))
+
+    for selector, label, token in SURFACES + ACCENTED:
+        colour = resolve(f"var({token})", hc)
+        ratio = contrast(over(colour, panel), panel)
+        check(f"high-contrast: {selector} — {label}",
+              ratio >= AAA,
+              f"{ratio:.2f}:1 against the panel, below the {AAA}:1 AAA ratio "
+              f"({token} = {colour})")
+
+    # Status colours on their own tints, which is where a "high contrast"
+    # set most easily stops being one: a coloured foreground on a coloured
+    # background is two decisions, and only measuring one of them is how the
+    # amber badge got through in the first place.
+    for selector, label, token, tint in STATUS:
+        colour = resolve(f"var({token})", hc)
+        behind = over(resolve(f"var({tint})", hc), panel)
+        ratio = contrast(over(colour, behind), behind)
+        check(f"high-contrast: {selector} — {label}",
+              ratio >= AAA,
+              f"{ratio:.2f}:1 on its tint, below {AAA}:1 ({token} = {colour})")
+
+    # A dimmed white written as rgba is dimmed *by the background*, and the
+    # background is the one thing that must not affect legibility here.
+    for token in ("--on-surface", "--on-surface-dim", "--on-surface-muted"):
+        value = tokens(parsed, '[data-theme="high-contrast"]').get(token, "")
+        check(f"{token} is a solid colour, not an alpha over the page",
+              value.startswith("#"),
+              f"{token} = {value!r}")
+
+
+def test_the_high_contrast_terminal_scheme() -> None:
+    """
+    The terminal half of #569, measured colour by colour.
+
+    The interface theme and the terminal scheme are two settings on purpose
+    — the terminal keeps its own colours whatever the application around it
+    does — so the interface clearing AAA says nothing about what a device's
+    output looks like. Every ANSI colour is checked, not just the
+    foreground: a scheme where the text is readable and half the colours
+    are not is a dark scheme with a white foreground, not a high-contrast
+    one.
+    """
+    print("\n-- The High Contrast terminal scheme --")
+    from backend import schemes
+
+    scheme = schemes.BUILT_IN.get("high_contrast")
+    check("the built-in scheme exists", scheme is not None,
+          str(sorted(schemes.BUILT_IN)))
+    if scheme is None:
+        return
+
+    theme = scheme["theme"]
+    ratio = schemes.contrast(theme)
+    check("foreground on background clears AAA", ratio >= AAA,
+          f"{ratio}:1, below {AAA}:1")
+
+    background = parse_colour(theme["background"])[:3]
+    # cursorAccent is drawn *under* the cursor and selectionBackground is a
+    # background; neither is a foreground and neither belongs in this.
+    skip = {"background", "cursorAccent", "selectionBackground"}
+    for key, value in theme.items():
+        if key in skip or not isinstance(value, str) or not value.startswith("#"):
+            continue
+        got = contrast(parse_colour(value)[:3], background)
+        check(f"{key} clears AAA on the background", got >= AAA,
+              f"{value} is {got:.2f}:1, below {AAA}:1")
+
+    check("black and bright black stay distinguishable",
+          theme.get("black") != theme.get("brightBlack"),
+          "a device drawing a box loses the difference between them")
+
+    # The scheme has to be complete, or the missing keys fall back to the
+    # default's — which is a dark scheme, and would put unmeasured colours
+    # into the one scheme whose whole promise is that they were measured.
+    missing = [k for k in schemes.KEYS
+               if k not in theme and k != "selectionBackground"]
+    check("every colour xterm.js reads is specified", not missing,
+          f"falls back to the default for: {missing}")
+
+
 def test_status_colours_read_in_both_themes() -> None:
     """
     Amber and green, measured rather than eyeballed.
@@ -422,6 +540,8 @@ def main() -> int:
     print("=" * 52)
 
     for test in (test_no_hardcoded_overlay_backgrounds, test_overlay_text_meets_aa,
+                 test_high_contrast_clears_aaa,
+                 test_the_high_contrast_terminal_scheme,
                  test_status_colours_read_in_both_themes,
                  test_the_hover_card_severities_read_in_both_themes,
                  test_no_status_colour_is_written_as_a_literal,

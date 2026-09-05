@@ -151,6 +151,113 @@
   --overlay-solid: #ECECF0;
 }
 
+/* --------------------------------------------------------------------------
+   High contrast (#569)
+
+   A third token set rather than a filter over one of the others. #428 gave
+   the interface roles and focus management; contrast is the part that was
+   still missing for anybody reading a comms-room screen over somebody's
+   shoulder, or with low vision, and the token architecture makes it a data
+   change rather than a rewrite.
+
+   Three rules hold it together:
+
+   **Pure black and pure white.** Not "darker dark". The whole point is the
+   maximum the display can produce, and every foreground here is measured
+   against it at AAA (7:1) by test_contrast.py rather than chosen by eye.
+
+   **No translucency.** --overlay is opaque, because a panel at 96% over a
+   terminal takes its contrast from whatever happens to be behind it — which
+   is device output, and therefore unknowable. That is the same class of bug
+   as the six surfaces that once hardcoded rgba(32,32,32,0.9x); it just fails
+   for a different reason.
+
+   **Focus is 2px and never removed.** Somebody using this set is more
+   likely, not less, to be navigating by keyboard.
+-------------------------------------------------------------------------- */
+[data-theme="high-contrast"] {
+  --bedrock:          #000000;
+  --surface:          #000000;
+  --panel:            #000000;
+  --surface-high:     #1A1A1A;
+  --surface-highest:  #262626;
+
+  --on-surface:       #FFFFFF;
+  /* Solid, not rgba. A dimmed white is dimmed *by the background*, and the
+     background here is the one thing that must not affect legibility. */
+  --on-surface-dim:   #E4E4E4;
+  --on-surface-muted: #C0C0C0;
+
+  --primary:           #66D9FF;
+  --primary-container: #FFFFFF;
+  --on-primary:        #000000;
+
+  --outline:   #9A9A9A;
+  --error:     #FF8A80;
+  --secondary: #9FD8FF;
+
+  --warn:       #FFD000;
+  --warn-tint:  rgba(255,208,0,0.15);
+  --warn-edge:  #FFD000;
+  --ok:         #5AFF8F;
+  --ok-tint:    rgba(90,255,143,0.15);
+  --ok-edge:    #5AFF8F;
+  --live:       #5AFF8F;
+  --live-glow:  rgba(90,255,143,0.75);
+  --error-tint: rgba(255,138,128,0.15);
+  --zap:        #66D9FF;
+  --zap-glow:   rgba(102,217,255,0.75);
+  --primary-tint: rgba(102,217,255,0.15);
+  --primary-edge: #66D9FF;
+
+  --overlay:       #000000;
+  --overlay-solid: #000000;
+}
+
+/* Every floating surface gets a visible edge. On the other two sets a panel
+   is told apart from the page by its shade; here both are black, so the
+   border is the only thing that says where it ends. */
+[data-theme="high-contrast"] .alert-toast,
+[data-theme="high-contrast"] #vault-dialog,
+[data-theme="high-contrast"] #modal-dialog,
+[data-theme="high-contrast"] .side-panel,
+[data-theme="high-contrast"] #paste-dialog,
+[data-theme="high-contrast"] .sm-dialog,
+[data-theme="high-contrast"] .tip-bubble,
+[data-theme="high-contrast"] #term-filter {
+  border: 1px solid var(--outline);
+  backdrop-filter: none;
+}
+
+/* 2px, and on :focus as well as :focus-visible — a browser that does not
+   support the latter must not leave this set with no focus indicator at all,
+   which is the one thing it cannot afford. */
+[data-theme="high-contrast"] :focus,
+[data-theme="high-contrast"] :focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* The dimmed literals in the base rules are dark-theme greys chosen against
+   near-black. They are legible there and not here, and they are colours
+   rather than tokens, so they need saying again. */
+[data-theme="high-contrast"] .sidebar-link       { color: #C0C0C0; }
+[data-theme="high-contrast"] .sidebar-link:hover,
+[data-theme="high-contrast"] .sidebar-link.active { color: var(--primary); }
+[data-theme="high-contrast"] #status-bar         { color: #C0C0C0; }
+[data-theme="high-contrast"] #status-connection  { color: #FFFFFF; }
+[data-theme="high-contrast"] .chat-welcome       { color: #FFFFFF; }
+[data-theme="high-contrast"] .chat-welcome-hint  { color: #E4E4E4; }
+[data-theme="high-contrast"] #chat-input::placeholder { color: #C0C0C0; }
+[data-theme="high-contrast"] .btn-secondary      { color: #FFFFFF; border-color: var(--outline); }
+[data-theme="high-contrast"] .tab-close          { color: #E4E4E4; }
+
+/* Shadows do nothing on black and soften edges that need to be hard. */
+[data-theme="high-contrast"] #modal-dialog,
+[data-theme="high-contrast"] #paste-dialog,
+[data-theme="high-contrast"] #vault-dialog,
+[data-theme="high-contrast"] #copy-toast { box-shadow: none; }
+
 /* Elements that use hardcoded light-on-dark rgba values need explicit overrides */
 [data-theme="light"] #sidebar-logo-img,
 [data-theme="light"] #welcome-logo               { filter: none; }

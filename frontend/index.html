@@ -1213,10 +1213,13 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div class="setting-row">
             <label class="setting-label" for="setting-theme"
-                   data-tip="Light or dark for the application around the terminal — panels, dialogs, the tab strip. Follow the system tracks the operating system's own setting and changes with it.||The terminal keeps its own colour scheme regardless, so choosing the light theme does not lighten the terminal. Set that under Terminal Appearance if you want the two to agree.">Theme</label>
+                   data-tip="Light, dark or high contrast for the application around the terminal — panels, dialogs, the tab strip. Follow the system tracks the operating system's own settings, and picks high contrast if that is what the system asks for.||The terminal keeps its own colour scheme regardless, so choosing the light theme does not lighten the terminal. Set that under Terminal Appearance if you want the two to agree — there is a High Contrast scheme there to pair with this one.">Theme</label>
             <select id="setting-theme" class="setting-input">
               <option value="dark">Dark</option>
               <option value="light">Light</option>
+              <!-- #569: pure black and white, no translucency, and a 2px
+                   focus ring. Every colour in it is measured at AAA. -->
+              <option value="high-contrast">High contrast</option>
               <option value="system">Follow the system</option>
             </select>
           </div>
@@ -3996,9 +3999,19 @@ GigEth0/2     unassigned    YES unset  down     down
       const icon = document.getElementById('theme-icon');
       const root = document.documentElement;
 
-      /** Resolve "system" against what the OS is actually asking for. */
+      /**
+       * Resolve "system" against what the OS is actually asking for.
+       *
+       * Contrast is checked before colour (#569). Somebody who has asked
+       * their operating system for more contrast has asked for the thing
+       * this set exists to provide, and answering them with "light" because
+       * they also prefer light would be answering the smaller question.
+       */
       function effective(choice) {
         if (choice !== 'system') return choice;
+        if (window.matchMedia('(prefers-contrast: more)').matches) {
+          return 'high-contrast';
+        }
         return window.matchMedia('(prefers-color-scheme: light)').matches
           ? 'light' : 'dark';
       }
@@ -4006,8 +4019,19 @@ GigEth0/2     unassigned    YES unset  down     down
       function paint(choice) {
         const theme = effective(choice);
         root.setAttribute('data-theme', theme);
-        icon.textContent = theme === 'light' ? 'dark_mode' : 'light_mode';
-        btn.title = theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme';
+        // The quick toggle stays a light/dark switch; high contrast is a
+        // deliberate choice made in Settings, and a two-state button cannot
+        // carry three states without one of them being unreachable. From
+        // high contrast the button leaves it, and says so rather than
+        // showing a moon that would look like it goes somewhere else.
+        if (theme === 'high-contrast') {
+          icon.textContent = 'contrast';
+          btn.title = 'Leave high contrast (switch to the dark theme)';
+        } else {
+          icon.textContent = theme === 'light' ? 'dark_mode' : 'light_mode';
+          btn.title = theme === 'light' ? 'Switch to dark theme'
+                                        : 'Switch to light theme';
+        }
       }
 
       // The choice lives in settings.json, not localStorage, so it travels
@@ -4025,10 +4049,18 @@ GigEth0/2     unassigned    YES unset  down     down
       window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
         if (choice === 'system') paint(choice);
       });
+      // Turning the OS contrast setting on while ShellMate is open should
+      // land, the same way the colour one does.
+      window.matchMedia('(prefers-contrast: more)').addEventListener('change', () => {
+        if (choice === 'system') paint(choice);
+      });
 
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const next = effective(choice) === 'light' ? 'dark' : 'light';
+        const now = effective(choice);
+        const next = now === 'light' ? 'dark'
+                   : now === 'high-contrast' ? 'dark'
+                   : 'light';
         window.shellmateTheme.apply(next);
         if (typeof window.saveInterfacePreference === 'function') {
           window.saveInterfacePreference('theme', next);

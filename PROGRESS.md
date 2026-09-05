@@ -228,3 +228,41 @@ retyped copy — nine cases plus the empty-match guard, all passing.
 
 `python test_logsearch.py` — 38 passed. test_icons 4, test_contrast 59.
 
+## 2026-09-05 08:11 — steps 11 and 12 done (#569)
+
+A third token set, `[data-theme="high-contrast"]`, and a High Contrast
+terminal scheme to pair with it. Two settings on purpose: the terminal
+keeps its own colours whatever the application around it does, so the
+interface clearing AAA says nothing about what a device's output looks
+like.
+
+Every colour is measured rather than chosen by eye — test_contrast now
+holds both halves to 7:1, and the scheme is checked colour by colour
+rather than only on its foreground. A scheme where the text is readable
+and half the ANSI colours are not is a dark scheme with a white
+foreground, not a high-contrast one.
+
+Three things the measuring settled that eyeballing would not have:
+
+- ANSI `black` as a foreground on a black background is unreadable by
+  definition and every scheme remaps it. At 7:1 it lands in the greys, so
+  `brightBlack` had to move up with it or the two become one colour and a
+  device drawing a box loses the distinction.
+- `--overlay` is opaque here. A panel at 96% over the terminal takes its
+  contrast from whatever device output is behind it, which is unknowable,
+  and "high contrast except when the output is pale" is not a promise.
+- The dimmed text tokens are solid hex, not rgba. A dimmed white is dimmed
+  *by the background*, and the background is the one thing that must not
+  affect legibility here. The test asserts that shape, not just the ratio.
+
+`prefers-contrast: more` is checked before `prefers-color-scheme` under
+"Follow the system": somebody whose OS asks for more contrast has asked
+for what this set provides, and answering "light" because they also prefer
+light answers the smaller question.
+
+The quick toggle stays a two-state light/dark switch — three states cannot
+live on it without one being unreachable — so from high contrast it leaves,
+and the button says so rather than showing a moon.
+
+`python test_contrast.py` — 103 passed, 0 failed (was 59).
+

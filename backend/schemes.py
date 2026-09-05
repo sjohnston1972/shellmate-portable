@@ -57,6 +57,36 @@ BUILT_IN: dict[str, dict[str, Any]] = {
             "brightCyan": "#89DCEB", "brightWhite": "#FFFFFF",
         },
     },
+    # #569. The terminal half of the high-contrast interface theme: those
+    # are two settings on purpose, because the terminal keeps its own colours
+    # whatever the application around it does. Pure white on pure black, and
+    # every ANSI colour bright enough to clear 7:1 on it — a scheme where the
+    # text is readable and half the colours are not is not a high-contrast
+    # scheme, it is a dark one with a white foreground.
+    "high_contrast": {
+        "label": "High Contrast",
+        "theme": {
+            "background": "#000000", "foreground": "#FFFFFF",
+            "cursor": "#FFFFFF", "cursorAccent": "#000000",
+            "selectionBackground": "#4D4D4D",
+            # The normal set is already the bright one. A "dim" red at 4:1
+            # on black is exactly what somebody choosing this cannot read,
+            # and there is nothing to be gained by keeping it dim.
+            # ANSI black as a *foreground* on a black background is
+            # unreadable by definition, so every scheme remaps it. Here it
+            # has to clear 7:1 like everything else, which puts it in the
+            # greys — and bright black then has to move up with it, or the
+            # two become the same colour and a device drawing a box loses
+            # its distinction between them.
+            "black": "#9A9A9A", "red": "#FF8A80", "green": "#5AFF8F",
+            "yellow": "#FFD000", "blue": "#66D9FF", "magenta": "#F0A6FF",
+            "cyan": "#7DF9FF", "white": "#FFFFFF",
+            "brightBlack": "#C6C6C6", "brightRed": "#FFB3AC",
+            "brightGreen": "#9BFFBC", "brightYellow": "#FFE566",
+            "brightBlue": "#A6E9FF", "brightMagenta": "#F7C8FF",
+            "brightCyan": "#B3FCFF", "brightWhite": "#FFFFFF",
+        },
+    },
     "solarized_dark": {
         "label": "Solarized Dark",
         "theme": {

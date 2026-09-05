@@ -127,7 +127,12 @@ DEFAULT_SETTINGS: dict = {
     # inside the data folder — but opening http://localhost:8765 in a browser
     # gave a different set of preferences, and nothing reconciled the two.
     "interface": {
-        # "dark" | "light" | "system"
+        # "dark" | "light" | "high-contrast" | "system"
+        #
+        # "system" resolves contrast before colour (#569): somebody whose OS
+        # asks for more contrast has asked for the thing the third set
+        # exists to provide, and answering with "light" because they also
+        # prefer light answers the smaller question.
         "theme": "dark",
         # The dashboard's recently-used list (#268): the last few connections
         # actually opened, newest first. Written by the tab module, cleared
