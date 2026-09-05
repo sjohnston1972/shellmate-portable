@@ -155,6 +155,11 @@ async def stream_chat(
     # engineer approved a command. Sent back so the model continues its
     # exchange rather than being told about it afterwards in prose.
     resume: list[dict] | None = None,
+    # What the engineer is pointing at (#551): a terminal selection, the
+    # last command's output, or something they pasted. Redacted here
+    # rather than in the browser — the browser is where the unmasked
+    # text already is, and the promise is about what leaves the machine.
+    attachment: dict | None = None,
 ) -> AsyncIterator:
     """
     Build context from session buffers, then stream an AI response.
@@ -311,7 +316,15 @@ async def stream_chat(
     # what somebody inspects is what was sent, not a reconstruction of
     # it. Sent before the first chunk so it is on the bubble whether or
     # not the answer finishes.
-    yield {"context": context_block}
+    # Redacted on the way out, like everything else that leaves (#320).
+    attachment_text = ""
+    if attachment and str(attachment.get("text") or "").strip():
+        attachment_text = turns.attachment_block(
+            str(attachment.get("kind") or "selection"),
+            outbound.redact_text(str(attachment["text"])))
+
+    yield {"context": (context_block + "\n\n" + attachment_text
+                       if attachment_text else context_block)}
 
     # The persona, then the part of the context that holds still between
     # questions — the tab list and the steady device facts — so the cached
@@ -367,6 +380,7 @@ async def stream_chat(
         async for chunk in stream_response(
             message, context_block, model=model, system_prompt=system_prompt,
             history=history, tools=tool_defs, prior=prior or None,
+            attachment=attachment_text,
         ):
             if isinstance(chunk, dict):
                 if "tool_calls" in chunk:

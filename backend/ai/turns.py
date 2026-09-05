@@ -92,7 +92,38 @@ def trim_block(max_turns: int) -> int:
     return min(4, max_turns // 2)
 
 
-def user_content(context_block: str, user_message: str) -> str:
+#: What an attachment is called in the prompt, per kind (#551). Named
+#: rather than lumped under one heading because the model should treat
+#: them differently: a selection is what the engineer is pointing at, a
+#: record is output already on screen, and a paste came from somewhere
+#: else entirely and may be about a device this session is not on.
+ATTACHMENT_HEADINGS = {
+    "selection": "THE LINES THE ENGINEER IS POINTING AT",
+    "record":    "THE OUTPUT OF THE LAST COMMAND THEY RAN",
+    "paste":     "TEXT THE ENGINEER PASTED IN (it may be from another device, or from a file — do not assume it is this session)",
+}
+
+
+def attachment_block(kind: str, text: str) -> str:
+    """
+    One attachment, under its own heading (#551).
+
+    Mid-outage the engineer wants to say "these six lines", not ask a
+    question over a two-hundred-line window and hope. The heading
+    matters as much as the text: without it the lines are indistinguish-
+    able from the terminal output already in the block, and the model
+    has no way to know they are what was pointed at.
+    """
+    body = (text or "").strip()
+    if not body:
+        return ""
+    heading = ATTACHMENT_HEADINGS.get(kind,
+                                      ATTACHMENT_HEADINGS["selection"])
+    return f"=== {heading} ===\n{body}"
+
+
+def user_content(context_block: str, user_message: str,
+                 attachment: str = "") -> str:
     """
     The user message as the model receives it: the context block, then the
     question under its own heading.
@@ -101,9 +132,16 @@ def user_content(context_block: str, user_message: str) -> str:
     sends its whole task as the message, and a "question" heading over a
     note-writing task was the wrong framing for it (#502).
     """
-    if not (context_block or "").strip():
+    parts = [p for p in (context_block or "").strip().split("\n\n") if p]
+    if attachment.strip():
+        # After the context and before the question: the model reads
+        # the session, then what it is being pointed at, then what is
+        # being asked about it — which is the order somebody says it in.
+        parts.append(attachment.strip())
+    if not parts:
         return user_message
-    return f"{context_block}\n\n=== ENGINEER'S QUESTION ===\n{user_message}"
+    body = "\n\n".join(parts)
+    return f"{body}\n\n=== ENGINEER'S QUESTION ===\n{user_message}"
 
 
 def openai_messages(system: str, history: list | None, user: str) -> list[dict]:

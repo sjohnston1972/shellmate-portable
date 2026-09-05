@@ -153,6 +153,7 @@ async def stream(
     history: list[dict] | None = None,
     tools: list[dict] | None = None,
     prior: list[dict] | None = None,
+    attachment: str = "",
 ) -> AsyncIterator:
     """
     Stream one chat completion, yielding text chunks and then the usage.
@@ -166,7 +167,8 @@ async def stream(
     than 200, after at most two retries that each drop a parameter the
     model refused.
     """
-    full_user_message = turns.user_content(context_block, user_message)
+    full_user_message = turns.user_content(context_block, user_message,
+                                          attachment)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type":  "application/json",

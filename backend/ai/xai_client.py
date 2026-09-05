@@ -28,6 +28,7 @@ async def stream_response(
     history: list[dict] | None = None,
     tools: list[dict] | None = None,
     prior: list[dict] | None = None,
+    attachment: str = "",
 ) -> AsyncIterator:
     """
     Stream a Grok response token by token via xAI's OpenAI-compatible API.
@@ -39,6 +40,7 @@ async def stream_response(
 
     async for item in openai_compat.stream(
         PROVIDER, api_key, user_message, context_block, model or XAI_MODEL,
-        system_prompt=system_prompt, history=history, tools=tools, prior=prior,
+        system_prompt=system_prompt, history=history, tools=tools,
+        prior=prior, attachment=attachment,
     ):
         yield item

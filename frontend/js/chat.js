@@ -380,6 +380,9 @@
       lastSentPayload = {
         message,
         history,
+        // What the engineer pointed at, if anything (#551). Redacted
+        // server-side, and cleared once it has gone.
+        attachment: takeAttachment(),
         investigate_step:  _investigation.steps,
         session_id:        sessionId,
         // Always the real tab order. The selection used to be sent *as* this
@@ -735,6 +738,144 @@
       }
       if (typeof window._showCopyToast === 'function') window._showCopyToast();
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Pointing at something (#551)
+  //
+  // Mid-outage the engineer wants to say "these six lines", not ask a
+  // question over a two-hundred-line window and hope the model picks the
+  // right ones out of it. Three ways in — a terminal selection, the last
+  // command's output, and a paste into the chat box — and one shape out.
+  //
+  // The text is carried unredacted to the server and masked there, not
+  // here. The browser is where the unmasked text already is; the promise
+  // is about what leaves the machine, and keeping the masking at that
+  // boundary means one place to be right rather than two.
+  // -------------------------------------------------------------------------
+
+  /** What is attached to the next question, or null. */
+  let attached = null;
+
+  /** A paste longer than this becomes an attachment rather than a message. */
+  const PASTE_AS_ATTACHMENT = 400;
+
+  const ATTACHMENT_LABEL = {
+    selection: 'Selected output',
+    record: 'Last command',
+    paste: 'Pasted text',
+  };
+
+  function attach(kind, text, sessionId) {
+    const body = String(text || '').trim();
+    if (!body) {
+      appendErrorBubble('Nothing was selected.');
+      return;
+    }
+    attached = { kind, text: body, sessionId: sessionId || null };
+    renderAttachment();
+    if (inputEl) inputEl.focus();
+  }
+
+  /**
+   * The newest finished command on a session, attached.
+   *
+   * Read from the server's records rather than scraped off the screen:
+   * the terminal has no idea where one command ends and the next begins,
+   * and `transcript.py` does.
+   */
+  async function explainLast(sessionId) {
+    const sid = sessionId
+      || (typeof window.getActiveTab === 'function'
+          ? (window.getActiveTab() || {}).sessionId : null);
+    if (!sid) { appendErrorBubble('No active session.'); return; }
+
+    try {
+      const res = await fetch(
+        `/api/sessions/${encodeURIComponent(sid)}/last-output`);
+      const data = await res.json();
+      if (!data.ready) {
+        appendErrorBubble('No finished command has been recorded on this '
+                        + 'session yet.');
+        return;
+      }
+      attach('record', `${data.command}\n${data.output}`, sid);
+      // Asked straight away: "explain the last command" is a whole
+      // instruction, and making somebody type one after choosing it from a
+      // menu is asking them to say it twice.
+      // Through the input rather than around it, so the question
+      // appears in the transcript as the engineer's own.
+      if (inputEl) {
+        inputEl.value = 'What does this output mean?';
+        sendMessage();
+      }
+    } catch (e) {
+      appendErrorBubble(`Could not read the last command: ${e.message || e}`);
+    }
+  }
+
+  /** The chip above the input, showing what is going with the question. */
+  function renderAttachment() {
+    const host = document.getElementById('chat-attachment');
+    if (!host) return;
+    host.innerHTML = '';
+    if (!attached) { host.classList.add('hidden'); return; }
+    host.classList.remove('hidden');
+
+    const lines = attached.text.split('\n').length;
+    const chip = document.createElement('div');
+    chip.className = 'chat-attachment-chip';
+
+    const label = document.createElement('span');
+    label.className = 'chat-attachment-label';
+    label.textContent = `${ATTACHMENT_LABEL[attached.kind] || 'Attached'} · `
+      + `${lines} line${lines === 1 ? '' : 's'}`;
+
+    // Collapsed, with the first line as the summary: a pasted running
+    // configuration is the ordinary case, and a chip that grows to fill
+    // the panel would push the thing being written off the screen.
+    const preview = document.createElement('details');
+    preview.className = 'chat-attachment-preview';
+    const summary = document.createElement('summary');
+    summary.textContent = attached.text.split('\n')[0].slice(0, 80);
+    const pre = document.createElement('pre');
+    pre.textContent = attached.text;
+    preview.append(summary, pre);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'chat-attachment-remove';
+    remove.title = 'Do not send this with the question';
+    remove.innerHTML = '<span class="material-symbols-outlined">close</span>';
+    remove.addEventListener('click', () => { attached = null; renderAttachment(); });
+
+    chip.append(label, remove);
+    host.append(chip, preview);
+  }
+
+  /**
+   * A long paste into the chat box becomes an attachment.
+   *
+   * Left as a message, a pasted configuration is a question with two
+   * hundred lines of noise in front of it — and the model reads the whole
+   * thing as something the engineer wrote. As an attachment it is labelled
+   * for what it is: text from somewhere else, possibly another device.
+   */
+  function handlePaste(event) {
+    const text = (event.clipboardData || window.clipboardData)
+      ? (event.clipboardData || window.clipboardData).getData('text')
+      : '';
+    if (!text || text.length < PASTE_AS_ATTACHMENT) return;
+    event.preventDefault();
+    attach('paste', text, null);
+  }
+
+  /** What travels with the next question, and clears after it. */
+  function takeAttachment() {
+    const out = attached;
+    attached = null;
+    renderAttachment();
+    return out ? { kind: out.kind, text: out.text } : null;
   }
 
   // -----------------------------------------------------------------------
@@ -2001,10 +2142,13 @@
   // to be deliverable without a live provider to test the approval gate
   // at all, and restoring a saved conversation will replay through here.
   initContextInspector();
+  if (inputEl) inputEl.addEventListener('paste', handlePaste);
 
   window.shellmateChatMessage = handleWsMessage;
 
   window.shellmateChat = {
+    attach,
+    explainLast,
     renderRaw: (bubble) => { renderBubbleContent(bubble); wireCommandBlocks(bubble); },
     ansibleMode: () => ansibleMode,
   };

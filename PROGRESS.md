@@ -189,3 +189,33 @@ text in the reply.
 
 `python test_context_inspector.py` — 28 passed. 95 of 95 test files pass.
 
+## 2026-09-05 12:46 — #551 closed
+
+Two terminal menu entries and a paste path, all producing one attachment
+shape. The chip sits above the input so what is going with the question is
+visible while it is written rather than a surprise after it is sent.
+
+**Three kinds, three headings**, and the paste heading is the one that
+matters: it says the text may be from another device or a file. A model
+that assumes a pasted configuration is the current session answers
+confidently about the wrong switch.
+
+**Redacted on the way out, not in the browser.** The attachment is the one
+path into the prompt that is not the session buffer, and it needed the
+same door. It also reaches the #553 inspector — a context view that showed
+the block and omitted the attachment would be the reconstruction problem in
+miniature: most of what the model got, which is worse than none because it
+looks complete.
+
+Two mistakes of mine, both worth recording:
+
+- My own two new test fakes enumerated the provider contract and broke on
+  `attachment` — the exact thing I had criticised in the pre-existing fakes
+  an hour earlier. Both take `**kwargs` now.
+- An assertion collided with itself: I checked that "POINTING AT" comes
+  before "ENGINEER", and the attachment heading is "THE LINES THE ENGINEER
+  IS POINTING AT", so the needle matched inside the thing it was meant to
+  precede. Now anchored on "ENGINEER'S QUESTION".
+
+`python test_attachment.py` — 29 passed. 96 of 96 test files pass.
+

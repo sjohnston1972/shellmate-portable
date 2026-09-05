@@ -826,6 +826,17 @@ SETTINGS: tuple[Setting, ...] = (
             "The relay files each report as a GitHub issue. Emptied, "
             "reports are saved to feedback-outbox.json in the data folder "
             "instead of being sent anywhere."),
+    Setting("ai.attachment_max_chars", "Largest thing you can point at",
+            40000, "int",
+            "How much selected or pasted text is sent with a question.",
+            "A pasted running configuration is the ordinary case here, and "
+            "a whole one from a big chassis can be hundreds of kilobytes — "
+            "which costs real money on a metered provider and makes the "
+            "answer worse, not better.||Anything longer is cut and the "
+            "message says how much was left out, so a short answer to a "
+            "long paste is never a mystery.",
+            minimum=1000, maximum=500_000, unit="chars"),
+
     Setting("ai.native_tools", "Let the assistant use tools", True, "bool",
             "Ask for commands and data through the provider's own tool "
             "calling, rather than by wrapping suggestions in tags.",

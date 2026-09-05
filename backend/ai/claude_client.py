@@ -115,6 +115,7 @@ async def stream_response(
     history: list[dict] | None = None,
     tools: list[dict] | None = None,
     prior: list[dict] | None = None,
+    attachment: str = "",
 ) -> AsyncIterator:
     """
     Stream a Claude API response token by token.
@@ -135,7 +136,8 @@ async def stream_response(
     if not api_key:
         raise ValueError("Anthropic API key is not set. Configure it in Settings or .env.")
 
-    full_user_message = turns.user_content(context_block, user_message)
+    full_user_message = turns.user_content(context_block, user_message,
+                                          attachment)
 
     headers = {
         "x-api-key": api_key,

@@ -94,9 +94,13 @@ def fake_provider(script):
     """
     state = {"round": 0}
 
+    # **kwargs, for the same reason the pre-existing fakes needed it: a
+    # fake that enumerates the provider contract has to be edited every
+    # time the contract grows, and this one broke on `attachment` an
+    # hour after it was written.
     async def stream_response(message, context_block, model=None,
                               system_prompt=None, history=None,
-                              tools=None, prior=None):
+                              tools=None, prior=None, **kwargs):
         index = min(state["round"], len(script) - 1)
         state["round"] += 1
         # Recorded so a test can assert what the model was offered and

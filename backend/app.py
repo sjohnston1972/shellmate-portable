@@ -7611,6 +7611,24 @@ async def chat_websocket(websocket: WebSocket) -> None:
             # shape, and the message list is assembled server-side so a
             # crafted payload cannot put arbitrary turns in front of the
             # model.
+            # What the engineer is pointing at (#551). Capped here, not
+            # in the browser: a pasted running configuration is the
+            # ordinary case and the cap is a promise about what leaves
+            # the machine, so it is kept where the promise is.
+            attachment = None
+            att = msg.get("attachment")
+            if isinstance(att, dict) and str(att.get("text") or "").strip():
+                cap = int(advanced("ai.attachment_max_chars"))
+                text = str(att["text"])
+                if len(text) > cap:
+                    text = (text[:cap]
+                            + f"\n\n[... {len(text) - cap:,} more characters "
+                              "were not sent ...]")
+                attachment = {
+                    "kind": str(att.get("kind") or "selection"),
+                    "text": text,
+                }
+
             resume = None
             handoff = msg.get("tool_result")
             if isinstance(handoff, dict) and handoff.get("calls"):
@@ -7644,6 +7662,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     investigate_step=investigate_step,
                     ansible_canvas=ansible_canvas,
                     resume=resume,
+                    attachment=attachment,
                 ):
                     if isinstance(chunk, dict) and "context" in chunk:
                         # What this reply rests on (#553). To the browser

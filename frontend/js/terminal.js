@@ -748,6 +748,21 @@
         { icon: 'content_copy', label: 'Copy all scrollback',
           onClick: () => copyOutput(sessionId, {}) },
         'sep',
+        // Point at the screen (#551). Mid-outage the engineer wants to
+        // say "these six lines", not ask a question over a two-hundred-
+        // line window and hope the model picks the right ones.
+        { icon: 'smart_toy', label: 'Ask the assistant about this',
+          disabled: !hasSelection,
+          title: hasSelection ? '' : 'Select some output first.',
+          onClick: () => window.shellmateChat
+            && window.shellmateChat.attach
+            && window.shellmateChat.attach('selection',
+                                           terminal.getSelection(), sessionId) },
+        { icon: 'smart_toy', label: "Explain the last command's output",
+          onClick: () => window.shellmateChat
+            && window.shellmateChat.explainLast
+            && window.shellmateChat.explainLast(sessionId) },
+        'sep',
         { icon: 'backspace', label: 'Clear screen', onClick: () => terminal.clear() },
       ]);
     }

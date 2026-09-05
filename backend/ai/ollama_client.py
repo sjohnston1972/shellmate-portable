@@ -60,13 +60,15 @@ async def stream_response(
     history: list[dict] | None = None,
     tools: list[dict] | None = None,
     prior: list[dict] | None = None,
+    attachment: str = "",
 ) -> AsyncIterator:
     """
     Stream an Ollama response token by token.
     Yields text chunks as they arrive.
     Raises if Ollama is unreachable or returns an error.
     """
-    full_user_message = turns.user_content(context_block, user_message)
+    full_user_message = turns.user_content(context_block, user_message,
+                                          attachment)
 
     host = get_effective("ollama_host", OLLAMA_HOST)
     url = f"{host.rstrip('/')}/api/chat"

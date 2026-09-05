@@ -149,7 +149,7 @@ def test_the_block_reaches_the_browser_first() -> None:
     real = claude.stream_response
 
     async def fake(message, context_block, model=None, system_prompt=None,
-                   history=None, tools=None, prior=None):
+                   history=None, tools=None, prior=None, **kwargs):
         yield "an answer"
 
     claude.stream_response = fake
@@ -199,7 +199,7 @@ def test_what_is_shown_is_what_was_sent() -> None:
     seen = {}
 
     async def fake(message, context_block, model=None, system_prompt=None,
-                   history=None, tools=None, prior=None):
+                   history=None, tools=None, prior=None, **kwargs):
         seen["sent"] = context_block
         yield "ok"
 

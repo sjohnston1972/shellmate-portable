@@ -3628,6 +3628,78 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 }
 
 /* ---------------------------------------------------------------------------
+   Pointing at something (#551)
+
+   The chip sits above the input, so what is going with the question is
+   visible while it is being written rather than a surprise after it is sent.
+--------------------------------------------------------------------------- */
+#chat-attachment {
+  margin: 0 12px 6px;
+}
+
+.chat-attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--primary-edge);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--primary-tint);
+}
+
+.chat-attachment-label {
+  flex: 1;
+  min-width: 0;
+  color: var(--primary);
+  font-size: 11.5px;
+}
+
+.chat-attachment-remove {
+  flex: 0 0 auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--primary);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.chat-attachment-remove .material-symbols-outlined { font-size: var(--icon-xs); }
+
+/* Collapsed by default: a pasted running configuration is the ordinary case,
+   and a chip that grew to fill the panel would push the thing being written
+   off the screen. */
+.chat-attachment-preview {
+  border: 1px solid var(--primary-edge);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--surface-high);
+}
+
+.chat-attachment-preview > summary {
+  padding: 4px 8px;
+  color: var(--on-surface-dim);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-attachment-preview pre {
+  margin: 0;
+  padding: 8px;
+  max-height: 200px;
+  overflow: auto;
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------------------------------------------------------------------------
    The context inspector (#553)
 
    Small and quiet on the bubble: it is there when somebody asks "how do you
