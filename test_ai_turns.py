@@ -233,7 +233,16 @@ def test_usage_passes_through_the_router() -> None:
         got = asyncio.run(drive())
     finally:
         ollama_client.stream_response = original
-    check("text chunks arrive as text", got[:2] == ["hel", "lo"], str(got))
+    # The context block comes first (#553), so it is on the bubble
+    # whether or not the answer finishes — a reply that failed halfway
+    # is exactly the one somebody wants to inspect.
+    check("the context block is yielded first",
+          isinstance(got[0], dict) and "context" in got[0], str(got[0])[:120])
+    check("it is not sent as text to the reader",
+          not any(isinstance(x, str) and "ACTIVE SESSION" in x for x in got),
+          "it goes to the browser as its own event, never into the reply")
+    text = [x for x in got if isinstance(x, str)]
+    check("text chunks arrive as text", text == ["hel", "lo"], str(got))
     check("the usage dict arrives last, intact",
           isinstance(got[-1], dict) and got[-1]["usage"]["input"] == 12, str(got))
 

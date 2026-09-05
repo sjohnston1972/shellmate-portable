@@ -7645,6 +7645,14 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     ansible_canvas=ansible_canvas,
                     resume=resume,
                 ):
+                    if isinstance(chunk, dict) and "context" in chunk:
+                        # What this reply rests on (#553). To the browser
+                        # only — it never goes back to a provider, and it
+                        # is the same redacted string the provider got, so
+                        # what somebody inspects is what was sent.
+                        await websocket.send_text(json.dumps({
+                            "type": "context", "text": chunk["context"]}))
+                        continue
                     if isinstance(chunk, dict) and "tool_request" in chunk:
                         # The model asked to run something. Rendered as the
                         # command block a [SUGGEST_CMD] tag produces, and

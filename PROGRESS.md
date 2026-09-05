@@ -160,3 +160,32 @@ carries nothing.
 
 **#560 is closed.** Next: #553.
 
+## 2026-09-05 12:19 — #553 closed
+
+`SessionBuffer` keeps a timestamp per line and counts evictions, so it can
+say where the visible window starts. The heading over the terminal output
+now says how many lines are visible, from when, and how many are not —
+turning "I cannot see that" from an assertion into a claim about a stated
+boundary.
+
+Evicted lines count as hidden alongside lines still in the buffer but
+outside the window. Counting only one of the two understates it, and the
+number is the whole point.
+
+The block itself reaches the browser as its own event before the first
+chunk, so it is on the bubble whether or not the answer finishes. The test
+asserts the browser gets **the same string** the provider got, not an
+equivalent one: a reconstruction would show what ShellMate believes it
+sent, which is precisely what is being questioned.
+
+The inspector counts masked values and says how many. "Redaction is on" is
+a claim about a setting; "9 values were masked" is a claim about this
+request, and it is the one somebody asked for.
+
+One existing assertion needed updating rather than working around: the
+router's yield contract deliberately gained a leading context event, so
+test_ai_turns now asserts it comes *first* and that it never arrives as
+text in the reply.
+
+`python test_context_inspector.py` — 28 passed. 95 of 95 test files pass.
+

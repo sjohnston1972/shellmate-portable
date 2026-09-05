@@ -201,6 +201,15 @@ async def stream_chat(
     active_session = (session_manager.get_session(active_session_id)
                       if active_session_id else None)
 
+    # How much of the session the model can actually see (#553).
+    horizon: dict | None = None
+    _buffer = (active_session or {}).get("buffer")
+    if _buffer is not None and hasattr(_buffer, "horizon"):
+        try:
+            horizon = _buffer.horizon(int(advanced("ai.context_lines")))
+        except Exception:                             # never worth failing chat
+            horizon = None
+
     if active_session_id:
         session = active_session
         if session:
@@ -294,7 +303,15 @@ async def stream_chat(
         parsed_tables=parsed_tables or None,
         investigation=investigation,
         stable_in_system=True,
+        horizon=horizon,
     )
+
+    # The exact block this reply rests on, to the browser only (#553).
+    # Already redacted — it is the same string the provider gets — so
+    # what somebody inspects is what was sent, not a reconstruction of
+    # it. Sent before the first chunk so it is on the bubble whether or
+    # not the answer finishes.
+    yield {"context": context_block}
 
     # The persona, then the part of the context that holds still between
     # questions — the tab list and the steady device facts — so the cached

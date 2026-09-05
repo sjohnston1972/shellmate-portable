@@ -379,6 +379,39 @@ def build_system_preamble(
     return "\n".join(lines)
 
 
+def _horizon_line(horizon: dict | None) -> str:
+    """
+    The heading over the terminal output, saying what it is a window onto.
+
+    "Terminal output (last 200 lines)" was a constant, and it was wrong
+    whenever the session had fewer than two hundred lines or more than the
+    buffer keeps. More importantly it said nothing about what is *missing*,
+    so a model asked about something off the top could only say "I cannot
+    see that" as an assertion nobody could check. With a count and a time
+    it becomes a claim about a stated boundary.
+    """
+    if not horizon or not horizon.get("visible"):
+        return "--- Terminal output ---"
+
+    visible = int(horizon.get("visible", 0))
+    hidden = int(horizon.get("hidden", 0))
+    since = float(horizon.get("since", 0) or 0)
+
+    when = ""
+    if since:
+        import time as _time
+
+        when = _time.strftime("%H:%M:%S", _time.localtime(since))
+
+    head = f"--- Terminal output: the {visible} most recent line(s)"
+    if when:
+        head += f", from {when} onwards"
+    if hidden:
+        head += (f". {hidden} earlier line(s) are NOT visible to you — say so "
+                 "rather than guessing at them, and ask for what you need")
+    return head + " ---"
+
+
 def build_context_prompt(
     sessions_summary: list[dict],
     active_buffer: str,
@@ -390,6 +423,9 @@ def build_context_prompt(
     parsed_tables: list[str] | None = None,
     investigation: dict | None = None,
     stable_in_system: bool = False,
+    # Where the visible window starts (#553). The model is told to say
+    # when it cannot see enough and was never told where enough ends.
+    horizon: dict | None = None,
 ) -> str:
     """
     Build the context block prepended to every user message.
@@ -441,7 +477,7 @@ def build_context_prompt(
 
     # Active session terminal output
     lines.append(f"=== ACTIVE SESSION: {active_label} ===")
-    lines.append("--- Terminal output (last 200 lines) ---")
+    lines.append(_horizon_line(horizon))
     lines.append(active_buffer or "(no output yet)")
     lines.append("")
 

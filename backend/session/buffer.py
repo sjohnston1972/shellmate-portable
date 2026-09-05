@@ -7,6 +7,7 @@ gives O(1) append and automatic eviction of old lines.  A separate raw
 list stores the original byte strings for any future full-fidelity replay.
 """
 
+import time
 from collections import deque
 from typing import Deque
 
@@ -26,6 +27,19 @@ class SessionBuffer:
 
         # Rolling line buffer — oldest lines fall off the left end
         self._lines: Deque[str] = deque(maxlen=max_lines)
+
+        # When each of those lines arrived, in step with it (#553).
+        # The assistant is told where its visible window starts, and
+        # "I cannot see that" is only checkable if there is a time to
+        # check it against. A parallel deque rather than tuples in the
+        # one above, so every existing reader of _lines is untouched.
+        self._times: Deque[float] = deque(maxlen=max_lines)
+
+        # Lines evicted since the session opened. The count matters more
+        # than the lines: "400 older lines are not visible" is the
+        # difference between an answer about the session and an answer
+        # about the last screenful of it.
+        self._dropped: int = 0
 
         # Accumulates the current incomplete line until we see a newline
         self._pending: str = ""
@@ -61,9 +75,13 @@ class SessionBuffer:
         parts = combined.split("\n")
 
         # All parts except the last are complete lines
+        now = time.time()
         for line in parts[:-1]:
             # Strip carriage returns that come from CR+LF sequences
+            if len(self._lines) == self._lines.maxlen:
+                self._dropped += 1
             self._lines.append(line.rstrip("\r"))
+            self._times.append(now)
 
         # The last part is either empty (data ended with \n) or an
         # incomplete line that we hold until the next write
@@ -113,9 +131,43 @@ class SessionBuffer:
         """
         return "\n".join(self.get_lines(n))
 
+    def horizon(self, n: int = 200) -> dict:
+        """
+        Where the window the assistant can see begins (#553).
+
+        The model is told to say when it cannot see enough, and was
+        never told where "enough" ends. Without this, "I cannot see
+        that" is an assertion nobody can check; with it, it is a claim
+        about a stated line and a stated time.
+
+        Args:
+            n: How many lines are being sent.
+
+        Returns:
+            ``{"visible", "hidden", "since", "total"}`` — how many
+            lines are in the window, how many are not, when the oldest
+            visible one arrived, and how many the session has had
+            altogether. ``since`` is 0 when nothing has been written.
+        """
+        stored = len(self._lines) + (1 if self._pending else 0)
+        visible = min(max(0, n), stored)
+        # Both halves of what is missing: lines still in the buffer
+        # but outside the window, and lines the buffer has evicted.
+        # Reporting only one of them understates it, and the whole
+        # point is that the number is honest.
+        hidden = (stored - visible) + self._dropped
+        since = 0.0
+        if visible and self._times:
+            index = max(0, len(self._times) - visible)
+            since = self._times[min(index, len(self._times) - 1)]
+        return {"visible": visible, "hidden": hidden,
+                "since": since, "total": stored + self._dropped}
+
     def clear(self) -> None:
         """Discard all stored data and reset the pending line fragment."""
         self._lines.clear()
+        self._times.clear()
+        self._dropped = 0
         self._pending = ""
 
     # ------------------------------------------------------------------

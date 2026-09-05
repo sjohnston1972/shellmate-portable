@@ -260,6 +260,9 @@
 
     if (msg.type === 'chunk') {
       appendChunk(msg.data);
+    } else if (msg.type === 'context') {
+      // Exactly what this reply was built from (#553).
+      attachContext(msg.text || '');
     } else if (msg.type === 'tool_request') {
       // The model asked to run something (#560). Rendered as the command
       // block a suggestion tag produces; nothing runs until it is clicked.
@@ -623,6 +626,115 @@
     // exchange attached: the model is answering what it was originally
     // asked, having now seen what it asked for.
     chatWs.send(JSON.stringify({ ...lastSentPayload, tool_result: handoff }));
+  }
+
+  // -------------------------------------------------------------------------
+  // What the assistant saw (#553)
+  //
+  // Each reply carries the exact context block the request was built from,
+  // and an inspector on the bubble opens it. The point is checkability: the
+  // model is told to say when it cannot see enough, and until now "I cannot
+  // see that" was an assertion nobody could test. It is also the proof a
+  // team lead asks for — that redaction ran, and that the answer rests on
+  // what was actually on screen rather than on something invented.
+  //
+  // The text arrives already redacted, because it is the same string the
+  // provider received. Reconstructing it here would show what ShellMate
+  // *believes* it sent, which is exactly the thing under question.
+  //
+  // Capped, because a context block is a few thousand lines and twenty of
+  // them held forever is a chat panel that grows until the tab dies.
+  // -------------------------------------------------------------------------
+
+  const CONTEXT_KEEP = 20;
+
+  /** Bubbles holding a stored context, oldest first. */
+  const contextHolders = [];
+
+  function attachContext(text) {
+    const bubble = streamingBubble;
+    if (!bubble || !text) return;
+
+    bubble._shellmateContext = text;
+    contextHolders.push(bubble);
+    // The oldest lose the text but keep the button, which then says why —
+    // silently removing the control would read as a feature that comes and
+    // goes.
+    while (contextHolders.length > CONTEXT_KEEP) {
+      const old = contextHolders.shift();
+      if (old) old._shellmateContext = null;
+    }
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'context-inspect';
+    button.title = 'Show exactly what the assistant was given for this reply';
+    button.innerHTML =
+      '<span class="material-symbols-outlined">visibility</span> What it saw';
+    button.addEventListener('click', () => showContext(bubble));
+    bubble.appendChild(button);
+  }
+
+  function showContext(bubble) {
+    const text = bubble && bubble._shellmateContext;
+    if (!text) {
+      window.shellmateDialog.alert({
+        title: 'No longer kept',
+        body: `Only the last ${CONTEXT_KEEP} replies keep their context, so `
+            + 'this one has been let go. Newer replies still have theirs.',
+      });
+      return;
+    }
+
+    const overlay = document.getElementById('context-overlay');
+    const body = document.getElementById('context-body');
+    if (!overlay || !body) return;
+
+    // textContent: this is device output, and a running configuration
+    // containing a tag is the ordinary case rather than the attack.
+    body.textContent = text;
+
+    const meta = document.getElementById('context-meta');
+    if (meta) {
+      const lines = text.split('\n').length;
+      const masked = (text.match(/\*{4,}/g) || []).length;
+      meta.textContent = `${lines.toLocaleString()} lines, `
+        + `${text.length.toLocaleString()} characters`
+        // Said as a number rather than a reassurance. "Redaction is on" is a
+        // claim about a setting; "9 values were masked" is a claim about
+        // this request, and it is the one somebody asked for.
+        + (masked ? ` · ${masked} value(s) masked before sending`
+                  : ' · nothing matched a secret pattern');
+    }
+    overlay.classList.remove('hidden');
+  }
+
+  function initContextInspector() {
+    const overlay = document.getElementById('context-overlay');
+    if (!overlay) return;
+    const close = () => overlay.classList.add('hidden');
+    document.getElementById('context-close').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !overlay.classList.contains('hidden')) close();
+    });
+    const copy = document.getElementById('context-copy');
+    if (copy) copy.addEventListener('click', async () => {
+      const text = document.getElementById('context-body').textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (_) { /* give up */ }
+        ta.remove();
+      }
+      if (typeof window._showCopyToast === 'function') window._showCopyToast();
+    });
   }
 
   // -----------------------------------------------------------------------
@@ -1888,6 +2000,8 @@
   // The entry point the socket uses, exported (#560). A tool request has
   // to be deliverable without a live provider to test the approval gate
   // at all, and restoring a saved conversation will replay through here.
+  initContextInspector();
+
   window.shellmateChatMessage = handleWsMessage;
 
   window.shellmateChat = {

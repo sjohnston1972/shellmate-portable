@@ -2788,6 +2788,33 @@ GigEth0/2     unassigned    YES unset  down     down
        the server rather than written here: a panel holding its own copy
        would drift from the matching it describes.
   ================================================================ -->
+  <!-- ================================================================
+       WHAT THE ASSISTANT SAW (#553)
+
+       The exact block a reply was built from — already redacted, because
+       it is the same string the provider received. Reconstructing it here
+       would show what ShellMate believes it sent, which is precisely the
+       thing being questioned.
+  ================================================================ -->
+  <div id="context-overlay" class="panel-overlay hidden">
+    <div id="context-panel" class="side-panel side-panel-wide">
+      <div class="panel-header">
+        <h2 class="panel-title">What the assistant was given</h2>
+        <button id="context-copy" class="btn-tertiary" title="Copy the whole block">
+          <span class="material-symbols-outlined">content_copy</span>
+          Copy
+        </button>
+        <button id="context-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <p id="context-meta"></p>
+      <div class="panel-body">
+        <pre id="context-body"></pre>
+      </div>
+    </div>
+  </div>
+
   <div id="compliance-overlay" class="panel-overlay hidden">
     <div id="compliance-panel" class="side-panel side-panel-wide">
       <div class="panel-header">
