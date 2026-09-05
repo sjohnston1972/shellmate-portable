@@ -359,6 +359,42 @@ Worked examples of each shape are shipped with ShellMate. *Try it* loads
 one through the same parse a real upload goes through; the download icon
 beside it saves the file, so your own export can be made to match.
 
+## Playbooks in GitHub
+
+The library holds the current version of a playbook and the runner holds a
+copy of it. Neither is a history. A file that changes a hundred devices
+should be able to answer what it looked like last Tuesday and who changed
+it, so ShellMate can commit each save to a GitHub repository.
+
+Set it up in **Settings → Ansible → Playbooks in GitHub**. Five things are
+worth knowing, because each of them is a way this could go quietly wrong:
+
+- **The token is yours, and it lives in the vault.** Like every other
+  credential, it is encrypted and never written to `settings.json`.
+  ShellMate deliberately does *not* read a `GITHUB_TOKEN` environment
+  variable: that name already exists on a great many machines, and picking
+  it up would commit your estate under somebody else's identity with
+  nothing on screen saying so.
+- **Two ways to point it at a repository.** *Create a private repository*
+  needs a token that can create repositories. *Use the one named above*
+  needs only a token that can push to one that exists — a much smaller
+  permission, and the reason both are offered rather than one falling back
+  to the other. The repository is read before it is stored, so a name that
+  is wrong is said now rather than at the next save.
+- **Private unless you say otherwise.** A playbook carries hostnames,
+  addresses and the shape of your estate, and a repository made public by
+  accident cannot be un-published. Anything ShellMate creates is private.
+- **The playbook, and nothing else.** Never the inventory. That is
+  generated from your estate, it is the whole device list, and a
+  repository's visibility can be changed later by anyone who can reach it.
+- **A commit that fails never costs the save.** The playbook is written to
+  the library first. If GitHub cannot be reached, the editor says "saved
+  here, but not committed" and names the reason — that order is the point
+  of the sentence.
+
+Playbooks are committed to a `playbooks/` directory in the repository,
+which is also where `ansible-runner` expects to find them.
+
 ## Environments
 
 An environment is a named set of run settings: which inventory, which

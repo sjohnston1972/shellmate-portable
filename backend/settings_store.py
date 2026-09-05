@@ -294,6 +294,19 @@ DEFAULT_SETTINGS: dict = {
         # A bearer token, when the runner requires one. Never written here:
         # update_settings diverts it into the vault and blanks this.
         "token": "",
+        # Keeping playbooks in GitHub as well as in the library (#609).
+        # A playbook that changes a hundred devices deserves a history, and
+        # neither the library nor the runner is one.
+        "github_enabled": False,
+        "github_owner": "",
+        "github_repo": "",
+        # Private unless somebody says otherwise. A playbook carries
+        # hostnames and the shape of an estate, and a repository made
+        # public by accident cannot be un-published.
+        "github_public": False,
+        # Like `token` above: never written here. Diverted to the vault as
+        # `ansible_github_token` and blanked.
+        "github_token": "",
         # Where playbooks live on the container's host, for copying one
         # across. The container mounts it as its project directory.
         "project_dir": "/runner/project",
@@ -580,6 +593,18 @@ def get_settings_for_ui() -> dict:
         stored_token = _os.environ.get("ANSIBLE_RUNNER_TOKEN", "") or ""
     ansible_block["token"] = "•" * 8 if stored_token else ""
     ansible_block["has_token"] = bool(stored_token)
+
+    # The GitHub token, the same way (#609) — but with no environment
+    # fallback. `GITHUB_TOKEN` exists in a great many development
+    # environments, including the one ShellMate is built in, and picking
+    # it up would commit a user's estate under a developer's identity with
+    # nothing on screen saying so.
+    try:
+        github_token = vault.get("ansible_github_token", "") or ""
+    except Exception:                                     # locked, or no vault
+        github_token = ""
+    ansible_block["github_token"] = "•" * 8 if github_token else ""
+    ansible_block["has_github_token"] = bool(github_token)
     s_out["ansible"] = ansible_block
     s_out["env_preconfigured"] = env_preconfigured
     return s_out
@@ -630,20 +655,13 @@ def update_settings(partial: dict) -> dict:
             if field in merged.get("providers", {}):
                 merged["providers"][field] = ""
 
-        # The Ansible runner's token is a secret in a section of its own
-        # (#585). Same rule, same vault: it is stored under `ansible_token`
-        # and blanked here, so settings.json never carries it.
-        token = (incoming.get("ansible") or {}).get("token")
-        if token is not None:
-            try:
-                if token:
-                    vault.set("ansible_token", token)
-                else:
-                    vault.delete("ansible_token")
-            except VaultError as exc:
-                logger.warning("Could not store the Ansible token: %s", exc)
-        if isinstance(merged.get("ansible"), dict):
-            merged["ansible"]["token"] = ""
+        # Two secrets live in a section of their own rather than under
+        # `providers` (#585, #609). Same rule, same vault, same blanking:
+        # settings.json never carries either.
+        _divert_section_secret(incoming, merged, "ansible", "token",
+                               "ansible_token")
+        _divert_section_secret(incoming, merged, "ansible", "github_token",
+                               "ansible_github_token")
 
         jsonfile.write(paths.settings_file(), merged)
         invalidate()
@@ -781,6 +799,37 @@ def _extract_secrets(partial: dict) -> dict[str, str]:
         secrets[field] = value
 
     return secrets
+
+
+def _divert_section_secret(incoming: dict, merged: dict, section: str,
+                           field: str, vault_key: str) -> None:
+    """
+    Move one secret out of a settings section and into the vault.
+
+    Blanks the field in what is about to be written either way, so a bug
+    in the diversion cannot leave a live secret in settings.json.
+
+    The masked placeholder is dropped rather than stored, and that check
+    belongs here rather than only in the browser. The frontend does filter
+    it — but the API is scriptable and settings.json is a file people are
+    told to edit, so a POST that echoes back what a GET returned would
+    otherwise overwrite a working token with a row of dots. That is the
+    exact bug the providers path was given a guard for; this path never
+    had one.
+    """
+    value = (incoming.get(section) or {}).get(field)
+    if value is not None:
+        masked = isinstance(value, str) and value and set(value) <= {"•"}
+        if not masked:
+            try:
+                if value:
+                    vault.set(vault_key, value)
+                else:
+                    vault.delete(vault_key)
+            except VaultError as exc:
+                logger.warning("Could not store %s: %s", vault_key, exc)
+    if isinstance(merged.get(section), dict):
+        merged[section][field] = ""
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

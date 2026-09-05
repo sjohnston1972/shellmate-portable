@@ -9257,6 +9257,7 @@ body {
 }
 #ansible-edit-footer .ansible-note { margin: 0; }
 .ansible-note-bad { color: var(--error); }
+.ansible-note-ok  { color: var(--ok); }
 
 #ansible-event-content {
   flex: 1;

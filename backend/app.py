@@ -4040,7 +4040,38 @@ class PlaybookRunRequest(BaseModel):
 class PlaybookSaveRequest(BaseModel):
     """Body for PUT /api/ansible/library/{name}."""
 
+    model_config = ConfigDict(extra="forbid")
+
     text: str
+    #: Whether to commit it to GitHub as well (#609). None follows the
+    #: setting; True and False override it for this save alone. Never a
+    #: reason for the save itself to fail.
+    publish: bool | None = None
+    #: What the commit says. Blank takes a default naming the playbook.
+    message: str = ""
+
+
+class GitRepoRequest(BaseModel):
+    """Body for POST /api/ansible/github/repository (#609)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str = ""
+    #: Private unless explicitly not. A playbook carries the shape of an
+    #: estate and a public repository cannot be un-published.
+    private: bool = True
+    #: An organisation to create it in. Empty means the token's own user.
+    org: str = ""
+
+
+class GitUseRequest(BaseModel):
+    """Body for POST /api/ansible/github/use (#609)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    owner: str
+    repo: str
 
 
 def _ansible_error(exc: Exception) -> HTTPException:
@@ -4296,15 +4327,106 @@ async def ansible_read_playbook(name: str) -> dict:
 
 @app.put("/api/ansible/library/{name}")
 async def ansible_save_playbook(name: str, request: PlaybookSaveRequest) -> dict:
-    """Write one into the library. Refuses YAML that does not parse."""
+    """
+    Write one into the library. Refuses YAML that does not parse.
+
+    The commit to GitHub happens after the file is on disk and can only
+    ever add a `github` block to the answer (#609). It never raises:
+    losing somebody's work because GitHub was unreachable would be an
+    appalling trade for a feature about not losing work.
+    """
     from backend import ansible as ansible_module
+    from backend import ansible_git
 
     try:
         saved = await asyncio.to_thread(ansible_module.save_playbook, name, request.text)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     saved["transfer"] = ansible_module.playbook_transfer_plan(saved["name"])
+
+    wanted = request.publish
+    if wanted is None:
+        wanted = (await asyncio.to_thread(ansible_git.config))["enabled"]
+    if wanted:
+        saved["github"] = await asyncio.to_thread(
+            ansible_git.publish, saved["name"], request.text, request.message)
     return saved
+
+
+# ---------------------------------------------------------------------------
+# Playbooks in GitHub (#609)
+# ---------------------------------------------------------------------------
+@app.get("/api/ansible/github")
+async def ansible_github_config() -> dict:
+    """What is configured, never the token."""
+    from backend import ansible_git
+
+    return await asyncio.to_thread(ansible_git.config)
+
+
+@app.post("/api/ansible/github/check")
+async def ansible_github_check() -> dict:
+    """Who the saved token belongs to."""
+    from backend import ansible_git
+
+    try:
+        return await asyncio.to_thread(ansible_git.check)
+    except ansible_git.GitError as exc:
+        raise HTTPException(status_code=400 if exc.code == "no-token" else 502,
+                            detail=str(exc)) from exc
+
+
+@app.post("/api/ansible/github/repository")
+async def ansible_github_create(request: GitRepoRequest) -> dict:
+    """
+    Create a repository for playbooks, and remember it.
+
+    Remembered only on success. A settings file naming a repository that
+    was never made would send every later save to a 404 and report it as
+    a permission problem.
+    """
+    from backend import ansible_git
+
+    try:
+        made = await asyncio.to_thread(
+            ansible_git.create_repository, request.name, request.description,
+            request.private, request.org)
+    except ansible_git.GitError as exc:
+        raise HTTPException(status_code=400 if exc.code == "no-token" else 502,
+                            detail=str(exc)) from exc
+
+    await asyncio.to_thread(update_settings, {"ansible": {
+        "github_owner": made["owner"], "github_repo": made["repo"],
+        "github_public": not made["private"], "github_enabled": True}})
+    return made
+
+
+@app.post("/api/ansible/github/use")
+async def ansible_github_use(request: GitUseRequest) -> dict:
+    """
+    Point at a repository that already exists.
+
+    Its own choice rather than a fallback from the one above, because it
+    needs a much smaller token: pushing to a repository is not the same
+    permission as creating one, and somebody should be able to hand over
+    only the smaller.
+
+    The repository is read before it is stored, so "that name is wrong" is
+    said here rather than at the next save.
+    """
+    from backend import ansible_git
+
+    try:
+        found = await asyncio.to_thread(
+            ansible_git.repository, request.owner, request.repo)
+    except ansible_git.GitError as exc:
+        raise HTTPException(status_code=400 if exc.code == "no-token" else 502,
+                            detail=str(exc)) from exc
+
+    await asyncio.to_thread(update_settings, {"ansible": {
+        "github_owner": found["owner"], "github_repo": found["repo"],
+        "github_public": not found["private"], "github_enabled": True}})
+    return found
 
 
 @app.delete("/api/ansible/library/{name}")

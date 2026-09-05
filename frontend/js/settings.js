@@ -118,6 +118,14 @@
       if (typeof window.openAnsible === 'function') window.openAnsible();
     });
 
+    // Playbooks in GitHub (#609).
+    const gitCheck = document.getElementById('github-check');
+    if (gitCheck) gitCheck.addEventListener('click', _checkGithub);
+    const gitCreate = document.getElementById('github-create');
+    if (gitCreate) gitCreate.addEventListener('click', () => _setUpGithub('create'));
+    const gitUse = document.getElementById('github-use');
+    if (gitUse) gitUse.addEventListener('click', () => _setUpGithub('use'));
+
     // The Broadcast section's door to the panel the library lives in (#239).
     const broadcastOpen = document.getElementById('broadcast-open-panel');
     if (broadcastOpen) broadcastOpen.addEventListener('click', () => {
@@ -866,6 +874,14 @@
     _val('setting-ansible-project', ans.project_dir || '/runner/project');
     _val('setting-ansible-timeout', ans.timeout ?? 30);
 
+    // The GitHub half, masked the same way and for the same reason (#609).
+    _val('setting-github-token', ans.has_github_token ? '•'.repeat(8) : '');
+    const gitTok = document.getElementById('setting-github-token');
+    if (gitTok) gitTok.dataset.maskedOriginal = ans.has_github_token ? '•'.repeat(8) : '';
+    _val('setting-github-owner', ans.github_owner || '');
+    _val('setting-github-repo', ans.github_repo || '');
+    _checked('setting-github-enabled', !!ans.github_enabled);
+
     _checked('setting-logging-enabled',   !!l.enabled);
     _checked('setting-redact-secrets',    l.redact_secrets !== false);
 
@@ -992,7 +1008,100 @@
       verify_tls:  _gchecked('setting-ansible-verify'),
       project_dir: _gval('setting-ansible-project').trim() || '/runner/project',
       timeout:     _int('setting-ansible-timeout', 30),
+      // Playbooks in GitHub (#609). Same mask rule as the runner token.
+      ..._githubTokenIfChanged(),
+      github_owner:   _gval('setting-github-owner').trim(),
+      github_repo:    _gval('setting-github-repo').trim(),
+      github_enabled: _gchecked('setting-github-enabled'),
     };
+  }
+
+  function _githubTokenIfChanged() {
+    const el = document.getElementById('setting-github-token');
+    if (!el) return {};
+    const typed = (el.value || '').trim();
+    const mask = (el.dataset.maskedOriginal || '').trim();
+    if (typed === mask) return {};
+    return { github_token: typed };
+  }
+
+  /**
+   * Ask GitHub who the saved token belongs to.
+   *
+   * Saves first, like Test connection does, so the answer is about the
+   * token that is stored rather than the one sitting unsaved in a box.
+   */
+  async function _checkGithub() {
+    const button = document.getElementById('github-check');
+    const result = document.getElementById('github-check-result');
+    if (!button || !result) return;
+    button.disabled = true;
+    result.textContent = 'Asking GitHub…';
+    result.className = 'ansible-note';
+    try {
+      await _saveAnsibleOnly();
+      const who = await _postJson('/api/ansible/github/check', {});
+      const scopes = (who.scopes || []).length
+        ? ` Scopes: ${who.scopes.join(', ')}.`
+        : ' GitHub sent no scope header, which is normal for a fine-grained token.';
+      result.textContent = `The token belongs to ${who.login}`
+        + (who.name ? ` (${who.name}).` : '.') + scopes;
+      result.className = 'ansible-note ansible-note-ok';
+    } catch (e) {
+      result.textContent = String(e.message || e);
+      result.className = 'ansible-note ansible-note-bad';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  /**
+   * Create a repository, or adopt one that already exists.
+   *
+   * Two buttons rather than one that falls back, because they need
+   * different tokens: creating a repository is a much larger permission
+   * than pushing to one, and somebody should be able to hand over only
+   * the smaller one and have it work.
+   */
+  async function _setUpGithub(how) {
+    const result = document.getElementById('github-repo-result');
+    const owner = _gval('setting-github-owner').trim();
+    const repo = _gval('setting-github-repo').trim();
+    if (!result) return;
+    result.className = 'ansible-note';
+
+    if (how === 'use' && (!owner || !repo)) {
+      result.textContent = 'Name the owner and the repository first.';
+      result.className = 'ansible-note ansible-note-bad';
+      return;
+    }
+    if (how === 'create' && !repo) {
+      result.textContent = 'Give the repository a name first.';
+      result.className = 'ansible-note ansible-note-bad';
+      return;
+    }
+
+    result.textContent = how === 'create' ? 'Creating…' : 'Checking…';
+    try {
+      await _saveAnsibleOnly();
+      // `private: true` is sent explicitly rather than left to a default
+      // on either side. A public repository of playbooks cannot be
+      // un-published, so it should never be what a missing field means.
+      const made = how === 'create'
+        ? await _postJson('/api/ansible/github/repository',
+                          { name: repo, org: owner, private: true })
+        : await _postJson('/api/ansible/github/use', { owner, repo });
+      _val('setting-github-owner', made.owner);
+      _val('setting-github-repo', made.repo);
+      _checked('setting-github-enabled', true);
+      result.textContent = `${made.owner}/${made.repo} — `
+        + (made.private ? 'private' : 'public')
+        + '. Saving a playbook will commit it here.';
+      result.className = 'ansible-note ansible-note-ok';
+    } catch (e) {
+      result.textContent = String(e.message || e);
+      result.className = 'ansible-note ansible-note-bad';
+    }
   }
 
   /**
@@ -1003,6 +1112,44 @@
    * failure to connect. The service's own message is passed through — it
    * names the missing certificate, or the host that refused.
    */
+  /**
+   * Write the Ansible block alone, without the rest of the form.
+   *
+   * Everything in this section that asks a question of a remote service
+   * has to save first, because every one of those endpoints answers from
+   * the stored settings — an address still sitting unsaved in a box would
+   * get an answer about the previous one, which is the worst possible
+   * result to show somebody.
+   */
+  async function _saveAnsibleOnly() {
+    await fetch('/api/settings', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ settings: { ansible: _collectAnsible() } }),
+    });
+    await loadSettings();
+  }
+
+  /**
+   * POST, with the server's own refusal as the error.
+   *
+   * `detail` is where FastAPI puts it, and it is GitHub's own words by the
+   * time it reaches here — "name already exists on this account" is worth
+   * far more than "the server answered 502".
+   */
+  async function _postJson(url, body) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.detail || `The server answered ${response.status}.`);
+    }
+    return data;
+  }
+
   async function _testAnsible() {
     const button = document.getElementById('ansible-test');
     const result = document.getElementById('ansible-test-result');
@@ -1014,12 +1161,7 @@
       // Saved first, because /api/ansible/status is answered from the stored
       // settings. Testing an address still sitting unsaved in a box would
       // report on the previous one, which is the worst possible answer.
-      await fetch('/api/settings', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ settings: { ansible: _collectAnsible() } }),
-      });
-      await loadSettings();
+      await _saveAnsibleOnly();
 
       const data = await (await fetch('/api/ansible/status')).json();
       if (!data.configured) {

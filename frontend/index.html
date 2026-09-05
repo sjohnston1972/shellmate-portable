@@ -2276,6 +2276,63 @@ GigEth0/2     unassigned    YES unset  down     down
             </span>
           </div>
           <p class="ansible-note" id="ansible-test-result"></p>
+
+          <!-- ===== Playbooks in GitHub (#609) ===== -->
+          <h4 class="settings-subsection-title">Playbooks in GitHub</h4>
+          <p class="settings-section-hint">The library and the runner both hold the current version of a playbook. Neither is a history. Commit each save to GitHub and a file that changes a hundred devices can answer what it looked like last Tuesday, and who changed it. Only the playbook is committed &mdash; never the inventory, which is your whole device list.</p>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-github-token"
+                   data-tip="A GitHub personal access token. Saved into the encrypted vault, never into settings.json, and never handed back to this page.||Deliberately not read from a `GITHUB_TOKEN` environment variable. That name already exists on a great many machines, and picking it up would commit your estate under somebody else's identity with nothing on screen saying so.">Token</label>
+            <input type="password" id="setting-github-token" class="setting-input setting-input-full" autocomplete="off" />
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label"
+                   data-tip="Asks GitHub who the saved token belongs to. Nothing is created and nothing is committed.||It also reports the token's scopes where GitHub sends them &mdash; a fine-grained token sends none, which is not a fault.">Check the token</label>
+            <span class="setting-value">
+              <button type="button" id="github-check" class="btn-secondary">
+                <span class="material-symbols-outlined">lan</span>
+                Check
+              </button>
+            </span>
+          </div>
+          <p class="ansible-note" id="github-check-result"></p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-github-owner"
+                   data-tip="The account or organisation the repository belongs to, and the repository's own name.||Filled in for you by either button below. Typed by hand they take effect on the next save.">Repository</label>
+            <span class="setting-value setting-input-group">
+              <input type="text" id="setting-github-owner" class="setting-input setting-input-sm" placeholder="owner" autocomplete="off" />
+              <span class="setting-unit">/</span>
+              <input type="text" id="setting-github-repo" class="setting-input setting-input-sm" placeholder="playbooks" autocomplete="off" />
+            </span>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label"
+                   data-tip="Two ways in, because they need different tokens. Creating a repository is a much larger permission than pushing to one that already exists, so somebody who only wants the second can hand over only the second.||A repository created here is private. A playbook carries hostnames, addresses and the shape of an estate, and a public repository cannot be un-published.">Set it up</label>
+            <span class="setting-value">
+              <button type="button" id="github-create" class="btn-secondary">
+                <span class="material-symbols-outlined">add</span>
+                Create a private repository
+              </button>
+              <button type="button" id="github-use" class="btn-tertiary">
+                <span class="material-symbols-outlined">check</span>
+                Use the one named above
+              </button>
+            </span>
+          </div>
+          <p class="ansible-note" id="github-repo-result"></p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-github-enabled"
+                   data-tip="Whether saving a playbook also commits it. Off, nothing reaches GitHub at all.||A commit that fails never costs the save: the playbook is written to the library first, and a GitHub that cannot be reached is reported beside it rather than raised over it.">Commit on save</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-github-enabled" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
         </section>
 
 
@@ -2601,6 +2658,7 @@ GigEth0/2     unassigned    YES unset  down     down
       <textarea id="ansible-edit-text" spellcheck="false" autocomplete="off"></textarea>
       <div id="ansible-edit-footer">
         <p id="ansible-edit-note" class="ansible-note"></p>
+        <p id="ansible-edit-commit" class="ansible-note"></p>
         <span class="ansible-spacer"></span>
         <button type="button" id="ansible-edit-save" class="btn-primary">
           <span class="material-symbols-outlined">save</span>

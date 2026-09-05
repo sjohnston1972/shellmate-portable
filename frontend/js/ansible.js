@@ -1267,12 +1267,40 @@
       document.getElementById('ansible-edit-delete').classList.remove('hidden');
       document.getElementById('ansible-edit-send').classList.remove('hidden');
       _describeTransfer(data.transfer);
+      _describeCommit(data.github);
       await refreshPlaybooks();
     } catch (e) {
       _note(String(e.message || e), true);
     } finally {
       button.disabled = false;
     }
+  }
+
+  /**
+   * What happened to the commit, said beside the save rather than instead
+   * of it (#609).
+   *
+   * The playbook is on disk by the time this runs. So a failure here is a
+   * note, never an error over the save — reporting "could not save" when
+   * the file is safely written would send somebody to retype work they
+   * still have.
+   */
+  function _describeCommit(github) {
+    const host = document.getElementById('ansible-edit-commit');
+    if (!host) return;
+    host.className = 'ansible-note';
+    if (!github) { host.textContent = ''; return; }
+    if (github.ok) {
+      host.textContent = github.created
+        ? `Committed to GitHub as a new file${github.sha ? ` (${github.sha})` : ''}.`
+        : `Committed to GitHub${github.sha ? ` (${github.sha})` : ''}.`;
+      host.className = 'ansible-note ansible-note-ok';
+      return;
+    }
+    // Saved first, and said first. The order of this sentence is the
+    // point of it.
+    host.textContent = `Saved here, but not committed: ${github.why}`;
+    host.className = 'ansible-note ansible-note-bad';
   }
 
   async function deletePlaybook() {

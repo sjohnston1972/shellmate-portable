@@ -85,6 +85,7 @@ shellmate/
 │   ├── ansible.py               # Driving Ansible from ShellMate, through a runner service (#585)
 │   ├── ansible_builder.py       # Getting to a first playbook without writing YAML (#586)
 │   ├── ansible_examples.py      # Templates worth starting from (#590)
+│   ├── ansible_git.py           # Keeping a playbook's history somewhere that has one (#609)
 │   ├── ansible_health.py        # Is the link to the runner healthy, and is it actually secure?
 │   ├── ansible_inventories.py   # Inventories somebody built, rather than the estate (#608)
 │   ├── ansible_keys.py          # The secrets an automation needs, and where they go (#586)
@@ -166,7 +167,7 @@ shellmate/
 │       ├── ansible_dashboard.js # The Ansible view's first screen (#586)
 │       ├── ansible_environments.js # Named settings a run inherits, so production is one choice not…
 │       ├── ansible_estate.js    # Turning something dragged out of the tree into a target (#601)
-│       ├── ansible_inventory.js # What a run is pointed at, from the estate or from the runner…
+│       ├── ansible_inventory.js # What a run is pointed at, and where a list comes from (#586, #608)
 │       ├── ansible_keys.js      # Credentials a run needs, held in the vault and sent only with a…
 │       ├── ansible_playbooks.js # Where the Playbooks area actually lives (#586)
 │       ├── ansible_repositories.js # Where a set of playbooks came from, and how it gets to the runner…

@@ -86,3 +86,30 @@ Machine: SJLAP. The Ansible runner container is local here, reached on
   fixed date, chosen away from the March clock change. A test whose answer
   depends on when it is run is not testing the thing it names.
 
+- **2026-09-05 04:40** — Step 4 done (#609). A playbook can now be committed
+  to GitHub on every save. `backend/ansible_git.py`, its routes, the
+  Settings section and the editor's note. 29 checks in
+  `test_ansible_github.py`, against a stand-in GitHub that records what was
+  *sent* — because for the visibility question that is the only thing that
+  proves anything: a response saying "private" says nothing if the request
+  asked for public.
+
+  Deliberately no `GITHUB_TOKEN` environment fallback. The obvious
+  convenience is the trap: that name exists in a great many development
+  environments, this repository's own included, and picking it up would
+  commit a user's estate under a developer's identity with nothing on
+  screen saying so. Vault only.
+
+  Two buttons rather than one with a fallback, because creating a
+  repository and pushing to one need very different tokens; somebody who
+  only wants the smaller permission should be able to hand over only the
+  smaller token and have it work.
+
+  And a real bug found on the way, in the code this copied. The Ansible
+  runner token had no mask guard on the backend — the frontend filters the
+  "••••••••" placeholder, but the API is scriptable and settings.json is a
+  file people are told to edit, so a POST echoing back what a GET returned
+  would have stored eight bullets as the runner token. The providers path
+  had that guard; this path never did. Both section secrets now go through
+  one helper that has it.
+
