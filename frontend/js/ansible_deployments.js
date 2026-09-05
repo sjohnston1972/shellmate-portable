@@ -114,6 +114,12 @@
     try {
       const saved = await view.post('/api/deployments', body);
       toast(`${saved.name} saved.`);
+      // A new deployment fetches its kit at once. Failing that is not
+      // fatal — the step says "not fetched" and offers the button.
+      if (!entry) {
+        try { await view.post(`/api/deployments/${encodeURIComponent(saved.id)}/kit`, {}); }
+        catch (e) { toast(`Kit not fetched yet: ${e.message || e}`, 'error'); }
+      }
       open = null;
       await refresh();
       await show(saved.id);
@@ -187,6 +193,8 @@
         pick('tags', 'Tags', false),
         pick('mx', 'MX serial', false),
         pick('ms', 'MS serial', false),
+        pick('third_octet', 'Third octet (0–255; the site\'s subnets are built on it)', false),
+        pick('timezone', 'Timezone (blank means Etc/UTC)', false),
         { name: 'extra', label: 'Other columns to carry through, comma-separated (optional)',
           value: (remembered.extra || []).join(', ') },
       ],
@@ -195,6 +203,7 @@
     if (!answer) return;
 
     const mapping = { name: answer.name, tags: answer.tags, mx: answer.mx, ms: answer.ms,
+                      third_octet: answer.third_octet, timezone: answer.timezone,
                       extra: (answer.extra || '').split(',').map(s => s.trim()).filter(Boolean) };
     try {
       const out = await view.post(`/api/deployments/${encodeURIComponent(entry.id)}/sites`,
@@ -215,7 +224,66 @@
    * runner owns what a scheme means, and a form invented here for fields
    * the playbook does not read would be a form that lies.
    */
+  /**
+   * The Meraki scheme as a form — the four keys the runner's kit reads,
+   * with the runner's own meaning and defaults beside each. Other
+   * providers get the JSON editor until their kits declare their fields:
+   * a form invented here for fields the playbook does not read would be
+   * a form that lies.
+   */
+  async function editMerakiScheme(entry) {
+    const s = entry.scheme || {};
+    const planLines = (s.vlan_plan || [])
+      .map(v => `${v.id}, ${v.name}, ${v.offset ?? ''}`).join('\n');
+    const answer = await window.shellmateDialog.form({
+      title: `Scheme for ${entry.name}`,
+      body: 'What every site is built to. The runner reads these from '
+          + 'scheme.yml; provisioning logic stays in Ansible.',
+      fields: [
+        { name: 'product_types', label: 'Product types (comma-separated, required)',
+          value: (s.product_types || ['appliance']).join(', '), placeholder: 'appliance, switch' },
+        { name: 'manage_prefix', label: 'Manage prefix (required)',
+          value: s.manage_prefix || '', placeholder: 'deploy-' },
+        { name: 'vlan_subnet_base', label: 'VLAN subnet base (optional)',
+          value: s.vlan_subnet_base || '', placeholder: '10.10' },
+        { name: 'vlan_plan', label: 'VLAN plan — one per line: id, name, offset (optional)',
+          type: 'textarea', rows: 6, value: planLines, placeholder: '10, data, 0\n20, voice, 1' },
+      ],
+      confirmLabel: 'Save scheme',
+      validate: (v) => {
+        if (!(v.product_types || '').trim()) return 'Product types are required.';
+        if (!(v.manage_prefix || '').trim()) {
+          return 'A manage prefix is required — only sites whose name starts with '
+               + 'it are configured beyond creation. It is what stops a deployment '
+               + 'reaching into a network it did not create.';
+        }
+        const bad = (v.vlan_plan || '').split('\n').map(l => l.trim()).filter(Boolean)
+          .find(l => { const p = l.split(',').map(x => x.trim()); return p.length < 2 || !/^\d+$/.test(p[0]); });
+        return bad ? `VLAN line "${bad}" needs at least "id, name", with a numeric id.` : '';
+      },
+    });
+    if (!answer) return null;
+    const scheme = {
+      product_types: answer.product_types.split(',').map(x => x.trim()).filter(Boolean),
+      manage_prefix: answer.manage_prefix.trim(),
+    };
+    if ((answer.vlan_subnet_base || '').trim()) scheme.vlan_subnet_base = answer.vlan_subnet_base.trim();
+    const plan = (answer.vlan_plan || '').split('\n').map(l => l.trim()).filter(Boolean)
+      .map(l => { const [id, name, offset] = l.split(',').map(x => x.trim());
+                  const row = { id: Number(id), name };
+                  if (offset !== undefined && offset !== '') row.offset = Number(offset);
+                  return row; });
+    if (plan.length) scheme.vlan_plan = plan;
+    return scheme;
+  }
+
   async function editScheme(entry) {
+    if (entry.provider === 'meraki') {
+      const scheme = await editMerakiScheme(entry);
+      if (!scheme) return;
+      await saveScheme(entry, scheme);
+      return;
+    }
     const answer = await window.shellmateDialog.form({
       title: `Scheme for ${entry.name}`,
       body: 'What every site is built to: the base prefix, the VLAN plan, the rule '
@@ -231,14 +299,35 @@
                          catch (e) { return `Not valid JSON: ${e.message}`; } },
     });
     if (!answer) return;
+    await saveScheme(entry, JSON.parse(answer.scheme || '{}'));
+  }
+
+  async function saveScheme(entry, scheme) {
     try {
       await view.post('/api/deployments', {
         id: entry.id, name: entry.name, provider: entry.provider,
         description: entry.description || '', scope: entry.scope || {},
         keys: entry.keys || [], environment_id: entry.environment_id || '',
-        scheme: JSON.parse(answer.scheme || '{}'),
+        scheme,
       });
       toast('Scheme saved. Publish to send it to the runner.');
+      refresh();
+    } catch (e) {
+      toast(e.message || String(e), 'error');
+    }
+  }
+
+  /**
+   * Snapshot the provider's plan and apply from the runner's kit.
+   *
+   * The runner owns provider knowledge. The snapshot is what the
+   * deployment commits, so a later kit change does not silently rewrite a
+   * deployment already built — fetching again is a deliberate act.
+   */
+  async function fetchKit(entry) {
+    try {
+      const out = await view.post(`/api/deployments/${encodeURIComponent(entry.id)}/kit`, {});
+      toast(`Kit fetched: ${out.fetched.length} playbooks from the runner.`);
       refresh();
     } catch (e) {
       toast(e.message || String(e), 'error');
@@ -250,9 +339,15 @@
   async function publish(entry) {
     try {
       const out = await view.post(`/api/deployments/${encodeURIComponent(entry.id)}/publish`, {});
-      toast(out.commit
-        ? `Committed ${out.commit.sha} and sent ${out.sent.length} files to the runner.`
-        : `Sent ${out.sent.length} files to the runner. ${out.skipped_git || ''}`);
+      const replaced = (out.replaced || []).length;
+      toast((out.commit
+        ? `Committed ${out.commit.sha} and sent ${out.sent.length} files to the runner`
+        : `Sent ${out.sent.length} files to the runner`)
+        + ` — ${(out.changed || []).length} changed.`
+        // The one case worth a sentence: a copy on the host had been
+        // edited by hand, and the commit is what won.
+        + (replaced ? ` ${replaced} replaced a copy on the runner that differed from the commit.` : '')
+        + (out.skipped_git ? ` ${out.skipped_git}` : ''));
       refresh();
     } catch (e) {
       toast(e.message || String(e), 'error');
@@ -440,19 +535,25 @@
              ? `${Object.keys(entry.scheme).length} field${Object.keys(entry.scheme).length === 1 ? '' : 's'}` : 'empty',
            el('button', { type: 'button', class: 'btn-secondary',
                           onclick: () => editScheme(entry) }, [icon('edit'), 'Edit the scheme'])),
-      step(3, 'Publish', entry.last_published
+      step(3, 'Kit', entry.kit_fetched
+             ? `plan and apply from the runner, ${new Date(entry.kit_fetched * 1000).toLocaleString()}`
+             : 'not fetched',
+           el('button', { type: 'button', class: 'btn-secondary',
+                          onclick: () => fetchKit(entry) },
+              [icon('download'), entry.kit_fetched ? 'Fetch again' : 'Fetch from the runner'])),
+      step(4, 'Publish', entry.last_published
              ? `sent ${new Date(entry.last_published.at * 1000).toLocaleString()}`
                + (entry.last_commit ? ` · commit ${entry.last_commit.sha}` : ' · not committed')
              : 'not yet',
            el('button', { type: 'button', class: 'btn-secondary',
                           onclick: () => publish(entry) }, [icon('upload'), 'Commit and send'])),
-      step(4, 'Plan', entry.last_plan ? `last ${entry.last_plan.job}` : 'none yet',
+      step(5, 'Plan', entry.last_plan ? `last ${entry.last_plan.job}` : 'none yet',
            // `disabled` only when true: el() sets any attribute it is given,
            // and a button with disabled="false" is a disabled button.
            el('button', { type: 'button', class: 'btn-secondary',
                           ...(entry.last_published ? {} : { disabled: true }),
                           onclick: () => startRun(entry, 'plan') }, [icon('science'), 'Run a plan'])),
-      step(5, 'Apply', blocked ? 'not yet' : 'ready',
+      step(6, 'Apply', blocked ? 'not yet' : 'ready',
            el('button', { type: 'button', class: 'btn-primary',
                           ...(blocked ? { disabled: true } : {}),
                           title: blocked || 'Build what the plan described',

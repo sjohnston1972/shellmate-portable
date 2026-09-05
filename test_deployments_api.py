@@ -79,6 +79,9 @@ class Runner:
     def upload_playbook(self, name, text, overwrite=False):
         self.uploaded.append(("playbook", name)); return {"plays": 1}
 
+    def read_playbook(self, path):
+        return "- hosts: localhost\n  tasks: []\n" if "_kit/meraki/" in path else ""
+
     def upload_file(self, path, text, overwrite=True):
         self.uploaded.append(("file", path)); return {"parsed": True}
 
@@ -86,6 +89,7 @@ class Runner:
 fake = Runner()
 runner.start, runner.status, runner.result = fake.start, fake.status, fake.result
 runner.upload_playbook, runner.upload_file = fake.upload_playbook, fake.upload_file
+runner.read_playbook = fake.read_playbook
 git.config = lambda: {"has_token": True, "owner": "o", "repo": "r",
                       "enabled": True, "visibility": "private"}
 git.commit_tree = lambda tree, message: {"sha": "c0ffee1", "url": "", "files": sorted(tree),
@@ -185,6 +189,21 @@ def test_the_flow() -> None:
     check("the list view counts what was built",
           next(x for x in client.get("/api/deployments").json()["deployments"]
                if x["id"] == dep["id"])["built"] == 3)
+
+    print("\n-- The kit --")
+    res = client.post("/api/deployments", json={"name": "Kit via API", "provider": "meraki"})
+    kit = res.json()
+    check("a new deployment has no playbooks until the kit is fetched",
+          not client.get(f"/api/deployments/{kit['id']}").json()["plan_text"])
+    res = client.post(f"/api/deployments/{kit['id']}/kit")
+    check("fetching the kit snapshots both playbooks",
+          res.status_code == 200 and len(res.json()["fetched"]) == 2, res.text[:200])
+    check("and publish now has something to send",
+          client.get(f"/api/deployments/{kit['id']}").json()["plan_text"].startswith("- hosts"))
+    res = client.post("/api/deployments", json={"name": "No kit", "provider": "azure"})
+    res = client.post(f"/api/deployments/{res.json()['id']}/kit")
+    check("a provider with no kit on the runner is a 400 that says so",
+          res.status_code == 400 and "no azure kit" in res.json()["detail"], res.text[:200])
 
     print("\n-- Refusals by name --")
     res = client.post("/api/deployments", json={

@@ -2654,6 +2654,25 @@ async def deployments_sites(deployment_id: str, request: DeploymentSitesRequest)
     return {"sites": len(sites), "mapping": saved["mapping"], "id": saved["id"]}
 
 
+@app.post("/api/deployments/{deployment_id}/kit")
+async def deployments_kit(deployment_id: str) -> dict:
+    """
+    Fetch the provider's plan and apply from the runner onto this deployment.
+
+    The runner owns provider knowledge; ShellMate snapshots it so the
+    deployment commits the texts it was applied with. Calling this again
+    is how a deployment deliberately takes a newer kit.
+    """
+    from backend import deployments
+
+    try:
+        return await asyncio.to_thread(deployments.fetch_kit, deployment_id)
+    except deployments.DeploymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+
+
 @app.post("/api/deployments/{deployment_id}/publish")
 async def deployments_publish(deployment_id: str, request: DeploymentPublishRequest) -> dict:
     """One commit to the repository, then the four files to the runner."""

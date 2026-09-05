@@ -949,6 +949,14 @@ def upload_file(path: str, text: str, overwrite: bool = True) -> dict:
     return data or {}
 
 
+def read_file(path: str) -> str:
+    """A data file's text from the runner — a kit's scheme, a deployment's sites."""
+    clean = str(path or "").strip().lstrip("/")
+    if not clean or ".." in clean.split("/"):
+        raise AnsibleError("That is not a file path on the runner.")
+    return _call("GET", f"/api/v1/files/{clean}", text=True) or ""
+
+
 def supports_files() -> bool:
     """Whether this runner has the data-file route. Probed, like upload."""
     try:

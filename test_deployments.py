@@ -60,13 +60,14 @@ def _raises(fn, exc_type=d.DeploymentError) -> str:
 
 
 CSV = "\n".join([
-    "Network Name,Region,Tags,MX Serial,MS Serial,Timezone",
-    "Glasgow Central,uk-west,retail;flagship,Q2XX-AAAA-0001,Q2YY-BBBB-0001,Europe/London",
-    "Edinburgh Waverley,uk-east,retail,,,Europe/London",
-    "Zürich HB,ch,retail;flagship,,,Europe/Zurich",
+    "Network Name,Region,Tags,MX Serial,MS Serial,Timezone,Octet",
+    "Glasgow Central,uk-west,retail;flagship,Q2XX-AAAA-0001,Q2YY-BBBB-0001,Europe/London,10",
+    "Edinburgh Waverley,uk-east,retail,,,Europe/London,11",
+    "Zürich HB,ch,retail;flagship,,,Europe/Zurich,",
 ])
 MAPPING = {"name": "Network Name", "tags": "Tags", "mx": "MX Serial",
-           "ms": "MS Serial", "extra": ["Region", "Timezone"]}
+           "ms": "MS Serial", "timezone": "Timezone", "third_octet": "Octet",
+           "extra": ["Region"]}
 
 
 # ---------------------------------------------------------------------------
@@ -84,8 +85,16 @@ def test_the_data_set() -> None:
     check("a site with no serials has no serials key — 'not yet', not an error",
           "serials" not in sites[1], str(sites[1]))
     check("extra columns pass through as variable names",
-          sites[0]["region"] == "uk-west" and sites[0]["timezone"] == "Europe/London",
+          sites[0]["region"] == "uk-west", str(sites[0]))
+    check("timezone is its own nominated column",
+          sites[0]["timezone"] == "Europe/London" and "timezone" not in sites[2].get("tags", []),
           str(sites[0]))
+    check("the third octet is a number, and blank is absent",
+          sites[0]["third_octet"] == 10 and "third_octet" not in sites[2], str(sites))
+    bad = CSV.replace(",Europe/London,10", ",Europe/London,300", 1)
+    why = _raises(lambda: d.sites_from_upload(bad, MAPPING))
+    check("an octet outside 0-255 is refused by site and value",
+          "Glasgow Central" in why and "300" in why, why)
     check("unicode survives", sites[2]["name"] == "Zürich HB")
 
     why = _raises(lambda: d.sites_from_upload(CSV, {}))
@@ -180,6 +189,41 @@ def test_two_paths_one_prefix() -> None:
         check(f"{bad!r} cannot be a folder", bool(_raises(lambda: d.runner_paths(bad))))
 
 
+def test_the_kit() -> None:
+    """
+    The runner owns provider knowledge; the deployment snapshots it.
+    """
+    print("\n-- The kit --")
+    check("a kit lives under deployments/_kit/<provider>/",
+          d.kit_paths("meraki")["plan.yml"] == "deployments/_kit/meraki/plan.yml")
+    check("and an unknown provider has none",
+          bool(_raises(lambda: d.kit_paths("gcp"))))
+
+    class Runner:
+        def __init__(self, texts): self.texts = texts; self.asked = []
+        def read_playbook(self, path):
+            self.asked.append(path); return self.texts.get(path, "")
+
+    rec = d.save({"name": "Kit", "provider": "meraki", "scheme": {}})
+    full = Runner({"deployments/_kit/meraki/plan.yml": "- hosts: localhost\n",
+                   "deployments/_kit/meraki/apply.yml": "- hosts: localhost\n  tasks: []\n"})
+    out = d.fetch_kit(rec["id"], runner=full)
+    after = d.get(rec["id"])
+    check("both playbooks are fetched from the kit",
+          sorted(full.asked) == sorted(d.kit_paths("meraki").values()), str(full.asked))
+    check("and snapshotted on the record",
+          after["plan_text"].startswith("- hosts") and after["apply_text"].startswith("- hosts"))
+    check("with when", bool(after["kit_fetched"]) and out["plan_bytes"] > 0)
+    check("a save keeps the snapshot",
+          d.save({"id": rec["id"], "name": "Kit", "provider": "meraki",
+                  "scheme": {"x": 1}})["plan_text"].startswith("- hosts"),
+          "a later kit change must not silently rewrite a deployment already built")
+
+    why = _raises(lambda: d.fetch_kit(rec["id"], runner=Runner({})))
+    check("a runner with no kit says so, and who owns kits",
+          "no meraki kit" in why and "runner session" in why, why)
+
+
 def test_the_gate() -> None:
     """
     Meraki has no check mode, so the plan is the only preview.
@@ -223,7 +267,7 @@ def main() -> int:
     print("  Deployments")
     print("=" * 52)
     for test in (test_the_data_set, test_the_record, test_rendering_is_deterministic,
-                 test_two_paths_one_prefix, test_the_gate):
+                 test_two_paths_one_prefix, test_the_kit, test_the_gate):
         try:
             test()
         except Exception as exc:

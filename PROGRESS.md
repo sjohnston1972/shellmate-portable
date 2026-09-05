@@ -97,3 +97,28 @@ and is not committed there. The deploy-test networks stay. The runner has
 been told both. Steps 3 and 7 still wait on the runner's playbook texts
 and its Azure/AWS skeletons — asked for again, since its reply never
 arrived here.
+
+## 2026-09-06 00:05 — step 3 done: the kit, and the scheme as a form
+
+The runner owns provider knowledge. A new deployment fetches its plan and
+apply from `deployments/_kit/<provider>/` on the runner and snapshots them
+on the record — so the deployment commits the exact texts it was applied
+with, and a later kit change never silently rewrites a deployment already
+built. Fetching again is a deliberate step. No copy lives in the exe.
+
+The Meraki scheme is a form for the four keys the kit reads, with the
+runner's meaning and default beside each — `manage_prefix` required, with
+its reason as the hint: only sites whose name starts with it are
+configured beyond creation, which is what stops a deployment reaching into
+a network it did not create. Other providers keep the JSON editor until
+their kit declares fields. Site uploads gained `third_octet` (validated
+0–255, by site) and `timezone` as nominated columns.
+
+Publish now reports what the runner said changed, and names any file that
+replaced a copy on the host that differed from the commit.
+
+The runner reports plan and apply now agree — plan → apply → re-plan
+converges to all-unchanged — and reads MERAKI_DASHBOARD_API_KEY, the
+collection's own name, as asked. Its Meraki and Azure kits are live.
+
+Tests: deployments 52, publish 27, api 28, ui 24, ansible_view 44.

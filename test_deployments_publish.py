@@ -76,16 +76,17 @@ class FakeGit:
 
 
 class FakeRunner:
-    def __init__(self):
+    def __init__(self, changed=True, overwrote=False):
         self.calls: list[tuple[str, str, str]] = []
+        self.changed, self.overwrote = changed, overwrote
 
     def upload_playbook(self, name, text, overwrite=False):
         self.calls.append(("playbook", name, text))
-        return {"plays": 1}
+        return {"plays": 1, "changed": self.changed, "overwrote": self.overwrote}
 
     def upload_file(self, path, text, overwrite=True):
         self.calls.append(("file", path, text))
-        return {"parsed": True}
+        return {"parsed": True, "changed": self.changed, "overwrote": self.overwrote}
 
 
 def make() -> dict:
@@ -175,6 +176,26 @@ def test_when_git_is_not_there() -> None:
     check("a missing playbook is refused before anything moves", raised)
 
 
+def test_what_the_runner_said_changed() -> None:
+    """
+    With ShellMate the sole writer, "overwrote something that differed" is
+    the one case worth a sentence: a copy on the host had been edited by
+    hand, and the commit won.
+    """
+    print("\n-- What changed on the runner --")
+    rec = make()
+    out = d.publish(rec["id"], PLAN, APPLY, git=FakeGit(), runner=FakeRunner(changed=False, overwrote=True))
+    check("same bytes again: nothing changed, nothing replaced",
+          out["changed"] == [] and out["replaced"] == [], str(out))
+    out = d.publish(rec["id"], PLAN, APPLY, git=FakeGit(), runner=FakeRunner(changed=True, overwrote=False))
+    check("first write: changed, not replaced",
+          len(out["changed"]) == 4 and out["replaced"] == [], str(out))
+    out = d.publish(rec["id"], PLAN, APPLY, git=FakeGit(), runner=FakeRunner(changed=True, overwrote=True))
+    check("different bytes over an existing copy: replaced, and named",
+          len(out["replaced"]) == 4 and all(p.startswith("deployments/") for p in out["replaced"]),
+          str(out))
+
+
 def test_the_trees_api_sequence() -> None:
     """
     commit_tree against a scripted GitHub: the six requests in order, and
@@ -248,7 +269,8 @@ def main() -> int:
     print("  Deployments — publish")
     print("=" * 52)
     for test in (test_commit_then_send, test_same_bytes_two_paths, test_routes_by_file_name,
-                 test_when_git_is_not_there, test_the_trees_api_sequence):
+                 test_when_git_is_not_there, test_what_the_runner_said_changed,
+                 test_the_trees_api_sequence):
         try:
             test()
         except Exception as exc:

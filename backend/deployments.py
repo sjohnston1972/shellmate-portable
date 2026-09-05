@@ -63,7 +63,7 @@ PROVIDERS = ("meraki", "azure", "aws")
 #: The columns a site data set may nominate. `name` is the only one that
 #: must be there; serials are "not yet" when absent, never an error, because
 #: the org has no claimed devices and sites get built before hardware ships.
-SITE_FIELDS = ("name", "tags", "mx", "ms")
+SITE_FIELDS = ("name", "tags", "mx", "ms", "third_octet", "timezone")
 
 #: Where the runner's project directory sits inside the repository.
 #:
@@ -75,6 +75,13 @@ PROJECT_PREFIX = "runner/project/"
 
 #: The folder every deployment lives under, on both sides of that prefix.
 FOLDER = "deployments"
+
+#: Where a provider's canonical plan and apply live on the runner. The
+#: runner owns provider knowledge; ShellMate fetches a kit and snapshots
+#: it on the deployment, so the deployment's own folder commits the exact
+#: texts it was planned and applied with, and a later kit change does not
+#: silently rewrite a deployment already built.
+KIT_FOLDER = f"{FOLDER}/_kit"
 
 #: The four files, in the order they are committed and sent.
 FILES = ("sites.yml", "scheme.yml", "plan.yml", "apply.yml")
@@ -261,6 +268,20 @@ def sites_from_upload(text: str, mapping: dict,
         seen.add(name.lower())
 
         site: dict[str, Any] = {"name": name}
+        # The two the Meraki kit reads per site. third_octet feeds the
+        # subnet scheme and must be a number; timezone defaults on the
+        # runner's side (Etc/UTC) so blank is "not said", not an error.
+        octet = cell(str(mapping.get("third_octet") or ""))
+        if octet:
+            if not octet.isdigit() or not 0 <= int(octet) <= 255:
+                raise DeploymentError(
+                    f"{name!r}: third octet {octet!r} is not a number from 0 to "
+                    "255. It becomes the third octet of every VLAN subnet at "
+                    "that site.")
+            site["third_octet"] = int(octet)
+        timezone = cell(str(mapping.get("timezone") or ""))
+        if timezone:
+            site["timezone"] = timezone
         tags = cell(str(mapping.get("tags") or ""))
         if tags:
             site["tags"] = [t.strip() for t in re.split(r"[,;]", tags) if t.strip()]
@@ -355,6 +376,7 @@ def save(fields: dict) -> dict:
         # What the last commit and the last runs were. Never cleared by a
         # save: editing the scheme does not un-happen the apply, and the
         # ids the apply returned are the only record of what was built.
+        "kit_fetched":    (existing or {}).get("kit_fetched") or None,
         "last_commit":    (existing or {}).get("last_commit") or None,
         "last_published": (existing or {}).get("last_published") or None,
         "last_plan":      (existing or {}).get("last_plan") or None,
@@ -414,6 +436,46 @@ def files_for(record: dict, plan_text: str, apply_text: str) -> dict[str, bytes]
         paths_by_name["plan.yml"]:   (plan_text or "").encode("utf-8"),
         paths_by_name["apply.yml"]:  (apply_text or "").encode("utf-8"),
     }
+
+
+def kit_paths(provider: str) -> dict[str, str]:
+    """The runner-side paths of a provider's kit."""
+    if provider not in PROVIDERS:
+        raise DeploymentError("The provider is one of: " + ", ".join(PROVIDERS) + ".")
+    return {name: f"{KIT_FOLDER}/{provider}/{name}" for name in PLAYBOOKS}
+
+
+def fetch_kit(deployment_id: str, runner=None) -> dict:
+    """
+    Snapshot the provider's plan and apply from the runner onto the record.
+
+    Deliberately a snapshot rather than a reference: the runner is the one
+    home for provider knowledge, but a deployment that has been applied
+    must keep committing the texts it was applied *with*. Refreshing is
+    this same call, made on purpose.
+    """
+    from backend import ansible as runner_module
+
+    runner = runner or runner_module
+    record = get(deployment_id)
+    if record is None:
+        raise DeploymentError("No such deployment.")
+    paths_by_name = kit_paths(record["provider"])
+    texts = {}
+    for name, path in paths_by_name.items():
+        text = runner.read_playbook(path)
+        if not (text or "").strip():
+            raise DeploymentError(
+                f"The runner has no {record['provider']} kit at {path}. The "
+                "runner session owns the kits; ask for one before deploying.")
+        texts[name] = text
+    record["plan_text"] = texts["plan.yml"]
+    record["apply_text"] = texts["apply.yml"]
+    record["kit_fetched"] = _now()
+    record["updated"] = _now()
+    _replace(record)
+    return {"fetched": sorted(paths_by_name.values()),
+            "plan_bytes": len(texts["plan.yml"]), "apply_bytes": len(texts["apply.yml"])}
 
 
 def as_git_tree(files: dict[str, bytes]) -> dict[str, bytes]:
@@ -566,14 +628,24 @@ def publish(deployment_id: str, plan_text: str, apply_text: str,
                        "copy is the only copy until it is.")
 
     sent: list[str] = []
+    changed: list[str] = []
+    replaced: list[str] = []
     for name in FILES:
         path = runner_paths(record["slug"])[name]
         content = files[path].decode("utf-8")
         if name in PLAYBOOKS:
-            runner.upload_playbook(path, content, overwrite=True)
+            answer = runner.upload_playbook(path, content, overwrite=True) or {}
         else:
-            runner.upload_file(path, content, overwrite=True)
+            answer = runner.upload_file(path, content, overwrite=True) or {}
         sent.append(path)
+        # The runner says whether the bytes differed. With ShellMate as the
+        # sole writer, "overwrote something that differed" is the one case
+        # worth a sentence: a copy on the host had been edited by hand, and
+        # the commit is what won.
+        if answer.get("changed"):
+            changed.append(path)
+            if answer.get("overwrote"):
+                replaced.append(path)
 
     # Published means "on the runner", whether or not git was there to
     # take the commit. It is what a plan checks for — a plan against a
@@ -587,4 +659,5 @@ def publish(deployment_id: str, plan_text: str, apply_text: str,
     logger.info("Published deployment %s: %s, %d file(s) to the runner",
                 record["slug"], commit["sha"] if commit else "uncommitted",
                 len(sent))
-    return {"commit": commit, "sent": sent, "skipped_git": skipped_git}
+    return {"commit": commit, "sent": sent, "changed": changed,
+            "replaced": replaced, "skipped_git": skipped_git}
