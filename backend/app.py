@@ -638,7 +638,15 @@ async def history_search(
     hits = await asyncio.to_thread(
         store.search, q.strip(), hostname.strip(), since, until, limit,
     )
-    return {"query": q, "count": len(hits), "results": hits}
+    # Notes are searched alongside and returned beside, not merged in
+    # (#530). A note is about a session, not about a command, and dressing
+    # one as a command row would put words in the transcript that nobody
+    # typed at a device.
+    notes = await asyncio.to_thread(
+        store.search_notes, q.strip(), hostname.strip(), since, until, 50,
+    )
+    return {"query": q, "count": len(hits), "results": hits,
+            "notes": notes, "note_count": len(notes)}
 
 
 @app.get("/api/history/sessions")
@@ -654,6 +662,38 @@ async def history_session_detail(session_id: str) -> dict:
     if session is None:
         raise HTTPException(status_code=404, detail="No such session in history")
     return session
+
+
+class SessionNotesRequest(BaseModel):
+    """Body for PUT /api/history/sessions/{id}/notes (#530)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    notes: str = ""
+
+
+@app.get("/api/history/sessions/{session_id}/notes")
+async def history_get_notes(session_id: str) -> dict:
+    """What was written about this session, if anything."""
+    return {"session_id": session_id,
+            "notes": await asyncio.to_thread(store.get_notes, session_id)}
+
+
+@app.put("/api/history/sessions/{session_id}/notes")
+async def history_set_notes(session_id: str, request: SessionNotesRequest) -> dict:
+    """
+    Replace a session's notes.
+
+    Refuses a session that is not on record rather than creating one. A
+    note filed against an id nothing else knows about is a note nobody
+    will ever find again, and returning "saved" for it would be a lie the
+    user has no way to check.
+    """
+    saved = await asyncio.to_thread(store.set_notes, session_id, request.notes)
+    if not saved:
+        raise HTTPException(status_code=404, detail="No such session in history")
+    return {"session_id": session_id, "saved": True,
+            "bytes": len(request.notes.encode("utf-8"))}
 
 
 @app.delete("/api/history/sessions/{session_id}")

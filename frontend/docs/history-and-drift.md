@@ -37,6 +37,42 @@ Scheduled runs happen only while ShellMate is running. It is a portable tool
 on a laptop, not a service; for a backup that must happen whether or not
 your laptop is open, run it on a machine that is.
 
+## Notes
+
+A change window produces a running commentary. "16:02 shut Gi1/0/24, 16:05
+confirmed by site, 16:40 rolled back, ticket INC-4471." It usually lives in
+Notepad, where it is never searched again and never meets the transcript it
+describes.
+
+**Ctrl+Shift+N**, or **Notes for this session** on a tab's menu, opens a box
+that belongs to the session in front of you. **Timestamp** puts the time at
+the start of a fresh line, which is the whole point of a commentary written
+while something is happening — typing "16:02" by hand while watching a
+device reload is how the times end up approximate.
+
+It saves itself a second after you stop typing, and immediately when you
+close it. There is no Save button, because a note that needs saving is a
+note that gets lost when the window shuts.
+
+Notes are kept with the session, so:
+
+- They survive a restart.
+- They are searched by **History**, alongside the commands. A note hit is
+  marked as a note and shown in your own words; it is never mixed in with
+  the transcript, because a sentence in a transcript that nobody typed at a
+  device is the one thing a record of a change window must not contain.
+- They appear at the top of the session's own replay, above the commands
+  they describe. "16:05 confirmed by site" means something next to what was
+  running at 16:05.
+
+**Notes are never sent to the assistant.** They carry things written for
+yourself — a customer's name, why a change was really made, what somebody
+said on the phone. The assistant sees terminal output; if you want it to
+see a note, paste it into the chat.
+
+If history recording is switched off there is no session on record to keep
+a note against, and the box says so rather than quietly keeping nothing.
+
 ## Playing a session back
 
 Open any recorded session from History and press **Play**. The commands run

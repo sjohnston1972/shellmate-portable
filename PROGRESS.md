@@ -164,3 +164,53 @@ Machine: SJLAP. The Ansible runner container is local here, reached on
   What is now known about the intermittent: the location, and that it is not
   this. That is still more than the name it used to arrive as.
 
+- **2026-09-05 06:50** — Step 7 done (#530). Notes on the session:
+  Ctrl+Shift+N or the tab menu, a Timestamp button, no Save button because
+  a note that needs saving is a note that gets lost. Kept on the sessions
+  row, indexed by FTS with an update trigger, shown in the session's own
+  replay and as marked note hits in History — never mixed into the
+  transcript, because a sentence in a record of a change window that
+  nobody typed at a device is the one thing it must not contain. 30 checks
+  in `test_notes.py`, including that a note handed to the prompt builder on
+  the session summary does not travel in the prompt.
+
+  The schema needed a real migration. `CREATE TABLE IF NOT EXISTS` does
+  nothing at all to a table that already exists, so a column added to the
+  definition appears only for people installing fresh — everybody else
+  meets it as an OperationalError at the point of use, with their history
+  apparently broken. `_add_missing_columns` is additive, idempotent, and
+  checked against the table rather than a version number, so a database
+  restored from a backup ends up right too.
+
+- **2026-09-05 07:05** — **The intermittent (#586) has a cause, proved.**
+
+  `test_sftp.py` stands up five fake SSH servers, each with a freshly
+  generated host key, each on an ephemeral port — and the OS recycles
+  ephemeral ports. When a later server lands on a port an earlier one
+  used, ShellMate compares the new key against the one it remembered and
+  refuses: "the host key for 127.0.0.1 has changed". Nothing was wrong
+  with the code under test. The fixture was two different machines
+  claiming to be one host.
+
+  That explains every property the failure had. About one run in three,
+  because a collision needs the port pool to have wrapped. Never when the
+  file ran alone, because forty other files are what cycles it. And
+  order-dependent, which is what made it look like a race.
+
+  Proved rather than argued: storing a key for a port, then verifying a
+  different key for the same port, reproduces the exact error message from
+  the kept log; forgetting it first accepts. The fixture now forgets the
+  key for the port it just took — through `forget_host`, which already
+  existed for the Keys panel.
+
+  Which is the other lesson. I wrote a second function to do it, and only
+  noticed the duplicate because a passing test in the same file was called
+  "and Forget removes it". A second implementation of something this
+  project already had would have drifted, silently, in the direction of
+  whichever one got maintained.
+
+  Two things this does not claim. The templates and env-keys occurrences
+  are not explained by it — they use no SSH — so either there is a second
+  cause or those were something else. And it fixes a fixture, not the
+  application: the behaviour it was tripping over is correct and stays.
+

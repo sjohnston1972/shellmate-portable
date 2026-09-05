@@ -3391,6 +3391,46 @@ GigEth0/2     unassigned    YES unset  down     down
   </div>
 
   <!-- ================================================================
+       SESSION NOTES (#530)
+
+       A change window produces a running commentary — "16:02 shut
+       Gi1/0/24, 16:05 confirmed by site" — and it lives in Notepad,
+       where it never meets the transcript it describes. Here it is
+       beside the commands it is about, kept with the session, and
+       findable by searching for what somebody wrote.
+  ================================================================ -->
+  <div id="notes-overlay" class="panel-overlay hidden">
+    <div id="notes-panel" class="side-panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Notes</h2>
+        <span id="notes-for" class="panel-subtitle"></span>
+        <button id="notes-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <div id="notes-toolbar">
+        <button id="notes-stamp" class="btn-tertiary" title="Insert the time">
+          <span class="material-symbols-outlined">history</span>
+          Timestamp
+        </button>
+        <span class="ansible-spacer"></span>
+        <span id="notes-state" class="field-hint"></span>
+      </div>
+
+      <div class="panel-body">
+        <textarea id="notes-text" spellcheck="true"
+                  placeholder="16:02 shut Gi1/0/24&#10;16:05 confirmed by site"
+                  aria-label="Notes for this session"></textarea>
+        <p class="field-hint">
+          Kept with this session's history and searchable with it. Not sent
+          to the assistant unless you paste it into the chat yourself.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
        PASTE CONFIRMATION MODAL
   ================================================================ -->
   <div id="paste-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="paste-title">
@@ -3630,6 +3670,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/drift.js"></script>
   <script src="/static/js/logs.js"></script>
   <script src="/static/js/sftp.js"></script>
+  <script src="/static/js/notes.js"></script>
   <script src="/static/js/jira.js"></script>
   <script src="/static/js/feedback.js"></script>
   <script src="/static/js/ansible.js"></script>

@@ -12,6 +12,16 @@ exists.
   Your own connections and groups can be the inventory, and there is a
   playbook library you can edit here. See the Ansible page in the manual.
 
+- **Notes, kept with the session.** A change window produces a running
+  commentary — "16:02 shut Gi1/0/24, 16:05 confirmed by site" — and it
+  usually lives in Notepad, where it is never searched again and never
+  meets the transcript it describes. **Ctrl+Shift+N** opens a box that
+  belongs to the session in front of you, with a Timestamp button and no
+  Save button: it saves itself. Notes survive a restart, are searched by
+  History alongside the commands and marked as notes rather than mixed
+  into the transcript, and appear at the top of the session's own replay.
+  They are never sent to the assistant.
+
 - **ShellMate reads your ~/.ssh/config.** If you already use OpenSSH,
   Termius or VS Code, the hostnames, ports, accounts and bastions are
   already written down. **Import ~/.ssh/config** on the home view turns each

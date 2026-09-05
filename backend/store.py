@@ -31,7 +31,7 @@ from backend import paths
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Cap on stored output per command. A "show tech-support" runs to megabytes,
 # and storing it whole would bloat the database for no practical gain.
@@ -169,7 +169,13 @@ class SessionStore:
                 username        TEXT NOT NULL DEFAULT '',
                 target          TEXT NOT NULL DEFAULT '',
                 started_at      REAL NOT NULL,
-                ended_at        REAL
+                ended_at        REAL,
+                -- What the person was doing, in their own words (#530).
+                -- On the session rather than in a table of its own: a note
+                -- is about one session and there is one of them, and a
+                -- separate table would make "show me this session" two
+                -- queries and let the two drift apart.
+                notes           TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS commands (
@@ -223,6 +229,8 @@ class SessionStore:
             """
         )
 
+        self._add_missing_columns(connection)
+
         # FTS5 is compiled into most SQLite builds but not guaranteed. Probe
         # rather than assume, and fall back to LIKE if it is missing.
         try:
@@ -243,6 +251,39 @@ class SessionStore:
                     INSERT INTO commands_fts(commands_fts, rowid, command, output)
                     VALUES ('delete', old.id, old.command, old.output);
                 END;
+
+                -- Notes, indexed the same way (#530). A note is written to
+                -- be found later — "customer confirmed", "rolled back at
+                -- 16:40" — and a running commentary nobody can search is
+                -- the Notepad file this replaces.
+                --
+                -- Unlike a command, a note is edited rather than inserted
+                -- once, so it needs the update trigger as well: without
+                -- it the index would go on matching text the session no
+                -- longer says, which is worse than not indexing at all.
+                CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+                    notes,
+                    content='sessions', content_rowid='rowid',
+                    tokenize='porter unicode61'
+                );
+
+                CREATE TRIGGER IF NOT EXISTS sessions_notes_ai
+                AFTER INSERT ON sessions BEGIN
+                    INSERT INTO notes_fts(rowid, notes) VALUES (new.rowid, new.notes);
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS sessions_notes_ad
+                AFTER DELETE ON sessions BEGIN
+                    INSERT INTO notes_fts(notes_fts, rowid, notes)
+                    VALUES ('delete', old.rowid, old.notes);
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS sessions_notes_au
+                AFTER UPDATE OF notes ON sessions BEGIN
+                    INSERT INTO notes_fts(notes_fts, rowid, notes)
+                    VALUES ('delete', old.rowid, old.notes);
+                    INSERT INTO notes_fts(rowid, notes) VALUES (new.rowid, new.notes);
+                END;
                 """
             )
             self._fts_enabled = True
@@ -255,6 +296,42 @@ class SessionStore:
             (str(SCHEMA_VERSION),),
         )
         connection.commit()
+
+    def _add_missing_columns(self, connection: sqlite3.Connection) -> None:
+        """
+        Add columns a newer schema wants to a table that already exists.
+
+        `CREATE TABLE IF NOT EXISTS` does nothing at all to a table that is
+        already there, so a column added to the definition above appears
+        only for people installing for the first time — and everybody else
+        gets an OperationalError on the first query that names it, at the
+        point of use, with their history apparently broken.
+
+        Additive and idempotent, checked against the table rather than
+        against a version number: a database restored from a backup, or
+        one whose meta row was lost, still ends up with the columns the
+        code expects.
+        """
+        wanted = {
+            "sessions": {"notes": "TEXT NOT NULL DEFAULT ''"},
+        }
+        for table, columns in wanted.items():
+            try:
+                have = {row["name"] for row in
+                        connection.execute(f"PRAGMA table_info({table})")}
+            except sqlite3.Error:                         # pragma: no cover
+                continue
+            if not have:
+                continue
+            for name, definition in columns.items():
+                if name in have:
+                    continue
+                try:
+                    connection.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+                    logger.info("History schema: added %s.%s", table, name)
+                except sqlite3.Error as exc:              # pragma: no cover
+                    logger.warning("Could not add %s.%s: %s", table, name, exc)
 
     def close(self) -> None:
         """Close the database."""
@@ -763,6 +840,138 @@ class SessionStore:
             session = dict(row)
             session["commands"] = [dict(c) for c in commands]
             return session
+
+    # -----------------------------------------------------------------
+    # Notes (#530)
+    #
+    # A change window produces a running commentary — "16:02 shut
+    # Gi1/0/24, 16:05 confirmed by site" — and it lives in Notepad, where
+    # it never meets the transcript it describes. Kept here it is beside
+    # the commands it is about, survives a restart, and can be found by
+    # searching for what somebody wrote rather than what a device printed.
+    # -----------------------------------------------------------------
+
+    #: How much of one is kept. Generous — a change window's commentary is
+    #: not short — but bounded, because this is a text box in a browser
+    #: and a paste is a paste.
+    MAX_NOTES = 64_000
+
+    def set_notes(self, session_id: str, notes: str) -> bool:
+        """
+        Replace a session's notes. Returns False if there is no such session.
+
+        Written synchronously rather than through the background writer.
+        The writer exists so a slow disk cannot stall a terminal read loop;
+        a note is a deliberate act whose result somebody is looking at, and
+        "saved" has to mean saved.
+        """
+        text = (notes or "")[: self.MAX_NOTES]
+        with self._lock:
+            connection = self.connect()
+            try:
+                cursor = connection.execute(
+                    "UPDATE sessions SET notes = ? WHERE id = ?",
+                    (text, session_id))
+                connection.commit()
+            except sqlite3.Error as exc:
+                logger.warning("Could not save notes for %s: %s", session_id, exc)
+                return False
+            return cursor.rowcount > 0
+
+    def get_notes(self, session_id: str) -> str:
+        """A session's notes, or "" for one that has none or is not there."""
+        with self._lock:
+            connection = self.connect()
+            try:
+                row = connection.execute(
+                    "SELECT notes FROM sessions WHERE id = ?",
+                    (session_id,)).fetchone()
+            except sqlite3.Error:                         # pragma: no cover
+                return ""
+            return (row["notes"] if row else "") or ""
+
+    def search_notes(self, query: str = "", hostname: str = "",
+                     since: float | None = None, until: float | None = None,
+                     limit: int = 50) -> list[dict]:
+        """
+        Sessions whose notes match, newest first.
+
+        Returned separately from the command search rather than merged into
+        it. A note is about a session, not about a command, and giving it a
+        fabricated command row to travel in would put words in the
+        transcript that nobody typed at a device — which is the one thing
+        a record of a change window must never do.
+        """
+        with self._lock:
+            connection = self.connect()
+            params: list[Any] = []
+
+            if query and self._fts_enabled:
+                base = """
+                    SELECT s.id, s.hostname, s.label, s.started_at, s.ended_at,
+                           snippet(notes_fts, 0, '', '', ' … ', 16) AS snippet
+                    FROM notes_fts
+                    JOIN sessions s ON s.rowid = notes_fts.rowid
+                    WHERE notes_fts MATCH ?
+                """
+                params.append(_to_fts_query(query))
+            elif query:
+                base = """
+                    SELECT s.id, s.hostname, s.label, s.started_at, s.ended_at,
+                           substr(s.notes, 1, 200) AS snippet
+                    FROM sessions s
+                    WHERE s.notes LIKE ?
+                """
+                params.append(f"%{query}%")
+            else:
+                base = """
+                    SELECT s.id, s.hostname, s.label, s.started_at, s.ended_at,
+                           substr(s.notes, 1, 200) AS snippet
+                    FROM sessions s
+                    WHERE s.notes <> ''
+                """
+
+            clauses: list[str] = []
+            if hostname:
+                clauses.append("s.hostname = ?")
+                params.append(hostname)
+            if since is not None:
+                clauses.append("s.started_at >= ?")
+                params.append(since)
+            if until is not None:
+                clauses.append("s.started_at <= ?")
+                params.append(until)
+
+            sql = base + "".join(f" AND {clause}" for clause in clauses)
+            sql += " ORDER BY s.started_at DESC LIMIT ?"
+            params.append(min(max(limit, 1), 200))
+
+            try:
+                rows = connection.execute(sql, params).fetchall()
+            except sqlite3.Error as exc:
+                logger.warning("Note search failed: %s", exc)
+                return []
+
+            # The FTS index can go stale where a note was written by a
+            # version that predates the triggers, so a miss falls back to a
+            # substring pass — the same arrangement the command search
+            # already uses, and for the same reason: nothing from the index
+            # is not the same as nothing to find.
+            if not rows and query and self._fts_enabled:
+                try:
+                    rows = connection.execute(
+                        """
+                        SELECT s.id, s.hostname, s.label, s.started_at,
+                               s.ended_at, substr(s.notes, 1, 200) AS snippet
+                        FROM sessions s
+                        WHERE s.notes LIKE ?
+                        ORDER BY s.started_at DESC LIMIT ?
+                        """,
+                        (f"%{query}%", min(max(limit, 1), 200))).fetchall()
+                except sqlite3.Error:                     # pragma: no cover
+                    return []
+
+            return [dict(row) for row in rows]
 
     def recent_commands(self, hostname: str = "", query: str = "",
                         limit: int = 50) -> list[dict]:

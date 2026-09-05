@@ -133,6 +133,7 @@ whole conversation. The [AI assistant](#assistant) page explains it.
 | `Ctrl+F` | Find in the terminal |
 | `Ctrl+Alt+1` … `Ctrl+Alt+9` | Choose a split layout (the rest are in the picker) |
 | `Ctrl+Shift+B` | Broadcast a command to several devices |
+| `Ctrl+Shift+N` | Notes for this session |
 | `Ctrl+Shift+C` | Copy the selection |
 | `Ctrl+Shift+V` | Paste |
 | `Ctrl+C` | Copy if text is selected, otherwise send an interrupt |

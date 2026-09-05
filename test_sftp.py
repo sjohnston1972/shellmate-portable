@@ -198,6 +198,28 @@ class SSHTestServer:
         self._listener.listen(5)
         self.port = self._listener.getsockname()[1]
 
+        # This file stands up five of these, each with a freshly generated
+        # host key, each on an ephemeral port — and the OS recycles those.
+        # When a later server lands on a port an earlier one used,
+        # ShellMate compares the new key with the one it remembered and
+        # correctly refuses: "the host key for 127.0.0.1 has changed".
+        #
+        # That is the right behaviour and it was this suite's intermittent
+        # (#586). Nothing was wrong with the code under test; the fixture
+        # was claiming to be the same host twice while being two different
+        # machines. It bit roughly one full run in three and never when
+        # the file was run alone, because a run of forty other files
+        # cycles through enough ports to make a collision likely — which
+        # is exactly the order-dependence that made it look like a race.
+        #
+        # Forgetting the stored key says the true thing: a brand-new
+        # server on a recycled port genuinely is a host nobody has seen.
+        # Trusting the change instead would have switched off the check
+        # this file also has to exercise.
+        from backend import keys as _keys
+
+        _keys.forget_host(_keys.host_entry_name("127.0.0.1", self.port))
+
         self._stop = threading.Event()
         self._transports: list[paramiko.Transport] = []
         threading.Thread(target=self._accept_loop, daemon=True).start()

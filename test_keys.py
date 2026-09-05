@@ -459,6 +459,40 @@ def test_the_host_key_store() -> None:
     check("another algorithm from the same host is not a change",
           bool(ssh_handler._verify_host_key("sw-store", 22, other_type)))
 
+    # Forgetting one, which is the honest answer when the thing answering
+    # really is a different machine at the same address.
+    #
+    # This has a specific history. The suite carried an intermittent for
+    # weeks (#586) and it was this: test_sftp.py stands up five fake SSH
+    # servers, each with a freshly generated host key, each on an
+    # ephemeral port — and the OS recycles ephemeral ports. When a later
+    # server landed on a port an earlier one had used, ShellMate compared
+    # the new key against the remembered one and refused, exactly as it
+    # should. Nothing was wrong with the code; the fixture was two
+    # different machines claiming to be one host. It bit about one full
+    # run in three and never when the file ran alone, because forty other
+    # files cycle through enough ports to make a collision likely.
+    #
+    # The fixture now forgets the key for the port it just took, through
+    # the `forget_host` the Keys panel already used, and this is the
+    # assertion that the operation it depends on keeps working —
+    # including that it forgets *only* the host it was asked about.
+    keys.remember_host("sw-keep", 22, key_a)
+    check("forgetting a host that is known says so",
+          keys.forget_host(keys.host_entry_name("sw-store", 22)) is True)
+    check("  and it is unknown afterwards",
+          keys.known_host_key("sw-store", 22) is None,
+          "a recycled port is genuinely a host nobody has seen")
+    check("  while every other host is left alone",
+          keys.known_host_key("sw-keep", 22) == key_a,
+          "rewriting the file must not take the rest of the estate with it")
+    check("forgetting one that was never known says that instead",
+          keys.forget_host(keys.host_entry_name("sw-store", 22)) is False)
+    check("  and a fresh key is then simply a first sighting",
+          ssh_handler._verify_host_key("sw-store", 22, key_b)
+          == keys.host_fingerprint(key_b),
+          "which is the whole point: no warning where there is no evidence")
+
     check("forgetting a host is the way back", keys.forget_host("sw-store"))
     check("  and it is then unknown again",
           keys.known_host_key("sw-store", 22) is None)

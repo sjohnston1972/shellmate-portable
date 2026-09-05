@@ -1759,6 +1759,11 @@
         setting: 'logging', value: (tab) => _loggingLabel(tab) },
       { action: 'log-open', icon: 'folder_open', label: 'Open this log',
         setting: 'log_open', when: (tab) => tab && !!tab.logFile },
+      // What you were doing, in your own words, kept with the session
+      // (#530). Beside the log because they answer adjacent questions —
+      // the log is what happened, the note is why.
+      { action: 'notes', icon: 'edit', label: 'Notes for this session',
+        setting: 'notes' },
     ],
     [
       // Two entries, deliberately, because they are two different acts
@@ -2028,6 +2033,9 @@
             break;
 
           case 'logging':       _toggleLogging(tab);              break;
+          case 'notes':
+            if (typeof window.openNotes === 'function') window.openNotes();
+            break;
           case 'log-open':
             if (typeof window.viewLogFile === 'function') window.viewLogFile(tab.logFile);
             else if (typeof window.openLogs === 'function') window.openLogs();

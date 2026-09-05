@@ -203,6 +203,7 @@ shellmate/
 │       ├── markdown.js          # A small Markdown renderer for the built-in documentation
 │       ├── menu.js              # The one context menu
 │       ├── mode.js              # Learn / Troubleshoot mode toggle
+│       ├── notes.js             # What you were doing, written down beside what you did (#530)
 │       ├── palette.js           # Find a tab by name (#410), and recall a command (#522)
 │       ├── panel_resize.js      # Dragging a side panel wider
 │       ├── platforms_editor.js  # Edit device platform definitions in the app

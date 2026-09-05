@@ -302,12 +302,22 @@
   function renderResults(data) {
     resultsEl.innerHTML = '';
 
-    if (!data.results.length) {
+    const notes = data.notes || [];
+    if (!data.results.length && !notes.length) {
       showMessage(data.query
         ? `Nothing matches "${data.query}".`
         : 'No sessions recorded yet. Connect to a device and your history builds itself.');
       return;
     }
+
+    // Notes first, and marked as notes (#530). They are what somebody
+    // wrote rather than what a device printed, and the two must never be
+    // mistaken for each other in a record of a change window — a sentence
+    // in a transcript that nobody typed at a device is the worst thing
+    // this panel could show. They lead because a search that matches a
+    // note usually matched it on purpose: nothing else here is in
+    // anybody's own words.
+    notes.forEach(note => resultsEl.appendChild(_noteRow(note)));
 
     data.results.forEach(hit => {
       const row = document.createElement('div');
@@ -348,6 +358,41 @@
       row.addEventListener('click', () => openReplay(hit.session_id));
       resultsEl.appendChild(row);
     });
+  }
+
+  /** A note hit: whose session, when, and what was written. */
+  function _noteRow(note) {
+    const row = document.createElement('div');
+    row.className = 'history-row history-note-hit';
+
+    const head = document.createElement('div');
+    head.className = 'history-row-head';
+
+    const mark = document.createElement('span');
+    mark.className = 'history-note-mark';
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined';
+    icon.textContent = 'edit';
+    mark.append(icon, document.createTextNode('Note'));
+
+    const meta = document.createElement('span');
+    meta.className = 'history-meta';
+    meta.textContent = `${note.hostname || note.label || 'unknown'} · `
+                     + formatWhen(note.started_at);
+
+    head.append(mark, meta);
+    head.appendChild(_copyButton('Copy this note', note.snippet || ''));
+    row.appendChild(head);
+
+    const body = document.createElement('div');
+    // textContent: a note is typed by a person and is no more trustworthy
+    // as markup than a device's output is.
+    body.className = 'history-note-text';
+    body.textContent = note.snippet || '';
+    row.appendChild(body);
+
+    row.addEventListener('click', () => openReplay(note.id));
+    return row;
   }
 
   /**
@@ -709,8 +754,32 @@
     const list = document.getElementById('replay-commands');
     list.innerHTML = '';
 
+    // The note above the commands, in the session's own record rather than
+    // in a list of its own (#530). "16:05 confirmed by site" only means
+    // anything next to what was running at 16:05, and a separate notes
+    // view would be the Notepad file again with a nicer background.
+    if (session.notes) {
+      const box = document.createElement('div');
+      box.className = 'replay-notes';
+      const title = document.createElement('p');
+      title.className = 'replay-notes-title';
+      title.textContent = 'Notes';
+      const body = document.createElement('p');
+      // textContent: written by a person, and no more trustworthy as
+      // markup than a device's output.
+      body.className = 'replay-notes-body';
+      body.textContent = session.notes;
+      box.append(title, body);
+      list.appendChild(box);
+    }
+
     if (!session.commands.length) {
-      list.innerHTML = '<div class="history-empty">No commands were recorded in this session.</div>';
+      list.appendChild(Object.assign(document.createElement('div'), {
+        className: 'history-empty',
+        textContent: session.notes
+          ? 'No commands were recorded in this session — only the note above.'
+          : 'No commands were recorded in this session.',
+      }));
       return;
     }
 
