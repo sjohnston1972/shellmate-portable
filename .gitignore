@@ -45,3 +45,7 @@ relay/**/.wrangler/
 # Worktrees the agents work in, and wrangler's cache wherever it lands.
 .claude/worktrees/
 .wrangler/
+
+# What a failing test file printed, kept by tools/run_tests.py (#586).
+# Evidence about a run, not about the code — never committed.
+.test-failures/
