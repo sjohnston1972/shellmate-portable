@@ -173,3 +173,29 @@ before `/api/logs/{filename}`, so "search" is not captured as a filename.
 
 `python test_logsearch.py` — 36 passed, 0 failed. test_advanced 363 passed.
 
+## 2026-09-05 08:00 — out of plan: the runner's breaking change
+
+Not a PLAN.md step. The runner session shipped e35fe6b while this run was
+in progress, and one half of it breaks shipped ShellMate code.
+
+**`/api/v1/jobs` is now paginated** — 100 by default, 500 max. `jobs()`
+returned a bare list and its docstring said "every run the runner knows
+of", which is now false. It returns a window that describes itself, and
+the Runs area says so on screen when the runner reports a bigger total.
+Two bounds, not one: even `total` is only what the runner has not pruned
+(artifacts default to 500, about three weeks of an hourly pipeline), so
+nothing here presents itself as a complete history any more.
+
+My own change nearly broke the Ansible dashboard, which sliced the return
+value `[:10]` — now a dict. Caught by grepping the callers rather than by
+the tests, which is worth noting: nothing would have failed at import.
+
+**The event-ordering half does not affect ShellMate**, contrary to what
+they inferred from something I told them. `events()` fetches the whole set,
+filters `counter <= since` across all of it and re-sorts by counter itself
+— it never used the response order as a cursor. test_ansible has asserted
+"events come back in counter order" all along. Told them so rather than
+accepting the premise.
+
+test_ansible 79 passed, 0 failed.
+

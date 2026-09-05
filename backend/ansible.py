@@ -404,10 +404,45 @@ def start(playbook: str, *, extra_vars: dict | None = None,
             "inventory": data.get("inventory") or ""}
 
 
-def jobs() -> list[dict]:
-    """Every run the runner knows of, newest first — including past ones."""
-    data = _call("GET", "/api/v1/jobs") or {}
-    return list(data.get("jobs") or [])
+def jobs(limit: int = 100, offset: int = 0, pipeline: str = "",
+         status_filter: str = "") -> dict:
+    """
+    A window onto the runs the runner knows of, newest first.
+
+    **Not "every run".** The endpoint used to return all of them and now
+    pages, defaulting to 100 and capping at 500 — 402 runs took it 8.5
+    seconds and 88 KB, which is about seventeen days of an hourly pipeline.
+    The old signature returned a bare list and its docstring claimed
+    completeness, so a caller had no way to know it was seeing a window.
+
+    Two bounds, not one, and they are different: ``total`` is how many the
+    runner is holding *now*, and the runner prunes artifacts (500 by
+    default, roughly three weeks of an hourly pipeline). So even
+    ``total`` is not the history — it is what has not been pruned. Anything
+    presenting this as a complete record is wrong twice over.
+
+    Returns:
+        ``{"jobs": [...], "total": n, "count": n, "offset": n, "limit": n}``.
+        ``total`` is absent on a runner predating pagination, in which case
+        the list itself is everything it had.
+    """
+    params = {"limit": max(1, min(int(limit), 500)), "offset": max(0, int(offset))}
+    if pipeline:
+        params["pipeline"] = pipeline
+    if status_filter:
+        params["status"] = status_filter
+    data = _call("GET", "/api/v1/jobs", params=params) or {}
+    rows = list(data.get("jobs") or [])
+    return {
+        "jobs": rows,
+        # An older runner sends no total. Reporting len(rows) as the total
+        # would be a claim we cannot support; None says "not stated", and
+        # the interface can say so rather than inventing a number.
+        "total": data.get("total"),
+        "count": data.get("count", len(rows)),
+        "offset": data.get("offset", params["offset"]),
+        "limit": data.get("limit", params["limit"]),
+    }
 
 
 def status(job_id: str) -> dict:

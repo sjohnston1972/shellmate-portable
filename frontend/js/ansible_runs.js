@@ -81,7 +81,9 @@
 
     let jobs = null;
     try {
-      jobs = await view.json('/api/ansible/jobs');
+      // A window, not the record. The runner pages (100 by default)
+      // and prunes its artifacts, so what it holds is bounded twice.
+      jobs = await view.json('/api/ansible/jobs?limit=100');
     } catch (e) {
       host.appendChild(el('div', { class: 'av-notice av-notice-warn' }, [
         icon('info'),
@@ -91,6 +93,7 @@
     }
 
     const rows = Array.isArray(jobs) ? jobs : (jobs.jobs || []);
+    const total = jobs && typeof jobs.total === 'number' ? jobs.total : null;
     if (!rows.length) {
       host.appendChild(view.empty(
         'The runner has no runs on record. One started from here will appear '
@@ -101,8 +104,19 @@
     // Grouped by what started them. A run carries the pipeline that fired
     // it, or null when a person did — and "who asked for this" is the first
     // question about a run somebody did not watch happen.
+    // Say what this is a window of, when the runner tells us. An area that
+    // silently shows the newest hundred of four hundred reads as the whole
+    // record, and somebody looking for last month's run concludes it never
+    // happened rather than that they are looking at a page.
+    if (total !== null && total > rows.length) {
+      host.appendChild(el('p', { class: 'av-hint',
+        text: `Showing the ${rows.length} most recent of ${total} runs the `
+            + 'runner is holding. It prunes older ones, so this is not the '
+            + 'complete history.' }));
+    }
+
     const groups = new Map();
-    rows.slice(0, 60).forEach((job) => {
+    rows.forEach((job) => {
       const key = job.pipeline || '';
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(job);

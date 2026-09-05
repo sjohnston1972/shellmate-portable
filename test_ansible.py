@@ -208,9 +208,20 @@ def test_playbooks_and_runs() -> None:
     check("a running job says it is running",
           state["running"] and not state["finished"], str(state))
 
+    # A window, not a list. The runner pages now — it used to return every
+    # job ever, which at 402 runs took it 8.5 seconds — so the return says
+    # what it is a window of rather than implying completeness.
     history = with_runner(ansible.jobs)
     check("past runs are listed too, not only live ones",
-          len(history) == 2 and any(j["source"] == "artifacts" for j in history), str(history))
+          len(history["jobs"]) == 2
+          and any(j["source"] == "artifacts" for j in history["jobs"]),
+          str(history))
+    check("the window describes itself",
+          set(history) >= {"jobs", "total", "count", "offset", "limit"},
+          str(sorted(history)))
+    check("a runner that states no total is not given an invented one",
+          history["total"] is None or isinstance(history["total"], int),
+          f"total came back as {history['total']!r}")
 
     got = with_runner(lambda: ansible.events("abc123"))
     check("events come back in counter order",

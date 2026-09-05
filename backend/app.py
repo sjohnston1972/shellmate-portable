@@ -4502,12 +4502,21 @@ async def ansible_run(request: PlaybookRunRequest) -> dict:
 
 
 @app.get("/api/ansible/jobs")
-async def ansible_jobs() -> dict:
-    """Every run the runner knows of, including ones from before a restart."""
+async def ansible_jobs(limit: int = 100, offset: int = 0,
+                       pipeline: str = "", status: str = "") -> dict:
+    """
+    A window onto the runs the runner knows of, newest first.
+
+    Paginated because the runner now pages: it used to return every job
+    ever, which at 402 runs was 8.5 seconds and 88 KB. `total` says what
+    the window is a window *of* — and even that is bounded by the runner's
+    own artifact pruning, so it is not the whole history either.
+    """
     from backend import ansible as ansible_module
 
     try:
-        return {"jobs": await asyncio.to_thread(ansible_module.jobs)}
+        return await asyncio.to_thread(
+            ansible_module.jobs, limit, offset, pipeline, status)
     except Exception as exc:
         raise _ansible_error(exc) from exc
 
@@ -5384,8 +5393,12 @@ async def ansible_overview() -> dict:
            "jobs": [], "error": ""}
     if runner.get("reachable"):
         try:
-            jobs = await asyncio.to_thread(ansible_module.jobs)
-            out["jobs"] = jobs[:10]
+            # Ten asked for, rather than a hundred fetched and sliced:
+            # the runner pages now, and pulling a page to throw ninety
+            # rows away is the cost the pagination exists to avoid.
+            page = await asyncio.to_thread(ansible_module.jobs, 10)
+            out["jobs"] = page["jobs"]
+            out["jobs_total"] = page.get("total")
             out["playbooks"]["runner"] = runner.get("playbooks", 0)
         except Exception as exc:
             out["error"] = str(exc)
