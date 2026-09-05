@@ -46,3 +46,38 @@ thing off and falls back to tags, which every model supports.
 `python test_tools.py` — 49 passed. test_advanced, test_caching and
 test_prompts still pass.
 
+## 2026-09-05 10:57 — step 2, first half (#560)
+
+`backend/ai/toolloop.py`: collecting a tool call out of a provider stream,
+and answering the read-only ones.
+
+**A real trap, found by writing the test first.** `configs.drift_report` is
+exactly what `get_drift` looks like it should call — and it calls
+`capture_config`, which opens a second channel to the switch. Built that
+way, a model asking "what changed?" would be reaching a device nobody
+approved it reaching, at a moment it chose, which is precisely the risk
+line on the issue. `get_drift` reads the two most recent *stored*
+snapshots instead, and says out loud that it did not capture.
+
+The central test replaces `capture_config`, `capture_config_live`,
+`drift_report` and the handler's `send`/`open_secondary_channel` with
+things that raise, then calls all three read-only tools. If any of them
+reaches a device it fails here rather than in a comms room.
+
+Three smaller decisions:
+
+- **Half a tool call is not a tool call.** Arguments arrive as partial
+  JSON; a model that streamed broken JSON has made a mistake it should be
+  told about, not one that reaches the engineer as a traceback. Malformed
+  arguments become an empty set.
+- **An unknown tool name is answered, not dropped.** A silent drop leaves
+  the model waiting for a result that never comes; it gets an error naming
+  what does exist.
+- **"Not run" is a fact, not a reason to run it.** `get_parsed_output` on a
+  command nobody ran lists what *was* run and points at `run_command` —
+  the path with a person on it. A tool that helpfully ran it would be the
+  read-only rule broken by helpfulness.
+
+`python test_toolloop.py` — 34 passed. Next: the client wiring and the
+stream_chat loop.
+
