@@ -81,3 +81,44 @@ Three smaller decisions:
 `python test_toolloop.py` — 34 passed. Next: the client wiring and the
 stream_chat loop.
 
+## 2026-09-05 11:29 — step 2, backend complete (#560)
+
+All five clients send `tools` and collect tool calls out of their streams,
+and `stream_chat` runs the loop. The browser half is next.
+
+**The rule holds, and the test proves it rather than describing it.** A
+`run_command` request *stops the turn*: the model does not get to carry on
+as though the command had been run, the browser gets a command block, and
+the fake device's handler is a trap that fails the test if anything sends
+to it. Two separate tests assert `touched == []`.
+
+Read-only calls do not stop the turn — they are answered and the model
+continues, which is the whole point: a question needing drift *and*
+history is one turn rather than three requests that each start over. The
+test asserts the second request carries the first exchange and the third
+carries both, because a model that asked and was ignored looks exactly
+like one that answered from nothing.
+
+Four decisions worth recording:
+
+- **The bound is `ai.investigate_max_steps`**, unchanged and shared with
+  Investigate mode. A second number to keep in step would drift from it.
+  Reaching it is said out loud rather than the turn just ending.
+- **Usage is held back until the turn actually ends.** Yielding it per
+  round would have the meter count one answer several times.
+- **The resume is rebuilt server-side.** The browser says what was asked,
+  what came back and which provider shape; the message list is assembled
+  in `app.py` so a crafted payload cannot put arbitrary turns in front of
+  the model.
+- **Ollama returns tool arguments as an object**, where every other
+  provider sends a JSON string. Normalised at the client rather than by
+  branching inside the collector — one accumulation to be right.
+
+Two existing test fakes enumerated the provider contract and broke when it
+grew. Both now take `**kwargs`, with a comment saying why: a fake that
+lists every parameter needs editing every time the contract does, and
+neither file is about the provider signature.
+
+`python test_tool_turn.py` — 30 passed. `python tools/run_tests.py` —
+**93 of 93 test files passed.**
+

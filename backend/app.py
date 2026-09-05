@@ -7558,6 +7558,30 @@ async def chat_websocket(websocket: WebSocket) -> None:
             canvas = msg.get("ansible_canvas")
             ansible_canvas = canvas if isinstance(canvas, dict) else None
 
+            # Resuming a tool exchange (#560): the model asked to run a
+            # command, the engineer approved it, and this carries the
+            # request and its output back so the model continues its own
+            # exchange rather than being told about it in prose. Rebuilt
+            # here rather than trusted from the browser — the browser
+            # supplies what was asked, what came back and which provider
+            # shape, and the message list is assembled server-side so a
+            # crafted payload cannot put arbitrary turns in front of the
+            # model.
+            resume = None
+            handoff = msg.get("tool_result")
+            if isinstance(handoff, dict) and handoff.get("calls"):
+                from backend.ai import turns as turns_module
+                try:
+                    resume = turns_module.with_tool_exchange(
+                        [], str(handoff.get("shape") or "openai"),
+                        str(handoff.get("text") or ""),
+                        [c for c in handoff["calls"] if isinstance(c, dict)],
+                        [r for r in (handoff.get("results") or [])
+                         if isinstance(r, dict)])
+                except Exception as exc:
+                    logger.info("Could not rebuild a tool exchange: %s", exc)
+                    resume = None
+
             if not user_message:
                 continue
 
@@ -7575,7 +7599,15 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     history=history,
                     investigate_step=investigate_step,
                     ansible_canvas=ansible_canvas,
+                    resume=resume,
                 ):
+                    if isinstance(chunk, dict) and "tool_request" in chunk:
+                        # The model asked to run something. Rendered as the
+                        # command block a [SUGGEST_CMD] tag produces, and
+                        # nothing reaches the device until somebody clicks.
+                        await websocket.send_text(json.dumps({
+                            "type": "tool_request", **chunk["tool_request"]}))
+                        continue
                     if isinstance(chunk, dict) and "usage" in chunk:
                         # Real counts from the provider (#416), so the meter
                         # can stop estimating.

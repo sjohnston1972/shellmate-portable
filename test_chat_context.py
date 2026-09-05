@@ -79,7 +79,12 @@ SESSIONS = {sid: _session(sid, label) for sid, label in
 MANAGER = StubManager(SESSIONS)
 
 
-async def _fake_stream(message, context_block, model=None, system_prompt=None, history=None):
+# **kwargs rather than the four named ones: the router now also passes
+# `tools` and `prior` for native tool use (#560), and a fake that
+# enumerates the provider contract has to be edited every time the
+# contract grows. What this file is about is the context block.
+async def _fake_stream(message, context_block, model=None,
+                       system_prompt=None, history=None, **kwargs):
     yield "ok"
 
 

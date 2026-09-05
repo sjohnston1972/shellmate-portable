@@ -24,7 +24,8 @@ from dataclasses import dataclass
 import httpx
 
 from backend.advanced import get as advanced
-from backend.ai import http, turns
+from backend.ai import http, toolloop
+from backend.ai import tools as tool_registry, turns
 from backend.ai.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -150,9 +151,16 @@ async def stream(
     model: str,
     system_prompt: str | None = None,
     history: list[dict] | None = None,
+    tools: list[dict] | None = None,
+    prior: list[dict] | None = None,
 ) -> AsyncIterator:
     """
     Stream one chat completion, yielding text chunks and then the usage.
+
+    When the model asks for something, a ``{"tool_calls": [...]}`` dict is
+    yielded after the text and before the usage. ``prior`` carries an
+    earlier tool exchange from this same turn, spliced in before the
+    question so the model sees its own request and the answer to it.
 
     Raises ValueError with the provider's own message on any status other
     than 200, after at most two retries that each drop a parameter the
@@ -163,9 +171,15 @@ async def stream(
         "Authorization": f"Bearer {api_key}",
         "Content-Type":  "application/json",
     }
-    payload = build_payload(provider, model, turns.openai_messages(
-        system_prompt or SYSTEM_PROMPT, history, full_user_message))
+    messages = turns.openai_messages(
+        system_prompt or SYSTEM_PROMPT, history, full_user_message)
+    if prior:
+        messages = messages[:-1] + list(prior) + messages[-1:]
+    payload = build_payload(provider, model, messages)
+    if tools:
+        payload["tools"] = tools
     usage: dict = {}
+    collector = toolloop.OpenAICollector()
 
     client = http.shared(__name__.rsplit(".", 1)[-1], advanced("ai.request_timeout"))   # reused (#503)
     if True:
@@ -177,6 +191,14 @@ async def stream(
                     body = await resp.aread()
                     if (attempt < 3 and resp.status_code == 400
                             and learn_from_refusal(provider, payload, body)):
+                        continue
+                    # Falls back to suggestion tags rather than failing —
+                    # a model without tools is not an error (#560).
+                    if (attempt < 3 and resp.status_code == 400
+                            and "tools" in payload
+                            and tool_registry.looks_like_a_tools_refusal(body)):
+                        tool_registry.remember_refusal(provider.name, model)
+                        payload.pop("tools", None)
                         continue
                     raise ValueError(
                         f"{provider.label} API error {resp.status_code}: "
@@ -203,10 +225,17 @@ async def stream(
                     if event.get("usage"):
                         usage.update(normalise_usage(event["usage"]))
                     choices = event.get("choices") or [{}]
-                    chunk = (choices[0].get("delta") or {}).get("content", "")
+                    delta = choices[0].get("delta") or {}
+                    chunk = delta.get("content", "")
                     if chunk:
                         yield chunk
+                    if delta.get("tool_calls"):
+                        collector.delta(delta["tool_calls"])
                 break
+    calls = collector.calls()
+    if calls:
+        tool_registry.remember_support(provider.name, model)
+        yield {"tool_calls": calls}
     if usage:
         usage["provider"] = provider.name
         yield {"usage": usage}

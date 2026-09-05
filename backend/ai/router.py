@@ -8,7 +8,8 @@ import logging
 from collections.abc import AsyncIterator
 
 from backend.ai.prompts import build_context_prompt, build_system_preamble, get_system_prompt
-from backend.ai import chroma_client
+from backend.ai import chroma_client, toolloop, turns
+from backend.ai import tools as tool_registry
 from backend.connections.manager import SessionManager
 from backend.settings_store import get_settings
 
@@ -149,6 +150,11 @@ async def stream_chat(
     history: list[dict] | None = None,    # earlier turns, [{role, text}]
     investigate_step: int | None = None,  # approved steps so far, in Investigate mode
     ansible_canvas: dict | None = None,   # the plays on the builder, in Ansible mode
+    # An earlier tool exchange in this same turn (#560): the model's own
+    # request and the answer to it, rebuilt by the browser after the
+    # engineer approved a command. Sent back so the model continues its
+    # exchange rather than being told about it afterwards in prose.
+    resume: list[dict] | None = None,
 ) -> AsyncIterator:
     """
     Build context from session buffers, then stream an AI response.
@@ -192,8 +198,11 @@ async def stream_chat(
     device_context: dict | None = None
     parsed_tables: list[str] = []
 
+    active_session = (session_manager.get_session(active_session_id)
+                      if active_session_id else None)
+
     if active_session_id:
-        session = session_manager.get_session(active_session_id)
+        session = active_session
         if session:
             # Both are synchronous work — two history-database reads and
             # up to a dozen TextFSM parses — and this runs inside the chat
@@ -308,11 +317,89 @@ async def stream_chat(
     else:
         from backend.ai.ollama_client import stream_response
 
-    async for chunk in stream_response(
-        message, context_block, model=model, system_prompt=system_prompt,
-        history=history,
-    ):
-        yield chunk
+    # ----------------------------------------------------------------
+    # Native tool use (#560)
+    #
+    # The read-only tools are answered here and the conversation continues
+    # without troubling anybody: they reach nothing, so there is nothing to
+    # approve. `run_command` is different in kind — it is handed to the
+    # browser as a command block, which is exactly what a [SUGGEST_CMD] tag
+    # produces today, and the person decides. Their approval sends it and
+    # the output comes back on the next request as a tool result, so the
+    # model continues its own exchange rather than being told about it
+    # afterwards in prose.
+    #
+    # The bound is `ai.investigate_max_steps`, unchanged and shared with
+    # Investigate mode: a model that keeps asking read-only questions must
+    # stop somewhere, and the number somebody already tuned is the number.
+    # ----------------------------------------------------------------
+    tool_defs = None
+    shape = "anthropic" if backend == "claude" else "openai"
+    if tool_registry.supports(backend, model or ""):
+        tool_defs = (tool_registry.for_anthropic() if shape == "anthropic"
+                     else tool_registry.for_openai())
+
+    prior: list[dict] = list(resume or [])
+    rounds = max(1, int(advanced("ai.investigate_max_steps")))
+
+    for _round in range(rounds):
+        said: list[str] = []
+        calls: list[dict] = []
+        usage_event = None
+
+        async for chunk in stream_response(
+            message, context_block, model=model, system_prompt=system_prompt,
+            history=history, tools=tool_defs, prior=prior or None,
+        ):
+            if isinstance(chunk, dict):
+                if "tool_calls" in chunk:
+                    calls = chunk["tool_calls"]
+                    continue
+                # Usage is held back until the turn actually ends: yielding
+                # it after each round would have the meter count one answer
+                # several times.
+                usage_event = chunk
+                continue
+            said.append(chunk)
+            yield chunk
+
+        if not calls:
+            if usage_event:
+                yield usage_event
+            return
+
+        answerable, needs_approval = toolloop.partition(calls)
+
+        if needs_approval:
+            # The turn stops here. Everything the model said on the way to
+            # asking has already been streamed, and the command block the
+            # browser renders carries the id, so the result can be tied
+            # back to the request when it comes.
+            if usage_event:
+                yield usage_event
+            yield {"tool_request": {
+                "shape": shape,
+                "text": "".join(said),
+                # The read-only calls from the same turn are answered now
+                # and travel with the request, so the model does not have
+                # to ask for them again after the approval.
+                "answered": toolloop.answer_all(answerable, active_session),
+                "calls": needs_approval,
+                "read_only_calls": answerable,
+            }}
+            return
+
+        # Only read-only calls: answer them and go round again, without the
+        # browser seeing anything but the text.
+        results = toolloop.answer_all(answerable, active_session)
+        prior = turns.with_tool_exchange(
+            prior, shape, "".join(said), answerable, results)
+
+    # The bound was reached. Said rather than left as a turn that simply
+    # stopped: a model looping on read-only questions is a fact about the
+    # answer somebody is reading.
+    yield ("\n\n_The assistant reached its limit of "
+           f"{rounds} lookups for this question._")
 
 
 def _parsed_tables(session: dict) -> list[str]:

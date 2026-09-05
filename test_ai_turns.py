@@ -209,7 +209,11 @@ def test_usage_passes_through_the_router() -> None:
     from backend.ai import router, ollama_client
     from backend.connections.manager import SessionManager
 
-    async def fake(user_message, context_block, model=None, system_prompt=None, history=None):
+    # **kwargs: the router also passes `tools` and `prior` now (#560),
+    # and a fake that enumerates the provider contract needs editing
+    # every time that contract grows.
+    async def fake(user_message, context_block, model=None,
+                   system_prompt=None, history=None, **kwargs):
         yield "hel"
         yield "lo"
         yield {"usage": {"provider": "ollama", "input": 12, "output": 2, "cache_read": 0}}
@@ -247,7 +251,11 @@ def test_session_notes_are_not_troubleshooting() -> None:
 
     seen: dict = {}
 
-    async def fake(user_message, context_block, model=None, system_prompt=None, history=None):
+    # **kwargs: the router also passes `tools` and `prior` now (#560),
+    # and a fake that enumerates the provider contract needs editing
+    # every time that contract grows.
+    async def fake(user_message, context_block, model=None,
+                   system_prompt=None, history=None, **kwargs):
         seen.update({"message": user_message, "context": context_block, "system": system_prompt})
         yield "notes"
 

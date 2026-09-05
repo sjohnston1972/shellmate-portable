@@ -30,6 +30,8 @@ async def stream_response(
     model: str | None = None,
     system_prompt: str | None = None,
     history: list[dict] | None = None,
+    tools: list[dict] | None = None,
+    prior: list[dict] | None = None,
 ) -> AsyncIterator:
     """
     Stream a DeepSeek response token by token.
@@ -41,6 +43,6 @@ async def stream_response(
 
     async for item in openai_compat.stream(
         PROVIDER, api_key, user_message, context_block, model or DEEPSEEK_MODEL,
-        system_prompt=system_prompt, history=history,
+        system_prompt=system_prompt, history=history, tools=tools, prior=prior,
     ):
         yield item

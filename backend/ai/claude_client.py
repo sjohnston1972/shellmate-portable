@@ -13,7 +13,8 @@ from backend.advanced import get as advanced
 
 from backend.config import ANTHROPIC_API_KEY
 from backend.settings_store import get_effective
-from backend.ai import http, turns
+from backend.ai import http, toolloop
+from backend.ai import tools as tool_registry, turns
 from backend.ai.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -112,10 +113,22 @@ async def stream_response(
     model: str | None = None,
     system_prompt: str | None = None,
     history: list[dict] | None = None,
+    tools: list[dict] | None = None,
+    prior: list[dict] | None = None,
 ) -> AsyncIterator:
     """
     Stream a Claude API response token by token.
-    Yields text chunks as they arrive.
+
+    Yields text chunks as they arrive, then — when the model asked for
+    something — a ``{"tool_calls": [...]}`` dict, and finally the usage.
+
+    Args:
+        tools: Tool definitions to offer, or None to stay text-only.
+        prior: Messages from an earlier tool exchange in this same turn,
+               spliced in after the history so the model sees its own
+               request and the answer to it rather than being told about
+               them afterwards in prose.
+
     Raises on API or auth errors.
     """
     api_key = get_effective("anthropic_api_key", ANTHROPIC_API_KEY)
@@ -134,6 +147,12 @@ async def stream_response(
     # cacheable (#416); the context block and the question come last.
     system_blocks, messages = turns.anthropic_request(
         system_prompt or SYSTEM_PROMPT, history, full_user_message)
+    # An earlier exchange in this turn goes *before* the question, in the
+    # order it happened: the model's request, the result, then what it was
+    # asked in the first place stays where it was.
+    if prior:
+        messages = messages[:-1] + list(prior) + messages[-1:]
+
     payload = {
         "model": model or _fallback_model(),
         "max_tokens": advanced("ai.max_tokens"),
@@ -141,7 +160,10 @@ async def stream_response(
         "messages": messages,
         "stream": True,
     }
+    if tools:
+        payload["tools"] = tools
     usage: dict = {}
+    collector = toolloop.AnthropicCollector()
     # Sampling parameters were removed from the Claude 5 family and from
     # Opus 4.7 onwards: sending `temperature` is a 400, not a warning. It is
     # sent only to models known to accept it, and dropped and retried once
@@ -162,6 +184,15 @@ async def stream_response(
                         _NO_SAMPLING.add(payload["model"])
                         payload.pop("temperature", None)
                         continue
+                    # A model that will not take tool definitions falls
+                    # back to suggestion tags rather than failing: it is
+                    # not an error, it is a model (#560).
+                    if (attempt == 1 and resp.status_code == 400
+                            and "tools" in payload
+                            and tool_registry.looks_like_a_tools_refusal(body)):
+                        tool_registry.remember_refusal("claude", payload["model"])
+                        payload.pop("tools", None)
+                        continue
                     raise ValueError(_explain_api_error(resp.status_code, body,
                                                         payload.get("model", "")))
 
@@ -174,10 +205,17 @@ async def stream_response(
                     try:
                         event = json.loads(data)
                         kind = event.get("type")
-                        if kind == "content_block_delta":
+                        if kind == "content_block_start":
+                            collector.block_start(event.get("index", 0),
+                                                  event.get("content_block") or {})
+                        elif kind == "content_block_delta":
                             delta = event.get("delta", {})
                             if delta.get("type") == "text_delta":
                                 yield delta.get("text", "")
+                            else:
+                                # A tool call's arguments, arriving as
+                                # partial JSON across several deltas.
+                                collector.block_delta(event.get("index", 0), delta)
                         elif kind == "message_start":
                             # Input-side counts arrive first, cache hits included.
                             u = (event.get("message") or {}).get("usage") or {}
@@ -199,6 +237,11 @@ async def stream_response(
                     except json.JSONDecodeError:
                         continue
                 break
+    calls = collector.calls()
+    if calls:
+        # After the text, before the usage: the caller has already streamed
+        # whatever the model said about what it is about to ask for.
+        yield {"tool_calls": calls}
     if usage:
         usage["provider"] = "anthropic"
         yield {"usage": usage}
