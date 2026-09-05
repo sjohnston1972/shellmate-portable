@@ -359,6 +359,11 @@
               <span class="material-symbols-outlined">tune</span>
               <span class="av-tab-label">Environments</span>
             </button>
+            <button type="button" class="av-tab" data-av-go="deployments"
+                    title="Build infrastructure from a definition: sites, a scheme, a plan, then an apply">
+              <span class="material-symbols-outlined">automation</span>
+              <span class="av-tab-label">Deployments</span>
+            </button>
             <button type="button" class="av-tab" data-av-go="keys"
                     title="Credentials a run needs, held in the vault">
               <span class="material-symbols-outlined">key</span>
@@ -495,6 +500,16 @@
               <p>A named set of run settings, so “run it against production” is one choice rather than six fields typed the same way every time. A run inherits whatever it left blank — except forced check mode, which an environment can turn on and no run can turn off.</p>
             </header>
             <div class="av-area-body" id="av-environments-body">
+              <p class="av-empty">Nothing here yet.</p>
+            </div>
+          </section>
+
+          <section class="av-area" id="av-deployments" data-av-area="deployments" hidden>
+            <header class="av-area-head">
+              <h3>Deployments</h3>
+              <p>Infrastructure built from a definition rather than discovered: a site list, a scheme, and the runner’s plan and apply playbooks, committed to your repository in one commit. Nothing is built until a plan has been read — Meraki has no check mode, so the plan is the only preview there is.</p>
+            </header>
+            <div class="av-area-body" id="av-deployments-body">
               <p class="av-empty">Nothing here yet.</p>
             </div>
           </section>
@@ -4066,6 +4081,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/ansible_templates.js"></script>
   <script src="/static/js/ansible_inventory.js"></script>
   <script src="/static/js/ansible_environments.js"></script>
+  <script src="/static/js/ansible_deployments.js"></script>
   <script src="/static/js/ansible_keys.js"></script>
   <script src="/static/js/ansible_repositories.js"></script>
   <script>

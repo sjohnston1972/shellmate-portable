@@ -12421,3 +12421,132 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
   overflow: auto;
   white-space: pre;
 }
+
+/* --------------------------------------------------------------------------
+   Deployments — sites, a scheme, a plan, then an apply
+   -------------------------------------------------------------------------- */
+.av-dep-card { cursor: pointer; }
+
+.av-dep-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.av-dep-head h4 { margin: 0; flex: 1; min-width: 0; }
+
+/* The five steps, in the order they happen. Numbered because they are a
+   sequence — publish before plan, plan before apply — and the number is
+   what says so. */
+.av-dep-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.av-dep-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+}
+
+.av-dep-step-n {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--on-primary);
+  background: var(--primary);
+}
+
+.av-dep-step-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+/* The reason Apply is off, in words. A disabled button with no sentence
+   is a puzzle; this one has a rule behind it worth knowing. */
+.av-dep-why {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.av-dep-run {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--outline);
+}
+
+.av-dep-run-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.av-dep-run-head h5 { margin: 0; flex: 1; font-size: 13px; }
+
+.av-dep-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.av-dep-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+.av-dep-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--on-surface-dim);
+  border-bottom: 1px solid var(--outline);
+}
+
+.av-dep-table td {
+  padding: 6px 8px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--outline);
+  overflow-wrap: anywhere;
+}
+
+.av-dep-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--on-surface-dim);
+}
+
+.av-dep-changes {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--on-surface-dim);
+}
+
+/* Only the rows that need reading are tinted: a conflict or a failure.
+   Five hundred "unchanged" rows in colour would drown the two that matter. */
+.av-dep-conflict td, .av-dep-failed td { background: var(--error-tint, transparent); }

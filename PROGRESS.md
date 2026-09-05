@@ -66,3 +66,26 @@ against. Ids per site land on the record from the apply's result.
 The API test drives the whole flow against the runner's real payloads
 from `test_fixtures/`. `python test_deployments_api.py` — 24 passed.
 Guards: deployments 42, publish 24, ansible 79, startup 154, library 83.
+
+## 2026-09-05 22:50 — step 6 done: the Deployments area
+
+`frontend/js/ansible_deployments.js`, a tab beside Environments. A list of
+cards; a detail view laid out as the five steps in the order they happen
+— sites, scheme, publish, plan, apply — with the plan and outcome tables
+under them, rendered from the runner's real payloads.
+
+The interface keeps the backend's rules rather than its own: Apply is off
+on the server's `apply_blocked` word, with the reason written beside it,
+and `disabled` is only ever set when true (el() sets any attribute it is
+given, and disabled="false" is a disabled button — caught by reading el()
+rather than assuming). Conflicts then creates in a plan; failures then
+creates in an outcome. Network ids on plan rows too, so an unchanged or
+conflicting site names the network it matched before any apply exists.
+
+The scheme editor is generic JSON until the runner's kit declares its
+fields — a form invented here for fields the playbook does not read would
+be a form that lies. Step 3 waits on the runner's plan.yml/apply.yml and
+its scheme field list.
+
+`python test_deployments_ui.py` — 24 passed, including one pass in a
+browser. `test_ansible_view.py` gained the tab: 44 passed.

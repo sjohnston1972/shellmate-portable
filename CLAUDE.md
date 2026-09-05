@@ -104,6 +104,7 @@ shellmate/
 │   ├── config_push.py           # Apply configuration with a preview first, and a way back (#407)
 │   ├── configs.py               # Configuration capture, storage and drift reporting
 │   ├── crash.py                 # What ShellMate can say about a fault it did not survive (#568)
+│   ├── deployments.py           # Infrastructure built from a definition, not discovered
 │   ├── desktop.py               # Present ShellMate as a desktop application rather than a browser…
 │   ├── diagnostics.py           # Is this install healthy? (#562)
 │   ├── discovery.py             # Finding out what is on the wire
@@ -181,6 +182,7 @@ shellmate/
 │       ├── ansible.js           # Driving an Ansible runner, and watching it work (#585)
 │       ├── ansible_builder.js   # A playbook, drawn as the thing it is (#586, #600)
 │       ├── ansible_dashboard.js # The Ansible view's first screen (#586)
+│       ├── ansible_deployments.js # Infrastructure from a definition: sites, a scheme, a plan, then…
 │       ├── ansible_environments.js # Named settings a run inherits, so production is one choice not…
 │       ├── ansible_estate.js    # Turning something dragged out of the tree into a target (#601)
 │       ├── ansible_inventory.js # What a run is pointed at, and where a list comes from (#586, #608)
