@@ -2056,6 +2056,20 @@ async def _start_backup_scheduler() -> None:
     except Exception as exc:
         logger.warning("History housekeeping at startup: %s", exc)
 
+    # Change windows nobody closed (#544). Left forever, a stale record
+    # claims a window that ended a fortnight ago, and the diff at the end
+    # would carry everything that happened since — which reads as one
+    # enormous change nobody made.
+    try:
+        from backend import change as change_module
+
+        dropped = await asyncio.to_thread(change_module.prune_stale)
+        if dropped:
+            logger.info("Dropped %d change window(s) left open past the "
+                        "stale bound", len(dropped))
+    except Exception as exc:
+        logger.warning("Change housekeeping at startup: %s", exc)
+
 
 @app.on_event("startup")
 async def _flush_feedback_outbox() -> None:
@@ -3987,6 +4001,198 @@ async def support_reveal(request: SupportRequest) -> dict:
         logger.info("Could not open the bundle folder: %s", exc)
         opened = False
     return {"opened": opened, "folder": str(folder)}
+
+
+# ---------------------------------------------------------------------------
+# REST — Change records (#544)
+#
+# A change is a window: capture, work, capture, diff, and the commands typed
+# in between. Everything is keyed on the hostname rather than the session,
+# because a reload is frequently the change being made and a reload is what
+# destroys a session. See backend/change.py.
+# ---------------------------------------------------------------------------
+
+
+class ChangeStartRequest(BaseModel):
+    """Body for POST /api/sessions/{id}/change/start."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note: str = ""
+    ticket: str = ""
+
+
+def _change_device(session: dict) -> str:
+    """
+    What the change is about.
+
+    The hostname the device reported, falling back to the label and then the
+    target. A change has to be findable later from a different session, and
+    the display label is the only thing that survives a device that never
+    gave a prompt ShellMate recognised.
+    """
+    return (str(session.get("hostname") or "").strip()
+            or str(session.get("display_label") or "").strip()
+            or str(session.get("target") or "").strip())
+
+
+@app.get("/api/changes")
+async def list_changes() -> dict:
+    """Every open change window, newest first."""
+    from backend import change as change_module
+
+    rows = await asyncio.to_thread(change_module.open_changes)
+    return {"changes": [c.as_dict() for c in rows]}
+
+
+@app.post("/api/sessions/{session_id}/change/start")
+async def change_start(session_id: str, request: ChangeStartRequest) -> dict:
+    """
+    Open a change window: capture the configuration and pin it.
+
+    A capture that fails does not stop the window. A device that will not
+    give up its configuration is exactly the one somebody most wants a
+    record of working on, and the record carries the reason instead — the
+    alternative is refusing to bracket the work that most needs it.
+    """
+    from backend import change as change_module
+
+    session = _require_session(session_id)
+    hostname = _change_device(session)
+    if not hostname:
+        raise HTTPException(
+            status_code=400,
+            detail="This session has no device name yet, so a change would "
+                   "have nothing to be about. Wait for a prompt, or rename "
+                   "the tab.")
+
+    before_id, capture_error = None, ""
+    try:
+        captured = await asyncio.to_thread(capture_config, session)
+        before_id = (captured.get("snapshot") or {}).get("id")
+    except Exception as exc:
+        capture_error = str(exc)
+        logger.info("No baseline for a change on %s: %s", hostname, exc)
+
+    try:
+        record = await asyncio.to_thread(
+            change_module.start, hostname, request.note, request.ticket,
+            str(session.get("username") or ""),
+            str(session.get("display_label") or ""),
+            before_id, capture_error)
+    except ValueError as exc:
+        # Already open on this device. A 409 rather than a 400: the request
+        # is well formed and the state is the problem, and the message names
+        # what is in the way.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    # Pinned as the baseline so "since your last visit" measures from the
+    # start of the change rather than from whenever somebody last logged in
+    # — which is what merely looking at the device consumes.
+    if before_id:
+        try:
+            await asyncio.to_thread(
+                store.set_baseline, hostname, before_id,
+                request.note or "Change window")
+        except Exception as exc:                          # pragma: no cover
+            logger.info("Could not pin the baseline for %s: %s", hostname, exc)
+
+    return {"change": record.as_dict()}
+
+
+@app.post("/api/sessions/{session_id}/change/end")
+async def change_end(session_id: str) -> dict:
+    """
+    Close the window and build the record.
+
+    The result is what ``drift.js`` already renders — hostname, diff, counts,
+    the two snapshot ids — plus the commands typed in the window and any
+    reload still pending. Reusing that shape rather than inventing one means
+    the change record and the drift view cannot come to present the same
+    diff differently.
+    """
+    from backend import change as change_module
+
+    session = _require_session(session_id)
+    hostname = _change_device(session)
+    record = await asyncio.to_thread(change_module.active, hostname)
+    if record is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No change is open on {hostname or 'this device'}.")
+
+    after_id, capture_error = None, ""
+    try:
+        captured = await asyncio.to_thread(capture_config, session)
+        after_id = (captured.get("snapshot") or {}).get("id")
+    except Exception as exc:
+        capture_error = str(exc)
+        logger.info("No closing capture for the change on %s: %s", hostname, exc)
+
+    diff: dict = {}
+    if record.before_id and after_id:
+        old = await asyncio.to_thread(store.get_snapshot, record.before_id)
+        new = await asyncio.to_thread(store.get_snapshot, after_id)
+        if old and new:
+            diff = diff_snapshots(old, new)
+
+    commands = await asyncio.to_thread(
+        change_module.commands_in_window, hostname, record.started_at)
+
+    # Whatever is still hanging over the device. A change record that does
+    # not mention the reload waiting to happen describes a device in a state
+    # it is about to leave.
+    pending = None
+    tracker = session.get("alerts")
+    if tracker is not None:
+        try:
+            pending = (tracker.payload() or {}).get("pending")
+        except Exception:                                 # pragma: no cover
+            pending = None
+
+    # Closed last, and only once the record above is assembled: ending the
+    # window before building it would lose the baseline id on any failure in
+    # between, and the baseline is the half that cannot be recovered.
+    await asyncio.to_thread(change_module.end, hostname)
+
+    return {
+        "change":   record.as_dict(),
+        "hostname": record.hostname or hostname,
+        "old_id":   record.before_id,
+        "new_id":   after_id,
+        "diff":     diff.get("diff", ""),
+        "added":    diff.get("added", 0),
+        "removed":  diff.get("removed", 0),
+        "changed":  diff.get("changed", 0),
+        # drift.js says "since N days ago"; for a change the window is the
+        # interesting span and it is usually minutes, so it goes in a field
+        # of its own as well rather than being rounded to a day.
+        "days_since":     round(record.age_seconds / 86400, 2),
+        "window_seconds": round(record.age_seconds, 1),
+        "commands":       commands,
+        "pending":        pending,
+        "capture_error":  capture_error or record.capture_error,
+        # Which half is missing, when one is. "No diff" and "we could not
+        # look" are different facts, and a change board must not read the
+        # second as the first.
+        "comparable": bool(record.before_id and after_id),
+    }
+
+
+@app.post("/api/sessions/{session_id}/change/abandon")
+async def change_abandon(session_id: str) -> dict:
+    """
+    Drop an open change without producing a record.
+
+    Separate from ending it, because a change opened on the wrong device
+    should not leave a diff behind implying somebody did something there.
+    """
+    from backend import change as change_module
+
+    session = _require_session(session_id)
+    hostname = _change_device(session)
+    dropped = await asyncio.to_thread(change_module.abandon, hostname)
+    return {"abandoned": dropped, "hostname": hostname}
 
 
 # ---------------------------------------------------------------------------

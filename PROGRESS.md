@@ -41,3 +41,36 @@ history store, and step 2 drives it through the API.
 
 `python test_change.py` — 38 passed, 0 failed.
 
+## 2026-09-05 09:52 — step 2 done (#544)
+
+`POST /api/sessions/{id}/change/start`, `/end` and `/abandon`, plus
+`GET /api/changes`. `prune_stale` is called at startup rather than being
+declared and never read.
+
+The end record is deliberately the shape `drift.js showDiff` already
+renders — hostname, diff, counts, the two snapshot ids — plus the commands
+and any pending reload. Inventing a second shape would let the change
+record and the drift view come to present the same diff differently.
+
+The test that earns its place covers **the two kinds of nothing**, in all
+four combinations, because both captures fail independently:
+
+- both ends captured, nothing moved → comparable, zero changes
+- captured at the start, device gone at the end → **not** comparable, and
+  the reason carried. This is the ordinary shape of a change that reloaded
+  the device, and reporting it as "no difference" would tell a change board
+  the work had no effect
+- nothing captured at the start → the window still opens, carrying why
+- neither → not comparable, and said so
+
+Three smaller decisions: a second change on a device is a **409** rather
+than a 400, because the request is well formed and the state is the
+problem; the window is closed **last**, after the record is assembled, so
+a failure in between cannot lose the baseline id, which is the half that
+cannot be recovered; and a session with no device name is refused, because
+a change keyed on nothing could never be found from anywhere else.
+
+Also: a broken alert tracker does not take the record with it. Tested.
+
+`python test_change_api.py` — 33 passed, 0 failed. test_change 38.
+
