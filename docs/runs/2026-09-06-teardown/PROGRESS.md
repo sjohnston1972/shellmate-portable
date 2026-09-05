@@ -73,3 +73,8 @@ baseline. The real dry-run payload (four removals, one skip with its
 reason) is in the fixtures and the table's skip-row rendering is asserted.
 
 Full suite: 116 of 116. Tests: ui 43.
+
+## 2026-09-06 05:40 — close-out
+
+Executable rebuilt at `8a928fd`, 37068838 bytes. Full suite 116 of 116.
+Archived to `docs/runs/2026-09-06-teardown/`; DONE is the hand-off.

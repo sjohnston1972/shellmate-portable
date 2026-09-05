@@ -1,0 +1,60 @@
+# DONE — Teardown: destroy behind a plan, proven against the test resources
+
+Run of 2026-09-06, small hours. Archive: `docs/runs/2026-09-06-teardown/`.
+
+## What it accomplished
+
+All six steps. The runner ran every destroy for real against the test
+resources Steven said to use, and the estate is back to exactly what it
+was before any deployment work began.
+
+| Step | Commit | What |
+|---|---|---|
+| 1 | runner | All three destroys proven; `dry_run` shipped as the extra var; mirror test passes for each |
+| 2 | `f77597a` | `destroy.yml` travels with a deployment as its fifth file |
+| 3 | `eafb45b` | Destroy plan and gated destroy over the API; the name checked server-side; ids kept for what did not go |
+| 4, 5 | `8e62819` | The destroy step and dialog; the orphan warning; Forget offers Destroy first |
+| 6 | this commit | Manual, suite 116 of 116, executable rebuilt at `8a928fd` (37068838 bytes), archived |
+
+## What running the destructive path found
+
+- **AWS's ordering was wrong**: subnets must go before the VPC, and the
+  logic had been tidied away as dead code. Found by `DependencyViolation`,
+  not by reading.
+- **AWS's report lied about success**: `removed` listed what was
+  *attempted*, so both VPCs appeared as removed and as failed. A table
+  rendered from names would have shown a clean teardown. Counts are now
+  computed from the rows on the runner's side, and ShellMate's table
+  renders from `outcome` per row, failures first.
+- **A site removed from `sites.yml` is orphaned.** Destroy sees only the
+  list. Two networks had been dropped from their data sets and had to be
+  put back to be removed. This is the sharpest gap in the model, and it
+  became two pieces of interface rather than a note.
+- **What destroy does not remove**, observed per provider, is now the
+  dialog's text — including "claimed devices: untested" for Meraki.
+
+## Decisions Steven took
+
+- The test resources were the ones to prove destroy against. They are
+  gone; the estate is at baseline.
+
+## Left unfinished, deliberately
+
+- Claimed MX/MS serials: destroy of a network holding a claimed device is
+  untested because the org has none.
+- Scheduled applies (#611) and inventory hosts if VMs appear — unchanged.
+
+## The one thing Steven has to do — it matters more now
+
+**Press the three "Commit the … kit" buttons once**, in the ShellMate whose
+Settings → Ansible point at the runner and at GitHub. Three kits, three
+example deployments and the dry-run destroys exist only on the runner's
+disk. ShellMate is the sole git writer by Steven's decision, so nothing
+else will ever commit them.
+
+## Recommended starting point for the next run
+
+The team-and-identity cluster: **#566** (shared team folder — build it on
+`setup_bundle.PARTS`, the format it was missing), **#526** (SSH agent;
+`certs.py` has the smaller half), **#541** (operator identity and audit
+trail). None needs a decision first.
