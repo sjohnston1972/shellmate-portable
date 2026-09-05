@@ -1,0 +1,98 @@
+# Run finished — 5 September 2026
+
+Ten steps planned, ten done. Archive in
+`docs/runs/2026-09-05-open-issue-list/` (PLAN.md and the full PROGRESS.md
+with the reasoning behind each decision).
+
+**81 of 81 test files passing** at `b2a5c7b`. Every step committed and
+pushed to `origin/main` as it closed.
+
+
+## What the run did
+
+| Issue | What shipped | Commit |
+|---|---|---|
+| #608 | Custom inventories: the store, the Inventory area, the Run-dialog picker, five worked examples | `90da66d` |
+| #586 | A failing test file now keeps its output; the intermittent's cause found and fixed | `a9ad416`, `e035e33` |
+| #609 | A playbook can be committed to GitHub on save, vault-backed token, private by default | `c621e0f` |
+| #527 | `~/.ssh/config` imported as profiles, and filled into the connection dialog | `c3c1216` |
+| #530 | Session notes, kept with the history and searchable with it | `e035e33` |
+| #525 | Break over telnet, baud changed mid-session, DTR/RTS, per-transport capabilities | `0606787` |
+| #539 | The scheduled-backup digest (the webhook half is **not** done — see below) | `677d989` |
+| #542 | CDP/LLDP neighbours from a live session, saved into a group | `b2a5c7b` |
+
+Plus one test of my own from the previous run that read the wall clock and
+so passed or failed by the hour (`d9181af`).
+
+
+## The find worth knowing about
+
+**The intermittent suite failure (#586) is solved, and it was never the
+application.** `test_sftp.py` stands up five fake SSH servers, each with a
+freshly generated host key on an ephemeral port — and the OS recycles those
+ports. When a later server landed on a port an earlier one had used,
+ShellMate compared the new key with the one it had remembered and correctly
+refused. The fixture was two different machines claiming to be one host.
+
+That explains every property the failure had: about one run in three,
+because a collision needs the port pool to have wrapped; never when the file
+ran alone, because forty other files are what cycles it; and
+order-dependent, which is what made it look like a race. Proved by
+reproducing the exact message from the kept log and then not reproducing it
+after forgetting the entry.
+
+It was only findable because the first step of the run made the runner keep
+a failing file's output. Before that, every occurrence arrived as one word.
+
+
+## Left undone, deliberately
+
+**The executable is not rebuilt.** Bundled frontend files changed in almost
+every step, so `dist/ShellMate-Portable.exe` is stale — it is from 00:05
+this morning. PyInstaller could not replace it because ShellMate is running
+(PIDs 25092 and 33288), and killing it could have dropped live device
+sessions. **Close ShellMate and run `pyinstaller build.spec --noconfirm`
+before testing any of this from the executable.**
+
+**The webhook half of #539.** The issue is "an in-app digest *and* an
+outbound webhook"; the plan asked for the digest. Two things need your
+decision first, and both are recorded on the issue: which Teams format to
+ship now that Workflows changed it, and whether diff text may ever leave
+the machine at all. That second one is policy, not implementation.
+
+**Group-level neighbour collection (#542).** One device at a time works;
+sweeping every open session in a group is a loop over the same call. Left
+out because forty devices' worth of neighbours in one list is a different
+screen from one device's, and the single-device one should be seen first.
+
+**Still blocked on you:** #611 (CI/CD — needs a host that boots without a
+login), #594 (cloud inventory — needs the integrations), #518 (code signing
+— needs a certificate decision).
+
+
+## What I would suggest next
+
+The Ansible list is finished. The open list is now mostly the AI cluster
+(#551–#561) and the estate cluster (#543–#548), and they are different kinds
+of work.
+
+My suggestion is **the estate cluster**, because three of them compound
+with what this run just built:
+
+- **#544 change record** — pre and post snapshots around a piece of work,
+  with the commands typed in between. Session notes (#530) and the config
+  archive are now both there; this is the thing that joins them.
+- **#543 compliance check** against a golden snippet per group, with a
+  fix-this-device path. The backup digest already runs the group and knows
+  what changed.
+- **#547 scheduled show collection** — read-only snippets on the backup
+  timer. Same timer, same storage, same diff.
+
+The alternative is the AI cluster, where **#553** (show what the assistant
+saw) and **#551** (ask about a selection) are the two that change how the
+panel feels day to day.
+
+**One decision I need before either can be planned:** which cluster, and for
+the AI one, whether you want #560 (native tool use) in the same batch — it
+changes the shape of every other AI issue, so doing it late means doing some
+of them twice.
