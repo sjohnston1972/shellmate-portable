@@ -826,6 +826,18 @@ SETTINGS: tuple[Setting, ...] = (
             "The relay files each report as a GitHub issue. Emptied, "
             "reports are saved to feedback-outbox.json in the data folder "
             "instead of being sent anywhere."),
+    Setting("ai.native_tools", "Let the assistant use tools", True, "bool",
+            "Ask for commands and data through the provider's own tool "
+            "calling, rather than by wrapping suggestions in tags.",
+            "The model can ask, see the answer and carry on in one turn "
+            "instead of one request per step, and things like parsed rows "
+            "and drift are fetched when wanted rather than loaded into "
+            "every request.||Turning it off falls back to suggestion tags, "
+            "which every model supports. The approval gate is the same "
+            "either way: a tool call puts a command in front of you, it "
+            "does not run one.",
+            applies="live"),
+
     # --- Session log search (#576) -----------------------------------------
     Setting("logs.search_max_bytes", "Searched per log file", 5_000_000, "int",
             "How much of one log file the search reads before it stops.",

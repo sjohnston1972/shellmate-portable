@@ -145,3 +145,114 @@ def anthropic_request(system: str, history: list | None, user: str) -> tuple[lis
         }
     messages.append({"role": "user", "content": user})
     return system_blocks, messages
+
+
+# ---------------------------------------------------------------------------
+# Tool turns (#560)
+#
+# A tool exchange is three messages, not one: the assistant's request, the
+# result, and then whatever the assistant says having seen it. The two
+# provider families disagree about how each of those is shaped, and about
+# which role the result belongs to — Anthropic sends it as a *user* message
+# containing a tool_result block, while the OpenAI shape gives it a role of
+# its own. Both are generated here rather than in the clients, so a change
+# to the conversation shape lands in one place and stays symmetrical.
+# ---------------------------------------------------------------------------
+
+
+def anthropic_tool_call(text: str, calls: list[dict]) -> dict:
+    """
+    The assistant turn that asked for something.
+
+    Anthropic requires the assistant's own text to travel with the tool_use
+    blocks in one message. Dropping it loses the model's reasoning for the
+    request, which is the half a person reads before approving.
+    """
+    content: list[dict] = []
+    if (text or "").strip():
+        content.append({"type": "text", "text": text})
+    for call in calls:
+        content.append({
+            "type": "tool_use",
+            "id": call["id"],
+            "name": call["name"],
+            "input": call.get("arguments") or {},
+        })
+    return {"role": "assistant", "content": content}
+
+
+def anthropic_tool_results(results: list[dict]) -> dict:
+    """
+    The results, as the *user* turn Anthropic expects them to be.
+
+    Every result for one assistant turn goes in a single message: sending
+    them one message each produces two user turns in a row, which the API
+    refuses.
+    """
+    return {
+        "role": "user",
+        "content": [{
+            "type": "tool_result",
+            "tool_use_id": result["id"],
+            "content": str(result.get("content", "")),
+            **({"is_error": True} if result.get("is_error") else {}),
+        } for result in results],
+    }
+
+
+def openai_tool_call(text: str, calls: list[dict]) -> dict:
+    """The assistant turn that asked, in the OpenAI shape."""
+    import json as _json
+
+    return {
+        "role": "assistant",
+        # None rather than "": some implementations reject an empty string
+        # alongside tool_calls, and the field is optional when there is no
+        # prose to carry.
+        "content": (text or None) if (text or "").strip() else None,
+        "tool_calls": [{
+            "id": call["id"],
+            "type": "function",
+            "function": {
+                "name": call["name"],
+                "arguments": _json.dumps(call.get("arguments") or {}),
+            },
+        } for call in calls],
+    }
+
+
+def openai_tool_results(results: list[dict]) -> list[dict]:
+    """
+    The results, one message each — the opposite of Anthropic's rule.
+
+    A list rather than a single message, so the caller extends the
+    conversation with it either way and the difference stays here.
+    """
+    return [{
+        "role": "tool",
+        "tool_call_id": result["id"],
+        "content": str(result.get("content", "")),
+    } for result in results]
+
+
+def with_tool_exchange(messages: list[dict], shape: str, text: str,
+                       calls: list[dict], results: list[dict]) -> list[dict]:
+    """
+    Append one complete request-and-answer to a conversation.
+
+    Args:
+        messages: The conversation so far, which is extended in place-safe
+                  fashion (a new list is returned).
+        shape:    "anthropic" or "openai".
+        text:     Anything the assistant said alongside its request.
+        calls:    ``[{"id", "name", "arguments"}]``.
+        results:  ``[{"id", "content", "is_error"}]``.
+    """
+    out = list(messages)
+    if shape == "anthropic":
+        out.append(anthropic_tool_call(text, calls))
+        out.append(anthropic_tool_results(results))
+    else:
+        out.append(openai_tool_call(text, calls))
+        out.extend(openai_tool_results(results))
+    return out
