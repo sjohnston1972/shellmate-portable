@@ -194,6 +194,18 @@ def logs_dir() -> Path:
     return data_dir() / "logs"
 
 
+def reports_dir() -> Path:
+    """
+    Directory holding exported reports (#540, #574).
+
+    Beside the logs rather than inside them: a log is a byproduct of a
+    session and is pruned on a retention timer, while a report was asked
+    for, named, and is very likely the thing somebody is about to attach
+    to a change record. Sweeping one folder must not take the other.
+    """
+    return data_dir() / "reports"
+
+
 def db_file() -> Path:
     """Path to the SQLite session store."""
     return data_dir() / "shellmate.db"
