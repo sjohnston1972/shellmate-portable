@@ -878,6 +878,50 @@ async def config_diff_endpoint(old_id: int, new_id: int) -> dict:
     return diff_snapshots(old, new)
 
 
+@app.get("/api/sessions/{session_id}/last-output")
+async def session_last_output(session_id: str, command: str = "",
+                              after: float = 0.0) -> dict:
+    """
+    The most recently finished command on this session, for a tool result (#560).
+
+    The browser needs the output of a command it just approved, and the
+    alternative is scraping its own terminal — which means reimplementing
+    prompt detection in JavaScript, badly, alongside the one in
+    `transcript.py` that already does it. This reads the records that layer
+    produces.
+
+    ``after`` is what makes it correct rather than merely working. Running
+    `show version` twice would otherwise match the first run's record and
+    hand the model output from before its own request. The browser sends
+    the moment it approved, and a record older than that is not the answer.
+
+    Returns ``ready: False`` while the device is still talking, so the
+    caller polls rather than being given half an answer.
+    """
+    session = _require_session(session_id)
+    records = list(session.get("recent_records") or [])
+    wanted = (command or "").strip().lower()
+
+    for record in reversed(records):
+        ran_at = float(getattr(record, "started_at", 0) or 0)
+        if after and ran_at < after - 1.0:
+            # Older than the approval: this is a previous run of the same
+            # command, not the one being waited for.
+            continue
+        text = str(getattr(record, "command", "") or "").strip()
+        if wanted and wanted not in text.lower():
+            continue
+        return {
+            "ready": True,
+            "command": text,
+            "output": outbound.redact_text(
+                str(getattr(record, "output", "") or "")),
+            "ran_at": ran_at,
+        }
+
+    return {"ready": False, "command": command, "output": "", "ran_at": 0.0}
+
+
 @app.post("/api/sessions/{session_id}/snapshot")
 async def capture_snapshot(session_id: str) -> dict:
     """

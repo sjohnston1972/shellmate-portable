@@ -21,6 +21,9 @@
   let currentModel    = 'claude-sonnet-5'; // specific model string
   let contextMode     = 'active'; // 'active' | 'all' | '1'..'9'
   let streamingBubble = null;     // the <div> currently being filled
+  // The last question's payload, so a tool exchange can be resumed with
+  // the same question rather than a reconstructed one (#560).
+  let lastSentPayload = null;
   const _outputWatchers = new Map();  // active command output watchers, by session (#317)
   // Auto-analyses that arrived while a reply was still streaming (#489),
   // sent one at a time as each reply finishes. Dropping them was silent.
@@ -257,6 +260,10 @@
 
     if (msg.type === 'chunk') {
       appendChunk(msg.data);
+    } else if (msg.type === 'tool_request') {
+      // The model asked to run something (#560). Rendered as the command
+      // block a suggestion tag produces; nothing runs until it is clicked.
+      handleToolRequest(msg);
     } else if (msg.type === 'usage') {
       _recordUsage(msg);
     } else if (msg.type === 'done') {
@@ -367,7 +374,7 @@
       const picked = typeof window.getChatContextSelection === 'function'
         ? window.getChatContextSelection() : null;
 
-      chatWs.send(JSON.stringify({
+      lastSentPayload = {
         message,
         history,
         investigate_step:  _investigation.steps,
@@ -382,11 +389,240 @@
         context_mode:      picked ? 'selected' : mode,
         mode:              ansibleMode ? 'ansible' : aiMode,
         ...(ansibleMode ? { ansible_canvas: canvasState() } : {}),
-      }));
+      };
+      chatWs.send(JSON.stringify(lastSentPayload));
     } else {
       finishStreaming();
       appendErrorBubble('Not connected to server. Reconnecting\u2026');
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Native tool use (#560)
+  //
+  // The model asked to run something. That arrives as a `tool_request`
+  // rather than a `[SUGGEST_CMD]` tag, and it renders as the same command
+  // block — deliberately, because the person approving should not have to
+  // learn a second thing depending on which provider answered.
+  //
+  // What is different is what happens *after* the click. A tag's command is
+  // sent and that is the end of it; the model finds out on the next turn, in
+  // prose. A tool call's output goes back as the result of the model's own
+  // request, so it continues the exchange it started. That is the whole
+  // point of the feature, and it is why this waits for the output rather
+  // than firing and forgetting.
+  // -------------------------------------------------------------------------
+
+  /** The exchange waiting on somebody's decision, or null. */
+  let pendingTool = null;
+
+  /** How long to wait for the device to finish before giving up. */
+  const TOOL_OUTPUT_TIMEOUT_MS = 45000;
+  const TOOL_POLL_MS = 700;
+
+  function handleToolRequest(msg) {
+    pendingTool = {
+      shape: msg.shape || 'openai',
+      text: msg.text || '',
+      calls: msg.calls || [],
+      // Read-only calls from the same turn, already answered server-side.
+      // They travel back with the approved command's result so the model
+      // does not have to ask for them a second time.
+      answered: msg.answered || [],
+      // The calls those answers belong to. They have to travel with
+      // the results or the ids in the exchange match nothing.
+      readOnlyCalls: msg.read_only_calls || [],
+    };
+
+    const call = pendingTool.calls[0];
+    if (!call) { pendingTool = null; return; }
+
+    const command = String((call.arguments || {}).command || '').trim();
+    const why = String((call.arguments || {}).why || '').trim();
+    if (!command) { pendingTool = null; return; }
+
+    // The live bubble, or the last assistant one: a request arriving
+    // after a reconnect has nowhere else to go, and dropping it leaves
+    // the model waiting for an answer nobody can give.
+    const bubble = streamingBubble
+      || messagesEl.querySelector('.chat-bubble-ai:last-of-type');
+    if (!bubble) { pendingTool = null; return; }
+
+    if (why) {
+      const line = document.createElement('p');
+      line.className = 'tool-why';
+      line.textContent = why;
+      bubble.appendChild(line);
+    }
+
+    // Bound to the session the question was asked about, exactly as a
+    // suggestion block is (#308, #316) — never to whatever is active
+    // when it is clicked.
+    const block = buildCommandBlock(
+      command, null, bubble.dataset.contextSession || '');
+    block.dataset.toolCallId = call.id || '';
+    // Marked so the approval knows to send a result back afterwards, and
+    // so the block reads as part of an exchange rather than a loose
+    // suggestion.
+    block.classList.add('cmd-block-tool');
+
+    const decline = document.createElement('button');
+    decline.type = 'button';
+    decline.className = 'btn-secondary cmd-decline';
+    decline.title = 'Tell the assistant you would rather not run this';
+    decline.innerHTML = '<span class="material-symbols-outlined">block</span>';
+    decline.addEventListener('click', () => declineTool(block));
+    const actions = block.querySelector('.cmd-block-actions');
+    if (actions) actions.appendChild(decline);
+
+    bubble.appendChild(block);
+    wireCommandBlocks(bubble);
+    wireToolApproval(block);
+    scrollToBottom();
+  }
+
+  /**
+   * Take over the Send button for a tool block.
+   *
+   * The ordinary handler injects and stops. This one injects, waits for
+   * the device to finish, and sends the output back as the result — so
+   * the model continues rather than being told about it next turn.
+   */
+  function wireToolApproval(block) {
+    const send = block.querySelector('.cmd-send');
+    const pre = block.querySelector('.cmd-block-text');
+    if (!send || !pre) return;
+
+    // Replaced rather than added to: the ordinary listener is already
+    // wired, and two handlers would inject the command twice.
+    const fresh = send.cloneNode(true);
+    send.parentNode.replaceChild(fresh, send);
+
+    fresh.addEventListener('click', async () => {
+      const command = pre.textContent.trim();
+      const target = block.dataset.targetSession || null;
+      fresh.disabled = true;
+      block.classList.add('cmd-block-running');
+
+      // The moment of approval, so a previous run of the same command is
+      // not mistaken for this one's answer.
+      const approvedAt = Date.now() / 1000;
+      const sessionId = target
+        || (typeof window.getActiveTab === 'function'
+            ? (window.getActiveTab() || {}).sessionId : null);
+
+      injectCommand(command, target);
+      if (!sessionId) { finishToolBlock(block, 'no session'); return; }
+
+      const output = await waitForOutput(sessionId, command, approvedAt);
+      finishToolBlock(block, output === null ? 'timeout' : 'done');
+      sendToolResult(command, output);
+    });
+  }
+
+  /**
+   * Poll for the finished record, or null if the device never settled.
+   *
+   * Reads the records `transcript.py` produces rather than scraping the
+   * terminal here — prompt detection is difficult and there is already one
+   * implementation of it that is careful.
+   */
+  async function waitForOutput(sessionId, command, approvedAt) {
+    const deadline = Date.now() + TOOL_OUTPUT_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, TOOL_POLL_MS));
+      try {
+        const params = new URLSearchParams({ command, after: String(approvedAt) });
+        const res = await fetch(
+          `/api/sessions/${encodeURIComponent(sessionId)}/last-output?${params}`);
+        if (!res.ok) break;
+        const data = await res.json();
+        if (data.ready) return data.output || '';
+      } catch (_) {
+        break;
+      }
+    }
+    return null;
+  }
+
+  function finishToolBlock(block, how) {
+    block.classList.remove('cmd-block-running');
+    if (how === 'timeout') block.classList.add('cmd-block-timeout');
+  }
+
+  /**
+   * Send the result back, continuing the model's own exchange.
+   *
+   * A timeout is reported as one rather than as empty output: "the device
+   * did not finish" and "the command printed nothing" are different facts
+   * and a model told the second will draw a conclusion from it.
+   */
+  function sendToolResult(command, output) {
+    if (!pendingTool || !chatWs || chatWs.readyState !== WebSocket.OPEN) {
+      pendingTool = null;
+      return;
+    }
+    const call = pendingTool.calls[0];
+    const results = [...pendingTool.answered];
+    results.push(output === null
+      ? { id: call.id, is_error: true,
+          content: `The engineer approved \`${command}\` but the device had `
+                 + 'not finished answering when ShellMate stopped waiting. '
+                 + 'The output is on their screen.' }
+      : { id: call.id, content: output || '(the command produced no output)' });
+
+    const handoff = {
+      shape: pendingTool.shape,
+      text: pendingTool.text,
+      calls: [...pendingTool.calls, ...pendingTool.readOnlyCalls],
+      results,
+    };
+    pendingTool = null;
+    resumeAfterTool(handoff);
+  }
+
+  /** Tell the model the engineer would rather not, and let it carry on. */
+  function declineTool(block) {
+    if (!pendingTool) return;
+    const call = pendingTool.calls[0];
+    block.classList.add('cmd-block-declined');
+    block.querySelectorAll('button').forEach(b => { b.disabled = true; });
+
+    const handoff = {
+      shape: pendingTool.shape,
+      text: pendingTool.text,
+      calls: [...pendingTool.calls, ...pendingTool.readOnlyCalls],
+      results: [...pendingTool.answered, {
+        id: call.id, is_error: true,
+        content: 'The engineer declined to run this. Suggest something else, '
+               + 'or explain what you would look for and why.',
+      }],
+    };
+    pendingTool = null;
+    resumeAfterTool(handoff);
+  }
+
+  /**
+   * Ask the model to continue, carrying the exchange.
+   *
+   * The same question is sent again with the exchange attached, rather than
+   * a new one: the model is answering what it was originally asked, having
+   * now seen what it asked for.
+   */
+  function resumeAfterTool(handoff) {
+    if (!chatWs || chatWs.readyState !== WebSocket.OPEN || !lastSentPayload) {
+      return;
+    }
+    startStreamingBubble();
+    if (streamingBubble && lastSentPayload.session_id) {
+      streamingBubble.dataset.contextSession = lastSentPayload.session_id;
+    }
+    isStreaming = true;
+    sendBtn.disabled = true;
+    // The same payload as the question that started this, with the
+    // exchange attached: the model is answering what it was originally
+    // asked, having now seen what it asked for.
+    chatWs.send(JSON.stringify({ ...lastSentPayload, tool_result: handoff }));
   }
 
   // -----------------------------------------------------------------------
@@ -1649,6 +1885,11 @@
   // Exposed so the block renderer can be exercised without a provider: the
   // shapes it produces are a contract — a playbook must never come out as a
   // command block, which is clicked to type into a live device (#602).
+  // The entry point the socket uses, exported (#560). A tool request has
+  // to be deliverable without a live provider to test the approval gate
+  // at all, and restoring a saved conversation will replay through here.
+  window.shellmateChatMessage = handleWsMessage;
+
   window.shellmateChat = {
     renderRaw: (bubble) => { renderBubbleContent(bubble); wireCommandBlocks(bubble); },
     ansibleMode: () => ansibleMode,

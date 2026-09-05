@@ -122,3 +122,41 @@ neither file is about the provider signature.
 `python test_tool_turn.py` — 30 passed. `python tools/run_tests.py` —
 **93 of 93 test files passed.**
 
+## 2026-09-05 12:07 — #560 closed
+
+The browser half: a `tool_request` renders as the same command block a
+suggestion tag produces, and approving it waits for the device, then sends
+the output back as the result of the model's own request.
+
+`GET /api/sessions/{id}/last-output` is new. The browser needs the output
+of a command it just approved, and the alternative was scraping its own
+terminal — which means reimplementing prompt detection in JavaScript
+alongside the careful one in `transcript.py`. Its `after` parameter is
+what makes it correct rather than merely working: running `show version`
+twice would otherwise match the earlier record and hand the model output
+from before its own request.
+
+Two changes to chat.js that are better regardless of the test:
+`window.shellmateChatMessage` exports the socket entry point (which #558's
+conversation restore will replay through), and a tool request arriving with
+no live bubble lands on the last assistant one rather than being dropped —
+after a reconnect there is nowhere else for it to go.
+
+Declining is a real answer. The model is told and can suggest something
+else, rather than waiting for a result that never comes; the block is
+struck through and its buttons disabled, because a declined request that
+can still be approved is two answers to one question.
+
+**A test of mine was too clever and I corrected the test, not the code.**
+`test_chat_context` scans chat.js textually for send sites carrying
+`context_session_ids`. The tool resume spreads the remembered payload, so
+it carries every field — the heuristic just could not see it. Taught it to
+recognise the spread, *and* added an assertion that the remembered payload
+itself carries the field, since a spread of a payload that never had it
+carries nothing.
+
+`python test_tool_ui.py` — 14 passed. `python tools/run_tests.py` —
+**94 of 94 test files passed.**
+
+**#560 is closed.** Next: #553.
+

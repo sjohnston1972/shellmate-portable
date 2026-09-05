@@ -3628,6 +3628,60 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 }
 
 /* ---------------------------------------------------------------------------
+   Native tool use (#560)
+
+   A tool call renders as the same command block a suggestion tag produces —
+   deliberately, because the person approving should not have to learn a
+   second control depending on which provider answered. What is added is the
+   state afterwards: this one is waited on, so it has to show that it is.
+--------------------------------------------------------------------------- */
+.tool-why {
+  margin: 6px 0 4px;
+  color: var(--on-surface-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.cmd-block-tool {
+  border-left: 2px solid var(--primary-edge);
+}
+
+/* Waiting on the device. Shown, because a Send that appears to do nothing
+   for forty seconds reads as a broken button — and this one is genuinely
+   still working. */
+.cmd-block-running {
+  opacity: 0.75;
+}
+
+.cmd-block-running .cmd-block-text::after {
+  content: ' — waiting for the device…';
+  color: var(--on-surface-muted);
+  font-style: italic;
+}
+
+/* The device never settled. Not the same as no output, and the assistant is
+   told which of the two it was. */
+.cmd-block-timeout {
+  border-left-color: var(--warn);
+}
+
+.cmd-block-timeout .cmd-block-text::after {
+  content: ' — ShellMate stopped waiting; the output is on your screen';
+  color: var(--warn);
+  font-style: italic;
+}
+
+.cmd-block-declined {
+  opacity: 0.6;
+  border-left-color: var(--on-surface-muted);
+}
+
+.cmd-block-declined .cmd-block-text {
+  text-decoration: line-through;
+  text-decoration-color: var(--on-surface-muted);
+}
+
+/* ---------------------------------------------------------------------------
    Compliance (#543)
 
    Three states get three treatments, because folding any two together sends

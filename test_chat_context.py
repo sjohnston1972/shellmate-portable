@@ -181,7 +181,12 @@ def test_frontend_wiring() -> None:
 
     sends = re.findall(r"chatWs\.send\(JSON\.stringify\(\{(.*?)\}\)\);",
                        chat, re.S)
-    carrying = [s for s in sends if "context_session_ids" in s]
+    # A send that spreads the remembered payload carries every field that
+    # payload had, including this one (#560's tool resume). Recognised
+    # rather than made to name each field again: two lists of fields to
+    # keep in step is how the auto-analysis path drifted in the first place.
+    carrying = [s for s in sends
+                if "context_session_ids" in s or "...lastSentPayload" in s]
     check("both send sites exist to check", len(sends) >= 2,
           f"only {len(sends)} chatWs.send sites found — the pattern is blind")
     check("every send carries the picker's selection",
@@ -190,6 +195,12 @@ def test_frontend_wiring() -> None:
           f"context_session_ids — that path reverts to the active tab alone")
 
     backend_src = (root / "backend" / "app.py").read_text(encoding="utf-8")
+    remembered = re.search(r"lastSentPayload = \{(.*?)\n      \};", chat, re.S)
+    check("the remembered payload carries the selection too",
+          remembered is not None
+          and "context_session_ids" in remembered.group(1),
+          "a spread of a payload that never had the field carries nothing")
+
     check("the websocket handler passes the field through",
           "context_session_ids=context_session_ids" in backend_src)
 
