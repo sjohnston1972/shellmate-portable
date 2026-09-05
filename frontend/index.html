@@ -3022,6 +3022,16 @@ GigEth0/2     unassigned    YES unset  down     down
           </button>
         </div>
 
+        <!-- Collecting is opt-in, and off by default. Sending is quick;
+             waiting for forty devices to finish answering is not, and a
+             panel that always waited would have made the common case —
+             "push this line to the access layer" — slower for everybody. -->
+        <div class="setting-row">
+          <label class="setting-label" for="broadcast-collect"
+                 data-tip="Wait for each device to finish answering, then list the replies side by side and say which of them differ.||It works by recognising the device prompt, which is how ShellMate knows one command's output has ended. A device whose prompt it cannot read is listed as not captured rather than left out — an absent row would read as agreement.">Collect the replies</label>
+          <input type="checkbox" id="broadcast-collect" class="setting-checkbox" />
+        </div>
+
         <div class="broadcast-targets-head">
           <span class="setting-label">Send to</span>
           <!-- One toggle, not a pair. It reads "All" when pressing it would

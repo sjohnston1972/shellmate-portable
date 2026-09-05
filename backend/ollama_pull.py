@@ -117,9 +117,15 @@ def start_pull(model: str) -> dict:
     _cancel.clear()
     _set(phase="pulling", model=model, received=0, total=0,
          status="starting", error="", started=time.time())
+    # Read before the thread is started, not after. A small model off a
+    # local registry can be finished before the next line runs, and a
+    # caller that asked to start a pull would then be told "done" for a
+    # pull it never saw begin — which the panel renders as a progress bar
+    # that never appears.
+    started = state()
     threading.Thread(target=_pull, args=(model,), daemon=True,
                      name="ollama-pull").start()
-    return state()
+    return started
 
 
 def cancel_pull() -> bool:

@@ -578,6 +578,16 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("broadcast.default_wait", "Default wait between commands", 500, "int",
             "The starting value in the panel. Snippets carry their own.",
             "", minimum=0, maximum=60000, unit="ms"),
+    Setting("broadcast.collect_seconds", "Wait for replies", 45, "int",
+            "How long to wait for each device to finish answering, when "
+            "collecting replies.",
+            "The bound is per broadcast, not per device, and it is the whole "
+            "reason collection is safe to offer: a device on an unidentified "
+            "platform never closes a record, and without a ceiling the panel "
+            "would sit there forever waiting for a prompt that is not coming. "
+            "What it costs when it expires is a row saying so, beside the "
+            "devices that did answer.",
+            minimum=5, maximum=300, unit="s"),
     Setting("broadcast.concurrency", "Devices at once", 0, "int",
             "Zero means no limit.",
             "Two hundred devices at once will bury a jump host, and every one "

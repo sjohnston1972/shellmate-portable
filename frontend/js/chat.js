@@ -328,6 +328,17 @@
       return;
     }
 
+    // "/compare <command>" sets out what each session in the chat's context
+    // said to the same command (#529). Read out of history — nothing is
+    // sent, because a broadcast from the chat box is a broadcast nobody
+    // confirmed.
+    const cmp = text.match(/^\/compare\s+(.+)$/i);
+    if (cmp) {
+      inputEl.value = '';
+      compareCommand(cmp[1].trim());
+      return;
+    }
+
     // "/investigate <problem>" switches to Investigate mode and asks (#403).
     let text2 = text;
     const inv = text.match(/^\/investigate\b\s*/i);
@@ -788,6 +799,7 @@
     selection: 'Selected output',
     record: 'Last command',
     paste: 'Pasted text',
+    compare: 'What each device said',
   };
 
   function attach(kind, text, sessionId) {
@@ -2970,7 +2982,116 @@
 
   window.shellmateChatMessage = handleWsMessage;
 
+
+  // -------------------------------------------------------------------------
+  // Comparing devices (#529)
+  //
+  // The broadcast panel's "Compare with the assistant" and the chat's
+  // `/compare <command>` arrive at the same place: a labelled block of what
+  // each device said, attached to a question about the differences.
+  //
+  // It goes as an *attachment*, not as the message. Forty near-identical
+  // outputs pasted into a question is the case where a model merges them and
+  // answers confidently about a device that does not exist. The attachment
+  // heading says each block is a different device, and says not to merge
+  // them.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Attach a comparison and ask about it.
+   *
+   * The question is asked straight away rather than left for the engineer
+   * to type: they pressed a button that says "compare", which is a whole
+   * instruction, and making somebody say it twice is the sort of thing
+   * that gets a feature described as fiddly.
+   */
+  function attachComparison(text, command) {
+    if (!String(text || '').trim()) {
+      appendErrorBubble('There is nothing to compare.');
+      return;
+    }
+    attach('compare', text, null);
+    if (inputEl) {
+      inputEl.value = command
+        ? `These devices were all asked "${command}". Set out the differences `
+          + 'between them as a table, and say which ones need attention.'
+        : 'Set out the differences between these devices as a table, and say '
+          + 'which ones need attention.';
+      sendMessage();
+    }
+  }
+
+  /**
+   * `/compare <command>` — the same thing, read out of history.
+   *
+   * No waiting and nothing sent: this looks for a record of that command
+   * already closed on each session in the chat's context. Sending it again
+   * from a chat box would be a broadcast nobody confirmed, and broadcast
+   * confirms for a reason.
+   */
+  async function compareCommand(command) {
+    const ids = (typeof window.getChatContextSelection === 'function'
+                 && window.getChatContextSelection())
+      || (typeof window.getOpenSessionIds === 'function'
+          ? window.getOpenSessionIds() : []);
+
+    if (!ids || ids.length < 2) {
+      appendErrorBubble('Comparing needs at least two sessions. Pick them '
+                      + 'with the context button above the chat box.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/broadcast/collect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // sent_at 0 and timeout 0: match the most recent such record on each
+        // session, whenever it ran, and wait for nothing.
+        body: JSON.stringify({ session_ids: ids, command, sent_at: 0, timeout: 0 }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        appendErrorBubble(data.detail || 'Could not read those sessions.');
+        return;
+      }
+
+      const collected = (data.results || [])
+        .filter(r => r.state === 'collected');
+      if (collected.length < 2) {
+        // Named, not counted. "Only one device has run that" leaves somebody
+        // guessing which, and the answer is usually that they typed it
+        // slightly differently on one of them.
+        const missing = (data.results || [])
+          .filter(r => r.state !== 'collected')
+          .map(r => r.label || r.session_id).join(', ');
+        appendErrorBubble(`Only ${collected.length} of ${ids.length} sessions `
+          + `have run "${command}" — nothing recorded on: ${missing}. `
+          + 'Run it on them first, or broadcast it with "Collect the replies" '
+          + 'ticked.');
+        return;
+      }
+
+      attachComparison(comparisonText(data), data.command);
+    } catch (e) {
+      appendErrorBubble(`Could not compare: ${e.message || e}`);
+    }
+  }
+
+  /** The same layout the broadcast panel copies and saves. */
+  function comparisonText(data) {
+    const comparison = data.comparison || {};
+    const lines = [`Command: ${data.command}`, ''];
+    if (comparison.summary) lines.push(comparison.summary, '');
+    (data.results || []).forEach(row => {
+      lines.push(`--- ${row.label || row.session_id} (${row.state}) ---`);
+      lines.push(row.output || row.detail || '(nothing was captured)');
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+
   window.shellmateChat = {
+    attachComparison,
     startRunbook,
     endRunbook,
     openConversations,

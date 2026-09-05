@@ -101,6 +101,7 @@ ATTACHMENT_HEADINGS = {
     "selection": "THE LINES THE ENGINEER IS POINTING AT",
     "record":    "THE OUTPUT OF THE LAST COMMAND THEY RAN",
     "paste":     "TEXT THE ENGINEER PASTED IN (it may be from another device, or from a file — do not assume it is this session)",
+    "compare":   "WHAT EACH DEVICE SAID TO THE SAME COMMAND (#529) — each block is one device, named. Answer about the differences between them; do not merge them into one device",
 }
 
 

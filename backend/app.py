@@ -3727,6 +3727,11 @@ async def broadcast(request: BroadcastRequest) -> dict:
     limit = advanced_setting("broadcast.concurrency")
     gate = asyncio.Semaphore(limit) if limit else None
 
+    # Read before the first byte leaves, not after the last: a record that
+    # closes while the fleet is still being worked through is a real answer
+    # to this broadcast, and a timestamp taken at the end would throw it away.
+    started_at = time.time()
+
     async def run_one(session_id: str) -> dict:
         session = session_manager.get_session(session_id)
         if session is None:
@@ -3836,7 +3841,83 @@ async def broadcast(request: BroadcastRequest) -> dict:
     return {
         "commands": commands, "command": commands[0],
         "sent": sent, "total": len(results), "results": results,
+        # The wall clock the caller hands back to /api/broadcast/collect, so
+        # a record that closed before this went out is not mistaken for its
+        # answer. Server-issued rather than taken from the browser: a laptop
+        # whose clock is four minutes fast would otherwise discard every
+        # reply it got.
+        "sent_at": started_at,
     }
+
+
+# ---------------------------------------------------------------------------
+# REST — Collecting what the fleet said back (#529)
+#
+# Broadcast has always been able to send and then say "watch the tabs". The
+# answer to "which of these six has the neighbour down" was in forty tabs,
+# which is why people write the Netmiko script instead.
+#
+# Two calls rather than one, because they have different shapes. Sending is
+# quick and must not be held open by a device that is slow to answer;
+# collecting is a bounded wait that the panel can show progress against and
+# the operator can walk away from. The join between them is `sent_at`, issued
+# by the server and handed straight back.
+# ---------------------------------------------------------------------------
+
+
+class BroadcastCollectRequest(BaseModel):
+    """Body for POST /api/broadcast/collect."""
+
+    session_ids: list[str] = []
+    command: str = ""
+    #: The `sent_at` from the broadcast this is collecting. Zero means "match
+    #: the most recent such record whenever it ran", which is what /compare
+    #: wants: it is reading history, not waiting on anything.
+    sent_at: float = 0.0
+    #: Seconds. None takes the configured bound; an explicit 0 means one pass
+    #: over what has already closed and no waiting at all.
+    timeout: float | None = None
+
+
+@app.post("/api/broadcast/collect")
+async def broadcast_collect_replies(request: BroadcastCollectRequest) -> dict:
+    """
+    Wait, bounded, for each session's reply and compare them.
+
+    The comparison travels with the results rather than being a second call.
+    It is derived entirely from what is already in the response, and two
+    endpoints would mean two chances for the summary line and the list under
+    it to disagree about how many devices differ — which is the one thing
+    that would stop anybody trusting either.
+    """
+    from backend import broadcast_collect
+
+    command = (request.command or "").strip()
+    if not command:
+        raise HTTPException(status_code=400, detail="No command to collect.")
+
+    sessions = {}
+    for session_id in request.session_ids:
+        session = session_manager.get_session(session_id)
+        if session is not None:
+            sessions[session_id] = session
+
+    if not sessions:
+        raise HTTPException(
+            status_code=404,
+            detail="None of those sessions are open any more.")
+
+    timeout = (float(advanced_setting("broadcast.collect_seconds"))
+               if request.timeout is None else max(0.0, float(request.timeout)))
+
+    out = await broadcast_collect.collect(
+        sessions, command, float(request.sent_at or 0.0), timeout=timeout)
+    out["comparison"] = broadcast_collect.compare(out.get("results") or [])
+    logger.info("Collected %s reply/replies to %r across %s session(s)",
+                sum(1 for r in out.get("results") or []
+                    if r.get("state") == "collected"),
+                command, len(sessions))
+    return out
 
 
 # ---------------------------------------------------------------------------

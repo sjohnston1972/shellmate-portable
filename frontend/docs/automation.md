@@ -86,6 +86,49 @@ There is no progress bar. There does not need to be one — the commands appear
 in the tabs as they land, which is a better view of what is happening than any
 progress bar would be.
 
+### Collecting the replies
+
+Tick **Collect the replies** and ShellMate waits for each device to finish
+answering, then lists what they said side by side and tells you which of them
+differ.
+
+This is the thing a Netmiko script usually gets written for: `show version |
+include Version` across an access layer before an upgrade, `show ip bgp
+summary` across the edge after a maintenance. The question is rarely "what did
+they say" — it is "which of these six is not like the others".
+
+Only the **last** command in a sequence is collected. A sequence is usually
+setup followed by the one that answers, and collecting `terminal length 0`
+alongside it would bury the reply you wanted.
+
+The list names every device you sent to, including the ones that did not
+answer. A device that timed out, or whose prompt ShellMate does not recognise,
+gets a row saying so — leaving it out would make it look like it agreed.
+
+The devices that differ sort to the top and open first, and the comparison
+names its baseline: **differs from sw-01** is something you can go and check.
+It is deliberately not "differs from the consensus" — thirty-four devices that
+have not been upgraded yet are a majority that is wrong.
+
+**Copy as text** and **Save as file** give you the whole collection, states and
+all, in the layout on the screen.
+
+**Compare with the assistant** hands it to the chat panel, which sets out the
+differences as a table and says which devices need attention. It arrives
+labelled device by device, so the assistant answers about your six switches
+rather than blending them into one.
+
+You can also ask about commands you have already run, without sending
+anything: type `/compare show version` in the chat. That reads what each
+session in the assistant's context last said to that command — pick the
+sessions with the context button above the chat box. Nothing is sent to any
+device, because a broadcast from a chat box would be a broadcast nobody
+confirmed.
+
+Collecting depends on ShellMate recognising the device prompt, which is how it
+knows one command's output has ended. How long it waits is
+**Settings → Broadcast → Wait for replies**.
+
 ### Why it is not keystroke mirroring
 
 Most terminals implement this by mirroring what you type into every open tab.

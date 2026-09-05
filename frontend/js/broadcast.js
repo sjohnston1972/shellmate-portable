@@ -768,6 +768,16 @@
         }
       });
       report('muted', `${data.sent} of ${data.total} sent.`);
+
+      // Only the last command is collected, and only when asked. A sequence
+      // is usually setup-then-the-one-that-answers — `terminal length 0`
+      // followed by `show version` — and collecting every line of it would
+      // bury the reply somebody actually wanted under the ones they did not.
+      if (collectWanted() && data.sent) {
+        await collectReplies(commands[commands.length - 1],
+                             data.results.filter(r => r.ok).map(r => r.session_id),
+                             data.sent_at);
+      }
     } catch (e) {
       results.innerHTML = '';
       report('error', `Could not reach the server: ${e.message}`);
@@ -787,6 +797,227 @@
     label.textContent = text;
     row.append(icon, label);
     results.appendChild(row);
+  }
+
+
+  // -------------------------------------------------------------------------
+  // Collecting the replies (#529)
+  //
+  // Sending to forty devices and being told to watch forty tabs is why the
+  // Netmiko script gets written instead. The value is correlation, not
+  // aggregation: "which of these six has the neighbour down".
+  //
+  // Three rules the rendering keeps to:
+  //
+  // **A device that did not answer is shown, not omitted.** Timeouts and
+  // unrecognised prompts are rows of their own. An absent row would read as
+  // agreement, which is the one wrong answer this must never give.
+  //
+  // **The baseline is named.** "Different from sw-01" is a fact somebody can
+  // go and check. "Different from the consensus" is a claim this has no
+  // standing to make — six upgraded and thirty-four not is a majority that
+  // is wrong.
+  //
+  // **The ones that differ come first.** Everything on this list is there to
+  // be scanned, and the two rows worth reading should not be at the bottom
+  // of thirty-eight that say the same thing.
+  // -------------------------------------------------------------------------
+
+  /** The last collection, kept so the buttons under it have something to act on. */
+  let collection = null;
+
+  /** How each state reads, and how it sorts. Lower sorts first. */
+  const STATE_TEXT = {
+    differs:        ['differs', 0],
+    timeout:        ['no reply in time', 1],
+    'not-captured': ['prompt not recognised', 2],
+    gone:           ['session gone', 3],
+    baseline:       ['baseline', 4],
+    identical:      ['same', 5],
+  };
+
+  function collectWanted() {
+    const box = document.getElementById('broadcast-collect');
+    return !!(box && box.checked);
+  }
+
+  /**
+   * Ask the server to wait for the replies, then render them.
+   *
+   * `sent_at` comes back from the broadcast and goes straight out again
+   * untouched. It is the server's own clock: a laptop four minutes fast
+   * would otherwise discard every reply it got as too old.
+   */
+  async function collectReplies(command, ids, sentAt) {
+    const waiting = document.createElement('div');
+    waiting.className = 'broadcast-result broadcast-muted';
+    waiting.textContent = `Waiting for ${ids.length} device`
+      + `${ids.length === 1 ? '' : 's'} to finish answering "${command}"…`;
+    results.appendChild(waiting);
+
+    try {
+      const res = await fetch('/api/broadcast/collect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_ids: ids, command, sent_at: sentAt }),
+      });
+      const data = await res.json();
+      waiting.remove();
+      if (!res.ok) {
+        report('error', data.detail || 'Could not collect the replies.');
+        return;
+      }
+      collection = data;
+      renderCollection(data);
+    } catch (e) {
+      waiting.remove();
+      report('error', `Could not collect the replies: ${e.message || e}`);
+    }
+  }
+
+  /** Which of the compare buckets a result landed in. */
+  function stateOf(row, comparison) {
+    if (row.state !== 'collected') return row.state;
+    if (row.label === comparison.baseline) return 'baseline';
+    return (comparison.differing || []).includes(row.label)
+      ? 'differs' : 'identical';
+  }
+
+  function renderCollection(data) {
+    const comparison = data.comparison || {};
+    const block = document.createElement('div');
+    block.className = 'broadcast-collect-block';
+
+    const summary = document.createElement('div');
+    summary.className = 'broadcast-collect-summary';
+    summary.textContent = comparison.summary || '';
+    block.appendChild(summary);
+
+    const rows = (data.results || []).slice().sort((a, b) =>
+      (STATE_TEXT[stateOf(a, comparison)] || ['', 9])[1]
+      - (STATE_TEXT[stateOf(b, comparison)] || ['', 9])[1]);
+
+    const list = document.createElement('div');
+    list.className = 'broadcast-collect-list';
+    rows.forEach(row => list.appendChild(deviceRow(row, comparison)));
+    block.appendChild(list);
+
+    block.appendChild(collectActions(data));
+    results.appendChild(block);
+  }
+
+  function deviceRow(row, comparison) {
+    const state = stateOf(row, comparison);
+    const text = (STATE_TEXT[state] || [row.state])[0];
+
+    const item = document.createElement('details');
+    item.className = 'broadcast-device';
+    item.dataset.state = state;
+    // Open the ones worth reading. Thirty-eight identical replies expanded
+    // is a wall nobody scrolls through; the two that differ are the answer.
+    item.open = state === 'differs';
+
+    const head = document.createElement('summary');
+    const name = document.createElement('span');
+    name.className = 'broadcast-device-name';
+    name.textContent = row.label || row.session_id;
+    const chip = document.createElement('span');
+    chip.className = `broadcast-device-chip broadcast-chip-${state}`;
+    chip.textContent = state === 'differs'
+      ? `differs from ${comparison.baseline}` : text;
+    head.append(name, chip);
+    item.appendChild(head);
+
+    const body = document.createElement('pre');
+    body.className = 'broadcast-device-output';
+    // The detail rather than an empty box: "no reply in time" with nothing
+    // under it leaves somebody wondering whether the panel is still working.
+    body.textContent = row.output || row.detail || '(nothing was captured)';
+    item.appendChild(body);
+    return item;
+  }
+
+  /** What can be done with a collection once it is on the screen. */
+  function collectActions(data) {
+    const bar = document.createElement('div');
+    bar.className = 'broadcast-collect-actions';
+
+    bar.appendChild(actionButton('content_copy', 'Copy as text', async () => {
+      try {
+        await navigator.clipboard.writeText(collectionText(data));
+        report('ok', 'Copied.');
+      } catch (e) {
+        report('error', 'The browser would not give access to the clipboard.');
+      }
+    }));
+
+    bar.appendChild(actionButton('download', 'Save as file', () => {
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      const blob = new Blob([collectionText(data)], { type: 'text/plain' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `broadcast-${stamp}.txt`;
+      link.click();
+      // Revoked on a later tick rather than in this one: the click is
+      // asynchronous in every browser, and a URL revoked in the same frame
+      // gives a download of zero bytes.
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    }));
+
+    bar.appendChild(actionButton('smart_toy', 'Compare with the assistant',
+                                 () => askTheAssistant(data)));
+    return bar;
+  }
+
+  function actionButton(icon, label, onClick) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn-tertiary';
+    const glyph = document.createElement('span');
+    glyph.className = 'material-symbols-outlined';
+    glyph.textContent = icon;
+    button.append(glyph, document.createTextNode(` ${label}`));
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
+  /**
+   * The collection as plain text — for the clipboard, the file and the
+   * assistant alike.
+   *
+   * One renderer for all three. Three would be three chances for the file
+   * somebody keeps as evidence to say something the screen did not.
+   */
+  function collectionText(data) {
+    const comparison = data.comparison || {};
+    const lines = [`Command: ${data.command}`, ''];
+    if (comparison.summary) lines.push(comparison.summary, '');
+    (data.results || []).forEach(row => {
+      const state = stateOf(row, comparison);
+      const text = (STATE_TEXT[state] || [row.state])[0];
+      lines.push(`--- ${row.label || row.session_id} (${text}) ---`);
+      lines.push(row.output || row.detail || '(nothing was captured)');
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+
+  /**
+   * Hand the collection to the chat panel as an attachment.
+   *
+   * As an attachment rather than a message: it arrives under a heading that
+   * says each block is a different device, which is the one thing a model
+   * reading forty near-identical outputs will otherwise get wrong — it
+   * merges them and answers about a device that does not exist.
+   */
+  function askTheAssistant(data) {
+    const chat = window.shellmateChat;
+    if (!chat || typeof chat.attachComparison !== 'function') {
+      report('error', 'The chat panel is not available.');
+      return;
+    }
+    close();
+    chat.attachComparison(collectionText(data), data.command);
   }
 
   window.openBroadcast = open;
