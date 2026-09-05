@@ -34,3 +34,22 @@ unquoted heredoc ate this entry whole the first time — the backticks became
 command substitution and the entry never landed, while the commit it
 described went through fine.
 
+## 2026-09-05 07:28 — step 3 done (#540)
+
+`POST /api/reports`, `/api/reports/preview` and `/api/reports/reveal`.
+Preview because the support bundle established that everything is readable
+before it leaves, and a report is more forwardable than a bundle, not less.
+
+The failure half is where the tests went, because it is the half that gets
+skipped: an unknown session is a 404 rather than an empty report, a diff
+with nothing to compare is a 400, and a misspelled body field is a 422
+rather than a cheerful 200 describing a document nobody asked for. That
+last one is the Ansible build-request lesson carried over.
+
+The route test seeds through the store's own API rather than writing rows
+behind it — the store redacts on the way in as well, so going around it
+would have tested a weaker guarantee than the one that ships.
+
+`python test_report.py` — 61 passed, 0 failed. test_ansible_library,
+test_config_archive and test_groups still pass against the changed app.py.
+

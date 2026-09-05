@@ -383,6 +383,107 @@ def test_redaction_off_is_honoured() -> None:
     setup_redaction(True)
 
 
+def test_the_routes() -> None:
+    """
+    The three kinds over HTTP, seeded through the store's own API.
+
+    Writing rows behind the store would test a schema rather than the path
+    a report actually travels — and the store redacts on the way in too, so
+    going around it would quietly test a weaker guarantee than the one that
+    ships.
+    """
+    print("\n-- The routes --")
+    setup_redaction(True)
+
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from backend import store as store_module
+    from backend.app import app
+
+    store = store_module.store
+    session_id = "report-route-1"
+    store.start_session(session_id, {
+        "label": "core-sw-01", "hostname": "core-sw-01",
+        "connection_type": "ssh", "username": "steven",
+        "target": "10.0.0.1:22",
+    })
+    store.add_command(session_id, SimpleNamespace(
+        command="show running-config | include username",
+        output=SECRET_LINE, prompt="core-sw-01#",
+        started_at=time.time(), duration_ms=120))
+    store.end_session(session_id)
+    store.flush()
+
+    client = TestClient(app, base_url="http://127.0.0.1")
+
+    res = client.post("/api/reports", json={"kind": "session",
+                                            "session_id": session_id})
+    check("a session report is written", res.status_code == 200,
+          f"HTTP {res.status_code}: {res.text[:160]}")
+    if res.status_code == 200:
+        body = res.json()
+        written = Path(body["path"])
+        check("the file is on disk", written.exists(), body["path"])
+        check("it is in the reports folder",
+              written.parent == paths.reports_dir())
+        text = written.read_text(encoding="utf-8")
+        check("the command reached the report",
+              "show running-config" in text)
+        check("and the secret did not",
+              "070C285F4D06485744" not in text,
+              "the store or the report failed to redact")
+
+    res = client.post("/api/reports", json={"kind": "session", "format": "html",
+                                            "session_id": session_id})
+    check("HTML is written too", res.status_code == 200
+          and Path(res.json()["path"]).suffix == ".html",
+          f"HTTP {res.status_code}: {res.text[:160]}")
+
+    res = client.post("/api/reports/preview",
+                      json={"kind": "session", "session_id": session_id})
+    check("preview renders without writing", res.status_code == 200
+          and "show running-config" in res.json().get("text", ""),
+          f"HTTP {res.status_code}: {res.text[:160]}")
+
+    # The failures, which are the half that gets skipped.
+    res = client.post("/api/reports", json={"kind": "session",
+                                            "session_id": "no-such-session"})
+    check("an unknown session is a 404, not an empty report",
+          res.status_code == 404, f"HTTP {res.status_code}")
+
+    res = client.post("/api/reports", json={"kind": "diff",
+                                            "session_id": session_id})
+    check("a diff with nothing to compare is refused",
+          res.status_code == 400, f"HTTP {res.status_code}")
+
+    res = client.post("/api/reports", json={"kind": "invoice",
+                                            "session_id": session_id})
+    check("an unknown kind is refused rather than guessed",
+          res.status_code == 400, f"HTTP {res.status_code}")
+
+    res = client.post("/api/reports", json={"kind": "session", "format": "pdf",
+                                            "session_id": session_id})
+    check("an unknown format is refused", res.status_code == 400,
+          f"HTTP {res.status_code}")
+
+    # The lesson from the Ansible build request: a field pydantic drops
+    # silently produces a 200 describing a document nobody asked for.
+    res = client.post("/api/reports", json={"kind": "session",
+                                            "session_id": session_id,
+                                            "sesion_id": "typo"})
+    check("a misspelled field is a 422, not a silent 200",
+          res.status_code == 422, f"HTTP {res.status_code}")
+
+    res = client.post("/api/reports/reveal")
+    check("reveal answers with the folder either way",
+          res.status_code == 200 and "folder" in res.json(),
+          f"HTTP {res.status_code}")
+
+    store.delete_session(session_id)
+
+
 def main() -> int:
     print("=" * 52)
     print("  Reports — what leaves the machine")
@@ -399,6 +500,7 @@ def main() -> int:
         test_long_output_is_cut_and_says_so,
         test_writing_a_file,
         test_redaction_off_is_honoured,
+        test_the_routes,
     ):
         try:
             test()

@@ -42,7 +42,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
-from backend import auth, config_archive, desktop, paths
+from backend import auth, config_archive, desktop, paths, report
 from backend import groups as groups_module
 from backend import schemes as schemes_module
 from backend.configs import capture_config, diff_snapshots, drift_report
@@ -3968,6 +3968,127 @@ async def support_reveal(request: SupportRequest) -> dict:
         opened = await asyncio.to_thread(desktop.reveal, folder)
     except Exception as exc:
         logger.info("Could not open the bundle folder: %s", exc)
+        opened = False
+    return {"opened": opened, "folder": str(folder)}
+
+
+# ---------------------------------------------------------------------------
+# REST — Reports (#540, #574)
+#
+# A file somebody who does not have ShellMate can read: a CAB pack, a vendor
+# case, a customer report. Everything written goes through report.py, which
+# redacts on the way in.
+# ---------------------------------------------------------------------------
+
+
+class ReportRequest(BaseModel):
+    """
+    Body for POST /api/reports.
+
+    ``extra="forbid"`` on purpose. A misspelled field that pydantic drops
+    silently produces a cheerful 200 describing a document nobody asked
+    for — which is exactly how a build request once reported "no tasks" for
+    a playbook full of them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = "session"          # session | diff | change
+    format: str = "md"             # md | html
+    session_id: str = ""
+    old_id: int | None = None
+    new_id: int | None = None
+    chat: list[dict] = []
+    summary: str = ""
+
+
+async def _report_blocks(request: ReportRequest) -> tuple[str, list, str]:
+    """Build the document, returning (title, blocks, device) or raising 404."""
+    if request.kind == "diff":
+        if request.old_id is None or request.new_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="A diff report needs two snapshots to compare.")
+        old = await asyncio.to_thread(store.get_snapshot, request.old_id)
+        new = await asyncio.to_thread(store.get_snapshot, request.new_id)
+        if old is None or new is None:
+            raise HTTPException(status_code=404, detail="No such snapshot")
+        title, blocks = report.diff_report(diff_snapshots(old, new), old, new)
+        return title, blocks, new.get("hostname") or "device"
+
+    session = await asyncio.to_thread(store.get_session, request.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="No such session")
+    device = session.get("label") or session.get("hostname") or "session"
+
+    if request.kind == "change":
+        # Both snapshots are optional. A change record with nothing to
+        # compare against still says what was typed, and says plainly that
+        # there was no comparison — which is a different statement from
+        # "nothing changed", and the one a change board must not confuse.
+        before = (await asyncio.to_thread(store.get_snapshot, request.old_id)
+                  if request.old_id is not None else None)
+        after = (await asyncio.to_thread(store.get_snapshot, request.new_id)
+                 if request.new_id is not None else None)
+        diff = diff_snapshots(before, after) if before and after else None
+        title, blocks = report.change_report(
+            session, before, after, diff, request.summary)
+        return title, blocks, device
+
+    if request.kind != "session":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown report kind: {request.kind!r}")
+
+    title, blocks = report.session_report(session, request.chat, request.summary)
+    return title, blocks, device
+
+
+@app.post("/api/reports")
+async def write_report(request: ReportRequest) -> dict:
+    """Write the report into ShellMate-Data/reports and return its path."""
+    if request.format not in ("md", "html"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown report format: {request.format!r}")
+
+    title, blocks, device = await _report_blocks(request)
+    try:
+        path = await asyncio.to_thread(
+            report.write, title, blocks, device, request.format)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not write the report: {exc}") from exc
+
+    return {"path": str(path), "folder": str(path.parent),
+            "name": path.name, "bytes": path.stat().st_size,
+            "kind": request.kind, "format": request.format, "title": title}
+
+
+@app.post("/api/reports/preview")
+async def preview_report(request: ReportRequest) -> dict:
+    """
+    Render without writing.
+
+    The support bundle established that everything is readable before it
+    leaves; a report is more forwardable than a bundle, not less.
+    """
+    title, blocks, _ = await _report_blocks(request)
+    text = (report.to_html(title, blocks) if request.format == "html"
+            else report.to_markdown(blocks))
+    return {"title": title, "format": request.format, "text": text}
+
+
+@app.post("/api/reports/reveal")
+async def reports_reveal() -> dict:
+    """Open the reports folder, where the platform allows it."""
+    folder = paths.reports_dir()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        opened = await asyncio.to_thread(desktop.reveal, folder)
+    except Exception as exc:
+        logger.info("Could not open the reports folder: %s", exc)
         opened = False
     return {"opened": opened, "folder": str(folder)}
 
