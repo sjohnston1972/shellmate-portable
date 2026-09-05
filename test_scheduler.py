@@ -159,14 +159,26 @@ def test_what_did_not_happen() -> None:
     the dangerous direction for this to fail in.
     """
     print("\n-- What was owed and did not happen --")
-    import time
+    from datetime import datetime
 
-    now = time.time()
+    # A pinned clock, not the wall one.
+    #
+    # This read `time.time()` and asserted that twelve hours on a nightly
+    # schedule owes nothing — which is true between 14:00 and 02:00 and
+    # false the rest of the day, because the 02:00 slot falls inside the
+    # gap. It passed every time it was run until it was run at half two in
+    # the morning. A test whose answer depends on when it is run is not
+    # testing the thing it names.
+    #
+    # 10 March is deliberate as well: the UK clocks change at the end of
+    # the month, and a nightly slot counted across that boundary is a
+    # different question from this one.
+    now = datetime(2026, 3, 10, 1, 0).timestamp()
     nightly = {"every": "daily", "at": "02:00", "enabled": True}
 
     check("nothing owed when the last run was recent",
           scheduler.missed_since(nightly, now - 12 * 3600, now) == [],
-          "a run twelve hours ago on a nightly schedule owes nothing")
+          "13:00 yesterday to 01:00 today crosses no 02:00 slot")
 
     weekend = scheduler.missed_since(nightly, now - 3 * 86400, now)
     check("a long weekend owes three slots", len(weekend) == 3, str(len(weekend)))
@@ -174,7 +186,7 @@ def test_what_did_not_happen() -> None:
           weekend == sorted(weekend), str(weekend))
 
     month = scheduler.missed_since(nightly, now - 30 * 86400, now)
-    check("a month owes about thirty", 29 <= len(month) <= 31, str(len(month)))
+    check("a month owes thirty", len(month) == 30, str(len(month)))
 
     # Bounded, or a year of downtime on an hourly schedule walks nine
     # thousand datetimes to produce a number nobody reads that precisely.
