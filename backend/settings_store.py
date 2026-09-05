@@ -275,6 +275,17 @@ DEFAULT_SETTINGS: dict = {
     # How loudly to say that something is about to happen to a device — a
     # pending reload, a commit waiting to be confirmed. The countdown itself is
     # not switchable: it is the information, not the interruption.
+    # What the scheduled backups found, and whether anybody has read it
+    # (#539). Only the marker lives here; the findings themselves are on
+    # the groups, written by the run that produced them.
+    "backups": {
+        # When the digest was last read. Anything a run recorded after
+        # this is still worth reporting; anything before it has been
+        # seen. A timestamp rather than a flag, because "seen" has to
+        # survive the next night's run turning up more.
+        "digest_seen": 0,
+    },
+
     # Driving Ansible through an ansible-runner-service container (#585).
     #
     # Paths, not contents: the service authenticates with mutual TLS, and a

@@ -1597,6 +1597,28 @@ async def run_group_backup(key: str) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/backups/digest")
+async def backup_digest(all: bool = False) -> dict:
+    """
+    What the scheduled backups found that somebody should know about (#539).
+
+    Answers ``{"anything": false, ...}`` most mornings, and that is the
+    point: a clean run where nothing changed is the normal night, and a
+    report that fires regardless is one people dismiss unread — at which
+    point the morning something did happen looks like all the others.
+
+    ``all=true`` ignores the seen marker, for the panel that is asked for
+    deliberately rather than raised on its own.
+    """
+    return await asyncio.to_thread(scheduler.digest, all)
+
+
+@app.post("/api/backups/digest/seen")
+async def backup_digest_seen() -> dict:
+    """Mark the digest as read, so it stops asking."""
+    return {"seen_at": await asyncio.to_thread(scheduler.mark_seen)}
+
+
 class SftpRenameRequest(BaseModel):
     path: str
     new_path: str

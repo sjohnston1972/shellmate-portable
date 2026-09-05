@@ -231,3 +231,30 @@ Machine: SJLAP. The Ansible runner container is local here, reached on
   device stuck in boot, see nothing happen, and the conclusion is that the
   device is dead rather than that the control never applied here.
 
+- **2026-09-05 09:35** — Step 9 done (#539, the digest half). `run_group`
+  now keeps which devices changed instead of logging it and discarding it;
+  `digest()` reports changes, failures and missed runs, and nothing at all
+  otherwise. A notice the morning after, a panel behind it with a real
+  comparison per changed device. 23 checks in `test_backup_digest.py`; 80
+  of 80 test files passing.
+
+  The thing this feature is mostly made of is restraint. A clean run where
+  nothing changed is the normal night, and a report that fires every
+  morning is one people dismiss unread — after which the morning something
+  did happen looks exactly like all the others. So silence is asserted as a
+  behaviour, not left as an accident: no groups, a group that never ran, a
+  clean run, and a run whose only skips were serial consoles all produce
+  nothing.
+
+  Missed runs are their own category rather than failures. "It failed"
+  sends somebody to the device; "it never ran" sends them to the machine
+  ShellMate runs on, and reporting the second as the first wastes a
+  morning.
+
+  **The webhook half of #539 is not done.** The issue is "an in-app digest
+  and an outbound webhook"; PLAN.md asked for the digest and that is what
+  this is. The webhook needs a decision I should not make alone — Teams'
+  incoming-webhook format changed with Workflows, so "one card format"
+  means choosing which, and whether diff text may ever leave the machine is
+  Steven's call rather than mine. Left open with a comment saying so.
+

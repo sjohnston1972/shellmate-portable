@@ -127,6 +127,7 @@ def run_group(key: str, profiles: list[dict], connect, capture, open_session_for
     """
     started = time.time()
     ok: list[str] = []
+    changed: list[str] = []
     failed: list[dict] = []
     skipped: list[dict] = []
     for profile in profiles:
@@ -146,6 +147,12 @@ def run_group(key: str, profiles: list[dict], connect, capture, open_session_for
                 headless = True
             result = capture(session)
             ok.append(name)
+            # Whether the configuration differed from the last one stored
+            # is the single most valuable thing a nightly run produces —
+            # "somebody changed core-2 overnight" — and it used to go into
+            # a log line and nowhere else (#539).
+            if result.get("stored"):
+                changed.append(name)
             logger.info("Scheduled backup of %s: %s", name,
                         "changed" if result.get("stored") else "unchanged")
         except Exception as exc:
@@ -159,9 +166,125 @@ def run_group(key: str, profiles: list[dict], connect, capture, open_session_for
                     pass
     return {
         "at": started, "took_s": round(time.time() - started, 1),
-        "ok": ok, "failed": failed, "skipped": skipped,
+        "ok": ok, "changed": changed, "failed": failed, "skipped": skipped,
         "group": key,
     }
+
+
+# ------------------------------------------------------------------ digest
+#
+# Scheduled backups were built and then reported into a log file. The most
+# valuable thing they produce — "somebody changed core-2 overnight", "the
+# Glasgow run has failed three nights running", "nothing ran at all
+# because the laptop was shut" — went nowhere anybody would see it.
+#
+# Two rules shape what follows:
+#
+# **Only what is worth saying.** A clean run where nothing changed is the
+# normal night, and a digest that announces it every morning is a digest
+# people learn to dismiss without reading — at which point it is worse
+# than nothing, because the morning it matters looks like all the others.
+#
+# **A run that did not happen counts.** #612 records those, and a gap in a
+# backup history looks exactly like a period in which nothing changed.
+# That is the dangerous direction for this to fail in.
+
+
+def _seen_before() -> float:
+    """When somebody last read the digest. 0 if never."""
+    try:
+        from backend.settings_store import peek
+
+        return float((peek("backups") or {}).get("digest_seen") or 0)
+    except Exception:                                     # pragma: no cover
+        return 0.0
+
+
+def mark_seen(at: float | None = None) -> float:
+    """Record that the digest has been read, so it stops asking."""
+    from backend.settings_store import update_settings
+
+    when = float(at if at is not None else time.time())
+    update_settings({"backups": {"digest_seen": when}})
+    return when
+
+
+def digest(include_seen: bool = False) -> dict:
+    """
+    What the scheduled backups found that somebody should know about.
+
+    Returns ``{"anything": False, "groups": []}`` when there is nothing —
+    and nothing is the common case. Silence here is a feature: a report
+    that fires every morning whether or not anything happened is one that
+    gets dismissed unread, and then the morning something did happen looks
+    exactly like every other morning.
+    """
+    from backend import groups as groups_module
+
+    seen = 0.0 if include_seen else _seen_before()
+    out: list[dict] = []
+    for group in groups_module.list_groups():
+        last = group.get("backup_last") or {}
+        at = float(last.get("at") or 0)
+        if not at or at <= seen:
+            continue
+
+        changed = list(last.get("changed") or [])
+        failed = list(last.get("failed") or [])
+        missed = int(last.get("missed") or 0)
+        # An ok run with nothing changed is not news. Reporting it is how
+        # a digest becomes noise, and noise is how the one that matters
+        # gets missed.
+        if not changed and not failed and not missed:
+            continue
+
+        out.append({
+            "group": group.get("key") or last.get("group") or "",
+            "name": group.get("name") or group.get("key") or "",
+            "at": at,
+            "changed": changed,
+            "failed": failed,
+            "skipped": list(last.get("skipped") or []),
+            # The runs that did not happen (#612). Named as their own
+            # thing rather than folded into failures: "it failed" and "it
+            # never ran" send somebody to two different places.
+            "missed": missed,
+            "missed_from": last.get("missed_from"),
+            "missed_to": last.get("missed_to"),
+        })
+
+    out.sort(key=lambda entry: entry["at"], reverse=True)
+    return {
+        "anything": bool(out),
+        "groups": out,
+        "changed": sum(len(entry["changed"]) for entry in out),
+        "failed": sum(len(entry["failed"]) for entry in out),
+        "missed": sum(entry["missed"] for entry in out),
+        "seen_at": seen,
+    }
+
+
+def digest_line(report: dict) -> str:
+    """
+    One sentence for a toast, or "" when there is nothing to say.
+
+    Counts rather than names: four devices do not fit in a toast, and a
+    sentence that trails off mid-list is worse than one that says how many
+    and offers to show them.
+    """
+    if not report.get("anything"):
+        return ""
+    parts = []
+    if report["changed"]:
+        parts.append(f"{report['changed']} changed")
+    if report["failed"]:
+        parts.append(f"{report['failed']} failed")
+    if report["missed"]:
+        parts.append(f"{report['missed']} run"
+                     f"{'' if report['missed'] == 1 else 's'} missed")
+    where = (report["groups"][0]["name"] if len(report["groups"]) == 1
+             else f"{len(report['groups'])} groups")
+    return f"Scheduled backups, {where}: " + ", ".join(parts) + "."
 
 
 # ---------------------------------------------------------------- the thread

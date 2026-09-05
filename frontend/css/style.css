@@ -10973,3 +10973,91 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
 
 .tab-context-menu button.is-current { color: var(--primary); }
 
+/* ---------------------------------------------------------------------------
+   The scheduled-backup digest (#539)
+
+   Ordered by what somebody does about it: what did not run first (a night
+   ShellMate was not there), then what changed, then what failed, then what
+   was never going to be attempted.
+--------------------------------------------------------------------------- */
+
+.digest-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 60vh;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.digest-quiet { margin: 0; color: var(--on-surface-dim); }
+
+.digest-group {
+  padding: 12px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+}
+
+.digest-group-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.digest-when {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--on-surface-dim);
+}
+
+.digest-missed {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: var(--warn-tint);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+.digest-list { margin-bottom: 10px; }
+.digest-list:last-child { margin-bottom: 0; }
+
+.digest-list-title {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surface-dim);
+}
+
+.digest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.digest-device {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--on-surface);
+}
+
+.digest-detail {
+  flex: 1;
+  color: var(--on-surface-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.digest-changed .digest-device { color: var(--primary); }
+.digest-failed  .digest-device { color: var(--error); }
+.digest-skipped .digest-device { color: var(--on-surface-dim); }
+

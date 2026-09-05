@@ -24,6 +24,15 @@ exists.
   device in reset. Where a control does not apply it is disabled and says
   why, rather than hidden or silently doing nothing.
 
+- **The overnight backups tell you what they found.** Scheduled backups
+  were reporting into a log file nobody reads. The morning after a run that
+  changed something, failed, or did not happen, a notice says so — with the
+  detail behind it and a comparison for each device that changed. A run
+  that never happened is kept separate from one that failed, because a gap
+  in a backup history looks exactly like a quiet week. Most mornings it
+  says nothing at all, which is the point: something that announces every
+  clean night is something you stop reading.
+
 - **Notes, kept with the session.** A change window produces a running
   commentary — "16:02 shut Gi1/0/24, 16:05 confirmed by site" — and it
   usually lives in Notepad, where it is never searched again and never

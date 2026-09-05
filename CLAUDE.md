@@ -176,6 +176,7 @@ shellmate/
 │       ├── ansible_templates.js # Parameterised plays: the holes, the form that fills them, and…
 │       ├── ansible_tls.js       # The TLS indicator, and the probe behind it (#586)
 │       ├── ansible_view.js      # The Ansible view: which area is showing, and nothing else (#586)
+│       ├── backup_digest.js     # What the overnight backups found (#539)
 │       ├── broadcast.js         # Send commands to several devices at once
 │       ├── chat.js              # AI chat panel for ShellMate
 │       ├── chat_context.js      # Choose which sessions the assistant can see

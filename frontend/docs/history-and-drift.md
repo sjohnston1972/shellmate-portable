@@ -37,6 +37,36 @@ Scheduled runs happen only while ShellMate is running. It is a portable tool
 on a laptop, not a service; for a backup that must happen whether or not
 your laptop is open, run it on a machine that is.
 
+## What the backups found
+
+A scheduled backup that runs every night is only worth having if somebody
+learns what it found. ShellMate reports that once, when there is something
+to report.
+
+The morning after a run that changed something, failed, or did not happen,
+a notice says so — "Scheduled backups, Glasgow: 2 changed, 1 failed" — with
+a button that opens the detail. Each changed device offers its own
+comparison against the configuration stored before it.
+
+Three things are kept apart on purpose:
+
+- **Changed** is a device whose configuration differs from the one stored
+  last time. This is the thing the backups exist to catch.
+- **Failed** is a device ShellMate could not reach or could not read. That
+  sends you to the device.
+- **Did not happen** is a scheduled run that never took place, because
+  ShellMate was not running when it was due. That sends you somewhere else
+  entirely — and a gap in a backup history looks exactly like a quiet week,
+  which is the dangerous way round for this to be wrong.
+
+Devices that were never going to be backed up — a serial console has no
+address to reach — are listed last and quietly. They are context, not news.
+
+**Most mornings it says nothing at all.** A clean run where nothing changed
+is the normal night, and something that announces it every day is something
+you learn to dismiss without reading — at which point the morning it matters
+looks like all the others.
+
 ## Notes
 
 A change window produces a running commentary. "16:02 shut Gi1/0/24, 16:05
