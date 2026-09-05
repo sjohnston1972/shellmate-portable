@@ -309,7 +309,14 @@
     if (!version) return;
     const seen = ui().last_seen_version;
     if (seen === undefined) return;                 // settings not loaded yet
-    if (seen === '') { remember({ last_seen_version: version }); return; }   // a fresh install
+    if (seen === '') {
+      // A fresh install (#564). The branch has been here since this modal
+      // was written and only ever recorded the version; the card is what
+      // it was always the right moment for.
+      remember({ last_seen_version: version });
+      if (window.shellmateFirstRun) window.shellmateFirstRun.offer();
+      return;
+    }
     if (!newer(version, seen)) return;
     openWhatsNew(version, seen);
     remember({ last_seen_version: version });

@@ -673,6 +673,14 @@
       <!-- ShellMate's own footprint (#266). Wrapped with its separator so an
            unavailable reading hides both rather than leaving a bare pipe. -->
       <span id="status-usage-wrap" class="hidden"><span class="status-sep">|</span><span id="status-usage" title="ShellMate's own processor and memory use — the application, not the machine"></span></span>
+      <!-- Portable or not (#564). Permanent, not first-run-only: it is the
+           answer to "is this the portable copy or the installed one", which
+           people ask of a machine they did not set up. Wrapped with its
+           separator so an unanswered probe hides both rather than leaving a
+           bare pipe. -->
+      <span id="status-portable-wrap" class="hidden"><span class="status-sep">|</span><button
+              type="button" id="status-portable" class="status-btn"
+              aria-label="Where ShellMate keeps its data"></button></span>
       <!-- Pushed to the right and only present when something is pending, so
            the countdown is the one thing in the bar that draws the eye. -->
       <span id="status-alert"></span>
@@ -3888,6 +3896,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/support.js"></script>
   <script src="/static/js/keys.js"></script>
   <script src="/static/js/stockton.js"></script>
+  <script src="/static/js/firstrun.js"></script>
   <script src="/static/js/knowledge.js"></script>
   <script src="/static/js/broadcast.js"></script>
   <script src="/static/js/settings_nav.js"></script>

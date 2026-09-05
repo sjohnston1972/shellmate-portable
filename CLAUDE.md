@@ -205,6 +205,7 @@ shellmate/
 │       ├── exit.js              # Exit ShellMate from the status bar (#452)
 │       ├── feedback.js          # The bug / feature-request reporter (#370)
 │       ├── filepicker.js        # Choosing a file on this machine
+│       ├── firstrun.js          # The four questions ShellMate already knows to ask (#564)
 │       ├── forwards.js          # Port forwards on a session (#405)
 │       ├── groups.js            # Groups on the dashboard
 │       ├── highlight.js         # Colour terminal output by regex rule

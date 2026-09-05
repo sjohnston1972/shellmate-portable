@@ -14,8 +14,27 @@ On first run it creates a `ShellMate-Data` folder **next to the executable**
 holding everything it needs. Move that folder and your setup moves with it.
 
 If the folder it runs from happens to be read-only — Program Files, a
-write-protected stick — it falls back to your user profile and says so in the
-log rather than failing.
+write-protected stick — it falls back to your user profile rather than
+failing. It says so, and it matters: your setup is then in your user profile
+and will *not* travel with the executable. The status bar shows **Not
+portable** in that case; move ShellMate to a folder you can write to and it
+goes back to being portable.
+
+### The first time
+
+One card, once, asking the four things ShellMate would otherwise decide for
+you: the theme, whether to turn the AI assistant on, where your data ended
+up — and, the one that matters, **where saved passwords should live**.
+
+That last one is worth a moment. *This Windows account* means nothing to
+remember and nothing to type, but the encryption is sealed to this account on
+this machine: copy ShellMate to another computer and the saved passwords will
+not come with it. *A master password* travels, and you type it once per
+session. There is no way to recover a forgotten master password — if it is
+lost, the saved passwords are lost with it, and nothing else is.
+
+Closing the card leaves every default in place, and all four are in Settings
+afterwards.
 
 ## The window
 

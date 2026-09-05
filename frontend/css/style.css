@@ -12178,3 +12178,100 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
 }
 
 .knowledge-skipped-list li { margin: 2px 0; }
+
+/* --------------------------------------------------------------------------
+   The first-run card and the portable chip (#564)
+   -------------------------------------------------------------------------- */
+.firstrun-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--scrim);
+}
+
+.firstrun-card {
+  width: min(620px, 100%);
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 24px 26px;
+  background: var(--surface);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 64px -12px rgba(0, 0, 0, 0.6);
+}
+
+.firstrun-title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.firstrun-sub {
+  margin: 0 0 20px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--on-surface-dim);
+}
+
+.firstrun-section { margin-bottom: 20px; }
+
+.firstrun-section-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.firstrun-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--on-surface-dim);
+}
+
+/* The one sentence whose absence costs people their credentials, and the
+   one that says a portable copy is not portable. Coloured because they are
+   the only two lines here anybody has to act on. */
+.firstrun-warn { color: var(--warn); }
+
+.firstrun-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.firstrun-choice {
+  padding: 7px 14px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--on-surface-dim);
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.firstrun-choice:hover { background: var(--surface-highest); }
+
+.firstrun-choice.on {
+  color: var(--on-primary);
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.firstrun-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+/* The chip reads as information, not as a control, until it is hovered —
+   it is a label that happens to open Diagnostics. */
+#status-portable.status-portable-warn { color: var(--warn); }

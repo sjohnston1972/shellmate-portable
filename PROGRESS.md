@@ -49,3 +49,34 @@ that arrives with a traceback and no reproduction wants different triage.
 
 `python test_crash.py` — 41 passed. Guards: feedback 21, advanced 384,
 startup 150, support 78, outbound 117, diagnostics 64.
+
+## 2026-09-05 17:22 — #564 done
+
+The first-run card and the portable chip.
+
+`update.js announceIfNew` has had a branch meaning exactly "fresh install"
+since the What's New modal was written, and it only recorded the version.
+Two decisions were being taken silently on that same run.
+
+The one worth the issue is **where saved passwords live**. It was decided
+implicitly by whichever write happened first, and the consequence — a vault
+that will not open on another machine — appears weeks later with nothing to
+connect it back to a decision nobody made. The card states the trade-off in
+full, including that a lost master password is not recoverable, and that
+only the saved passwords go with it.
+
+The chip has three states rather than two. "Portable" and "From source" are
+both intentional; a read-only application folder is neither, and somebody
+carrying a stick that will turn out to be empty should be told so before
+they carry it. That case names the folder the data actually went to and what
+to do about it.
+
+Two integration traps avoided by reading rather than assuming: the AI toggle
+goes through `toggleAiPanel` — which re-reads settings afterwards, because
+settings.js keeps its own copy for the form and a stale one there undoes the
+change on the next Save — and it does nothing when the value already
+matches, since that function toggles rather than sets. I had first written
+both the wrong way.
+
+`python test_firstrun.py` — 29 passed. Guards: contrast 103, icons 4,
+tooltips 8, accessibility 20, settings 49, vault 96, startup 150.
