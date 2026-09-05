@@ -2180,6 +2180,49 @@ GigEth0/2     unassigned    YES unset  down     down
         </section>
         <div class="settings-slot" data-category="discovery"></div>
 
+        <!-- ===== Ticketing (#540) =====
+             Jira lived only in .env. For a portable build that means finding
+             a file beside the executable, editing it, and restarting — which
+             closes every live session. It was the single biggest reason the
+             feature went unused. The token goes to the vault like any other. -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Ticketing</h3>
+          <p class="settings-section-hint">Conclude Session writes a session up as a Jira issue, or as a comment on one that already exists. Leave this blank and the button still works — it offers to save the write-up as a file instead. Anything already set in <code>.env</code> keeps working and is used when a field here is empty.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-jira-url"
+                   data-tip="Your Jira Cloud address, e.g. `https://acme.atlassian.net`.||Read when the call is made rather than when ShellMate starts, so changing it does not mean restarting and dropping every open session.">Jira address</label>
+            <span class="setting-value">
+              <input type="text" id="setting-jira-url" class="setting-input"
+                     placeholder="https://acme.atlassian.net" autocomplete="off" />
+            </span>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-jira-email"
+                   data-tip="The e-mail address of the Atlassian account the token belongs to. Jira Cloud authenticates with this and the token together, not with the token alone.">Account e-mail</label>
+            <span class="setting-value">
+              <input type="text" id="setting-jira-email" class="setting-input"
+                     placeholder="you@example.com" autocomplete="off" />
+            </span>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-jira-token"
+                   data-tip="An Atlassian API token, made at id.atlassian.com under Security. Not your password.||Saved into the encrypted vault, never into settings.json, and never handed back to this page. The field shows dots once one is stored, so saving after changing a project key leaves the token alone; clearing it and saving removes it.">API token</label>
+            <input type="password" id="setting-jira-token" class="setting-input setting-input-full" autocomplete="off" />
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-jira-project"
+                   data-tip="The project key issues are raised in — the short prefix on every issue number, e.g. `NET` in `NET-1042`.">Project key</label>
+            <span class="setting-value">
+              <input type="text" id="setting-jira-project" class="setting-input"
+                     placeholder="NET" autocomplete="off" />
+            </span>
+          </div>
+        </section>
+
         <!-- ===== Ansible (#585) =====
              Paths, not contents. The service authenticates with mutual TLS
              and a private key belongs in a file with its own permissions

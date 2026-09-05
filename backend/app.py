@@ -42,7 +42,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
-from backend import auth, config_archive, desktop, paths, report
+from backend import auth, config_archive, desktop, jira_client, paths, report
 from backend import groups as groups_module
 from backend import schemes as schemes_module
 from backend.configs import capture_config, diff_snapshots, drift_report
@@ -79,7 +79,7 @@ from backend.vault import VaultError, vault
 from backend.ai import prompt_store
 from backend.ai.router import stream_chat
 from backend.ai import chroma_client, providers
-from backend.config import DEFAULT_AI_BACKEND, JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
+from backend.config import DEFAULT_AI_BACKEND
 from backend import version as app_version
 from backend import config_push, scheduler
 from backend import licence as licence_module
@@ -3272,20 +3272,29 @@ async def chroma_health() -> dict:
 
 @app.get("/api/jira/config")
 async def jira_config() -> dict:
-    """Return whether Jira is configured and the project key."""
-    configured = bool(JIRA_URL and JIRA_USER_EMAIL and JIRA_API_TOKEN and JIRA_PROJECT_KEY)
-    return {"configured": configured, "project_key": JIRA_PROJECT_KEY, "jira_url": JIRA_URL}
+    """
+    Return whether Jira is configured and the project key.
+
+    Resolved per request (#540). The four values were module constants bound
+    when app.py imported, so configuring Jira meant editing .env and
+    restarting — closing every live session to change a project key.
+    """
+    jira = jira_client.settings()
+    return {"configured": jira.ready, "project_key": jira.project,
+            "jira_url": jira.url}
 
 
 @app.get("/api/jira/search")
 async def jira_search(q: str = "") -> list[dict]:
     """Search Jira issues by text within the configured project."""
-    if not all([JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY]):
+    jira = jira_client.settings()
+    if not jira.ready:
         raise HTTPException(400, "Jira not configured")
     # Allow empty query — Jira picker returns recent issues
     from backend.jira_client import search_issues
     try:
-        return await search_issues(JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY, q.strip())
+        return await search_issues(jira.url, jira.email, jira.token,
+                                   jira.project, q.strip())
     except Exception as e:
         raise HTTPException(502, f"Jira search error: {e}")
 
@@ -3293,11 +3302,13 @@ async def jira_search(q: str = "") -> list[dict]:
 @app.get("/api/jira/issue-types")
 async def jira_issue_types() -> list[str]:
     """Return available issue types for the configured project."""
-    if not all([JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY]):
+    jira = jira_client.settings()
+    if not jira.ready:
         raise HTTPException(400, "Jira not configured")
     from backend.jira_client import get_issue_types
     try:
-        return await get_issue_types(JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY)
+        return await get_issue_types(jira.url, jira.email, jira.token,
+                                     jira.project)
     except Exception as e:
         raise HTTPException(502, f"Jira error: {e}")
 
@@ -3329,8 +3340,12 @@ async def ai_session_summary(request: Request) -> dict:
 @app.post("/api/jira/session")
 async def post_session_to_jira(request: Request) -> dict:
     """Build a rich ADF document from session buffers + chat history and post to Jira."""
-    if not all([JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY]):
-        raise HTTPException(400, "Jira not configured — add JIRA_* vars to .env")
+    jira = jira_client.settings()
+    if not jira.ready:
+        raise HTTPException(
+            400,
+            "Jira is not configured. Settings has a Ticketing section for the "
+            "URL, the account e-mail, the API token and the project key.")
 
     body             = await request.json()
     summary          = body.get("summary", "ShellMate Session").strip() or "ShellMate Session"
@@ -3375,22 +3390,23 @@ async def post_session_to_jira(request: Request) -> dict:
     try:
         if existing_key:
             # Add session as a comment on an existing issue
-            await add_comment(JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN, existing_key, adf)
+            await add_comment(jira.url, jira.email, jira.token,
+                              existing_key, adf)
             return {
                 "issue_key": existing_key,
-                "url": f"{JIRA_URL.rstrip('/')}/browse/{existing_key}",
+                "url": jira.browse(existing_key),
                 "mode": "comment",
             }
         else:
             # Create a brand new issue
             result = await create_issue(
-                JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN,
-                JIRA_PROJECT_KEY, summary, adf, issue_type,
+                jira.url, jira.email, jira.token,
+                jira.project, summary, adf, issue_type,
             )
             issue_key = result.get("key", "")
             return {
                 "issue_key": issue_key,
-                "url": f"{JIRA_URL.rstrip('/')}/browse/{issue_key}",
+                "url": jira.browse(issue_key),
                 "mode": "created",
             }
     except Exception as e:

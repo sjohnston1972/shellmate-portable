@@ -78,3 +78,31 @@ raises nothing.
 test_icons 4 passed, test_contrast 59 passed, test_report 61 passed. All
 four changed JS files pass `node --check`.
 
+## 2026-09-05 07:36 — step 5 done (#540)
+
+Jira out of .env. The four values were module constants bound when app.py
+imported, so configuring Jira meant editing a file beside the executable and
+restarting — closing every live session to change a project key. They now
+resolve per call through `jira_client.settings()`: Settings, then the vault,
+then the environment. A new Ticketing section holds the address, the account
+e-mail, the token and the project key; the token is diverted into the vault
+by the mechanism #585 and #609 already built.
+
+The plan said "test_jira.py still passes". There is no test_jira.py — that
+was my assumption, not a fact. Wrote `test_ticketing.py` instead.
+
+It found a real defect on its first run. My mask guard checked only the
+settings block, so a mask that reached the vault by any other route — the
+settings API is scriptable — would have been handed to Jira as the token.
+The guard now applies to every source. That failure would have surfaced
+much later as "Jira rejected ShellMate", with nothing connecting it to the
+edit that caused it.
+
+Removed the four now-dead constants from config.py, and corrected the .env
+section of CLAUDE.md, which claimed every variable there is read by
+config.py or ansible.py. The frontend error message no longer tells people
+to edit .env.
+
+`python test_ticketing.py` — 24 passed, 0 failed. test_settings, test_vault
+and test_report still pass.
+

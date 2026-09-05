@@ -859,6 +859,17 @@
     // Ansible (#585). Paths and an address, never a secret: the private key
     // is a file with its own permissions and only its location is stored,
     // which is why nothing here goes through the vault.
+    // Ticketing (#540). The token is shown as dots when one is stored, so
+    // that saving a project-key change does not overwrite a token nobody
+    // can read to retype.
+    const tick = s.ticketing || {};
+    _val('setting-jira-url',     tick.jira_url         || '');
+    _val('setting-jira-email',   tick.jira_email       || '');
+    _val('setting-jira-project', tick.jira_project_key || '');
+    _val('setting-jira-token',   tick.has_jira_token ? '•'.repeat(8) : '');
+    const jiraTok = document.getElementById('setting-jira-token');
+    if (jiraTok) jiraTok.dataset.maskedOriginal = jiraTok.value;
+
     const ans = s.ansible || {};
     _val('setting-ansible-url',     ans.runner_url  || '');
     // Dots when one is stored, empty when not — and never the real value.
@@ -995,6 +1006,29 @@
    * rest of the form — trying a certificate path should not commit whatever
    * else happens to be open in Settings at the time.
    */
+  /**
+   * The Jira fields, with the same mask rule as every other stored secret.
+   *
+   * Sending the mask back would store eight bullet characters as the token,
+   * and the failure arrives later as "Jira rejected ShellMate" with nothing
+   * on screen connecting the two.
+   */
+  function _collectTicketing() {
+    const el = document.getElementById('setting-jira-token');
+    const token = {};
+    if (el) {
+      const typed = (el.value || '').trim();
+      const mask = (el.dataset.maskedOriginal || '').trim();
+      if (typed !== mask) token.jira_api_token = typed;
+    }
+    return {
+      jira_url:         _gval('setting-jira-url').trim().replace(/\/+$/, ''),
+      jira_email:       _gval('setting-jira-email').trim(),
+      jira_project_key: _gval('setting-jira-project').trim(),
+      ...token,
+    };
+  }
+
   function _collectAnsible() {
     return {
       runner_url:  _gval('setting-ansible-url').trim(),
@@ -1297,6 +1331,7 @@
         foreground_override: (_isValidHex(fgHex) && fgHex.toLowerCase() !== schemeTheme.foreground.toLowerCase()) ? fgHex : null,
         background_override: (_isValidHex(bgHex) && bgHex.toLowerCase() !== schemeTheme.background.toLowerCase()) ? bgHex : null,
       },
+      ticketing: _collectTicketing(),
       ansible: _collectAnsible(),
       providers: _collectProviders(),
     };

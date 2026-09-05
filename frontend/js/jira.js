@@ -242,7 +242,9 @@
 
     submitBtn.disabled = !jiraConfigured;
     if (!jiraConfigured) {
-      _showError('Jira is not configured. Add JIRA_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN and JIRA_PROJECT_KEY to your .env file.');
+      // #540: it is a panel now, not a file beside the executable — and
+      // there is something useful to do without Jira at all.
+      _showError('Jira is not configured. Settings has a Ticketing section for the address, the account e-mail, the API token and the project key. You can also save this session as a file instead.');
     }
 
     overlay.classList.remove('hidden');

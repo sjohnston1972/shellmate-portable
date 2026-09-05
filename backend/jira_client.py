@@ -14,6 +14,93 @@ _ANSI_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 
 # ---------------------------------------------------------------------------
+# Where the credentials come from (#540)
+# ---------------------------------------------------------------------------
+
+
+class JiraSettings:
+    """The four values a Jira call needs, resolved when it is made."""
+
+    __slots__ = ("url", "email", "token", "project")
+
+    def __init__(self, url: str, email: str, token: str, project: str) -> None:
+        self.url = url.rstrip("/")
+        self.email = email
+        self.token = token
+        self.project = project
+
+    @property
+    def ready(self) -> bool:
+        return bool(self.url and self.email and self.token and self.project)
+
+    def browse(self, key: str) -> str:
+        return f"{self.url}/browse/{key}"
+
+
+def _real(value) -> str:
+    """
+    A token, or "" if what we were handed is the panel's mask.
+
+    The check is applied to every source rather than only to the settings
+    block. A mask can reach the vault by more routes than the panel — the
+    settings API is scriptable, and a version predating the guard could have
+    stored one — and sending eight bullet characters to Jira fails much
+    later, as "Jira rejected ShellMate", with nothing connecting it to the
+    edit that caused it.
+    """
+    token = str(value or "").strip()
+    if token and set(token) == {"•"}:
+        return ""
+    return token
+
+
+def settings() -> JiraSettings:
+    """
+    Resolve Jira's configuration: Settings first, then the vault, then .env.
+
+    Read at call time rather than at import. The previous version bound four
+    module-level constants when app.py loaded, so editing .env meant
+    restarting ShellMate — which for a portable build means finding a file
+    beside the executable, editing it, and closing every live session to
+    pick it up. That is the single biggest reason the feature went unused.
+
+    The .env fallback stays. Anybody already running with JIRA_* variables
+    must not have this go dark the moment their settings file has no
+    ticketing block in it.
+    """
+    import os
+
+    try:
+        from backend.settings_store import peek
+
+        block = peek("ticketing") or {}
+    except Exception:                                     # pragma: no cover
+        block = {}
+
+    # The settings block only ever holds the value just typed, on its way to
+    # the vault; the stored one is read below.
+    token = _real(block.get("jira_api_token"))
+    if not token:
+        try:
+            from backend.vault import vault
+
+            token = _real(vault.get("jira_api_token", ""))
+        except Exception:                                 # locked, or no vault
+            token = ""
+    if not token:
+        token = _real(os.environ.get("JIRA_API_TOKEN", ""))
+
+    return JiraSettings(
+        url=str(block.get("jira_url") or "") or os.environ.get("JIRA_URL", ""),
+        email=(str(block.get("jira_email") or "")
+               or os.environ.get("JIRA_USER_EMAIL", "")),
+        token=token,
+        project=(str(block.get("jira_project_key") or "")
+                 or os.environ.get("JIRA_PROJECT_KEY", "")),
+    )
+
+
+# ---------------------------------------------------------------------------
 # ADF node helpers
 # ---------------------------------------------------------------------------
 

@@ -494,7 +494,9 @@ DEFAULT_AI_BACKEND=ollama
 # A fallback for a headless install; Settings puts the token in the vault.
 ANSIBLE_RUNNER_TOKEN=
 
-# Jira, for Conclude Session (optional)
+# Jira, for Conclude Session (optional). Settings has a Ticketing section
+# that wins over these, and puts the token in the vault; these remain as the
+# fallback for a setup that already had them.
 JIRA_URL=
 JIRA_USER_EMAIL=
 JIRA_API_TOKEN=
@@ -505,7 +507,8 @@ DEFAULT_SERIAL_PORT=COM3
 DEFAULT_BAUD_RATE=9600
 ```
 
-Every one of these is read by `backend/config.py` or `backend/ansible.py`.
+Every one of these is read by `backend/config.py`, `backend/ansible.py` or
+`backend/jira_client.py`.
 A variable the code reads and this block does not mention is a variable
 nobody knows exists; the drift is silent in that direction only.
 

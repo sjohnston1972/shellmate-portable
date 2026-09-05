@@ -73,11 +73,12 @@ DEFAULT_AI_BACKEND: str = os.getenv("DEFAULT_AI_BACKEND", "claude")
 DEFAULT_SERIAL_PORT: str = _env("DEFAULT_SERIAL_PORT", "COM3")
 DEFAULT_BAUD_RATE: int = _env_int("DEFAULT_BAUD_RATE", 9600)
 
-# Jira integration (optional)
-JIRA_URL: str          = os.getenv("JIRA_URL", "")
-JIRA_USER_EMAIL: str   = os.getenv("JIRA_USER_EMAIL", "")
-JIRA_API_TOKEN: str    = os.getenv("JIRA_API_TOKEN", "")
-JIRA_PROJECT_KEY: str  = os.getenv("JIRA_PROJECT_KEY", "")
+# Jira is deliberately not read here (#540). Constants in this module bind
+# when it imports, so configuring Jira meant editing .env and restarting —
+# which for a portable build closes every live session, and was the single
+# biggest reason the feature went unused. `jira_client.settings()` resolves
+# Settings, then the vault, then JIRA_URL / JIRA_USER_EMAIL /
+# JIRA_API_TOKEN / JIRA_PROJECT_KEY, at the moment a call is made.
 
 # Chroma vector DB (optional). When set, ShellMate queries this collection for
 # design-guideline context to inject into AI prompts. Empty = disabled.

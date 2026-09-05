@@ -292,6 +292,17 @@ DEFAULT_SETTINGS: dict = {
     # private key belongs in a file with its own permissions rather than in
     # settings.json. Nothing here is a secret, so nothing here is diverted
     # into the vault; the secret is the key file, which never moves.
+    # Ticketing (#540). Jira lived only in .env, which for a portable build
+    # means editing a file beside the executable and restarting — and that
+    # is the single biggest reason the feature went unused. The token is
+    # never written here: update_settings diverts it into the vault.
+    "ticketing": {
+        "jira_url": "",
+        "jira_email": "",
+        "jira_project_key": "",
+        "jira_api_token": "",
+    },
+
     "ansible": {
         # Where the runner answers, e.g. https://runner.example:5001
         "runner_url": "",
@@ -617,6 +628,24 @@ def get_settings_for_ui() -> dict:
     ansible_block["github_token"] = "•" * 8 if github_token else ""
     ansible_block["has_github_token"] = bool(github_token)
     s_out["ansible"] = ansible_block
+
+    # The Jira token, the same way (#540). The .env fallback stays, because
+    # anybody already using JIRA_API_TOKEN must not have the feature go dark
+    # the moment this ships — but the panel has to show that it is set, or
+    # the field reads as empty and they retype it to change a project key.
+    ticketing_block = dict(s_out.get("ticketing") or {})
+    try:
+        jira_token = vault.get("jira_api_token", "") or ""
+    except Exception:                                     # locked, or no vault
+        jira_token = ""
+    if not jira_token:
+        import os as _os
+
+        jira_token = _os.environ.get("JIRA_API_TOKEN", "") or ""
+    ticketing_block["jira_api_token"] = "•" * 8 if jira_token else ""
+    ticketing_block["has_jira_token"] = bool(jira_token)
+    s_out["ticketing"] = ticketing_block
+
     s_out["env_preconfigured"] = env_preconfigured
     return s_out
 
@@ -673,6 +702,8 @@ def update_settings(partial: dict) -> dict:
                                "ansible_token")
         _divert_section_secret(incoming, merged, "ansible", "github_token",
                                "ansible_github_token")
+        _divert_section_secret(incoming, merged, "ticketing", "jira_api_token",
+                               "jira_api_token")
 
         jsonfile.write(paths.settings_file(), merged)
         invalidate()
