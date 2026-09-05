@@ -74,3 +74,40 @@ Also: a broken alert tracker does not take the record with it. Tested.
 
 `python test_change_api.py` — 33 passed, 0 failed. test_change 38.
 
+## 2026-09-05 10:09 — step 3 done (#544)
+
+The record is drawn by the **diff window**, not a panel of its own. A
+change record is mostly a diff, and there is already a window that renders
+one with hunks, a capture history, Explain, Copy all, Export and "Propose
+the way back". A second window would be a second implementation of all of
+that, and the two would come to disagree about the same hunks. So drift.js
+grows one block for the parts a change has and drift does not: the note,
+the ticket, the window, the commands, and anything still pending.
+
+`config_push.offerRestore` is now exported so the way back is offered from
+the baseline *this change* pinned, rather than from whatever the last push
+left. One button, one implementation.
+
+Three menu entries — Start, End, Abandon — gated on a cache of which
+devices have a window open, because the menu is built synchronously and
+the answer lives on the server. When the cache is behind, the server
+refuses with a message naming what is open, which is why the 409 and 404
+on those routes are worded as they are.
+
+The browser test's centre of gravity is the case the whole feature exists
+for: **a change that could not be measured must not read as a change that
+did nothing.** A diff renders "0 lines added, 0 removed" for two identical
+captures *and* for a device that went away before the second one, and
+those are opposite facts. It asserts the warning appears, the summary
+refuses to claim anything about the configuration, and the words "0 lines
+added" do not appear at all. Three separate records are rendered —
+measured, identical, unmeasurable — and an ordinary drift view is checked
+to be untouched.
+
+Two things caught: `shellmate:tab-activated` was an event I invented and
+nothing dispatches (the real one is `shellmate:sessions-changed`, on
+`window`), and `play_circle` is outside the committed font subset.
+
+`python test_change_ui.py` — 20 passed, 0 failed. test_icons 4,
+test_contrast 103.
+

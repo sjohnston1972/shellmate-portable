@@ -213,5 +213,9 @@
     }
   }
 
-  window.shellmateConfigPush = { open, restore };
+  // offerRestore is exported for the change record (#544), which pins a
+  // baseline of its own and needs the way back from *that* rather than
+  // from whatever the last push happened to leave. One button, one
+  // implementation.
+  window.shellmateConfigPush = { open, restore, offerRestore: _offerRestore };
 })();

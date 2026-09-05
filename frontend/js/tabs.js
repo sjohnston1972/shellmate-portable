@@ -1738,6 +1738,23 @@
         setting: 'forwards', when: (tab) => tab && (tab.connectionType || 'ssh') === 'ssh' },
       { action: 'apply-config', icon: 'tune', label: 'Apply configuration…',
         setting: 'apply_config', when: (tab) => tab && tab.isConnected && (tab.connectionType || 'ssh') === 'ssh' },
+      // Bracketing a piece of work (#544). Which of the two shows depends on
+      // whether a window is already open on this device — the cache in
+      // change.js answers that synchronously, and the server refuses with a
+      // message naming what is open when the cache is behind.
+      { action: 'start-change', icon: 'history', label: 'Start a change…',
+        setting: 'start_change',
+        when: (tab) => tab && tab.isConnected
+          && (tab.connectionType || 'ssh') === 'ssh'
+          && !(window.shellmateChange && window.shellmateChange.hasOpen(tab)) },
+      { action: 'end-change', icon: 'history', label: 'End change…',
+        setting: 'end_change',
+        when: (tab) => tab && window.shellmateChange
+          && window.shellmateChange.hasOpen(tab) },
+      { action: 'abandon-change', icon: 'delete', label: 'Abandon the change…',
+        setting: 'abandon_change',
+        when: (tab) => tab && window.shellmateChange
+          && window.shellmateChange.hasOpen(tab) },
     ],
     [
       // Colour-coding a tab is the thing a single global scheme could never
@@ -2032,6 +2049,9 @@
           case 'rename':    _renameTab(tab);          break;
           case 'forwards':  window.shellmateForwards && window.shellmateForwards.open(tab); break;
           case 'apply-config': window.shellmateConfigPush && window.shellmateConfigPush.open(tab); break;
+          case 'start-change':   window.shellmateChange && window.shellmateChange.start(tab); break;
+          case 'end-change':     window.shellmateChange && window.shellmateChange.end(tab); break;
+          case 'abandon-change': window.shellmateChange && window.shellmateChange.abandon(tab); break;
           case 'scheme':    _chooseScheme(tab);       break;
           case 'keepalive':     _toggleKeepAlive([tab]);          break;
           case 'keepalive-all': _toggleKeepAlive(tabs.slice());   break;

@@ -2808,6 +2808,10 @@ GigEth0/2     unassigned    YES unset  down     down
         </button>
       </div>
       <div id="diff-summary"></div>
+      <!-- #544: the parts a change record has that a drift report does not —
+           the note, the window, what was typed, and anything still pending.
+           Empty and hidden for an ordinary drift view. -->
+      <div id="diff-change" class="hidden"></div>
       <div class="panel-body">
         <div id="diff-body"></div>
         <!-- The snapshot history, and pinning one as the baseline. Filled in
@@ -3761,6 +3765,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/report.js"></script>
   <script src="/static/js/history.js"></script>
   <script src="/static/js/drift.js"></script>
+  <script src="/static/js/change.js"></script>
   <script src="/static/js/logs.js"></script>
   <script src="/static/js/sftp.js"></script>
   <script src="/static/js/notes.js"></script>

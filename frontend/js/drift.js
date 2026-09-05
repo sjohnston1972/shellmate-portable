@@ -273,6 +273,166 @@
     });
   }
 
+  /**
+   * The change-record block (#544).
+   *
+   * Only drawn when the report carries a `change`, so an ordinary drift
+   * view is untouched. What goes here is what a change has and a drift
+   * report does not: why it was made, how long it took, what was typed,
+   * and whether the two ends are actually comparable.
+   *
+   * That last one is the reason this block exists at all. A drift report
+   * always has two captures; a change record may have one or none — the
+   * device may have reloaded, which is frequently the change itself. "No
+   * difference" and "we could not look" render identically in a diff, and
+   * a change board reading the first when the second is true is being told
+   * the work had no effect.
+   */
+  /**
+   * The one line at the top of a change record.
+   *
+   * Three outcomes, and they are three different sentences rather than one
+   * sentence with a zero in it. "0 lines added, 0 removed" over a change
+   * that could not be measured is the exact misreading this feature exists
+   * to prevent.
+   */
+  function changeSummary(report) {
+    if (!report.comparable) {
+      return 'This change could not be measured — see below. Nothing here '
+           + 'says the configuration did or did not change.';
+    }
+    if (!report.changed) {
+      return 'The configuration is identical before and after this change.';
+    }
+    return `${report.added} line${report.added === 1 ? '' : 's'} added, `
+         + `${report.removed} removed, over ${formatWindow(report.window_seconds)}.`;
+  }
+
+  function renderChangeBlock(report) {
+    const host = document.getElementById('diff-change');
+    if (!host) return;
+    host.innerHTML = '';
+
+    const change = report && report.change;
+    if (!change) { host.classList.add('hidden'); return; }
+    host.classList.remove('hidden');
+
+    const facts = document.createElement('dl');
+    facts.className = 'change-facts';
+    const add = (label, value) => {
+      if (!value) return;
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      facts.append(dt, dd);
+    };
+    add('What for', change.note);
+    add('Ticket', change.ticket);
+    add('Operator', change.operator);
+    add('Started', change.started_at
+      ? new Date(change.started_at * 1000).toLocaleString() : '');
+    add('Window', formatWindow(report.window_seconds));
+    host.appendChild(facts);
+
+    // Said before the hunks, not after them: somebody scrolling a diff and
+    // finding the caveat underneath has already drawn a conclusion.
+    if (!report.comparable) {
+      const warn = document.createElement('div');
+      warn.className = 'change-incomparable';
+      warn.textContent = report.old_id
+        ? 'The configuration could not be captured at the end of this change, '
+          + 'so there is nothing to compare the start against. This is not the '
+          + 'same as nothing having changed.'
+        : 'No configuration was captured at the start of this change, so '
+          + 'nothing below is a comparison.';
+      if (report.capture_error) {
+        const why = document.createElement('div');
+        why.className = 'change-incomparable-why';
+        why.textContent = report.capture_error;
+        warn.appendChild(why);
+      }
+      host.appendChild(warn);
+    }
+
+    // Anything still hanging over the device. A record that omits the
+    // reload describes a state the device is about to leave.
+    if (report.pending) {
+      const pending = document.createElement('div');
+      pending.className = 'change-pending';
+      const left = report.pending.seconds_left;
+      pending.textContent = `A ${report.pending.kind || 'pending action'} is `
+        + 'still outstanding on this device'
+        + (typeof left === 'number' && left > 0
+            ? `, in about ${Math.round(left / 60)} minute`
+              + `${Math.round(left / 60) === 1 ? '' : 's'}.`
+            : '.');
+      host.appendChild(pending);
+    }
+
+    renderChangeCommands(host, report.commands || []);
+  }
+
+  function formatWindow(seconds) {
+    if (typeof seconds !== 'number' || seconds < 0) return '';
+    if (seconds < 60) return `${Math.round(seconds)} seconds`;
+    if (seconds < 3600) return `${Math.round(seconds / 60)} minutes`;
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.round((seconds % 3600) / 60);
+    return `${hours}h ${minutes}m`;
+  }
+
+  /**
+   * What was typed in the window.
+   *
+   * Collapsed by default and counted on the summary line: on a long change
+   * this is two hundred lines, and the diff is what somebody opened the
+   * record to see. Empty is stated rather than left blank — "nothing was
+   * typed" is a real and interesting answer about a configuration that
+   * nevertheless changed.
+   */
+  function renderChangeCommands(host, commands) {
+    const box = document.createElement('details');
+    box.className = 'change-commands';
+
+    const summary = document.createElement('summary');
+    summary.textContent = commands.length
+      ? `${commands.length} command${commands.length === 1 ? '' : 's'} typed `
+        + 'during the change'
+      : 'No commands were recorded during the change';
+    box.appendChild(summary);
+
+    if (!commands.length) {
+      const none = document.createElement('p');
+      none.className = 'change-commands-none';
+      none.textContent = 'Either nothing was typed on this device in the '
+        + 'window, or session recording is switched off. If the '
+        + 'configuration changed anyway, it changed from somewhere else.';
+      box.appendChild(none);
+      host.appendChild(box);
+      return;
+    }
+
+    const list = document.createElement('ol');
+    list.className = 'change-command-list';
+    commands.forEach((entry) => {
+      const row = document.createElement('li');
+      // textContent: this is what a device echoed, not markup.
+      const cmd = document.createElement('code');
+      cmd.textContent = entry.command || '';
+      row.appendChild(cmd);
+      if (entry.ran_at) {
+        const when = document.createElement('span');
+        when.className = 'change-command-when';
+        when.textContent = new Date(entry.ran_at * 1000).toLocaleTimeString();
+        row.appendChild(when);
+      }
+      list.appendChild(row);
+    });
+    box.appendChild(list);
+    host.appendChild(box);
+  }
+
   // -------------------------------------------------------------------------
   // The diff window
   // -------------------------------------------------------------------------
@@ -294,16 +454,29 @@
     // Opened from an unchanged device too now (#276), where "configuration
     // changes" and "0 lines added" would be a strange way to describe what
     // is on screen — which is the capture history.
-    document.getElementById('diff-title').textContent = report.changed
-      ? `${name} — configuration changes`
-      : `${name} — configuration history`;
+    // A change record is not a drift report and should not be titled like
+    // one: "since your last visit" is the wrong frame for a window somebody
+    // opened deliberately twenty minutes ago.
+    document.getElementById('diff-title').textContent = report.change
+      ? `${name} — change record`
+      : report.changed
+        ? `${name} — configuration changes`
+        : `${name} — configuration history`;
 
-    document.getElementById('diff-summary').textContent = report.changed
-      ? `${report.added} line${report.added === 1 ? '' : 's'} added, `
-        + `${report.removed} removed, since ${report.days_since ?? 0} day`
-        + `${report.days_since === 1 ? '' : 's'} ago.`
-      : 'Nothing has changed since the last capture. Every stored capture is '
-        + 'below — pick any two to compare.';
+    document.getElementById('diff-summary').textContent =
+      report.change ? changeSummary(report)
+      : report.changed
+        ? `${report.added} line${report.added === 1 ? '' : 's'} added, `
+          + `${report.removed} removed, since ${report.days_since ?? 0} day`
+          + `${report.days_since === 1 ? '' : 's'} ago.`
+        : 'Nothing has changed since the last capture. Every stored capture is '
+          + 'below — pick any two to compare.';
+
+    // #544: a change record carries a note, a window, the commands and
+    // whether the two ends are comparable at all. Drawn before the
+    // hunks, because somebody who scrolls a diff and finds the caveat
+    // underneath has already drawn a conclusion.
+    renderChangeBlock(report);
 
     renderBaselineLine(report);
 
