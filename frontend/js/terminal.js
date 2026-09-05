@@ -1184,7 +1184,68 @@
     if (button) button.addEventListener('click', copyRecentOutput);
   });
 
+  /**
+   * Scroll to a cited session line and mark it (#559).
+   *
+   * The citation carries a line number counted from the start of the
+   * *session*; xterm counts from the start of its own scrollback, which is
+   * shorter because it evicts. The two agree at the end, so the mapping is
+   * done from the bottom up: the last line of the session is the last line
+   * of the buffer, whatever either of them has forgotten.
+   *
+   * That is also why this can fail honestly. A line cited three questions
+   * ago may simply not be in the terminal any more, and returning false
+   * lets the chip say so rather than scrolling somewhere arbitrary and
+   * highlighting the wrong thing — which is worse than doing nothing,
+   * because it looks like an answer.
+   *
+   * @returns {boolean} Whether the line was found and shown.
+   */
+  function revealLine(sessionId, from, to, sessionTotal) {
+    const entry = _instances[sessionId];
+    if (!entry) return false;
+    const term = entry.terminal;
+    const buf = term.buffer.active;
+
+    // What the session believes its newest line number is. Passed in
+    // rather than held here: only the server knows it, and a second
+    // copy of session state in the terminal is a second thing to keep
+    // in step. With no count, the two are assumed to line up.
+    const total = Number(sessionTotal || 0) || buf.length;
+    const offset = total - buf.length;      // lines the terminal has evicted
+    const row = Math.round(from) - 1 - offset;
+    if (row < 0 || row >= buf.length) return false;
+
+    // Put it a third of the way down rather than at the very top: a line
+    // with nothing above it reads as the start of the output, and the
+    // lines before a cited one are usually what make it mean something.
+    const above = Math.floor(term.rows / 3);
+    term.scrollToLine(Math.max(0, row - above));
+
+    _markLines(entry, row, Math.max(row, Math.round(to || from) - 1 - offset));
+    return true;
+  }
+
+  /**
+   * Select the cited rows, which is xterm's own way of marking something.
+   *
+   * A decoration would need an addon that is not vendored; a selection is
+   * visible, copyable, and cleared by the next click — all of which are the
+   * right behaviours for "here is the line I meant".
+   */
+  function _markLines(entry, firstRow, lastRow) {
+    const term = entry.terminal;
+    try {
+      const width = term.cols;
+      const rows = Math.max(1, (lastRow - firstRow) + 1);
+      term.select(0, firstRow, width * rows);
+    } catch (_) {
+      // A selection that will not take is not worth losing the scroll for.
+    }
+  }
+
   window.copyTerminalOutput = copyOutput;
+  window.revealTerminalLine = revealLine;
   window.terminalOutputLines = collectLines;
 
   /**

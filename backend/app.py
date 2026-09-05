@@ -7678,7 +7678,9 @@ async def chat_websocket(websocket: WebSocket) -> None:
                         # is the same redacted string the provider got, so
                         # what somebody inspects is what was sent.
                         await websocket.send_text(json.dumps({
-                            "type": "context", "text": chunk["context"]}))
+                            "type": "context", "text": chunk["context"],
+                            "session_lines": chunk.get("session_lines", 0),
+                            "session_id": chunk.get("session_id", "")}))
                         continue
                     if isinstance(chunk, dict) and "tool_request" in chunk:
                         # The model asked to run something. Rendered as the

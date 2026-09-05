@@ -826,6 +826,18 @@ SETTINGS: tuple[Setting, ...] = (
             "The relay files each report as a GitHub issue. Emptied, "
             "reports are saved to feedback-outbox.json in the data folder "
             "instead of being sent anywhere."),
+    Setting("ai.cite_lines", "Let the assistant cite terminal lines", True,
+            "bool",
+            "Number the terminal lines sent as context, so an answer can "
+            "point at the ones it rests on.",
+            "Turns a claim into something checkable in one click: the chips "
+            "in a reply scroll the terminal to the line and highlight it. It "
+            "also discourages invented output, which the prompt can only "
+            "ask for.||Costs roughly 8% more input tokens, because every "
+            "line carries a tag. Smaller local models cite inconsistently; "
+            "where the model does not cite, nothing changes.",
+            applies="live"),
+
     Setting("ai.conversation_token_budget", "Budget for one conversation",
             0, "int",
             "Tokens a single conversation may spend before ShellMate asks. "

@@ -3628,6 +3628,47 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 }
 
 /* ---------------------------------------------------------------------------
+   Citations (#559)
+
+   Small and inline, because a citation sits inside a sentence and a chip
+   that breaks the line changes how the sentence reads.
+--------------------------------------------------------------------------- */
+.citation-chip {
+  display: inline;
+  margin: 0 2px;
+  padding: 0 5px;
+  background: var(--primary-tint);
+  border: 1px solid var(--primary-edge);
+  border-radius: var(--radius-sm);
+  color: var(--primary);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+
+.citation-chip:hover {
+  background: var(--primary-edge);
+  color: var(--on-primary);
+}
+
+/* The cited line has scrolled out of the session. Greyed rather than
+   removed: a chip that vanishes reads as a rendering fault, and a chip
+   that silently does nothing is worse than one that says it cannot. */
+.citation-chip-gone {
+  background: none;
+  border-color: var(--outline);
+  color: var(--on-surface-muted);
+  cursor: default;
+  text-decoration: line-through;
+}
+
+.citation-chip-gone:hover {
+  background: none;
+  color: var(--on-surface-muted);
+}
+
+/* ---------------------------------------------------------------------------
    Real tables in the chat (#554)
 
    A 48-port interface table read as line-wrapped prose is the example the

@@ -298,3 +298,28 @@ pipe, and `||` is the separator. Reworded rather than escaped.
 
 `python test_platform_notes.py` — 21 passed. 99 of 99 test files pass.
 
+## 2026-09-05 14:01 — #559 closed
+
+Tagged context lines, a citation rule, and chips that scroll the terminal.
+
+**Absolute numbering is the design.** Per-request numbering renumbers every
+line whenever anything scrolls, so an older citation points at whatever has
+since slid into that slot — wrong exactly when a conversation is long
+enough for citations to matter. Numbered by position in the session,
+counting evictions; tested by growing a buffer past its own limit.
+
+A chip whose line has scrolled out greys itself rather than scrolling
+somewhere arbitrary — highlighting the wrong line looks like an answer.
+
+Wired after the Markdown renderer and never inside a code block: a device
+can print something shaped like a citation, and turning that into a chip
+would be inventing a reference. Commands are still extracted from the
+untagged text, because the extractor matches on the prompt.
+
+`python test_citations.py` — 25 passed. 100 of 100 test files pass.
+
+Also: three read-only survey agents ran in parallel for #558, #555+#561
+and #552+#529. Research parallelises here; edits do not — every remaining
+issue touches chat.js, router.py, prompts.py and app.py, and my edits are
+anchor-based replacements that two writers would break.
+

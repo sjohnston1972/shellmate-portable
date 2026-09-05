@@ -90,6 +90,46 @@ def session_text(session: dict, lines: int = 200) -> str:
     return redact(text) if redaction_enabled() else text
 
 
+def numbered_session_text(session: dict, lines: int = 200) -> tuple[str, int]:
+    """
+    The same text, with a stable line tag on every line (#559).
+
+    ``L0417| Gi1/0/48 ... err-disabled``. The number is the line's position
+    in the *session*, not in the window — so it does not shift when the
+    window slides, and a citation made three questions ago still points at
+    the line it meant.
+
+    That stability is the whole reason this exists. Numbering from one at
+    the top of each request would renumber every line whenever anything
+    scrolled, which is a citation system that is wrong exactly when the
+    conversation is long enough for citations to matter.
+
+    Returns:
+        ``(text, first_number)`` — the tagged text and the absolute number
+        of its first line, so the browser can map a tag back to a line.
+    """
+    buffer = session.get("buffer")
+    if buffer is None:
+        return "", 0
+
+    body = session_text(session, lines)
+    if not body:
+        return "", 0
+
+    rows = body.split(chr(10))
+    # Where this window starts in the session as a whole. `horizon` counts
+    # what has been evicted as well as what is merely out of view, which is
+    # what makes the number absolute rather than relative to the deque.
+    try:
+        info = buffer.horizon(lines)
+        first = max(1, info.get("total", len(rows)) - len(rows) + 1)
+    except Exception:                                     # pragma: no cover
+        first = 1
+
+    tagged = [f"L{first + i:04d}| {row}" for i, row in enumerate(rows)]
+    return chr(10).join(tagged), first
+
+
 def redact_text(text: str) -> str:
     """
     Mask an already-extracted string.

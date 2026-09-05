@@ -266,6 +266,9 @@
     } else if (msg.type === 'context') {
       // Exactly what this reply was built from (#553).
       attachContext(msg.text || '');
+      // For mapping a citation onto the terminal's shorter
+      // scrollback (#559).
+      if (msg.session_id) sessionLines[msg.session_id] = msg.session_lines || 0;
     } else if (msg.type === 'tool_request') {
       // The model asked to run something (#560). Rendered as the command
       // block a suggestion tag produces; nothing runs until it is clicked.
@@ -1142,6 +1145,111 @@
     return yes;
   }
 
+  // -------------------------------------------------------------------------
+  // Citations (#559)
+  //
+  // The context carries a stable tag on every line — `L0417| Gi1/0/48 ...` —
+  // numbered by position in the *session* rather than in the window, so a
+  // citation made three questions ago still points at the line it meant.
+  // The model is asked to cite as `[L417]` or `[L417-L420]`, and those
+  // become chips that scroll the terminal to the line and highlight it.
+  //
+  // "Show me where you saw that" in one click is the trust argument. The
+  // quieter one is that a model asked to point at a line is a model less
+  // able to invent output, which the prompt could previously only request.
+  //
+  // Where the model does not cite, nothing changes: no chips, no gaps, no
+  // complaint. A smaller local model that ignores the rule produces exactly
+  // the reply it produced before.
+  // -------------------------------------------------------------------------
+
+  /** [L417] or [L417-L420], as written in a reply. */
+  const CITATION = /\[L(\d+)(?:\s*[-–]\s*L?(\d+))?\]/g;
+
+  /** How many lines each session has produced, from the context event. */
+  const sessionLines = {};
+
+  /**
+   * Turn citations in an already-rendered bubble into chips.
+   *
+   * Walks text nodes rather than reworking the HTML: the bubble has just
+   * been through the Markdown renderer, and a second pass over its markup
+   * would be a second chance to break it — and the one place a citation
+   * must *not* be replaced is inside a code block, which is where a device
+   * might have printed something that looks like one.
+   */
+  function wireCitations(bubble, sessionId) {
+    if (!bubble) return;
+    const walker = document.createTreeWalker(bubble, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) =>
+        node.parentElement && node.parentElement.closest('pre, code')
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT,
+    });
+
+    const targets = [];
+    while (walker.nextNode()) {
+      if (CITATION.test(walker.currentNode.nodeValue)) targets.push(walker.currentNode);
+      CITATION.lastIndex = 0;
+    }
+
+    targets.forEach(node => replaceIn(node, sessionId));
+  }
+
+  function replaceIn(node, sessionId) {
+    const text = node.nodeValue;
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    let match;
+    CITATION.lastIndex = 0;
+
+    while ((match = CITATION.exec(text)) !== null) {
+      if (match.index > last) {
+        frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+      }
+      const from = Number(match[1]);
+      const to = match[2] ? Number(match[2]) : from;
+      frag.appendChild(buildChip(from, to, sessionId));
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) {
+      frag.appendChild(document.createTextNode(text.slice(last)));
+    }
+    node.parentNode.replaceChild(frag, node);
+  }
+
+  function buildChip(from, to, sessionId) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'citation-chip';
+    chip.textContent = from === to ? `L${from}` : `L${from}–${to}`;
+    chip.title = 'Show this line in the terminal';
+    chip.addEventListener('click', () => showLine(from, to, sessionId, chip));
+    return chip;
+  }
+
+  /**
+   * Scroll the terminal to the cited line and mark it.
+   *
+   * A chip whose line has scrolled out of the buffer greys itself out
+   * rather than doing nothing — a button that silently fails is worse than
+   * one that says it cannot.
+   */
+  function showLine(from, to, sessionId, chip) {
+    const target = sessionId
+      || (chip.closest('.chat-bubble') || {}).dataset?.contextSession;
+    if (target && typeof window.switchToTabBySessionId === 'function') {
+      window.switchToTabBySessionId(target);
+    }
+    const ok = typeof window.revealTerminalLine === 'function'
+      ? window.revealTerminalLine(target, from, to, sessionLines[target] || 0)
+      : false;
+    if (!ok) {
+      chip.classList.add('citation-chip-gone');
+      chip.title = 'That line has scrolled out of this session by now.';
+    }
+  }
+
   // -----------------------------------------------------------------------
   // Message rendering
   // -----------------------------------------------------------------------
@@ -1276,6 +1384,11 @@
         }
         renderBubbleContent(streamingBubble);
         wireCommandBlocks(streamingBubble);
+        // After the Markdown renderer, and never inside a code
+        // block — a device can print something that looks like a
+        // citation (#559).
+        wireCitations(streamingBubble,
+                      streamingBubble.dataset.contextSession || '');
         attachTables(streamingBubble);
       }
       streamingBubble = null;

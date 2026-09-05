@@ -229,9 +229,20 @@ async def stream_chat(
                 session.get("hostname", active_session_id[:8])
             )
             if session.get("buffer"):
-                active_buffer = _session_text(
-                    session, advanced("ai.context_lines"))
-                command_history = _extract_commands(active_buffer)
+                lines_wanted = int(advanced("ai.context_lines"))
+                # Tagged where citations are on (#559), so an answer
+                # can point at the line it rests on. The commands are
+                # still read from the untagged text: the extractor
+                # matches on the prompt, and a tag in front of every
+                # line is a prefix it has never seen.
+                plain = _session_text(session, lines_wanted)
+                command_history = _extract_commands(plain)
+                if advanced("ai.cite_lines"):
+                    tagged, _first = outbound.numbered_session_text(
+                        session, lines_wanted)
+                    active_buffer = tagged or plain
+                else:
+                    active_buffer = plain
 
     # Extra contexts (/context all or /context N)
     extra_contexts: list[dict] = []
@@ -324,7 +335,14 @@ async def stream_chat(
             outbound.redact_text(str(attachment["text"])))
 
     yield {"context": (context_block + "\n\n" + attachment_text
-                       if attachment_text else context_block)}
+                       if attachment_text else context_block),
+           # How many lines this session has produced altogether
+           # (#559). The browser needs it to map a citation onto
+           # xterm's own scrollback, which is shorter because it
+           # evicts — the two agree at the newest line, so the
+           # mapping is done from the bottom up.
+           "session_lines": (horizon or {}).get("total", 0),
+           "session_id": active_session_id or ""}
 
     # The same parse, as rows, for the browser (#554). A 48-port table
     # as line-wrapped prose is what the assistant documentation warns

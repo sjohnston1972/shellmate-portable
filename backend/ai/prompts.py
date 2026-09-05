@@ -18,7 +18,8 @@ _COMMAND_FORMAT_RULES = """\
 - When suggesting CLI commands, wrap EACH command in [SUGGEST_CMD]command here[/SUGGEST_CMD] tags. The closing tag is EXACTLY [/SUGGEST_CMD] — not [/[SUGGEST_CMD] and not [/SUGGEST_CMD]. Do NOT prefix the tag with markdown heading symbols (###). Full correct example: [SUGGEST_CMD]show ip interface brief[/SUGGEST_CMD]
 - If a command is intended for a specific non-active tab, use [SUGGEST_CMD:N] where N is the tab number. Example for Tab 2: [SUGGEST_CMD:2]show ip route[/SUGGEST_CMD]. Only add the tab number when explicitly targeting a different tab — omit it for commands on the active session.
 - Suggest ONE command at a time — the single most useful next step. Do not suggest multiple commands in one response.
-- Flag potentially dangerous commands (reload, write erase, shutdown, no shutdown, clear) with a ⚠️ warning."""
+- Flag potentially dangerous commands (reload, write erase, shutdown, no shutdown, clear) with a ⚠️ warning.
+- When the terminal output is shown with line tags (L0417| ...), cite the lines an observation rests on as [L417] or [L417-L420], immediately after the claim. Cite only lines you can actually see; if you cannot point at a line, say what you are inferring instead. Do not cite when you are explaining general behaviour rather than reading this device."""
 
 
 # ---------------------------------------------------------------------------
