@@ -2969,6 +2969,11 @@
         onClick: () => _changeStart(group) },
       { icon: 'history', label: 'End the change here…', disabled: empty, title: why,
         onClick: () => _changeEnd(group) },
+      // #543: did the standard land everywhere? Answered from the stored
+      // snapshots, so it needs no login and comes back at once.
+      { icon: 'rule', label: 'Check compliance…', disabled: empty, title: why,
+        onClick: () => window.shellmateCompliance
+          && window.shellmateCompliance.open(group) },
       // The group and everything nested under it, as a spreadsheet (#535).
       { icon: 'table', label: 'Export as CSV…', disabled: empty, title: why,
         onClick: () => window.shellmateEstateCsv.exportEstate(group.key) },

@@ -3628,6 +3628,139 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 }
 
 /* ---------------------------------------------------------------------------
+   Compliance (#543)
+
+   Three states get three treatments, because folding any two together sends
+   somebody to the wrong place: a device nobody has captured is not "not
+   compliant" — it may be perfectly configured — and it is certainly not
+   compliant, which would report a device nobody has looked at as verified.
+--------------------------------------------------------------------------- */
+#compliance-summary {
+  padding: 12px 24px 0;
+  color: var(--on-surface);
+  font-size: 13px;
+}
+
+/* The caveat, printed above the table rather than tucked under it. A check
+   that overstates what it verified is worse than no check, and a reader who
+   finds the limit after the verdicts has already drawn a conclusion. */
+#compliance-limits {
+  margin: 10px 24px 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--outline);
+  color: var(--on-surface-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.compliance-row {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--outline);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--surface-high);
+}
+
+.compliance-missing      { border-left-color: var(--warn); }
+.compliance-compliant    { border-left-color: var(--ok); }
+/* Neither colour: this is an absence of evidence, not a verdict, and
+   painting it green or amber would make it look like one. */
+.compliance-never-captured,
+.compliance-no-snippet,
+.compliance-no-device-name { border-left-color: var(--on-surface-muted); }
+.compliance-error          { border-left-color: var(--error); }
+
+.compliance-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.compliance-name {
+  font-weight: 600;
+  color: var(--on-surface);
+  font-size: 13px;
+}
+
+.compliance-state {
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+}
+
+.compliance-state-missing {
+  background: var(--warn-tint); color: var(--warn);
+}
+.compliance-state-compliant {
+  background: var(--ok-tint); color: var(--ok);
+}
+.compliance-state-never-captured,
+.compliance-state-no-snippet,
+.compliance-state-no-device-name {
+  background: var(--surface-highest); color: var(--on-surface-dim);
+}
+.compliance-state-error {
+  background: var(--error-tint); color: var(--error);
+}
+
+/* On the same line as the verdict, not below it. "Has every line" without
+   "captured six weeks ago" beside it invites the wrong conclusion. */
+.compliance-age {
+  margin-left: auto;
+  color: var(--on-surface-muted);
+  font-size: 11px;
+}
+
+.compliance-age-stale {
+  color: var(--warn);
+}
+
+.compliance-lines {
+  margin-top: 8px;
+}
+
+.compliance-lines-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--on-surface-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.compliance-lines ul {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.compliance-lines code {
+  color: var(--on-surface);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.compliance-unexpected code {
+  color: var(--error);
+}
+
+.compliance-note {
+  margin: 8px 0 0;
+  color: var(--on-surface-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.compliance-fix {
+  margin-top: 10px;
+}
+
+/* ---------------------------------------------------------------------------
    Change records (#544)
 
    Drawn inside the diff panel rather than in a window of its own: a change

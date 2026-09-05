@@ -183,3 +183,35 @@ there.
 
 `python test_compliance.py` — 30 passed. test_config_push 26, unchanged.
 
+## 2026-09-05 10:23 — step 7 done (#543)
+
+The compliance panel, the group menu entry, and "Open and fix".
+
+The browser test exists because "the verdict is right in the JSON" and
+"the verdict was communicated" are different claims. Its centre is
+**never-captured looking like neither of its neighbours** — painted green
+it reports a device nobody has looked at as verified, painted amber it
+sends an engineer to fix a device that may be perfectly configured. The
+test reads the computed border colour and asserts it differs from both.
+
+Two more properties it holds:
+
+- The caveat sits **above** the table, checked with
+  `compareDocumentPosition` rather than by looking. A limit found after
+  the verdicts is a limit read after a conclusion has been drawn.
+- The age of the evidence is on the verdict line, and a 45-day-old
+  "has every line" says "this verdict is that old too".
+
+"Open and fix" loads the missing lines into the push editor rather than
+sending them — config_push keeps its own preview and its dangerous-command
+guardrail, and a compliance report is evidence, not permission.
+
+Two mistakes, both mine and both the same shape as earlier ones:
+`window.activateTab` does not exist (it is `switchToTabBySessionId`), and
+my grep for it matched only my own file. And an assertion failed on
+casing because `inner_text` returns *rendered* text — a CSS
+`text-transform: uppercase` is invisible in the source and not to the test.
+
+`python test_compliance_ui.py` — 18 passed. test_compliance 30,
+test_contrast 103, test_icons 4.
+

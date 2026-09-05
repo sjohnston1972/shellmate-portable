@@ -2779,6 +2779,31 @@ GigEth0/2     unassigned    YES unset  down     down
        Opened from the drift banner shown when a device's configuration has
        changed since the last visit.
   ================================================================ -->
+  <!-- ================================================================
+       COMPLIANCE (#543)
+
+       "These fourteen switches are missing the new AAA lines" — asked of a
+       whole group, answered from the snapshots the nightly backups already
+       stored, so it needs no login. The caveat above the table is sent by
+       the server rather than written here: a panel holding its own copy
+       would drift from the matching it describes.
+  ================================================================ -->
+  <div id="compliance-overlay" class="panel-overlay hidden">
+    <div id="compliance-panel" class="side-panel side-panel-wide">
+      <div class="panel-header">
+        <h2 class="panel-title" id="compliance-title">Compliance</h2>
+        <button id="compliance-close" class="icon-btn" aria-label="Close">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div id="compliance-summary"></div>
+      <p id="compliance-limits" class="hidden"></p>
+      <div class="panel-body">
+        <div id="compliance-body"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="diff-overlay" class="panel-overlay hidden">
     <div id="diff-panel" class="side-panel side-panel-wide">
       <div class="panel-header">
@@ -3766,6 +3791,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/history.js"></script>
   <script src="/static/js/drift.js"></script>
   <script src="/static/js/change.js"></script>
+  <script src="/static/js/compliance.js"></script>
   <script src="/static/js/logs.js"></script>
   <script src="/static/js/sftp.js"></script>
   <script src="/static/js/notes.js"></script>
