@@ -2573,6 +2573,31 @@ GigEth0/2     unassigned    YES unset  down     down
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
+      <!-- Search and date range (#576). Two filters because people arrive
+           with either question: "the file from that Tuesday" and "the line
+           that said BGP". Searching only filenames would send somebody back
+           to opening one log at a time, which is where they started. -->
+      <div id="logs-toolbar">
+        <input type="search" id="logs-query" placeholder="Search inside the logs…"
+               autocomplete="off" spellcheck="false" />
+        <div class="search-opts" role="group" aria-label="Search options">
+          <button type="button" id="logs-opt-case" class="search-opt"
+                  aria-pressed="false" title="Match case">Aa</button>
+          <button type="button" id="logs-opt-word" class="search-opt"
+                  aria-pressed="false" title="Whole words only">ab|</button>
+          <button type="button" id="logs-opt-regex" class="search-opt"
+                  aria-pressed="false" title="Regular expression">.*</button>
+        </div>
+      </div>
+
+      <div id="logs-dates">
+        <label for="logs-from">From</label>
+        <input type="date" id="logs-from" />
+        <label for="logs-to">to</label>
+        <input type="date" id="logs-to" />
+        <button type="button" id="logs-dates-clear" class="btn-tertiary">Clear</button>
+      </div>
+
       <div class="panel-body">
         <div id="logs-list"></div>
       </div>

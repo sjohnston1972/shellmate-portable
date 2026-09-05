@@ -142,12 +142,20 @@ def test_a_bad_pattern_is_a_sentence() -> None:
         check(f"{query!r} is refused with a reason",
               bool(raised) and "valid pattern" in raised, raised or "no error")
 
-    empty = ""
-    try:
-        logsearch.search(LOGS, "   ")
-    except logsearch.SearchError as exc:
-        empty = str(exc)
-    check("an empty query says what to do", "Type something" in empty, empty)
+    # An empty query is not an error. "Show me the logs from that Tuesday"
+    # is a whole question, and substituting a match-everything pattern
+    # would report every line of every file as a hit — a number nobody
+    # asked for, arriving where a result goes.
+    out = logsearch.search(LOGS, "   ")
+    check("an empty query lists rather than refusing",
+          len(out["files"]) == 3, str(out))
+    check("and reports no hits, because nothing was searched for",
+          out["hits"] == 0 and all(not f["matches"] for f in out["files"]),
+          str(out["hits"]))
+    check("the listing is newest first",
+          [f["filename"] for f in out["files"]]
+          == ["core-sw-01.log", "edge-fw-02.log", "old-rtr-03.log"],
+          str([f["filename"] for f in out["files"]]))
 
 
 def test_the_date_range() -> None:
@@ -299,9 +307,14 @@ def test_the_route() -> None:
           "valid pattern" in res.json().get("detail", ""),
           res.text[:140])
 
-    res = client.get("/api/logs/search", params={"q": ""})
-    check("an empty query is a 400", res.status_code == 400,
-          f"HTTP {res.status_code}")
+    from datetime import date, timedelta
+
+    res = client.get("/api/logs/search", params={
+        "q": "", "since": (date.today() - timedelta(days=1)).isoformat()})
+    check("dates alone filter the listing rather than erroring",
+          res.status_code == 200
+          and [f["filename"] for f in res.json()["files"]] == ["core-sw-01.log"],
+          f"HTTP {res.status_code}: {res.text[:140]}")
 
 
 def main() -> int:

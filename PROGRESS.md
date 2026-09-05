@@ -199,3 +199,32 @@ accepting the premise.
 
 test_ansible 79 passed, 0 failed.
 
+## 2026-09-05 08:06 — steps 9 and 10 done (#576)
+
+The Logs panel's toolbar: a search box, three switches (case, whole word,
+regular expression) and a From/To date range, shaped like the history
+toolbar deliberately — two panels that both search wearing two different
+search bars is how somebody learns one and then has to learn the other.
+
+Results list the matching files with a hit count and the matching lines
+under each, marked. Clicking a line opens the viewer at it: a window of
+400 lines either side, with the elided parts stated at both ends rather
+than left as an absence that reads like the start of the file. A window
+because marking every match in a five-megabyte log is tens of thousands of
+elements and the browser stops responding building them.
+
+Two things I got wrong and fixed:
+
+- A date-only filter was sending `q='.'` as a regex, so every non-empty
+  line counted as a hit. An empty query now means "no text filter" all the
+  way down — the endpoint lists the files in range, newest first, with no
+  hit count. Substituting a match-everything pattern produces a number
+  nobody asked for, arriving where a result goes.
+- `_mark` needed a guard for a pattern that can match nothing (`x*`).
+  Without it the exec loop never advances and the tab locks up.
+
+The escape helper is exercised against the source that ships rather than a
+retyped copy — nine cases plus the empty-match guard, all passing.
+
+`python test_logsearch.py` — 38 passed. test_icons 4, test_contrast 59.
+

@@ -97,7 +97,6 @@ def build_pattern(query: str, regex: bool = False, case: bool = False,
     text = query or ""
     if not text.strip():
         raise SearchError("Type something to search for.")
-
     body = text if regex else re.escape(text)
     if whole_word:
         # Word boundaries around an escaped literal are safe. Around a
@@ -206,7 +205,7 @@ def search(directory: Path, query: str, since: str = "", until: str = "",
 
     Args:
         directory:  The session-log folder.
-        query:      What to look for.
+        query:      What to look for, or "" to filter by date alone.
         since:      YYYY-MM-DD, or "" for no lower bound.
         until:      YYYY-MM-DD, or "" for no upper bound.
         regex:      Treat the query as a regular expression.
@@ -220,7 +219,13 @@ def search(directory: Path, query: str, since: str = "", until: str = "",
     Raises:
         SearchError: The query or a date is malformed.
     """
-    pattern = build_pattern(query, regex, case, whole_word)
+    # An empty query is not an error, it is the absence of a text filter:
+    # "show me the logs from that Tuesday" is a whole question on its own.
+    # Substituting a pattern that matches everything would report every
+    # line of every file as a hit, which is a number nobody asked for and
+    # would read as a result.
+    pattern = (build_pattern(query, regex, case, whole_word)
+               if (query or "").strip() else None)
     after = _parse_day(since)
     before = _parse_day(until, end=True)
     if after is not None and before is not None and after > before:
@@ -249,6 +254,14 @@ def search(directory: Path, query: str, since: str = "", until: str = "",
             continue
 
         searched += 1
+        if pattern is None:
+            results.append(FileHits(
+                filename=path.name,
+                size_bytes=stat.st_size,
+                modified=datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            ))
+            continue
+
         try:
             hits, matches, truncated, capped = _scan(
                 path, pattern, max_bytes, max_hits)
@@ -270,8 +283,13 @@ def search(directory: Path, query: str, since: str = "", until: str = "",
 
     # Most hits first: the file that mentions the thing forty times is
     # almost always the session somebody is looking for, and sorting by
-    # date would bury it under one that mentions it once.
-    results.sort(key=lambda item: (-item.hits, item.filename))
+    # date would bury it under one that mentions it once. With no query
+    # there are no hits to rank by, so newest first — which is what the
+    # plain listing does, and this is a filtered listing.
+    if pattern is None:
+        results.sort(key=lambda item: item.modified, reverse=True)
+    else:
+        results.sort(key=lambda item: (-item.hits, item.filename))
 
     return {
         "files": [item.as_dict() for item in results],

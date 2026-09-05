@@ -1,11 +1,30 @@
 /**
  * logs.js — Logs panel for ShellMate.
  * Shows available session log files, views them in place, downloads them.
+ *
+ * Search and a date range (#576). The panel listed files by name and opened
+ * one at a time, which works while you remember which session it was, and
+ * stops working at exactly the point somebody needs it — "we changed
+ * something on a Tuesday and I do not remember which switch."
+ *
+ * Two filters, because people arrive with either question. The dates narrow
+ * the list; the query searches inside the files and reports which line. A
+ * search that only matched filenames would send somebody back to reading
+ * one log at a time, which is where they started.
+ *
+ * The server bounds what it reads and says when it stopped early, and the
+ * panel repeats that on screen rather than swallowing it: an unannounced
+ * bound makes "no matches" and "I did not look" the same answer.
  */
 (function () {
   'use strict';
 
   let overlay;
+
+  /** What is being searched for, and how. */
+  const search = { q: '', case: false, word: false, regex: false,
+                   from: '', to: '' };
+  let searchTimer = null;
 
   document.addEventListener('DOMContentLoaded', () => {
     overlay = document.getElementById('logs-overlay');
@@ -20,8 +39,62 @@
       if (e.target === overlay) closeLogs();
     });
 
+    _initToolbar();
     _initViewer();
   });
+
+  /**
+   * The search box, the three switches and the date range.
+   *
+   * Typing is debounced because every keystroke is a pass over every log
+   * file on the server side; the switches and the dates are not, because
+   * those are one deliberate click and waiting after one feels broken.
+   */
+  function _initToolbar() {
+    const query = document.getElementById('logs-query');
+    if (!query) return;
+
+    query.addEventListener('input', () => {
+      search.q = query.value;
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(refreshLogsList, 250);
+    });
+    // Enter searches now rather than waiting out the debounce, which is
+    // what somebody who has finished typing expects it to do.
+    query.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { clearTimeout(searchTimer); refreshLogsList(); }
+    });
+
+    [['logs-opt-case', 'case'], ['logs-opt-word', 'word'],
+     ['logs-opt-regex', 'regex']].forEach(([id, key]) => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        search[key] = !search[key];
+        btn.setAttribute('aria-pressed', String(search[key]));
+        refreshLogsList();
+      });
+    });
+
+    ['logs-from', 'logs-to'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('change', () => {
+        search.from = document.getElementById('logs-from').value;
+        search.to = document.getElementById('logs-to').value;
+        refreshLogsList();
+      });
+    });
+
+    const clear = document.getElementById('logs-dates-clear');
+    if (clear) clear.addEventListener('click', () => {
+      document.getElementById('logs-from').value = '';
+      document.getElementById('logs-to').value = '';
+      search.from = '';
+      search.to = '';
+      refreshLogsList();
+    });
+  }
 
   async function openLogs() {
     overlay.classList.remove('hidden');
@@ -53,9 +126,161 @@
     }
   }
 
+  /** A file row: icon, name, date and size, and the download button. */
+  function _fileRow(f, onOpen) {
+    // createElement throughout — the filename carries a device-supplied
+    // hostname, and interpolating it into markup let a quote in a
+    // hostname break the row.
+    const row = document.createElement('div');
+    row.className = 'log-row';
+
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined log-icon';
+    icon.textContent = 'description';
+
+    const info = document.createElement('div');
+    info.className = 'log-info';
+    const name = document.createElement('span');
+    name.className = 'log-name';
+    name.textContent = f.filename;
+    const meta = document.createElement('span');
+    meta.className = 'log-meta';
+    meta.textContent = `${new Date(f.modified).toLocaleString()} · `
+      + `${(f.size_bytes / 1024).toFixed(1)} KB`;
+    info.append(name, meta);
+
+    row.title = 'Click to view';
+    row.addEventListener('click', onOpen);
+
+    const dl = document.createElement('button');
+    dl.type = 'button';
+    dl.className = 'log-download btn-secondary';
+    dl.title = 'Download';
+    const dlIcon = document.createElement('span');
+    dlIcon.className = 'material-symbols-outlined';
+    dlIcon.textContent = 'download';
+    dl.appendChild(dlIcon);
+    dl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      downloadLog(f.filename);
+    });
+
+    row.append(icon, info, dl);
+    return row;
+  }
+
+  /**
+   * Show the files a search matched, with the lines it matched on.
+   *
+   * The hit count is on the row and the first few lines are under it: the
+   * count says which file to look in, the lines say whether it is the right
+   * one without opening it.
+   */
+  function _renderSearch(listEl, data) {
+    listEl.innerHTML = '';
+
+    if (!data.files.length) {
+      const empty = document.createElement('div');
+      empty.className = 'logs-empty';
+      empty.textContent = data.searched
+        ? `Nothing matched in ${data.searched} log`
+          + `${data.searched === 1 ? '' : 's'}.`
+        : 'No logs fall in that date range.';
+      listEl.appendChild(empty);
+      return;
+    }
+
+    const total = document.createElement('div');
+    total.className = 'logs-total';
+    // With dates alone there is nothing to count matches of, and a hit
+    // total of zero above a list of files reads as a failed search.
+    total.textContent = search.q.trim()
+      ? `${data.hits} match${data.hits === 1 ? '' : 'es'} in `
+        + `${data.files.length} of ${data.searched} log`
+        + `${data.searched === 1 ? '' : 's'}`
+      : `${data.files.length} log${data.files.length === 1 ? '' : 's'} `
+        + 'in that date range';
+    listEl.appendChild(total);
+
+    // Said, not implied. A truncated search that stayed quiet about it
+    // makes "no matches" and "I did not look" indistinguishable.
+    if (data.truncated) {
+      const warn = document.createElement('div');
+      warn.className = 'logs-bounded';
+      warn.textContent = 'Some logs were too long to search all the way '
+        + 'through, so there may be matches further back in them. The limit '
+        + 'is under Settings → Advanced → Session log search.';
+      listEl.appendChild(warn);
+    }
+
+    data.files.forEach((f) => {
+      const row = _fileRow(f, () => openViewer(f, { line: 1 }));
+      const hits = document.createElement('span');
+      hits.className = 'log-hits';
+      hits.textContent = f.hits === 1 ? '1 match' : `${f.hits} matches`;
+      if (f.capped) {
+        hits.title = `Showing the first ${f.matches.length} of ${f.hits}.`;
+      }
+      // Before the download button, so the count reads with the name.
+      row.insertBefore(hits, row.lastChild);
+      listEl.appendChild(row);
+
+      const matches = document.createElement('div');
+      matches.className = 'log-matches';
+      f.matches.forEach((m) => {
+        const hit = document.createElement('div');
+        hit.className = 'log-match';
+        hit.title = 'Open the log here';
+
+        const num = document.createElement('span');
+        num.className = 'log-match-line';
+        num.textContent = String(m.line);
+
+        const text = document.createElement('span');
+        text.className = 'log-match-text';
+        _mark(text, m.text);
+
+        hit.append(num, text);
+        hit.addEventListener('click', () => openViewer(f, { line: m.line }));
+        matches.appendChild(hit);
+      });
+      listEl.appendChild(matches);
+    });
+  }
+
   async function refreshLogsList() {
     const listEl = document.getElementById('logs-list');
     listEl.innerHTML = '<div class="logs-loading">Loading...</div>';
+
+    // A query, a date range, or both. With a query the server searches
+    // inside the files; with only dates it still goes through the search
+    // endpoint, because filtering the listing here and filtering it there
+    // are two implementations of one rule, and they would drift.
+    if (search.q.trim() || search.from || search.to) {
+      const params = new URLSearchParams({
+        q: search.q.trim(), since: search.from, until: search.to,
+        regex: String(search.regex), case: String(search.case),
+        whole_word: String(search.word),
+      });
+      try {
+        const res = await fetch(`/api/logs/search?${params}`);
+        const data = await res.json();
+        if (!res.ok) {
+          listEl.innerHTML = '';
+          const bad = document.createElement('div');
+          bad.className = 'logs-empty logs-error';
+          bad.textContent = data.detail || `Search failed (${res.status}).`;
+          listEl.appendChild(bad);
+          return;
+        }
+        _renderSearch(listEl, data);
+      } catch (e) {
+        listEl.innerHTML = '<div class="logs-empty logs-error">'
+          + 'The search could not be run.</div>';
+      }
+      return;
+    }
+
     try {
       const res = await fetch('/api/logs');
       const files = await res.json();
@@ -117,48 +342,8 @@
         + ' in total';
       listEl.appendChild(totalEl);
 
-      files.forEach(f => {
-        // createElement throughout — the filename carries a device-supplied
-        // hostname, and interpolating it into markup let a quote in a
-        // hostname break the row.
-        const row = document.createElement('div');
-        row.className = 'log-row';
-
-        const icon = document.createElement('span');
-        icon.className = 'material-symbols-outlined log-icon';
-        icon.textContent = 'description';
-
-        const info = document.createElement('div');
-        info.className = 'log-info';
-        const name = document.createElement('span');
-        name.className = 'log-name';
-        name.textContent = f.filename;
-        const meta = document.createElement('span');
-        meta.className = 'log-meta';
-        meta.textContent = `${new Date(f.modified).toLocaleString()} · `
-          + `${(f.size_bytes / 1024).toFixed(1)} KB`;
-        info.append(name, meta);
-
-        // The row opens the viewer — reading a log should not require
-        // leaving the application (#236).
-        row.title = 'Click to view';
-        row.addEventListener('click', () => openViewer(f));
-
-        const dl = document.createElement('button');
-        dl.type = 'button';
-        dl.className = 'log-download btn-secondary';
-        dl.title = 'Download';
-        const dlIcon = document.createElement('span');
-        dlIcon.className = 'material-symbols-outlined';
-        dlIcon.textContent = 'download';
-        dl.appendChild(dlIcon);
-        dl.addEventListener('click', (e) => {
-          e.stopPropagation();
-          downloadLog(f.filename);
-        });
-
-        row.append(icon, info, dl);
-        listEl.appendChild(row);
+      files.forEach((f) => {
+        listEl.appendChild(_fileRow(f, () => openViewer(f)));
       });
     } catch (e) {
       listEl.innerHTML = '<div class="logs-empty logs-error">Failed to load logs.</div>';
@@ -254,6 +439,64 @@
   /** Longest text the viewer will render; beyond it, the tail wins. */
   const VIEW_LIMIT = 2_000_000;
 
+  /** How many lines either side of a jumped-to match the viewer renders. */
+  const JUMP_CONTEXT = 400;
+
+  /** A newline. Named because it appears inside template literals
+   *  where an escape is easy to lose in an edit. */
+  const chr10 = String.fromCharCode(10);
+
+  /**
+   * The current query as a RegExp, for highlighting — or null.
+   *
+   * Built from the same three switches the server was given, so what is
+   * marked in the viewer is what was searched for. A query that will not
+   * compile returns null rather than throwing: the server has already
+   * refused it and said so, and the viewer failing as well would be the
+   * same complaint twice.
+   */
+  function _pattern() {
+    const raw = search.q.trim();
+    if (!raw) return null;
+    let body = search.regex ? raw : raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (search.word) body = `\\b(?:${body})\\b`;
+    try {
+      return new RegExp(body, search.case ? 'g' : 'gi');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Write text into an element with the matches wrapped in <mark>.
+   *
+   * Built out of text nodes rather than innerHTML: this is device output,
+   * and a log line containing a tag is the ordinary case, not the attack.
+   */
+  function _mark(el, text) {
+    const pattern = _pattern();
+    if (!pattern) { el.textContent = text; return; }
+
+    let last = 0;
+    let match;
+    pattern.lastIndex = 0;
+    while ((match = pattern.exec(text)) !== null) {
+      // A pattern that can match nothing — `x*`, or an empty alternation —
+      // would otherwise spin here forever with the browser unresponsive.
+      if (match.index === pattern.lastIndex) { pattern.lastIndex += 1; continue; }
+      if (match.index > last) {
+        el.appendChild(document.createTextNode(text.slice(last, match.index)));
+      }
+      const hit = document.createElement('mark');
+      hit.textContent = match[0];
+      el.appendChild(hit);
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) {
+      el.appendChild(document.createTextNode(text.slice(last)));
+    }
+  }
+
   let _viewerText = '';
   let _viewerFile = '';
 
@@ -314,12 +557,19 @@
       _viewerFile = f.filename;
       // The tail, not the head: on a log too big to show whole, the recent
       // end is the part someone opens it for. Copy still takes everything.
-      content.textContent = text.length > VIEW_LIMIT
-        ? `[…first ${(text.length - VIEW_LIMIT).toLocaleString()} characters `
-          + `not shown — download or copy for the whole file…]\n`
-          + text.slice(-VIEW_LIMIT)
-        : text;
-      content.scrollTop = content.scrollHeight;
+      if (jump && jump.line) {
+        // Opened from a search hit: show where the match is, not the tail.
+        _renderWindow(content, text, jump.line);
+      } else {
+        // The tail, not the head: on a log too big to show whole, the
+        // recent end is the part someone opens it for. Copy takes all.
+        content.textContent = text.length > VIEW_LIMIT
+          ? `[…first ${(text.length - VIEW_LIMIT).toLocaleString()} characters `
+            + `not shown — download or copy for the whole file…]` + chr10
+            + text.slice(-VIEW_LIMIT)
+          : text;
+        content.scrollTop = content.scrollHeight;
+      }
     } catch (e) {
       _viewerText = '';
       _viewerFile = '';

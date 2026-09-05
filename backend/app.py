@@ -5450,6 +5450,9 @@ async def search_logs(q: str = "", since: str = "", until: str = "",
     A bad pattern is a 400 with the reason, not a 500: people type regular
     expressions into a box while composing them, so a half-written one is
     the field's normal state rather than a fault.
+
+    An empty ``q`` is not an error either — with a date range it means
+    "the logs from that Tuesday", which is a whole question on its own.
     """
     from backend import logsearch
 
