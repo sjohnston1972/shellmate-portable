@@ -104,6 +104,11 @@ def test_the_rows_that_matter_come_first() -> None:
           "a form invented for fields the playbook does not read would be a form that lies")
     check("Azure's scope is the subscription only, sent as an env var",
           "sent as AZURE_SUBSCRIPTION_ID" in JS and "azure_resource_group" not in JS)
+    check("AWS has a spec too", "aws: [" in JS and "sg_rules" in JS)
+    check("an sg- security-group prefix is refused with the reason",
+          "reject: /^sg-/i" in JS and "f.reject.test(" in JS
+          and "says nothing about why" in JS,
+          "AWS forbids it and the module swallows the cause")
     check("the kit can be committed from the list",
           "kits/${encodeURIComponent(provider)}/commit" in JS,
           "nothing commits the runner's tree; a kit exists only on its disk "

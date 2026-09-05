@@ -239,6 +239,10 @@ def test_scope_per_provider() -> None:
           d.run_env(a) == {"AZURE_SUBSCRIPTION_ID": "394c"}
           and "azure_subscription_id" not in d.run_vars(a, "plan"),
           str((d.run_env(a), d.run_vars(a, "plan"))))
+    w = d.save({"name": "W", "provider": "aws", "scope": {"aws_region": "eu-west-2"}})
+    check("AWS: the region is an extra var, overriding the scheme's",
+          d.run_vars(w, "plan")["aws_region"] == "eu-west-2" and d.run_env(w) == {},
+          "three providers, three different answers — encoded, not assumed")
 
 
 def test_the_gate() -> None:

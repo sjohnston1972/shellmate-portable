@@ -84,6 +84,29 @@
       { name: 'nsg_suffix', label: 'NSG name prefix (optional, default nsg-)', kind: 'text', placeholder: 'nsg-' },
       { name: 'tags', label: 'Tags — one per line: key = value (optional)', kind: 'kv', placeholder: 'owner = netops' },
     ],
+    aws: [
+      { name: 'region', label: 'Region (required; the deployment\'s AWS region scope overrides it)',
+        kind: 'text', required: true, placeholder: 'us-east-1' },
+      { name: 'manage_prefix', label: 'Manage prefix (required)', kind: 'text', required: true,
+        placeholder: 'aws-test-',
+        hint: 'Only sites whose name starts with this are configured beyond the VPC.' },
+      { name: 'vpc_prefix', label: 'VPC name prefix (required)', kind: 'text', required: true, placeholder: 'vpc-' },
+      { name: 'base_prefix', label: 'Base prefix (required) — VPC is <base>.<third octet>.0/24', kind: 'text',
+        required: true, placeholder: '10.220' },
+      { name: 'subnets', label: 'Subnets — one per line: name, block, az (each a /26 at block×64; az is a letter; optional)',
+        kind: 'lines', cols: ['name', 'block:int', 'az'], placeholder: 'data, 0, a\nvoice, 1, b' },
+      // AWS forbids security-group names beginning "sg-", and the module
+      // swallows the reason — the runner only found it by calling boto3
+      // directly. Refused here, with the reason, so nobody meets an error
+      // that says nothing.
+      { name: 'sg_prefix', label: 'Security group name prefix (optional, default secgrp-; must not begin sg-)',
+        kind: 'text', placeholder: 'secgrp-', reject: /^sg-/i,
+        rejectWhy: 'AWS forbids security-group names beginning "sg-", and the error it gives '
+                 + 'back says nothing about why. Use another prefix, such as secgrp-.' },
+      { name: 'sg_rules', label: 'Ingress rules — one per line: proto, port, cidr, description (optional)',
+        kind: 'lines', cols: ['proto', 'port:int', 'cidr', 'desc'], placeholder: 'tcp, 443, 0.0.0.0/0, https\ntcp, 22, 10.0.0.0/8, ssh' },
+      { name: 'tags', label: 'Tags — one per line: key = value (optional)', kind: 'kv', placeholder: 'owner = netops' },
+    ],
   };
 
   // ---------------------------------------------------------------- data
@@ -321,6 +344,7 @@
       validate: (v) => {
         for (const f of spec) {
           if (f.required && !(v[f.name] || '').trim()) return `${f.label.split(' (')[0]} is required.`;
+          if (f.reject && f.reject.test((v[f.name] || '').trim())) return f.rejectWhy;
           if (f.kind === 'lines') {
             const bad = (v[f.name] || '').split('\n').map(l => l.trim()).filter(Boolean)
               .find(l => l.split(',').length < f.cols.filter(c => !c.endsWith(':int') || true).length - 1);

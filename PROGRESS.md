@@ -162,3 +162,21 @@ silently ignore as a var. Encoded as a table rather than assumed
 symmetric, so AWS can say which it is.
 
 Tests: deployments 54, publish 33, api 28, ui 30.
+
+## 2026-09-06 02:00 — step 7 complete: AWS
+
+The runner's AWS kit passed the convergence test with a site and two
+elements added — a third subnet and a second SG rule — and the plan named
+every element down to the subnet CIDR and the port. Three kits, five
+files each, all converging.
+
+One AWS gotcha now lives in the form: AWS forbids security-group names
+beginning `sg-`, and `amazon.aws.ec2_security_group` swallows the reason
+— the runner found the cause only by calling boto3 directly. The form
+refuses that prefix with the real reason. `aws_region` is an extra var
+overriding the scheme's region: three providers, three different answers
+to "where does scope go", all encoded, none assumed.
+
+`destroy.yml` exists in every kit and is wired to nothing yet; Azure's
+and AWS's are unproven because proving them deletes what Steven said to
+leave. Tests: deployments 55, ui 32.
