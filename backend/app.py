@@ -1598,6 +1598,69 @@ async def run_group_backup(key: str) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+class GroupChangeRequest(BaseModel):
+    """Body for POST /api/groups/{key}/change/start (#544)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note: str = ""
+    ticket: str = ""
+
+
+@app.post("/api/groups/{key:path}/change/start")
+async def group_change_start(key: str, request: GroupChangeRequest) -> dict:
+    """
+    Open a change window on every member of a group (#544).
+
+    Through the scheduler's own four injected callables, so a device with
+    no session open is connected to headlessly exactly as a nightly backup
+    does — the two paths cannot come to disagree about which devices they
+    can reach.
+
+    Partial success is the normal outcome and is reported rather than
+    raised: a site where six of eight switches answered is six bracketed
+    changes, not a failure.
+    """
+    from backend import change as change_module
+    from backend.profiles import profiles_tagged
+
+    profiles = await asyncio.to_thread(profiles_tagged, key, True)
+    if not profiles:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No connections are in '{key}'.")
+
+    return await asyncio.to_thread(
+        change_module.start_group, key, profiles,
+        scheduler._connect, scheduler._capture,
+        scheduler._open_session_for, scheduler._destroy,
+        request.note, request.ticket, "")
+
+
+@app.post("/api/groups/{key:path}/change/end")
+async def group_change_end(key: str) -> dict:
+    """
+    Close every open change window in the group and build the records.
+
+    One record per device rather than one merged diff: eight switches'
+    hunks in a single diff loses which line belonged to which device, and
+    that is the first thing anybody reading a change record needs.
+    """
+    from backend import change as change_module
+    from backend.profiles import profiles_tagged
+
+    profiles = await asyncio.to_thread(profiles_tagged, key, True)
+    if not profiles:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No connections are in '{key}'.")
+
+    return await asyncio.to_thread(
+        change_module.end_group, key, profiles,
+        scheduler._connect, scheduler._capture,
+        scheduler._open_session_for, scheduler._destroy)
+
+
 @app.get("/api/backups/digest")
 async def backup_digest(all: bool = False) -> dict:
     """

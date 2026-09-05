@@ -1589,6 +1589,131 @@
     } });
   }
 
+  /**
+   * Open a change window on every member of a group (#544).
+   *
+   * Partial success is the normal outcome and is reported as such: a site
+   * where six of eight switches answered is six bracketed changes. The
+   * toast names the counts rather than saying "done", because "done" over
+   * a group of eight is a claim about eight devices.
+   */
+  async function _changeStart(group) {
+    const answer = await window.shellmateDialog.form({
+      title: `Start a change on ${group.name}`,
+      body: 'Every device in this group is captured now and pinned. Devices '
+          + 'with no session open are connected to using their saved '
+          + 'credentials, the same way a scheduled backup does.',
+      fields: [
+        { name: 'note', label: 'What is this change for?',
+          placeholder: 'Quarterly AAA rollout' },
+        { name: 'ticket', label: 'Ticket reference (optional)',
+          placeholder: 'NET-1042' },
+      ],
+      confirmLabel: 'Capture and start',
+    });
+    if (!answer) return;
+
+    _changeToast(group, 'Opening a change window on every device. One at a '
+                      + 'time, so this can take a while.');
+    let out;
+    try {
+      const res = await fetch('/api/groups/' + encodeURIComponent(group.key)
+                              + '/change/start', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: answer.note || '', ticket: answer.ticket || '' }),
+      });
+      out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.detail || `HTTP ${res.status}`);
+    } catch (e) {
+      _changeToast(group, String(e.message || e), 'warning');
+      return;
+    }
+
+    if (window.shellmateChange) window.shellmateChange.refresh();
+    _changeOutcome(group, 'Change open',
+      `${(out.started || []).length} device(s) bracketed`,
+      out.skipped, out.failed);
+  }
+
+  /** Close every open window in the group and say what came back. */
+  async function _changeEnd(group) {
+    const yes = await window.shellmateDialog.confirm({
+      title: `End the change on ${group.name}?`,
+      body: 'Every device with a window open is captured again and compared '
+          + 'with its own starting point. One record per device — a single '
+          + 'merged diff would lose which line belonged to which switch.',
+      confirmLabel: 'Capture and end',
+    });
+    if (!yes) return;
+
+    _changeToast(group, 'Closing the windows and comparing. One device at a '
+                      + 'time, so this can take a while.');
+    let out;
+    try {
+      const res = await fetch('/api/groups/' + encodeURIComponent(group.key)
+                              + '/change/end', { method: 'POST' });
+      out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.detail || `HTTP ${res.status}`);
+    } catch (e) {
+      _changeToast(group, String(e.message || e), 'warning');
+      return;
+    }
+
+    if (window.shellmateChange) window.shellmateChange.refresh();
+
+    const records = out.records || [];
+    const changed = out.changed || [];
+    const unmeasurable = out.unmeasurable || [];
+    // Two counts, not one. "Three changed" and "one could not be measured"
+    // are different facts about different devices, and folding the second
+    // into the first is exactly the misreading this feature exists to stop.
+    let body = `${records.length} record(s): ${changed.length} changed`;
+    if (unmeasurable.length) {
+      body += `, ${unmeasurable.length} could not be measured `
+            + `(${unmeasurable.join(', ')})`;
+    }
+    _changeOutcome(group, 'Change closed', body, out.skipped, out.failed,
+                   unmeasurable.length > 0);
+
+    // The first record with something in it, opened for reading. Opening
+    // eight windows at once would be worse than opening none.
+    const worth = records.find(r => r.changed) || records[0];
+    if (worth && window.shellmateChange) {
+      window.shellmateChange.show(worth, { label: worth.hostname });
+    }
+  }
+
+  function _changeToast(group, body, severity) {
+    if (!window.shellmateAlerts) return;
+    window.shellmateAlerts.notify({
+      severity: severity || 'info', icon: severity ? 'error' : 'history',
+      title: group.name, body,
+    });
+  }
+
+  function _changeOutcome(group, title, body, skipped, failed, sticky) {
+    const notes = [];
+    if ((skipped || []).length) {
+      notes.push(`${skipped.length} skipped (`
+                 + skipped.map(s => `${s.name}: ${s.why}`).join('; ') + ')');
+    }
+    if ((failed || []).length) {
+      notes.push(`${failed.length} failed (`
+                 + failed.map(f => `${f.name}: ${f.why}`).join('; ') + ')');
+    }
+    if (window.shellmateAlerts) {
+      window.shellmateAlerts.notify({
+        severity: (failed || []).length ? 'warning' : 'info',
+        icon: (failed || []).length ? 'error' : 'history',
+        title: `${title} — ${group.name}`,
+        body: [body, ...notes].join('. '),
+        // A partial outcome has to survive being looked away from: the
+        // devices that did not answer are the whole reason to read it.
+        sticky: Boolean(sticky || (skipped || []).length || (failed || []).length),
+      });
+    }
+  }
+
   /** Back the group up right now and say how it went. */
   async function _backupNow(group) {
     if (window.shellmateAlerts) {
@@ -2837,6 +2962,13 @@
         onClick: () => _backupSchedule(group) },
       { icon: 'download', label: 'Back up configurations now', disabled: empty, title: why,
         onClick: () => _backupNow(group) },
+      // A maintenance window across a site (#544). Through the same
+      // headless harness the nightly backup uses, so a device with no
+      // session open is still bracketed.
+      { icon: 'history', label: 'Start a change here…', disabled: empty, title: why,
+        onClick: () => _changeStart(group) },
+      { icon: 'history', label: 'End the change here…', disabled: empty, title: why,
+        onClick: () => _changeEnd(group) },
       // The group and everything nested under it, as a spreadsheet (#535).
       { icon: 'table', label: 'Export as CSV…', disabled: empty, title: why,
         onClick: () => window.shellmateEstateCsv.exportEstate(group.key) },

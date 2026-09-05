@@ -276,6 +276,222 @@ def commands_in_window(hostname: str, since: float,
     return out
 
 
+# ---------------------------------------------------------------------------
+# A change across a group (#544)
+#
+# One change on one switch is the common case; a maintenance window across a
+# site is the one that produces a CAB pack. The mechanism is the same window
+# opened on each member, through the scheduler's own injected-callable
+# harness — so a device with no session open gets connected to headlessly,
+# exactly as a nightly backup does, and the two cannot drift apart in which
+# devices they can reach.
+#
+# **One record per device, never one merged diff.** Eight switches' hunks in
+# one diff loses which line belonged to which device, which is the first
+# thing anybody reading a change record needs. They are gathered under one
+# group result instead.
+# ---------------------------------------------------------------------------
+
+
+def _device_of(profile: dict) -> str:
+    """What a change on this profile would be keyed on."""
+    return (str(profile.get("hostname") or "").strip()
+            or str(profile.get("name") or "").strip())
+
+
+def start_group(key: str, profiles: list[dict], connect, capture,
+                open_session_for, destroy, note: str = "", ticket: str = "",
+                operator: str = "") -> dict:
+    """
+    Open a change window on every member of a group.
+
+    Injected callables, the same four the scheduler uses, for the same
+    reason: a device with no session open has to be reachable, and a test
+    must not need a switch.
+
+    Returns:
+        ``{"group", "at", "took_s", "started": [...], "skipped": [...],
+           "failed": [...]}``. Partial success is the normal outcome and is
+        reported rather than raised — a site where six of eight switches
+        answered is six bracketed changes, not a failure.
+    """
+    started_at = time.time()
+    started: list[dict] = []
+    skipped: list[dict] = []
+    failed: list[dict] = []
+
+    for profile in profiles:
+        name = (profile.get("name") or profile.get("hostname")
+                or profile.get("id", "?"))
+        hostname = _device_of(profile)
+
+        if (profile.get("connection_type") or "ssh") != "ssh":
+            skipped.append({"name": name, "why": "not an SSH connection"})
+            continue
+        if not hostname:
+            skipped.append({"name": name, "why": "no device name to key it on"})
+            continue
+        # Somebody may already have opened a window on one member by hand.
+        # Skipped, not failed, and certainly not overwritten: their baseline
+        # is evidence and taking a second one would spend it.
+        if active(hostname) is not None:
+            skipped.append({"name": name, "why": "a change is already open"})
+            continue
+
+        session = open_session_for(profile)
+        headless = False
+        try:
+            if session is None:
+                if (not profile.get("has_saved_credentials")
+                        and not profile.get("credential_ref")):
+                    skipped.append({"name": name, "why": "no saved credentials"})
+                    continue
+                session = connect(profile)
+                headless = True
+
+            before_id, capture_error = None, ""
+            try:
+                result = capture(session)
+                before_id = (result.get("snapshot") or {}).get("id")
+            except Exception as exc:
+                # The same rule as a single change: a device that will not
+                # give up its configuration still gets a window, carrying
+                # the reason. It is often the one most worth bracketing.
+                capture_error = str(exc)[:200]
+
+            record = start(hostname, note=note, ticket=ticket,
+                           operator=operator, label=str(profile.get("name") or ""),
+                           before_id=before_id, capture_error=capture_error)
+            started.append({"name": name, "hostname": hostname,
+                            "before_id": before_id,
+                            "capture_error": capture_error})
+        except Exception as exc:
+            failed.append({"name": name, "why": str(exc)[:200]})
+            logger.warning("Could not open a change on %s: %s", name, exc)
+        finally:
+            if headless and session is not None:
+                try:
+                    destroy(session)
+                except Exception:
+                    pass
+
+    return {
+        "group": key, "at": started_at,
+        "took_s": round(time.time() - started_at, 1),
+        "started": started, "skipped": skipped, "failed": failed,
+        "note": note, "ticket": ticket,
+    }
+
+
+def end_group(key: str, profiles: list[dict], connect, capture,
+              open_session_for, destroy) -> dict:
+    """
+    Close every open change window in a group and build the records.
+
+    Only members that actually have a window open are touched. A group whose
+    membership changed mid-window — somebody added a switch this afternoon —
+    would otherwise have the new one reported as a failed close, when the
+    truth is that no change was ever opened on it.
+    """
+    started_at = time.time()
+    records: list[dict] = []
+    skipped: list[dict] = []
+    failed: list[dict] = []
+
+    for profile in profiles:
+        name = (profile.get("name") or profile.get("hostname")
+                or profile.get("id", "?"))
+        hostname = _device_of(profile)
+        record = active(hostname) if hostname else None
+        if record is None:
+            skipped.append({"name": name, "why": "no change was open"})
+            continue
+
+        session = open_session_for(profile)
+        headless = False
+        after_id, capture_error = None, ""
+        try:
+            if session is None:
+                if (not profile.get("has_saved_credentials")
+                        and not profile.get("credential_ref")):
+                    capture_error = "no saved credentials to reconnect with"
+                else:
+                    session = connect(profile)
+                    headless = True
+            if session is not None:
+                try:
+                    result = capture(session)
+                    after_id = (result.get("snapshot") or {}).get("id")
+                except Exception as exc:
+                    capture_error = str(exc)[:200]
+        except Exception as exc:
+            capture_error = str(exc)[:200]
+        finally:
+            if headless and session is not None:
+                try:
+                    destroy(session)
+                except Exception:
+                    pass
+
+        try:
+            records.append(_close_one(record, after_id, capture_error))
+        except Exception as exc:                          # pragma: no cover
+            failed.append({"name": name, "why": str(exc)[:200]})
+
+    return {
+        "group": key, "at": started_at,
+        "took_s": round(time.time() - started_at, 1),
+        "records": records, "skipped": skipped, "failed": failed,
+        "changed": [r["hostname"] for r in records if r.get("changed")],
+        "unmeasurable": [r["hostname"] for r in records
+                         if not r.get("comparable")],
+    }
+
+
+def _close_one(record: "Change", after_id: int | None,
+               capture_error: str) -> dict:
+    """
+    Build one device's record and close its window.
+
+    The same shape the single-device endpoint returns, so one renderer
+    draws both — a group record that displayed differently from the record
+    for one switch would be two things to learn for one idea.
+    """
+    from backend.configs import diff_snapshots
+    from backend.store import store as history
+
+    diff: dict = {}
+    if record.before_id and after_id:
+        old = history.get_snapshot(record.before_id)
+        new = history.get_snapshot(after_id)
+        if old and new:
+            diff = diff_snapshots(old, new)
+
+    commands = commands_in_window(record.hostname, record.started_at)
+
+    # Closed only once the record above is assembled, for the same reason
+    # the single-device path does it last: a failure in between would lose
+    # the baseline id, which is the half that cannot be recovered.
+    end(record.hostname)
+
+    return {
+        "change": record.as_dict(),
+        "hostname": record.hostname,
+        "old_id": record.before_id,
+        "new_id": after_id,
+        "diff": diff.get("diff", ""),
+        "added": diff.get("added", 0),
+        "removed": diff.get("removed", 0),
+        "changed": diff.get("changed", 0),
+        "days_since": round(record.age_seconds / 86400, 2),
+        "window_seconds": round(record.age_seconds, 1),
+        "commands": commands,
+        "pending": None,
+        "capture_error": capture_error or record.capture_error,
+        "comparable": bool(record.before_id and after_id),
+    }
+
+
 def prune_stale() -> list[Change]:
     """
     Remove records older than the stale bound, returning what went.

@@ -111,3 +111,40 @@ nothing dispatches (the real one is `shellmate:sessions-changed`, on
 `python test_change_ui.py` — 20 passed, 0 failed. test_icons 4,
 test_contrast 103.
 
+## 2026-09-05 10:14 — step 4 done, and #544 is complete
+
+A change across a group, through the scheduler's own four injected
+callables — so a device with no session open is connected to headlessly
+exactly as a nightly backup does, and the two paths cannot come to
+disagree about which devices they can reach.
+
+**One record per device, never one merged diff.** Eight switches' hunks in
+a single diff loses which line belonged to which device, and that is the
+first thing anybody reading a change record needs.
+
+The interesting part is the taxonomy of not-quite-working, because a group
+run has four outcomes and folding any two together loses something:
+
+- **started** — bracketed, with or without a baseline
+- **skipped** — a reason ShellMate can state up front: a serial console, no
+  saved credentials, no device name to key on, or *a window somebody
+  already opened by hand*. That last one is never overwritten: their
+  baseline is evidence and taking a second would spend it.
+- **failed** — a device that should have answered and did not. This is the
+  one somebody has to go and look at, which is why it is not a skip.
+- **unmeasurable** — closed, but with only one end captured. Counted
+  separately from "changed" in the toast, because folding it in is exactly
+  the misreading the whole feature exists to stop.
+
+Two of my test expectations were wrong, not the code. A profile with a
+name but no hostname is legitimately keyed on the name — the same fallback
+the single-session path uses — and an unreachable device *should* be
+reported as failed. Both corrected, and the unreachable case is now its
+own test asserting no window is left claiming a baseline it never took.
+
+`python test_change_api.py` — 67 passed, 0 failed. test_change 38,
+test_change_ui 20. test_groups, test_scheduler and test_group_clone still
+pass against the changed app.py and groups.js.
+
+**#544 is complete.** Steps 5–8 are #543 next.
+

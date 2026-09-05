@@ -331,6 +331,293 @@ def test_a_pending_reload_is_carried() -> None:
           f"HTTP {res.status_code}")
 
 
+def fake_estate(answers):
+    """
+    Four injected callables over a dict of {hostname: config text or None}.
+
+    None means the capture raises — a device that answers the connection
+    and then will not give up its configuration, which is the shape the
+    single-device path already has a rule for.
+    """
+    opened, destroyed = [], []
+
+    def open_session_for(profile):
+        # Nothing has a live session: every device goes down the headless
+        # path, which is the one a scheduled window would actually use.
+        return None
+
+    def connect(profile):
+        host = profile.get("hostname") or profile.get("name")
+        if host not in answers:
+            raise RuntimeError(f"could not reach {host}")
+        opened.append(host)
+        return {"session_id": f"h-{host}", "hostname": host}
+
+    def capture(session):
+        text = answers.get(session["hostname"])
+        if text is None:
+            raise RuntimeError("The device did not answer show run.")
+        return store.add_snapshot(session["hostname"], text,
+                                  session["session_id"])
+
+    def destroy(session):
+        destroyed.append(session["hostname"])
+
+    return connect, capture, open_session_for, destroy, opened, destroyed
+
+
+def profile(name, hostname, **extra):
+    return {"id": f"p-{name}", "name": name, "hostname": hostname,
+            "connection_type": "ssh", "has_saved_credentials": True, **extra}
+
+
+def test_a_change_across_a_group() -> None:
+    print("\n-- A whole site --")
+    reset()
+
+    profiles = [profile("sw1", "site-sw-01"), profile("sw2", "site-sw-02"),
+                profile("sw3", "site-sw-03")]
+    connect, capture, opener, destroy, opened, destroyed = fake_estate({
+        "site-sw-01": BEFORE, "site-sw-02": BEFORE, "site-sw-03": BEFORE,
+    })
+
+    out = change_module.start_group(
+        "glasgow/core", profiles, connect, capture, opener, destroy,
+        note="Quarterly AAA rollout", ticket="NET-9")
+
+    check("every member got a window", len(out["started"]) == 3, str(out))
+    check("nothing was skipped or failed",
+          not out["skipped"] and not out["failed"], str(out))
+    check("each carries a baseline",
+          all(s["before_id"] for s in out["started"]), str(out["started"]))
+    check("headless sessions are cleaned up",
+          sorted(destroyed) == sorted(opened),
+          f"opened {opened}, destroyed {destroyed}")
+    check("and all three are open",
+          len(change_module.open_changes()) == 3)
+
+    # Work happens; two of the three actually change.
+    connect, capture, opener, destroy, _, destroyed2 = fake_estate({
+        "site-sw-01": AFTER, "site-sw-02": AFTER, "site-sw-03": BEFORE,
+    })
+    out = change_module.end_group("glasgow/core", profiles, connect, capture,
+                                  opener, destroy)
+
+    check("one record per device, not one merged diff",
+          len(out["records"]) == 3,
+          "eight switches' hunks in one diff loses whose line is whose")
+    check("the two that changed are named",
+          sorted(out["changed"]) == ["site-sw-01", "site-sw-02"],
+          str(out["changed"]))
+    check("the one that did not is still a record",
+          any(r["hostname"] == "site-sw-03" and r["changed"] == 0
+              for r in out["records"]), str(out["changed"]))
+    check("every record is comparable",
+          all(r["comparable"] for r in out["records"]))
+    check("and no windows are left open",
+          change_module.open_changes() == [])
+
+
+def test_a_group_where_not_everything_answers() -> None:
+    """
+    Partial success is the normal outcome of a maintenance window.
+
+    Six of eight switches answering is six bracketed changes, not a
+    failure — and the two that did not have to be named, because a group
+    result that quietly covers three of five devices is worse than one
+    that covers none.
+    """
+    print("\n-- Not everything answers --")
+    reset()
+
+    profiles = [
+        profile("sw1", "mixed-sw-01"),
+        profile("sw2", "mixed-sw-02"),
+        profile("serial", "mixed-con-03", connection_type="serial"),
+        profile("nocreds", "mixed-sw-04", has_saved_credentials=False),
+        # A profile with a name but no hostname is keyed on the name — the
+        # same fallback the single-session path uses, and reachable here
+        # because the fake estate answers to it.
+        profile("named-only", ""),
+        # Neither. There is nothing to key a change on at all.
+        {"id": "p-blank", "name": "", "hostname": "",
+         "connection_type": "ssh", "has_saved_credentials": True},
+    ]
+    # sw-02 connects but will not give up its configuration; sw-05 is not
+    # reachable at all.
+    connect, capture, opener, destroy, _, _ = fake_estate({
+        "mixed-sw-01": BEFORE, "mixed-sw-02": None, "named-only": BEFORE,
+    })
+
+    out = change_module.start_group("mixed", profiles, connect, capture,
+                                    opener, destroy, note="Partial")
+
+    started = {s["name"] for s in out["started"]}
+    skipped = {s["name"]: s["why"] for s in out["skipped"]}
+
+    check("the device that answered is bracketed", "sw1" in started, str(started))
+    check("so is the one that would not be captured",
+          "sw2" in started,
+          "the device that will not answer show run is the one most worth "
+          "bracketing")
+    check("and it carries the reason there is no baseline",
+          any(s["name"] == "sw2" and s["capture_error"] for s in out["started"]),
+          str(out["started"]))
+
+    check("a serial console is skipped, with the reason",
+          "not an SSH connection" in skipped.get("serial", ""), str(skipped))
+    check("a profile with no saved credentials is skipped",
+          "no saved credentials" in skipped.get("nocreds", ""), str(skipped))
+    check("a profile with a name but no hostname is keyed on the name",
+          "named-only" in started,
+          "the same fallback the single-session path uses")
+    check("a profile with neither is skipped rather than keyed on ''",
+          any("no device name" in s for s in skipped.values()), str(skipped))
+    check("nothing here was a failure — every case had a reason",
+          out["failed"] == [], str(out["failed"]))
+
+    for host in ("mixed-sw-01", "mixed-sw-02", "named-only"):
+        change_module.end(host)
+
+
+def test_a_device_that_cannot_be_reached_is_a_failure() -> None:
+    """
+    Distinct from a skip. A skip has a reason ShellMate can state up front —
+    it is a serial console, it has no credentials. A failure is a device
+    that should have answered and did not, and it is the one somebody has
+    to go and look at.
+    """
+    print("\n-- Unreachable --")
+    reset()
+
+    profiles = [profile("here", "reach-sw-01"), profile("gone", "reach-sw-99")]
+    connect, capture, opener, destroy, _, _ = fake_estate({"reach-sw-01": BEFORE})
+    out = change_module.start_group("reach", profiles, connect, capture,
+                                    opener, destroy, note="Reachability")
+
+    check("the reachable one is bracketed",
+          [s["name"] for s in out["started"]] == ["here"], str(out["started"]))
+    check("the unreachable one is a failure, not a skip",
+          [f["name"] for f in out["failed"]] == ["gone"], str(out))
+    check("and the reason is carried",
+          "could not reach" in out["failed"][0]["why"], str(out["failed"]))
+    check("no window was opened for it",
+          change_module.active("reach-sw-99") is None,
+          "a failed connection must not leave a record claiming a baseline")
+
+    change_module.end("reach-sw-01")
+
+
+def test_a_member_already_inside_a_change() -> None:
+    """
+    Skipped, and certainly not overwritten.
+
+    Somebody may have opened a window on one switch by hand an hour ago.
+    Taking a second baseline would spend theirs, and their capture is
+    evidence.
+    """
+    print("\n-- One member is already inside one --")
+    reset()
+
+    change_module.start("shared-sw-01", note="Opened by hand", before_id=99)
+    profiles = [profile("sw1", "shared-sw-01"), profile("sw2", "shared-sw-02")]
+    connect, capture, opener, destroy, _, _ = fake_estate({
+        "shared-sw-01": BEFORE, "shared-sw-02": BEFORE,
+    })
+
+    out = change_module.start_group("shared", profiles, connect, capture,
+                                    opener, destroy, note="Group window")
+
+    check("the one already inside a change is skipped",
+          any(s["name"] == "sw1" and "already open" in s["why"]
+              for s in out["skipped"]), str(out["skipped"]))
+    check("the other one still gets a window",
+          [s["name"] for s in out["started"]] == ["sw2"], str(out["started"]))
+
+    kept = change_module.active("shared-sw-01")
+    check("the hand-opened change is untouched",
+          kept is not None and kept.note == "Opened by hand"
+          and kept.before_id == 99,
+          "taking a second baseline would spend the one that is evidence")
+
+    change_module.end("shared-sw-01")
+    change_module.end("shared-sw-02")
+
+
+def test_ending_a_group_only_touches_open_windows() -> None:
+    """
+    A group whose membership moved mid-window.
+
+    Somebody adds a switch in the afternoon; it never had a change opened
+    on it. Reporting that as a failed close would be inventing a problem.
+    """
+    print("\n-- Membership moved --")
+    reset()
+
+    profiles = [profile("sw1", "moved-sw-01")]
+    connect, capture, opener, destroy, _, _ = fake_estate({"moved-sw-01": BEFORE})
+    change_module.start_group("moved", profiles, connect, capture, opener,
+                              destroy, note="Started with one")
+
+    profiles.append(profile("sw2", "moved-sw-02"))
+    connect, capture, opener, destroy, _, _ = fake_estate({
+        "moved-sw-01": AFTER, "moved-sw-02": AFTER,
+    })
+    out = change_module.end_group("moved", profiles, connect, capture,
+                                  opener, destroy)
+
+    check("only the device with a window gets a record",
+          [r["hostname"] for r in out["records"]] == ["moved-sw-01"],
+          str([r["hostname"] for r in out["records"]]))
+    check("the newcomer is skipped, not failed",
+          any(s["name"] == "sw2" and "no change was open" in s["why"]
+              for s in out["skipped"]), str(out["skipped"]))
+    check("and nothing is reported as a failure", out["failed"] == [])
+
+
+def test_a_device_that_goes_away_before_the_group_ends() -> None:
+    """The reload case, at group scale."""
+    print("\n-- Gone by the end --")
+    reset()
+
+    profiles = [profile("sw1", "gone-sw-01"), profile("sw2", "gone-sw-02")]
+    connect, capture, opener, destroy, _, _ = fake_estate({
+        "gone-sw-01": BEFORE, "gone-sw-02": BEFORE,
+    })
+    change_module.start_group("gone", profiles, connect, capture, opener,
+                              destroy, note="Firmware")
+
+    # sw-02 is mid-reload and cannot be reached at all.
+    connect, capture, opener, destroy, _, _ = fake_estate({"gone-sw-01": AFTER})
+    out = change_module.end_group("gone", profiles, connect, capture,
+                                  opener, destroy)
+
+    check("both still produce a record", len(out["records"]) == 2, str(out))
+    check("the unreachable one is listed as unmeasurable",
+          out["unmeasurable"] == ["gone-sw-02"], str(out["unmeasurable"]))
+    check("and it is not counted as changed",
+          "gone-sw-02" not in out["changed"],
+          "an unmeasurable change must not be reported as one that did "
+          "nothing, nor as one that did something")
+    check("its baseline is still in the record",
+          any(r["hostname"] == "gone-sw-02" and r["old_id"]
+              for r in out["records"]), str(out["records"]))
+
+
+def test_the_group_routes() -> None:
+    print("\n-- Over the API --")
+    reset()
+
+    res = client.post("/api/groups/nothing-here/change/start", json={})
+    check("a group with no connections is a 404",
+          res.status_code == 404, f"HTTP {res.status_code}")
+
+    res = client.post("/api/groups/x/change/start",
+                      json={"note": "n", "tikcet": "typo"})
+    check("a misspelled field is a 422 before anything is touched",
+          res.status_code == 422, f"HTTP {res.status_code}")
+
+
 def main() -> int:
     print("=" * 52)
     print("  Change records over the API")
@@ -344,6 +631,13 @@ def main() -> int:
         test_the_states_that_are_not_errors_and_the_ones_that_are,
         test_a_session_with_no_device_name,
         test_a_pending_reload_is_carried,
+        test_a_change_across_a_group,
+        test_a_group_where_not_everything_answers,
+        test_a_device_that_cannot_be_reached_is_a_failure,
+        test_a_member_already_inside_a_change,
+        test_ending_a_group_only_touches_open_windows,
+        test_a_device_that_goes_away_before_the_group_ends,
+        test_the_group_routes,
     ):
         try:
             test()
