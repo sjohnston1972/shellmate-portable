@@ -200,7 +200,18 @@ def test_a_second_load_picks_up_a_changed_file() -> None:
                   f"against the new backend, which is the whole bug")
             browser.close()
     finally:
-        marker.write_text(original, encoding="utf-8")
+        # Strip the tag by pattern rather than restoring the snapshot
+        # taken above. Restoring assumes nothing else touched the file
+        # while this ran — and when something did, the snapshot either
+        # clobbered that edit or, as happened, carried a probe tag from
+        # an earlier run back into the repo, where it showed up only as
+        # a 404 in a different test. Removing what this test added
+        # cannot do either.
+        current = marker.read_text(encoding="utf-8")
+        marker.write_text(
+            current.replace(
+                '  <script src="/static/js/_caching_probe.js"></script>\n', ''),
+            encoding="utf-8")
         probe.unlink(missing_ok=True)
         server.should_exit = True
         time.sleep(0.5)

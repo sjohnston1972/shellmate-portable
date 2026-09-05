@@ -397,3 +397,29 @@ A full-suite run *while* they were writing showed two spurious failures.
 Both passed alone. Worth remembering: a suite that reads repo source
 cannot be trusted while something else is editing it.
 
+## 2026-09-05 15:31 — a mistake of mine, and the fix
+
+My #552 commit swept two stray `<script src="/static/js/_caching_probe.js">`
+tags into `index.html`. They came from `test_caching.py`, which writes a
+probe tag, snapshots the file first and restores the snapshot in a
+`finally`. The restore assumes nothing else touched the file while it ran —
+and I ran the full suite *while editing index.html*, which is the exact
+hazard I had described to Steven an hour earlier and then walked into.
+
+Two errors, not one:
+
+- I chained `run_tests.py` and the commit in a single command, so I pushed
+  before reading the result. The suite said 103 of 105 and the commit went
+  anyway. Never chain a commit behind a suite run.
+- `git add -A` while the tree was polluted by a test. The tags were not
+  mine and I committed them.
+
+Fixed: the tags are gone, and `test_caching`'s teardown now strips what it
+added by pattern rather than restoring a snapshot. A restore can either
+clobber a concurrent edit or, as here, carry a stale tag back into the repo
+where it surfaces only as a 404 in a different test. Removing what you
+added can do neither.
+
+**105 of 105 test files pass** on a clean run with nothing else touching
+the tree.
+
