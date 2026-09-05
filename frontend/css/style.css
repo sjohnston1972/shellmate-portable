@@ -12360,3 +12360,64 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
   color: var(--on-surface-dim);
   overflow-wrap: anywhere;
 }
+
+/* A collection run against the one before it (#547). */
+.replay-compare-bar { margin: 8px 0; }
+
+.replay-compare-summary {
+  margin: 6px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--on-surface);
+}
+
+.replay-compare-item {
+  margin-bottom: 4px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  background: var(--surface-high);
+}
+
+.replay-compare-item > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+.replay-compare-item > summary code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.replay-compare-chip {
+  flex: none;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--outline);
+  color: var(--on-surface-muted);
+}
+
+/* Only the ones that moved are coloured. Eight chips saying "same" draw
+   the eye away from the two that are the answer. */
+.replay-compare-changed .replay-compare-chip { color: var(--warn); border-color: var(--warn); }
+
+.replay-compare-diff {
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--outline);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--on-surface-dim);
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+}

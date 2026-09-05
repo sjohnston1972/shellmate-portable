@@ -63,6 +63,8 @@
       searchTimer = setTimeout(runSearch, SEARCH_DELAY_MS);
     });
     deviceSelect.addEventListener('change', runSearch);
+    const kindSelect = document.getElementById('history-kind');
+    if (kindSelect) kindSelect.addEventListener('change', runSearch);
     rangeSelect.addEventListener('change', _onRangeChange);
     _syncRangeControls();
     ['history-from', 'history-from-time', 'history-to', 'history-to-time'].forEach((id) => {
@@ -284,6 +286,8 @@
     const params = new URLSearchParams();
     if (queryInput.value.trim()) params.set('q', queryInput.value.trim());
     if (deviceSelect.value) params.set('hostname', deviceSelect.value);
+    const kindSelect = document.getElementById('history-kind');
+    if (kindSelect && kindSelect.value) params.set('kind', kindSelect.value);
 
     const explicit = explicitRange();
     const since = explicit.since !== undefined ? explicit.since : rangeToSince(rangeSelect.value);
@@ -745,6 +749,61 @@
     }
   }
 
+  /** One collection run against the one before it (#547). */
+  async function _compareRun(sessionId, out, button) {
+    button.disabled = true;
+    out.innerHTML = '<div class="history-loading">Comparing…</div>';
+    let data;
+    try {
+      const res = await fetch(`/api/collection/${encodeURIComponent(sessionId)}/compare`);
+      data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    } catch (e) {
+      out.innerHTML = '';
+      out.appendChild(Object.assign(document.createElement('div'), {
+        className: 'history-empty', textContent: String(e.message || e) }));
+      button.disabled = false;
+      return;
+    }
+
+    out.innerHTML = '';
+    const summary = document.createElement('div');
+    summary.className = 'replay-compare-summary';
+    summary.textContent = data.summary || '';
+    out.appendChild(summary);
+
+    // Changed first, then new, then same collapsed — the two commands
+    // whose output moved are the answer, and they should not be under
+    // eight that did not.
+    const order = { changed: 0, new: 1, same: 2 };
+    (data.commands || []).slice()
+      .sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9))
+      .forEach(entry => {
+        const item = document.createElement('details');
+        item.className = `replay-compare-item replay-compare-${entry.state}`;
+        item.open = entry.state === 'changed';
+        const head = document.createElement('summary');
+        const cmd = document.createElement('code');
+        cmd.textContent = entry.command;
+        const chip = document.createElement('span');
+        chip.className = 'replay-compare-chip';
+        chip.textContent = entry.state === 'changed'
+          ? `+${entry.added} −${entry.removed}`
+          : (entry.state === 'new' ? 'not in the previous run' : 'same');
+        head.append(cmd, chip);
+        item.appendChild(head);
+        if (entry.diff) {
+          const pre = document.createElement('pre');
+          pre.className = 'replay-compare-diff';
+          // textContent: device output, never markup.
+          pre.textContent = entry.diff;
+          item.appendChild(pre);
+        }
+        out.appendChild(item);
+      });
+    button.disabled = false;
+  }
+
   function renderReplay(session) {
     replaying = session;
     document.getElementById('replay-title').textContent =
@@ -780,6 +839,26 @@
       body.textContent = session.notes;
       box.append(title, body);
       list.appendChild(box);
+    }
+
+    // A collection run offers itself against the run before it (#547).
+    // "Which interfaces started erroring this week" is answered by the
+    // diff, not by reading two nights' worth of `show interfaces` side by
+    // side — which is the thing nobody does, and why per-port drift goes
+    // unnoticed.
+    if (session.connection_type === 'collection') {
+      const bar = document.createElement('div');
+      bar.className = 'replay-compare-bar';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn-secondary';
+      button.innerHTML = '<span class="material-symbols-outlined">swap_horiz</span> '
+                       + 'Compare with the previous run';
+      const out = document.createElement('div');
+      out.className = 'replay-compare';
+      button.addEventListener('click', () => _compareRun(session.id, out, button));
+      bar.append(button);
+      list.append(bar, out);
     }
 
     if (!session.commands.length) {

@@ -1545,6 +1545,33 @@
   async function _backupSchedule(group) {
     const current = group.backup || {};
     const last = group.backup_last;
+
+    // What may be collected alongside the capture (#547). Read-only
+    // snippets only, and the ones that are not are *listed with the
+    // reason* rather than left out — a list that silently omitted the
+    // write snippets would have somebody wondering where theirs went.
+    let snippets = [];
+    try {
+      snippets = ((await (await fetch('/api/collection/snippets')).json())
+        .snippets || []);
+    } catch (_) { /* the dialog still opens; collection is the bonus */ }
+    const eligible = snippets.filter(s => !s.reason);
+    const barred = snippets.filter(s => s.reason);
+    const chosen = new Set(current.collect || []);
+    const collectFields = eligible.map(s => ({
+      name: `collect:${s.id}`,
+      label: `Also collect: ${s.name}`
+           + (s.platform ? ` (${s.platform})` : '')
+           + ` — ${s.commands.slice(0, 2).join('; ')}`
+           + (s.commands.length > 2 ? '; …' : ''),
+      type: 'checkbox',
+      value: chosen.has(s.id),
+    }));
+    const barredLine = barred.length
+      ? ` Not offered for collection: ${barred.slice(0, 4)
+          .map(s => `${s.name} (${s.reason})`).join('; ')}`
+        + `${barred.length > 4 ? `; and ${barred.length - 4} more` : ''}.`
+      : '';
     // What happened, and what did not (#612). "Last run Friday, 12 ok" is
     // true after a weekend with ShellMate closed and says nothing about
     // the two nights that were owed — and a gap in a backup history looks
@@ -1571,7 +1598,13 @@
       title: `Scheduled backups — ${group.name}`,
       body: 'Every device in the group has its configuration captured on the schedule, '
           + 'through an open session where there is one and a short headless login '
-          + 'otherwise. Devices without saved credentials are skipped. ' + lastLine,
+          + 'otherwise. Devices without saved credentials are skipped. ' + lastLine
+          + (collectFields.length
+             ? ' Ticked snippets run after each capture, on the same login, and '
+               + 'land in History as a collection you can compare with the '
+               + 'previous night.'
+             : '')
+          + barredLine,
       confirmLabel: 'Save schedule',
       fields: [
         { name: 'enabled', label: 'Back up on a schedule', type: 'checkbox', value: !!current.enabled },
@@ -1580,12 +1613,15 @@
         { name: 'at', label: 'At (HH:MM, for daily and weekly)', type: 'text', value: current.at || '02:00' },
         { name: 'day', label: 'On (for weekly)', type: 'select', value: current.day || 'sun',
           options: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map(d => ({ value: d, label: d[0].toUpperCase() + d.slice(1) })) },
+        ...collectFields,
       ],
       validate: (v) => (/^\d{1,2}:\d{2}$/.test(v.at || '') ? '' : 'The time needs to be HH:MM.'),
     });
     if (!answer) return;
+    const collect = eligible.filter(s => answer[`collect:${s.id}`]).map(s => s.id);
     await _update(group.key, { backup: {
       enabled: !!answer.enabled, every: answer.every, at: answer.at, day: answer.day,
+      collect,
     } });
   }
 

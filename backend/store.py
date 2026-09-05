@@ -746,7 +746,7 @@ class SessionStore:
 
     def search(
         self, query: str = "", hostname: str = "", since: float | None = None,
-        until: float | None = None, limit: int = 100,
+        until: float | None = None, limit: int = 100, kind: str = "",
     ) -> list[dict]:
         """
         Search command history.
@@ -804,6 +804,14 @@ class SessionStore:
             if hostname:
                 clauses.append("s.hostname = ?")
                 params.append(hostname)
+            # "collection" for the scheduled show commands (#547), "live"
+            # for everything a person typed. Not a connection-type filter in
+            # general: the question History is asked is "did I type this or
+            # did the scheduler", and ssh-vs-telnet is not that question.
+            if kind == "collection":
+                clauses.append("s.connection_type = 'collection'")
+            elif kind == "live":
+                clauses.append("s.connection_type != 'collection'")
             if since is not None:
                 clauses.append("c.ran_at >= ?")
                 params.append(since)
@@ -871,8 +879,14 @@ class SessionStore:
                 for row in rows
             ]
 
-    def list_sessions(self, limit: int = 50, hostname: str = "") -> list[dict]:
-        """Return recent sessions, newest first, with their command counts."""
+    def list_sessions(self, limit: int = 50, hostname: str = "",
+                      kind: str = "") -> list[dict]:
+        """
+        Return recent sessions, newest first, with their command counts.
+
+        ``kind`` is "collection" for the scheduled show commands (#547),
+        "live" for everything a person typed, or "" for both.
+        """
         # Reads share the one connection with the writer, so they take the
         # same lock. check_same_thread=False disables Python's guard; it does
         # not make the connection safe. These run on asyncio worker threads
@@ -883,11 +897,16 @@ class SessionStore:
                 SELECT s.*, COUNT(c.id) AS command_count
                 FROM sessions s
                 LEFT JOIN commands c ON c.session_id = s.id
+                WHERE 1=1
             """
             params: list[Any] = []
             if hostname:
-                sql += " WHERE s.hostname = ?"
+                sql += " AND s.hostname = ?"
                 params.append(hostname)
+            if kind == "collection":
+                sql += " AND s.connection_type = 'collection'"
+            elif kind == "live":
+                sql += " AND s.connection_type != 'collection'"
             sql += " GROUP BY s.id ORDER BY s.started_at DESC LIMIT ?"
             params.append(min(max(limit, 1), 500))
 

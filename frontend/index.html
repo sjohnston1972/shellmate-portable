@@ -3577,6 +3577,14 @@ GigEth0/2     unassigned    YES unset  down     down
         <select id="history-device" aria-label="Filter by device">
           <option value="">All devices</option>
         </select>
+        <!-- Did a person type this, or did the scheduler (#547)? Not a
+             connection-type filter: ssh-versus-telnet is not the question
+             anybody asks History. -->
+        <select id="history-kind" aria-label="Filter by who ran it">
+          <option value="">Typed and collected</option>
+          <option value="live">What I typed</option>
+          <option value="collection">Scheduled collections</option>
+        </select>
         <select id="history-range" aria-label="Filter by date">
           <option value="">Any time</option>
           <option value="1">Last 24 hours</option>

@@ -628,7 +628,7 @@ async def create_session(request: CreateSessionRequest) -> dict:
 @app.get("/api/history/search")
 async def history_search(
     q: str = "", hostname: str = "", since: float | None = None,
-    until: float | None = None, limit: int = 100,
+    until: float | None = None, limit: int = 100, kind: str = "",
 ) -> dict:
     """
     Search every command ever run.
@@ -639,6 +639,7 @@ async def history_search(
     """
     hits = await asyncio.to_thread(
         store.search, q.strip(), hostname.strip(), since, until, limit,
+        kind.strip(),
     )
     # Notes are searched alongside and returned beside, not merged in
     # (#530). A note is about a session, not about a command, and dressing
@@ -652,9 +653,11 @@ async def history_search(
 
 
 @app.get("/api/history/sessions")
-async def history_sessions(limit: int = 50, hostname: str = "") -> list[dict]:
+async def history_sessions(limit: int = 50, hostname: str = "",
+                           kind: str = "") -> list[dict]:
     """List recorded sessions, newest first."""
-    return await asyncio.to_thread(store.list_sessions, limit, hostname.strip())
+    return await asyncio.to_thread(store.list_sessions, limit, hostname.strip(),
+                                   kind.strip())
 
 
 @app.get("/api/history/sessions/{session_id}")
@@ -2463,6 +2466,64 @@ async def setup_move(request: SetupMoveRequest) -> dict:
                                        request.target, session_manager)
     except setup_bundle.BundleError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# REST — Scheduled show collection (#547)
+#
+# Configuration drift is one kind of drift. "Which interfaces started
+# erroring this week" is the other. The scheduler is already logged into
+# every device in a group overnight; these are the three questions the
+# panel asks about what it brought back.
+#
+# Nothing here runs a command. Collection happens inside the scheduler, on
+# the schedule, through `collection.collect`; the routes list what may be
+# scheduled, list what was collected, and compare two runs.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/collection/snippets")
+async def collection_snippets() -> dict:
+    """
+    Every snippet, with the reason it cannot be scheduled where there is one.
+
+    All of them rather than only the eligible ones, so the schedule dialog
+    can grey an entry and say why. A list that silently omitted the
+    write snippets would have somebody wondering where theirs went.
+    """
+    from backend import collection
+
+    return {"snippets": await asyncio.to_thread(collection.eligible_snippets)}
+
+
+@app.get("/api/collection/runs")
+async def collection_runs(hostname: str = "", limit: int = 30) -> dict:
+    """The collection runs for one device, newest first."""
+    from backend import collection
+
+    if not hostname.strip():
+        raise HTTPException(status_code=400, detail="Name a device.")
+    return {"hostname": hostname.strip(),
+            "runs": await asyncio.to_thread(collection.runs_for,
+                                            hostname.strip(), limit)}
+
+
+@app.get("/api/collection/{session_id}/compare")
+async def collection_compare(session_id: str) -> dict:
+    """
+    One run against the run before it on the same device.
+
+    Matched by command text rather than position — a snippet edited
+    between runs shifts positions, and comparing `show ip route` against
+    last night's `show interfaces` is a diff that is all noise and looks
+    like all signal.
+    """
+    from backend import collection
+
+    try:
+        return await asyncio.to_thread(collection.compare, session_id)
+    except collection.CollectionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

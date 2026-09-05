@@ -167,3 +167,37 @@ ignored with a warning rather than refusing to start.
 folder. Guards: startup 153, settings 49, vault 96, security 58, support 78,
 profiles 198, diagnostics 64, updater 32, env_example 8, tooltips, contrast,
 accessibility.
+
+## 2026-09-05 19:20 — #547 done
+
+Scheduled show collection. `backend/collection.py`, a `collect` step in
+`run_group` after the capture on the same login, a `kind` filter through
+`store.search` and `list_sessions`, three routes, the schedule dialog's
+"Also collect" checkboxes, and Compare-with-the-previous-run in History.
+
+Read-only, checked twice: a snippet marked `writes`, or with a command on
+the platform's dangerous list, is listed with the reason rather than left
+out, refused by `scheduler.normalise` on the way in, and refused again at
+the moment it would run — the group file is one people are told they may
+edit. A scheduled overnight job is the worst place for a command that
+changes something.
+
+One synthetic History session per device per run, `connection_type =
+"collection"`. Compared by command text, not position: a snippet edited
+between runs shifts positions. Bounded per command by
+`history.max_output_chars` and per device by the new
+`history.collection_keep` (30 — a month of nights), and the sweep is
+exercised at its floor in the test.
+
+A collection that fails does not fail the backup; `collected` and
+`collect_failed` are reported beside `ok` and `failed`, not folded in.
+
+The full suite before this showed one flake: `test_ansible_env_keys.py`
+failed 3 of 23 under load — an environment created and not yet listed —
+and passed 23/23 alone. A file this batch did not touch.
+
+`python test_collection.py` — 48 passed, against a fake device on a fake
+second channel that speaks `_read_until_idle`'s protocol. Guards:
+scheduler 45, history 63, history_range 7, store_writer 11, advanced 395,
+groups 94, snippets 23, tooltips 8, contrast 103, backup_digest 23,
+backup_webhook 40.

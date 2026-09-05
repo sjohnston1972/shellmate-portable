@@ -73,7 +73,18 @@ def normalise(schedule) -> dict | None:
     day = str(schedule.get("day", "sun")).lower()[:3]
     if day not in DAYS:
         day = "sun"
-    return {"enabled": True, "every": every, "at": f"{hour:02d}:{minute:02d}", "day": day}
+    out = {"enabled": True, "every": every, "at": f"{hour:02d}:{minute:02d}", "day": day}
+    # Read-only snippets to run after the capture (#547). Checked on the
+    # way in as well as at run time: the group file is one people are told
+    # they may edit, and a `writes` snippet that arrived through it must
+    # not run at 2 a.m. with nobody watching.
+    if schedule.get("collect"):
+        from backend import collection
+
+        kept = collection.normalise(schedule.get("collect"))
+        if kept:
+            out["collect"] = kept
+    return out
 
 
 def next_run(schedule: dict, after: datetime) -> datetime:
@@ -116,7 +127,8 @@ def is_due(schedule, last_run: float | None, now: float) -> bool:
     return fire.timestamp() <= now
 
 
-def run_group(key: str, profiles: list[dict], connect, capture, open_session_for, destroy) -> dict:
+def run_group(key: str, profiles: list[dict], connect, capture, open_session_for, destroy,
+              collect=None, collect_ids: list[str] | None = None) -> dict:
     """
     Back up every profile in a group, one after another.
 
@@ -124,12 +136,22 @@ def run_group(key: str, profiles: list[dict], connect, capture, open_session_for
     returns a live session dict or None; ``connect(profile)`` returns a new
     headless session dict (or raises); ``capture(session)`` captures;
     ``destroy(session)`` closes a headless session.
+
+    ``collect(session, ids)`` runs the schedule's read-only snippets after
+    the capture (#547), on the session that is already open — the marginal
+    cost of three more questions while logged in is seconds, and the
+    answers land in History beside the configuration. A collection that
+    fails does not fail the backup: the configuration is the job, the
+    collection is the bonus, and ``collected``/``collect_failed`` say what
+    happened separately from ``ok``/``failed``.
     """
     started = time.time()
     ok: list[str] = []
     changed: list[str] = []
     failed: list[dict] = []
     skipped: list[dict] = []
+    collected: list[str] = []
+    collect_failed: list[dict] = []
     for profile in profiles:
         name = profile.get("name") or profile.get("hostname") or profile.get("id", "?")
         if (profile.get("connection_type") or "ssh") != "ssh":
@@ -155,6 +177,13 @@ def run_group(key: str, profiles: list[dict], connect, capture, open_session_for
                 changed.append(name)
             logger.info("Scheduled backup of %s: %s", name,
                         "changed" if result.get("stored") else "unchanged")
+            if collect is not None and collect_ids:
+                try:
+                    collect(session, collect_ids)
+                    collected.append(name)
+                except Exception as exc:
+                    collect_failed.append({"name": name, "why": str(exc)[:200]})
+                    logger.warning("Collection on %s failed: %s", name, exc)
         except Exception as exc:
             failed.append({"name": name, "why": str(exc)[:200]})
             logger.warning("Scheduled backup of %s failed: %s", name, exc)
@@ -167,6 +196,7 @@ def run_group(key: str, profiles: list[dict], connect, capture, open_session_for
     return {
         "at": started, "took_s": round(time.time() - started, 1),
         "ok": ok, "changed": changed, "failed": failed, "skipped": skipped,
+        "collected": collected, "collect_failed": collect_failed,
         "group": key,
     }
 
@@ -504,7 +534,11 @@ def run_now(key: str) -> dict:
     from backend.profiles import profiles_tagged
     profiles = profiles_tagged(key, include_nested=True)
     group_id = next((g.get("id") for g in groups_module.list_groups() if g.get("key") == key), None)
-    result = run_group(key, profiles, _connect, _capture, _open_session_for, _destroy)
+    plan = next((g.get("backup") for g in groups_module.list_groups() if g.get("key") == key), None) or {}
+    collect_ids = list(plan.get("collect") or []) if isinstance(plan, dict) else []
+    result = run_group(key, profiles, _connect, _capture, _open_session_for, _destroy,
+                       collect=_collect if collect_ids else None,
+                       collect_ids=collect_ids)
     # Recorded on the group by id (#466): a rename that landed while the
     # backup ran used to make this create a ghost entry under the old key.
     current = next((g for g in groups_module.list_groups() if g.get("id") == group_id), None)
@@ -578,6 +612,13 @@ def _connect(profile: dict) -> dict:
 def _capture(session: dict) -> dict:
     from backend.configs import capture_config
     return capture_config(session)
+
+
+def _collect(session: dict, snippet_ids: list[str]) -> dict:
+    """The show commands, after the capture, on the same session (#547)."""
+    from backend import collection
+    return collection.collect(session, snippet_ids,
+                              run_id=time.strftime("%Y%m%d-%H%M"))
 
 
 def _destroy(session: dict) -> None:

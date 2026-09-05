@@ -97,6 +97,7 @@ shellmate/
 │   ├── broadcast_collect.py     # The replies a broadcast produced, and how they differ (#529)
 │   ├── certs.py                 # Read an OpenSSH certificate and say what it actually permits
 │   ├── change.py                # A piece of work, bracketed (#544)
+│   ├── collection.py            # Show commands on the backup timer, stored and diffable (#547)
 │   ├── compliance.py            # Did the standard land everywhere? (#543)
 │   ├── config.py                # Configuration loader for ShellMate
 │   ├── config_archive.py        # Keeping the captured configurations as files

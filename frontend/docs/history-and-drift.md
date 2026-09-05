@@ -67,6 +67,34 @@ is the normal night, and something that announces it every day is something
 you learn to dismiss without reading — at which point the morning it matters
 looks like all the others.
 
+### Collecting show commands too
+
+Configuration drift is one kind of drift. "Which interfaces started erroring
+this week" is the other, and it is the one monitoring rarely answers per
+port. The scheduler is already logged into every device in the group; in the
+schedule dialog, tick **Also collect** beside any read-only snippet and it
+runs after each capture, on the same login.
+
+What comes back lands in **History** as a *collection* — one entry per
+device per run — so `show interfaces status` on every access switch from
+last night is a search away. The **Typed and collected** filter in History's
+toolbar separates what you typed from what the scheduler brought back, and a
+collection offers **Compare with the previous run**: the same command on the
+same device, last night against the night before, changed commands first.
+
+Only read-only snippets are offered. One marked as writing to the device, or
+containing a command on the platform's dangerous list, is listed with the
+reason rather than left out — and checked again at the moment it would run,
+because the group file is one you are allowed to edit by hand. A scheduled
+overnight job is the worst possible place for a command that changes
+something.
+
+Output per command is capped by the same setting a live session respects,
+and **Collection runs kept per device** (Stockton → Recording and history,
+thirty by default) bounds how far back the comparison can reach. Without
+both, a group of forty devices collecting nightly is a disk somebody has to
+go and clear.
+
 ### Telling something else
 
 Nobody is sitting in front of ShellMate most mornings. Under

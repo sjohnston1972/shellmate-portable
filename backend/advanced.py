@@ -449,6 +449,14 @@ SETTINGS: tuple[Setting, ...] = (
             "need for a change record; the output is the part that carries "
             "configurations and secrets.||Search and drift detection depend on "
             "the output, so both stop working for sessions recorded this way."),
+    Setting("history.collection_keep", "Collection runs kept per device", 30, "int",
+            "How many scheduled show-command collections are kept for each "
+            "device before the oldest is discarded.",
+            "Collections run every night on every device in a group, so "
+            "this is the number that decides whether History grows by a "
+            "few megabytes or fills the disk. Thirty is a month of nightly "
+            "runs. Each run is bounded separately by the output cap above.",
+            minimum=2, maximum=1000),
     Setting("history.retention_days", "Discard history after", 0, "int",
             "Zero keeps it forever.",
             "Worth setting if ShellMate "
