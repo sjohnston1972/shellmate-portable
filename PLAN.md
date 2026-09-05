@@ -1,168 +1,198 @@
-# Run plan — the AI cluster
+# Run plan — the install, and the estate's loose ends
 
-Twelve issues: #560, #553, #551, #554, #556, #557, #559, #558, #555, #552,
-#529, #561.
+Six items: **#585** (close with a correction), **#568**, **#564**, **#539**,
+**#563**, **#547**.
 
-Succeeds the estate-cluster run, archived in
-`docs/runs/2026-09-05-estate-cluster/` with its own close-out entry. No DONE
-was written for it: it is being succeeded immediately rather than handed
-over, and a DONE created and deleted in the same minute is a signal nobody
-can read. #544 and #543 are closed on GitHub; #547 was never started and
-goes back on the open list untouched.
+Succeeds the AI-cluster run, archived in `docs/runs/2026-09-05-ai-cluster/`.
+All twelve of its issues closed: #560, #553, #551, #554, #556, #557, #559,
+#558, #555, #552, #529, #561. No DONE was written for it — it is succeeded
+immediately rather than handed over, and a DONE created and deleted in the
+same minute is a signal nobody can read. The same precedent as the estate
+run before it.
 
-## The one decision taken here
+## Why these six
 
-**#560 goes first.** It changes the shape of every other AI issue —
-citations, the context inspector, runbooks and the broadcast comparison all
-look different once the model can ask for what it needs instead of being
-pre-loaded with it. Doing it late means doing several of them twice. This
-was flagged at the end of the last two runs and not overruled, so it is
-taken as settled; say so if it should not be.
+Everything here is finishable **without a decision from Steven**. The four
+issues that need one — #518 (a certificate to buy), #449 (a commercial
+model), #570 (portal scope), #611/#594 (the runner's CI shape, and which
+cloud integrations exist) — stay on the open list untouched rather than
+being guessed at overnight.
+
+The theme is the install itself. Four of the six are about what happens
+before anyone has connected to anything: the first run, a crash, moving to
+another machine. The application has grown a long way past the point where
+"copy the folder by hand" is an acceptable answer to "how do I take this to
+my laptop".
 
 ## How this run commits
 
-One issue, one close, one push — as asked. A step that finishes an issue
-closes it on GitHub with what shipped and why, then commits and pushes.
-Steps that are half of an issue commit and push without closing.
+One issue, one close, one push. A step that finishes an issue closes it on
+GitHub with what shipped and why, then commits and pushes. Steps that are
+half of an issue commit and push without closing.
+
+The executable is rebuilt **at the end**, once, carrying everything. It was
+rebuilt at the start of this run too, so there is a current artifact either
+way if the run stops early.
 
 ## Ordering
 
-Largest last. #561 is medium-to-large and #529 and #552 are mediums; if
-the run runs out it stops there, and the smaller issues that compound with
-#560 are done either way.
+Largest last, as before. #547 is the only large one and it is the one most
+likely to be cut; the five before it stand on their own.
 
 ---
 
-## #560 — native tool use
+## #585 — close the Ansible issue, with a correction
 
-### 1. The tool shapes, per provider
+Not work. The integration shipped: eight backend modules, thirteen frontend,
+sixteen sections of manual. The issue is still open because nobody closed it.
 
-`turns.py` grows a tool-message shape for each of the five providers, and
-each client learns to send `tools` and to stream tool blocks. Claude,
-OpenAI, xAI and DeepSeek are three payload shapes between them; Ollama's
-support is uneven and is probed rather than assumed.
+It must not be closed silently, because **its body states two things as fact
+that are no longer true**, and it presents them as read from the service's
+own source:
 
-**Done:** `python test_turns.py` (new if absent) asserts each provider's
-tool call and tool result round-trip, and that a model with no tool support
-falls back to tags.
+- "It authenticates with **mutual TLS**, not a token." The implementation
+  uses an optional bearer token (`ANSIBLE_RUNNER_TOKEN`, vault-backed), with
+  client certificates supported *as well* rather than instead.
+- "**There is no endpoint that uploads a playbook.**" #605 added
+  `PUT /api/v1/playbooks/{name}`. `supports_upload()` probes the runner's
+  own OpenAPI document rather than assuming, and the SSH copy remains as the
+  fallback for a container that predates it.
 
-### 2. The loop, with the approval gate untouched
+An issue closed with a wrong premise standing is a wrong premise somebody
+quotes back in six months.
 
-The socket gains `tool_call` and `tool_result`. A `run_command` call
-renders as today's command block; approving it sends it and returns the
-output as a tool result so the model continues the same turn. The
-guardrail in `pipeline.py`, the approval, and `investigate_max_steps` stay
-exactly where they are.
-
-**Done:** a test drives a whole tool turn against a fake provider and
-proves nothing reaches a device without approval.
-
-### 3. The read-only tools
-
-`get_parsed_output(command)`, `get_drift()`, `search_history(query)` —
-answered from what ShellMate already holds, needing no approval because
-they touch no device.
-
-**Done:** a test proves each is answered without a session write, and that
-a read-only tool asking for something absent says so rather than inventing.
-
-**Closes #560.**
-
-## 4. #553 — show what the assistant saw
-
-The exact redacted context block each reply carried, on the bubble, plus a
-line saying where the visible window starts. Done next because it is what
-makes everything above inspectable.
-
-**Closes #553.**
-
-## 5. #551 — point at the screen
-
-Ask about a selection; explain the last command's output; a pasted config
-as the same attachment type, redacted server-side.
-
-**Closes #551.**
-
-## 6. #554 — real tables and proper Markdown
-
-`markdown.js` for AI bubbles, parsed rows shipped to the browser as a real
-table with Copy CSV. The `[SUGGEST_CMD]` and `[PLAN]` splitting stays ahead
-of rendering, and the escaping is checked before reuse on model output.
-
-**Closes #554.**
-
-## 7. #556 — a token budget
-
-Three bounded Stockton settings, the meter against them, and a price the
-team enters rather than one ShellMate guesses.
-
-**Closes #556.**
-
-## 8. #557 — per-platform assistant notes
-
-`assistant_notes` per platform, appended to the cached preamble only when
-the fingerprint is certain enough. The generic profile stays silent.
-
-**Closes #557.**
-
-## 9. #559 — citations
-
-Numbered context lines, a rule to cite them, chips that scroll the terminal
-and highlight. Where the model does not cite, nothing changes.
-
-**Closes #559.**
-
-## 10-11. #558 — conversation persistence and export
-
-Saved through the same redaction as the summary path, restored on relaunch,
-searchable from History, exported as Markdown. Two steps: the store and the
-API, then the restore and the export.
-
-**Closes #558.**
-
-## 12. #555 — local-model ergonomics
-
-Pull a model with progress, tokens per second, and a warning when the
-prompt filled the context — the silent-truncation problem the manual
-documents and nothing surfaces.
-
-**Closes #555.**
-
-## 13. #552 — runbooks
-
-A snippet becomes a plan the assistant walks with approval on every step,
-and a finished Investigate plan can be saved back as a snippet. A fourth
-persona body, which `prompts_editor.js` must show.
-
-**Closes #552.**
-
-## 14. #529 — broadcast that compares
-
-Collect the replies, diff each device against the first, and hand the
-parsed rows to the assistant rather than a hundred raw lines each.
-
-**Closes #529.**
-
-## 15. #561 — a local knowledge folder
-
-`ShellMate-Data/knowledge/` indexed into FTS5 and injected through the same
-block as Chroma, with redaction over the snippets. Last because it is the
-largest and the only one that stands alone.
-
-**Closes #561.**
-
-## 16. Close the run
-
-Regenerate the tree, run the whole suite, archive, write DONE.
-
-**Done:** `python tools/run_tests.py` reports every file passing.
+**Done when:** #585 is closed with a comment naming both corrections and
+what actually shipped.
 
 ---
 
-## Not in this run
+## #568 — crash and startup-failure reports through the relay
 
-- **The executable is still not rebuilt**, for the third run running. It
-  cannot be while ShellMate is running.
-- **#547** goes back on the list untouched.
-- If the run runs out it stops inside whichever issue it is on and DONE
-  says which — the issues are ordered so that what is left is the largest.
+**Size: small.** The relay already exists (#370); nothing here builds one.
+
+1. `backend/crash.py`: an unhandled-exception hook, `threading.excepthook`
+   included, writing `crash-<stamp>.json` to the data dir — traceback, the
+   About section, the last 50 log lines. Redacted through
+   `outbound.redact_text`, capped like `MAX_DESCRIPTION`, and **never the
+   scrollback**. A traceback embeds hostnames in its exception text, which
+   is exactly why it goes through the same door everything else does.
+2. `run.py _fatal` writes the same file *before* the message box. A startup
+   failure is the case with no log the user can be asked to read, so it is
+   the one that most needs this.
+3. On the next launch: a toast, "ShellMate hit a fault last time. Review and
+   send?", opening the feedback panel pre-filled with kind `crash` and a
+   preview of exactly what will leave. `feedback.report_crashes` defaults to
+   never prompting automatically — nothing about a crash justifies sending
+   something the user has not read.
+4. `kind` widens from bug/feature to bug/feature/crash, relay included.
+
+**Done when:** `python test_crash.py` passes, and a deliberately raised
+exception in a thread produces a redacted file with no hostname in it.
+
+---
+
+## #564 — the first-run card and a portable-mode chip
+
+**Size: small.** `update.js announceIfNew` already has the fresh-install
+branch; today it only records the version.
+
+One dismissible card, **not a tour**. Four things, because they are the four
+the application already knows the answer to and asks nobody:
+
+- theme;
+- **where saved passwords live** — Windows account or a master password.
+  This is the decision that costs people their vault when they change
+  machines, and it is currently taken implicitly on first write;
+- whether to turn the AI assistant on (off by default, and the reason is
+  already written down in `settings_store.py`);
+- "your data lives at …, and travels with the executable" — or the warning
+  chip when `using_fallback` is true and it does not.
+
+Plus a permanent status-bar chip, Portable or Local profile, that opens
+Diagnostics.
+
+**Done when:** `python test_firstrun.py` passes, the card renders once and
+never again, and both themes clear AA (`test_contrast.py`).
+
+---
+
+## #539 — the webhook half
+
+**Size: small.** The in-app digest shipped; this is the other half of the
+issue and the reason it is still open.
+
+- A webhook URL in Settings, **vault-backed** — it is a bearer secret in a
+  URL — and masked in the support bundle.
+- A generic JSON body: device, group, counts, a ShellMate link. Plus one
+  card format. Teams' incoming-webhook shape changed under Workflows, so
+  generic JSON is the thing that keeps working and the card is the
+  convenience.
+- **Never the diff text** unless a separate setting says so, and then only
+  redacted.
+- Fired from the same place the digest is written, so the two cannot report
+  different numbers for the same night.
+
+**Done when:** `python test_backup_webhook.py` passes, and a run with
+nothing changed sends nothing at all — silence is the feature.
+
+---
+
+## #563 — export and import my setup, and move the data folder
+
+**Size: medium.** The largest of the install group.
+
+1. `backend/setup_bundle.py` — `export`, `inspect`, `apply`.
+2. **Export**: one zip of settings (providers blanked), profiles, groups,
+   credential sets (names and usernames only, never a secret), platforms,
+   schemes, snippets, prompts, optionally the licence key. Manifest with
+   per-file checksums.
+3. **Import**: a preview table — replace, merge or skip per file, with
+   counts — applied atomically with caches invalidated. Profile merges go
+   through `identity()` and `find_matching`, or #73's duplicate problem
+   comes straight back.
+4. **Move data folder**: pick a directory, copy, write a `data-dir.txt`
+   pointer beside the exe, restart. One override check in `paths.data_dir()`
+   and nowhere else.
+5. Import with sessions open **refuses**, mirroring `updater.blockers`. It
+   is the same class of problem: replacing state underneath a live
+   connection.
+
+The DPAPI point has to be stated in the UI, not just the manual: a vault
+encrypted to a Windows account does not travel, and somebody who exports
+their setup and finds their credentials gone has been failed by a missing
+sentence.
+
+**Done when:** `python test_setup_bundle.py` passes, a round trip on a
+seeded data folder reproduces it, and no exported file contains a secret.
+
+---
+
+## #547 — scheduled show collection
+
+**Size: large.** Cut this first if the run runs out.
+
+1. The schedule dialog gains "also collect": one or more read-only snippets.
+   **Only snippets not marked `writes`**, checked against the dangerous list
+   the way `config_push._dangerous` does — a scheduled overnight job is the
+   worst possible place for a command that changes something.
+2. `scheduler.run_group` gains a `collect(session, snippet)` step after
+   `capture`, on the second channel.
+3. Results written through `store.submit` under a synthetic session with
+   `connection_type = "collection"`, so History finds
+   `show interfaces status` on every access switch from last night.
+4. A Collections filter in History, and compare-with-previous: the same
+   command on the same device across two runs.
+5. Bounded: `history.max_output_chars`, retention, and a per-group
+   collection age. Unbounded growth is the stated risk and the one that
+   turns this from useful into a disk somebody has to go and clear.
+
+**Done when:** `python test_collection.py` passes, a snippet marked `writes`
+cannot be scheduled, and a collection older than the age is pruned.
+
+---
+
+## Not in this run, and why
+
+- **#518, #449, #570, #611, #594** — need a decision from Steven.
+- **#526, #546, #566, #541, #548, #571, #572** — available, but this run is
+  already six items and the last one is large.
