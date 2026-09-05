@@ -2460,7 +2460,7 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div class="setting-row setting-row-stack">
             <label class="setting-label" for="setting-ansible-cert"
-                   data-tip="The client certificate the service demands. Mutual TLS is the only authentication it has, so this is not optional the way an API token might be.||A path, so the file keeps its own permissions. Pasting a certificate into a settings file would put it somewhere a support bundle could pick it up.">Client certificate</label>
+                   data-tip="A client certificate, for a deployment that puts mutual TLS in front of the runner. The runner itself authenticates with the bearer token above, so leave this blank unless somebody has put a TLS-terminating proxy in the way that demands one.||A path, so the file keeps its own permissions. Pasting a certificate into a settings file would put it somewhere a support bundle could pick it up.">Client certificate</label>
             <div class="setting-input-group setting-input-group-full">
               <input type="text" id="setting-ansible-cert" class="setting-input setting-input-full"
                      placeholder="C:\Users\you\.ansible\client.crt" />

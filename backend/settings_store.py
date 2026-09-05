@@ -308,7 +308,7 @@ DEFAULT_SETTINGS: dict = {
 
     # Driving Ansible through an ansible-runner-service container (#585).
     #
-    # Paths, not contents: the service authenticates with mutual TLS, and a
+    # Paths, not contents: a deployment may put mutual TLS in front, and a
     # private key belongs in a file with its own permissions rather than in
     # settings.json. Nothing here is a secret, so nothing here is diverted
     # into the vault; the secret is the key file, which never moves.
