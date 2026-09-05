@@ -2654,6 +2654,26 @@ async def deployments_sites(deployment_id: str, request: DeploymentSitesRequest)
     return {"sites": len(sites), "mapping": saved["mapping"], "id": saved["id"]}
 
 
+@app.post("/api/deployments/kits/{provider}/commit")
+async def deployments_commit_kit(provider: str) -> dict:
+    """
+    Commit a provider's kit from the runner into the repository.
+
+    Nothing commits the runner's working tree, so a kit the runner session
+    wrote exists only on its disk until this runs.
+    """
+    from backend import ansible_git, deployments
+
+    try:
+        return await asyncio.to_thread(deployments.commit_kit, provider)
+    except deployments.DeploymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ansible_git.GitError as exc:
+        raise HTTPException(status_code=502, detail=f"GitHub: {exc}") from exc
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+
+
 @app.post("/api/deployments/{deployment_id}/kit")
 async def deployments_kit(deployment_id: str) -> dict:
     """

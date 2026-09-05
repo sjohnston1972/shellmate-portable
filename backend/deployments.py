@@ -478,6 +478,62 @@ def fetch_kit(deployment_id: str, runner=None) -> dict:
             "plan_bytes": len(texts["plan.yml"]), "apply_bytes": len(texts["apply.yml"])}
 
 
+#: What a provider's kit holds on the runner: the two playbooks, and a
+#: scheme.yml that documents the keys with their defaults. The scheme is
+#: optional in the sense that a kit without one still runs; it is fetched
+#: when present because it is the reference somebody reads.
+KIT_FILES = ("plan.yml", "apply.yml", "scheme.yml")
+
+
+def commit_kit(provider: str, git=None, runner=None) -> dict:
+    """
+    Make a provider's kit durable: fetch it from the runner, commit it.
+
+    The runner's working tree is a mirror and nothing commits it — that is
+    Steven's decision, and the consequence is that a kit the runner
+    session wrote exists only on a bind mount until ShellMate commits it.
+    This is that commit: the kit's files under
+    `runner/project/deployments/_kit/<provider>/`, in one revision.
+
+    No PUT afterwards — the bytes came *from* the runner, so it already
+    has them. Returns the commit and the files it carried.
+    """
+    from backend import ansible as runner_module
+    from backend import ansible_git as git_module
+
+    git = git or git_module
+    runner = runner or runner_module
+    if provider not in PROVIDERS:
+        raise DeploymentError("The provider is one of: " + ", ".join(PROVIDERS) + ".")
+
+    files: dict[str, bytes] = {}
+    for name in KIT_FILES:
+        path = f"{KIT_FOLDER}/{provider}/{name}"
+        try:
+            text = (runner.read_playbook(path) if name in PLAYBOOKS
+                    else runner.read_file(path))
+        except Exception as exc:
+            if name in PLAYBOOKS:
+                raise DeploymentError(
+                    f"The runner has no {provider} kit at {path} ({exc}).") from exc
+            text = ""
+        if (text or "").strip():
+            files[PROJECT_PREFIX + path] = text.encode("utf-8")
+    if not any(p.endswith("/plan.yml") for p in files) or             not any(p.endswith("/apply.yml") for p in files):
+        raise DeploymentError(f"The runner's {provider} kit is missing a playbook; "
+                              "nothing was committed.")
+
+    configured = bool(git.config().get("has_token")) and bool(git.config().get("repo"))
+    if not configured:
+        raise DeploymentError(
+            "GitHub is not set up under Settings → Ansible. A kit that is only "
+            "on the runner's disk is not durable, and that is what this commit "
+            "is for.")
+    commit = git.commit_tree(files, f"Kit: {provider} ({len(files)} files) from the runner")
+    logger.info("Committed the %s kit: %s", provider, commit["sha"])
+    return {"commit": commit, "files": sorted(files)}
+
+
 def as_git_tree(files: dict[str, bytes]) -> dict[str, bytes]:
     """The same bytes under the repository's paths."""
     return {PROJECT_PREFIX + path: content for path, content in files.items()}

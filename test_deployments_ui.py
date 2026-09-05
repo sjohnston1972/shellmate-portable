@@ -92,6 +92,16 @@ def test_the_rows_that_matter_come_first() -> None:
           "an unchanged or conflicting site says which network it matched, "
           "before any apply exists")
     check("ids per site are shown on outcome rows", "r.ids || {}" in JS)
+    check("a site outside manage_prefix reads as planned, not touched",
+          "'planned, not touched'" in JS,
+          "a fact on the row, not something inferred from a blank")
+    check("updated is an outcome the table expects",
+          "r.outcome === 'updated'" in JS)
+    check("VLANs attempted per site are shown", "r.vlans" in JS)
+    check("the kit can be committed from the list",
+          "kits/${encodeURIComponent(provider)}/commit" in JS,
+          "nothing commits the runner's tree; a kit exists only on its disk "
+          "until this does")
     check("a truncated list says so", "list truncated" in JS)
     check("only conflicts and failures are tinted",
           ".av-dep-conflict td, .av-dep-failed td" in CSS
@@ -137,7 +147,15 @@ async def browser_pass() -> None:
         await page.click("#sidebar-link-ansible")
         await page.wait_for_selector("#ansible-stage:not([hidden])", timeout=5000)
         await page.click('#av-nav .av-tab[data-av-go="deployments"]')
-        await page.wait_for_timeout(400)
+        # The area fetches /api/deployments before it renders. Wait for
+        # the render, not for a number of milliseconds — the same race the
+        # Ansible env-keys test had, and the same fix.
+        try:
+            await page.wait_for_function(
+                "document.querySelector('#av-deployments-body').innerText"
+                ".includes('Build it from a definition')", timeout=5000)
+        except Exception:
+            pass
         body = await page.inner_text("#av-deployments-body")
         check("the empty state renders", "Build it from a definition" in body, body[:200])
         check("and says the plan is the only preview",

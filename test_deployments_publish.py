@@ -196,6 +196,55 @@ def test_what_the_runner_said_changed() -> None:
           str(out))
 
 
+def test_committing_a_kit() -> None:
+    """
+    Nothing commits the runner's tree, so a kit exists only on its disk
+    until ShellMate commits it. The bytes come from the runner; no PUT
+    goes back.
+    """
+    print("\n-- The kit made durable --")
+
+    class Runner:
+        def __init__(self, have): self.have = have; self.puts = 0
+        def read_playbook(self, p): return self.have.get(p, "")
+        def read_file(self, p):
+            if p not in self.have: raise RuntimeError("404")
+            return self.have[p]
+        def upload_playbook(self, *a, **k): self.puts += 1
+        def upload_file(self, *a, **k): self.puts += 1
+
+    git = FakeGit()
+    runner = Runner({"deployments/_kit/meraki/plan.yml": "- hosts: localhost\n",
+                     "deployments/_kit/meraki/apply.yml": "- hosts: localhost\n  tasks: []\n",
+                     "deployments/_kit/meraki/scheme.yml": "manage_prefix: deploy-\n"})
+    out = d.commit_kit("meraki", git=git, runner=runner)
+    check("three files committed under the kit path",
+          sorted(git.trees[0]) == ["runner/project/deployments/_kit/meraki/apply.yml",
+                                   "runner/project/deployments/_kit/meraki/plan.yml",
+                                   "runner/project/deployments/_kit/meraki/scheme.yml"],
+          str(sorted(git.trees[0])))
+    check("nothing was sent back to the runner", runner.puts == 0)
+    check("the message names the provider", "meraki" in git.messages[-1])
+
+    thin = Runner({"deployments/_kit/azure/plan.yml": "- hosts: localhost\n",
+                   "deployments/_kit/azure/apply.yml": "- hosts: localhost\n"})
+    out = d.commit_kit("azure", git=git, runner=thin)
+    check("a kit without a scheme.yml still commits its two playbooks",
+          len(out["files"]) == 2, str(out))
+
+    try:
+        d.commit_kit("aws", git=git, runner=Runner({})); raised = ""
+    except d.DeploymentError as exc:
+        raised = str(exc)
+    check("a missing kit is refused by provider", "aws kit" in raised, raised)
+    try:
+        d.commit_kit("meraki", git=FakeGit(configured=False), runner=runner); raised = ""
+    except d.DeploymentError as exc:
+        raised = str(exc)
+    check("and no GitHub is an error here, not a state — durability is the point",
+          "not durable" in raised, raised)
+
+
 def test_the_trees_api_sequence() -> None:
     """
     commit_tree against a scripted GitHub: the six requests in order, and
@@ -270,7 +319,7 @@ def main() -> int:
     print("=" * 52)
     for test in (test_commit_then_send, test_same_bytes_two_paths, test_routes_by_file_name,
                  test_when_git_is_not_there, test_what_the_runner_said_changed,
-                 test_the_trees_api_sequence):
+                 test_committing_a_kit, test_the_trees_api_sequence):
         try:
             test()
         except Exception as exc:

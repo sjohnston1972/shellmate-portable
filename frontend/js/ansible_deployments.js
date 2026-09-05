@@ -336,6 +336,15 @@
 
   // ---------------------------------------------------------------- runs
 
+  async function commitKit(provider) {
+    try {
+      const out = await view.post(`/api/deployments/kits/${encodeURIComponent(provider)}/commit`, {});
+      toast(`Committed the ${provider} kit as ${out.commit.sha} (${out.files.length} files).`);
+    } catch (e) {
+      toast(e.message || String(e), 'error');
+    }
+  }
+
   async function publish(entry) {
     try {
       const out = await view.post(`/api/deployments/${encodeURIComponent(entry.id)}/publish`, {});
@@ -429,10 +438,16 @@
     const rows = (plan.sites || []).slice()
       .sort((a, b) => (PLAN_ORDER[a.action] ?? 9) - (PLAN_ORDER[b.action] ?? 9));
     const table = el('table', { class: 'av-dep-table' }, [
-      el('thead', {}, el('tr', {}, ['Site', 'Action', 'Detail', 'Network'].map(h => el('th', { text: h })))),
+      el('thead', {}, el('tr', {}, ['Site', 'Action', 'Managed', 'Detail', 'Network'].map(h => el('th', { text: h })))),
       el('tbody', {}, rows.map(r => el('tr', { class: `av-dep-${r.action}` }, [
         el('td', { text: r.name }),
         el('td', {}, pill(r.action, r.action === 'conflict' ? 'bad' : r.action === 'create' ? 'ok' : '')),
+        // Whether the scheme's manage_prefix covers this site. A site
+        // outside it is planned and reported and never touched — which
+        // must read as a fact on the row, not be inferred from a blank.
+        el('td', {}, r.managed === false
+          ? pill('planned, not touched', 'warn')
+          : (r.managed === true ? pill('managed') : el('span', { text: '—' }))),
         el('td', {}, [
           el('div', { text: r.detail || '' }),
           (r.changes || []).length
@@ -459,10 +474,12 @@
     const rows = (apply.sites || []).slice()
       .sort((a, b) => (APPLY_ORDER[a.outcome] ?? 9) - (APPLY_ORDER[b.outcome] ?? 9));
     const table = el('table', { class: 'av-dep-table' }, [
-      el('thead', {}, el('tr', {}, ['Site', 'Outcome', 'Reason', 'Ids'].map(h => el('th', { text: h })))),
+      el('thead', {}, el('tr', {}, ['Site', 'Outcome', 'VLANs', 'Reason', 'Ids'].map(h => el('th', { text: h })))),
       el('tbody', {}, rows.map(r => el('tr', { class: `av-dep-${r.outcome}` }, [
         el('td', { text: r.name }),
-        el('td', {}, pill(r.outcome, r.outcome === 'failed' ? 'bad' : r.outcome === 'created' ? 'ok' : '')),
+        el('td', {}, pill(r.outcome, r.outcome === 'failed' ? 'bad'
+                            : (r.outcome === 'created' || r.outcome === 'updated') ? 'ok' : '')),
+        el('td', { class: 'av-dep-id', text: r.vlans === undefined ? '—' : String(r.vlans) }),
         el('td', { text: r.reason || '' }),
         el('td', { class: 'av-dep-id', text: Object.entries(r.ids || {})
           .map(([k, v]) => `${k}: ${v}`).join(', ') || '—' }),
@@ -617,9 +634,15 @@
       }));
       return;
     }
-    body.appendChild(el('div', { class: 'av-env-toolbar' },
+    body.appendChild(el('div', { class: 'av-env-toolbar' }, [
       el('button', { type: 'button', class: 'btn-primary', onclick: () => openForm(null) },
-         [icon('add'), 'New deployment'])));
+         [icon('add'), 'New deployment']),
+      // Nothing commits the runner's working tree, so a kit the runner
+      // session wrote exists only on its disk until this does.
+      ...providers.map(p => el('button', { type: 'button', class: 'btn-tertiary',
+        title: `Fetch the ${p} kit from the runner and commit it to the repository`,
+        onclick: () => commitKit(p) }, [icon('save'), `Commit the ${p} kit`])),
+    ]));
     body.appendChild(el('div', { class: 'av-grid av-env-list' }, list.map(card)));
   }
 

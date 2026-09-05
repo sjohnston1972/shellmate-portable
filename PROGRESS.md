@@ -122,3 +122,22 @@ converges to all-unchanged — and reads MERAKI_DASHBOARD_API_KEY, the
 collection's own name, as asked. Its Meraki and Azure kits are live.
 
 Tests: deployments 52, publish 27, api 28, ui 24, ansible_view 44.
+
+## 2026-09-06 00:40 — the kits made durable; the tables follow the runner's rows
+
+Nothing commits the runner's working tree — that is the decision — so a
+kit the runner session writes exists only on a bind mount until ShellMate
+commits it. `deployments.commit_kit(provider)` fetches the kit's files from
+the runner and commits them under `runner/project/deployments/_kit/` in
+one revision; no PUT goes back, because the bytes came from there. No
+GitHub is an error here, not a state: durability is the whole point.
+
+Plan rows gained `managed` (a site outside `manage_prefix` reads
+"planned, not touched" on the row — a fact, not an inference from a
+blank); apply rows gained `vlans` and the `updated` outcome. The fixtures
+carry the runner's convergence test: plan {1 create, 3 update, 1
+unchanged} → apply {1 created, 3 updated, 1 skipped, 0 failed} → re-plan
+{0, 0, 5, 0}. That is what "unchanged" means now.
+
+The area's browser check waited 400ms for a fetch; it now waits for the
+render. Tests: publish 33, ui 28, deployments 52, api 28.
