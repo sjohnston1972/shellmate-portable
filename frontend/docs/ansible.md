@@ -517,3 +517,62 @@ that group is serial, or has no address. Ansible has nothing to dial.
 
 **"No readable value for …"** A run asked for a key the vault cannot
 currently produce. Unlock the vault, or set that key's value again.
+
+## Deployments — building infrastructure from a definition
+
+The cloud accounts you connect to hold no hosts to log into, and Meraki is
+managed by calling its API with ids rather than by connecting to devices.
+So **Deployments** is not an inventory. It is a definition — five hundred
+sites as a site list, a scheme they are all built to, and the runner's own
+plan and apply playbooks — committed to your repository in one commit,
+sent to the runner, planned, and only then applied.
+
+A deployment is four files in one folder of the ansible repository,
+`deployments/<name>/`:
+
+| File | Who writes it | What it is |
+|---|---|---|
+| `sites.yml` | ShellMate, from a CSV you upload | One row per site: name, tags, the third octet its subnets are built on, timezone, and MX/MS serials when you have them |
+| `scheme.yml` | ShellMate, from a form | What every site is built to: product types, the manage prefix, the VLAN plan, the subnet base |
+| `plan.yml` | the runner | Read-only. Diffs the definition against what exists and reports, per site, create / update / unchanged / conflict |
+| `apply.yml` | the runner | Builds it, one site at a time, and reports per site what happened and the ids it made |
+
+**The plan is the only preview, and Apply is behind it.** Meraki has no
+check mode — none of its network modules declare it — so a `--check` run
+skips every task and reports success. ShellMate therefore refuses an apply
+until a plan has run *and its result has been fetched and shown*. The
+Apply button says why it is off. Edit the definition after a plan and the
+gate closes again until you plan once more.
+
+**The columns are asked for, never guessed.** Upload a site list and
+ShellMate shows the headers and asks which is the site name, which the
+tags, which the serials. A header called `site` and one called `Network
+Name` mean the same thing, and one called `serial` does not. The mapping
+is remembered, so next quarter's list is one confirmation. Serials may be
+blank now — sites get built before hardware ships — and filled in later
+against the same list; a second apply then claims them.
+
+**The manage prefix is the safety boundary.** Only sites whose name starts
+with it are configured beyond creation. A network in your site list that
+sits outside it is planned and reported as *planned, not touched*, and
+never reconfigured — which is what stops a deployment reaching into a
+network it did not create.
+
+**One site failing does not stop the rest**, and re-running skips what
+already exists, so a run that dies at site 213 is resumed by running it
+again. The outcome table lists failures first, with the API's own reason,
+and stores the network id of everything it built — the second run, and
+every later change, needs those ids rather than looking sites up by name.
+
+**Git.** ShellMate is the single writer. Publishing commits all four files
+in one revision to the repository set under Settings → Ansible, then sends
+the same bytes to the runner; the runner's copy is a mirror. A publish
+reports which files changed, and names any that replaced a copy on the
+runner that differed from the commit. The runner's own kits — the plan and
+apply a new deployment starts from — live only on its disk until you press
+**Commit the meraki kit** once; do that before relying on them.
+
+**Scale.** Five hundred Meraki sites is roughly 7,500 API calls, which at
+the organisation's rate limit is 30–45 minutes. The first apply of any new
+deployment should be against a handful of test-prefixed sites, with the
+plan read first.
