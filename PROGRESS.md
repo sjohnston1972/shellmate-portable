@@ -323,3 +323,39 @@ and #552+#529. Research parallelises here; edits do not — every remaining
 issue touches chat.js, router.py, prompts.py and app.py, and my edits are
 anchor-based replacements that two writers would break.
 
+## 2026-09-05 14:22 — #558 closed
+
+`chat_messages` with its own FTS5 index, the conversation routes, restore
+on load, and export through the report block model rather than a second
+renderer.
+
+The raw text is stored, markers and all: `[SUGGEST_CMD]` and `[PLAN]` are
+what make a reply a command block and a checklist, so rendered HTML would
+keep the appearance and lose the behaviour. Restored replies go back
+through `renderBubbleContent`. The session binding cannot come back — those
+tabs closed — and the restored conversation says so rather than leaving
+stale blocks looking live.
+
+The export unwraps markers instead of printing or stripping them. Left in
+they are noise; stripped out the reader loses the suggested commands,
+which is most of what a reasoning trail is for.
+
+**Writing this found a real redaction gap, and the fix is partial.** The
+redactor masks whatever follows `password` — right for
+`username admin password 7 <hash>`, wrong for prose: "the password is
+hunter2" masked the word *is* and stored the password. Chat is the first
+non-device text to go through that door. The pattern now hops a linking
+word, which no platform's configuration writes, so device lines are
+unchanged — asserted both ways.
+
+Still partial: "the password for the box is hunter2" gets the wrong token.
+The test asserts that failing case explicitly, with a note to invert it
+rather than delete it if it is ever fixed. A test that pretended prose was
+solved would be worse than one that does not.
+
+One test of mine was timing-fragile: several messages land in one clock
+tick on Windows, so asserting a named conversation is not first fails on a
+fast machine. Asserts the ordering property now.
+
+`python test_conversations.py` — 54 passed. 101 of 101 test files pass.
+

@@ -4414,6 +4414,73 @@ async def change_abandon(session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# REST — Conversations (#558)
+#
+# The chat was an array in the browser. Reloading the page threw away the
+# reasoning trail at exactly the moment somebody has to write it up.
+# ---------------------------------------------------------------------------
+
+
+class ChatMessageRequest(BaseModel):
+    """Body for POST /api/chat/conversations/{id}/messages."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = "ai"
+    text: str = ""
+    session_id: str = ""
+
+
+@app.get("/api/chat/conversations")
+async def list_conversations(limit: int = 50, q: str = "") -> dict:
+    """
+    Conversations, newest first — or the ones matching ``q``.
+
+    Titled by the first thing the engineer said. A generated summary would
+    be better prose and a worse label: what somebody recognises a fortnight
+    later is the words they typed.
+    """
+    if q.strip():
+        hits = await asyncio.to_thread(store.search_chat, q, limit)
+        return {"query": q, "matches": hits, "conversations": []}
+    rows = await asyncio.to_thread(store.list_conversations, limit)
+    return {"query": "", "matches": [], "conversations": rows}
+
+
+@app.get("/api/chat/conversations/{conversation_id}")
+async def get_conversation(conversation_id: str) -> dict:
+    """Every message in one conversation, oldest first."""
+    rows = await asyncio.to_thread(store.get_conversation, conversation_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail="No such conversation.")
+    return {"conversation_id": conversation_id, "messages": rows}
+
+
+@app.post("/api/chat/conversations/{conversation_id}/messages")
+async def add_chat_message(conversation_id: str,
+                           request: ChatMessageRequest) -> dict:
+    """
+    Store one message.
+
+    Redacted server-side, like everything else that is kept. Easy to argue
+    out of — the text is in the browser already and the model has seen it —
+    and wrong: a stored conversation is searched, exported, sent to Jira
+    and pasted into tickets, which is further than a session log goes.
+    """
+    row_id = await asyncio.to_thread(
+        store.add_chat_message, conversation_id, request.role, request.text,
+        request.session_id)
+    return {"id": row_id, "stored": row_id > 0}
+
+
+@app.delete("/api/chat/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str) -> dict:
+    """Forget one conversation."""
+    gone = await asyncio.to_thread(store.delete_conversation, conversation_id)
+    return {"deleted": gone}
+
+
+# ---------------------------------------------------------------------------
 # REST — Reports (#540, #574)
 #
 # A file somebody who does not have ShellMate can read: a CAB pack, a vendor
@@ -4434,9 +4501,11 @@ class ReportRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: str = "session"          # session | diff | change | playback | transcript
+    kind: str = "session"          # session | diff | change | playback |
+                                   # transcript | conversation
     format: str = "md"             # md | html (ignored by playback/transcript)
     session_id: str = ""
+    conversation_id: str = ""
     old_id: int | None = None
     new_id: int | None = None
     chat: list[dict] = []
@@ -4445,6 +4514,16 @@ class ReportRequest(BaseModel):
 
 async def _report_blocks(request: ReportRequest) -> tuple[str, list, str]:
     """Build the document, returning (title, blocks, device) or raising 404."""
+    if request.kind == "conversation":
+        messages = await asyncio.to_thread(
+            store.get_conversation, request.conversation_id)
+        if not messages:
+            raise HTTPException(status_code=404,
+                                detail="No such conversation.")
+        title, blocks = report.conversation_report(
+            request.conversation_id, messages)
+        return title, blocks, "conversation"
+
     if request.kind == "diff":
         if request.old_id is None or request.new_id is None:
             raise HTTPException(

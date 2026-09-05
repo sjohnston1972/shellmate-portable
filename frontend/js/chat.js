@@ -358,6 +358,8 @@
     const history = _recentHistory();
     // Record in Jira chat history
     if (typeof window.addJiraChatMessage === 'function') window.addJiraChatMessage('user', text);
+    // And to disk (#558), so a reload does not lose the trail.
+    persistMessage('user', text, sessionId);
 
     // Render user bubble
     appendUserBubble(text);
@@ -1250,6 +1252,157 @@
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Keeping the conversation (#558)
+  //
+  // ShellMate survives a window close by design — the sessions live in the
+  // server process, and closing the window only hides it. The *reasoning*
+  // did not: the chat was an array in this file, and a reload threw away
+  // how a conclusion was reached, at exactly the moment somebody has to
+  // write it up.
+  //
+  // What is stored is the raw text, markers and all. `[SUGGEST_CMD]` and
+  // `[PLAN]` are how a reply becomes a command block and a checklist, so
+  // storing the rendered HTML would keep the appearance and lose the
+  // behaviour; storing the raw text and replaying it through
+  // `renderBubbleContent` gets both back.
+  //
+  // Redaction happens server-side, not here. Easy to argue out of — this
+  // text is already in the browser — and wrong: a stored conversation is
+  // searched, exported, sent to Jira and pasted into tickets, which is
+  // further than a session log ever goes.
+  // -------------------------------------------------------------------------
+
+  /** This browser conversation. A new one starts when the chat is cleared. */
+  let conversationId = newConversationId();
+
+  function newConversationId() {
+    return 'c-' + Date.now().toString(36) + '-'
+      + Math.random().toString(36).slice(2, 8);
+  }
+
+  /**
+   * Store one message. Fire and forget.
+   *
+   * A failure to persist must never interrupt a conversation: the trail is
+   * worth having and never worth losing the thing it is a trail of.
+   */
+  function persistMessage(role, text, sessionId) {
+    if (!text || !String(text).trim()) return;
+    fetch(`/api/chat/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, text: String(text), session_id: sessionId || '' }),
+    }).catch(() => { /* the conversation matters more than the record of it */ });
+  }
+
+  /**
+   * Put a stored conversation back on screen.
+   *
+   * Through `renderBubbleContent`, which is the same path a live reply
+   * takes — so a restored command block is a command block, and a restored
+   * plan is a checklist. The one thing that cannot come back is the
+   * binding to a session: those ids belonged to tabs that closed with the
+   * last run, and `injectCommand` already refuses a block whose session is
+   * gone rather than sending it somewhere else.
+   */
+  async function restoreConversation(id) {
+    let data;
+    try {
+      const res = await fetch(
+        `/api/chat/conversations/${encodeURIComponent(id)}`);
+      if (!res.ok) return false;
+      data = await res.json();
+    } catch (_) {
+      return false;
+    }
+    if (!data || !(data.messages || []).length) return false;
+
+    messagesEl.innerHTML = '';
+    conversationId = id;
+
+    data.messages.forEach(message => {
+      const bubble = document.createElement('div');
+      bubble.className = message.role === 'user'
+        ? 'chat-bubble chat-bubble-user' : 'chat-bubble chat-bubble-ai';
+      if (message.session_id) bubble.dataset.contextSession = message.session_id;
+
+      if (message.role === 'user') {
+        bubble.textContent = message.text;
+      } else {
+        bubble.dataset.raw = message.text;
+        renderBubbleContent(bubble);
+        wireCommandBlocks(bubble);
+      }
+      messagesEl.appendChild(bubble);
+      // Back into the in-memory history too, or the next question would be
+      // asked with no memory of a conversation that is on the screen.
+      if (typeof window.addJiraChatMessage === 'function') {
+        window.addJiraChatMessage(message.role, message.text);
+      }
+    });
+
+    const note = document.createElement('div');
+    note.className = 'chat-restored-note';
+    note.textContent = 'Restored from a previous session. Command blocks above '
+      + 'were suggested for tabs that are no longer open.';
+    messagesEl.appendChild(note);
+
+    scrollToBottom(true);
+    return true;
+  }
+
+  /** The conversations panel: pick one, or search for something said in one. */
+  async function openConversations() {
+    let data;
+    try {
+      const res = await fetch('/api/chat/conversations?limit=50');
+      data = await res.json();
+    } catch (e) {
+      appendErrorBubble('Could not read the saved conversations.');
+      return;
+    }
+
+    const rows = data.conversations || [];
+    if (!rows.length) {
+      window.shellmateDialog.alert({
+        title: 'Nothing saved yet',
+        body: 'Conversations are kept from now on. This one will be here '
+            + 'the next time you open ShellMate.',
+      });
+      return;
+    }
+
+    const answer = await window.shellmateDialog.form({
+      title: 'Saved conversations',
+      body: 'Opening one replaces what is on screen. The current conversation '
+          + 'is already saved, so nothing is lost.',
+      fields: [{
+        name: 'id', label: 'Conversation', type: 'select',
+        options: rows.map(r => ({
+          value: r.conversation_id,
+          label: `${r.title} · ${r.messages} message`
+               + `${r.messages === 1 ? '' : 's'} · `
+               + new Date((r.last_at || 0) * 1000).toLocaleString(),
+        })),
+      }],
+      confirmLabel: 'Open it',
+    });
+    if (!answer || !answer.id) return;
+
+    const ok = await restoreConversation(answer.id);
+    if (!ok) appendErrorBubble('That conversation could not be opened.');
+  }
+
+  /** Write the conversation out as a file, through the report machinery. */
+  function exportConversation() {
+    if (!window.shellmateReport) return;
+    window.shellmateReport.offer(
+      document.getElementById('chat-export') || document.body,
+      (format) => ({ kind: 'conversation', format,
+                     conversation_id: conversationId }));
+  }
+
   // -----------------------------------------------------------------------
   // Message rendering
   // -----------------------------------------------------------------------
@@ -1382,6 +1535,8 @@
         if (typeof window.addJiraChatMessage === 'function') {
           window.addJiraChatMessage('ai', streamingBubble.dataset.raw);
         }
+        persistMessage('ai', streamingBubble.dataset.raw,
+                       streamingBubble.dataset.contextSession || '');
         renderBubbleContent(streamingBubble);
         wireCommandBlocks(streamingBubble);
         // After the Markdown renderer, and never inside a code
@@ -2520,6 +2675,9 @@
     // A fresh conversation is a fresh budget, and a fresh chance to
     // be asked about it (#556).
     budgetAcknowledged = false;
+    // A new conversation, so the old one keeps its own trail
+    // rather than having the next one appended to it (#558).
+    conversationId = newConversationId();
     _investigation.steps = 0;
     // Reset Jira chat history so context estimate resets too
     if (typeof window._clearJiraChatHistory === 'function') window._clearJiraChatHistory();
@@ -2563,6 +2721,9 @@
   window.shellmateChatMessage = handleWsMessage;
 
   window.shellmateChat = {
+    openConversations,
+    exportConversation,
+    conversationId: () => conversationId,
     attach,
     explainLast,
     renderRaw: (bubble) => { renderBubbleContent(bubble); wireCommandBlocks(bubble); },

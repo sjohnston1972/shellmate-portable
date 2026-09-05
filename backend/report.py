@@ -212,6 +212,88 @@ def session_report(session: dict, chat: list[dict] | None = None,
     return title, blocks
 
 
+def conversation_report(conversation_id: str, messages: list[dict],
+                        label: str = "") -> tuple[str, list[tuple]]:
+    """
+    A whole conversation as a document (#558).
+
+    The one decision here is what to do with the markers a reply carries.
+    `[SUGGEST_CMD]`, `[PLAN]` and `[PLAYBOOK]` are how the chat panel knows
+    to draw a command block or a checklist; left in the text they are
+    noise, and stripped out entirely the reader loses the commands that
+    were suggested — which is most of what a reasoning trail is for.
+
+    So they are unwrapped into the blocks they represent: a suggestion
+    becomes a code block, a plan becomes its steps. That is the same
+    decision `renderBubbleContent` makes in the browser, made once more
+    here rather than shipping the markers to a reader who has never seen
+    them.
+    """
+    title = f"Conversation — {label or conversation_id}"
+    said = [m for m in messages if (m.get("text") or "").strip()]
+
+    blocks: list[tuple] = [
+        _heading(1, title),
+        _meta([
+            ("Messages", str(len(said))),
+            ("Started", _when(said[0].get("said_at")) if said else ""),
+            ("Ended", _when(said[-1].get("said_at")) if said else ""),
+        ]),
+        _rule(),
+    ]
+
+    if not said:
+        blocks.append(_para("This conversation has no messages."))
+        return title, blocks
+
+    for message in said:
+        who = "You" if message.get("role") == "user" else "The assistant"
+        stamp = _when(message.get("said_at"))
+        blocks.append(_heading(3, f"{who}{f' — {stamp}' if stamp else ''}"))
+        blocks.extend(_conversation_body(message.get("text") or ""))
+
+    return title, blocks
+
+
+#: The markers the chat panel renders as something other than prose. Kept
+#: here rather than imported from the frontend for the obvious reason, and
+#: asserted against it by test_conversation_export.
+_MARKERS = re.compile(
+    r"\[SUGGEST_CMD(?::\d+)?\](.*?)\[/SUGGEST_CMD\]"
+    r"|\[PLAN\](.*?)\[/PLAN\]"
+    r"|\[PLAYBOOK\](.*?)\[/PLAYBOOK\]",
+    re.S)
+
+
+def _conversation_body(raw: str) -> list[tuple]:
+    """One message, with its markers unwrapped into blocks."""
+    out: list[tuple] = []
+    last = 0
+    for match in _MARKERS.finditer(raw):
+        prose = raw[last:match.start()].strip()
+        if prose:
+            out.append(_para(redact_text(prose)))
+        command, plan, playbook = match.group(1), match.group(2), match.group(3)
+        if command is not None:
+            # A suggestion, as the command it was. Whether it was approved
+            # is not recorded anywhere, so the document does not claim it
+            # was — the commands actually run are in the session report.
+            out.append(_para("Suggested:"))
+            out.append(_code(redact_text(command.strip())))
+        elif plan is not None:
+            out.append(_para("Plan:"))
+            out.append(_code(redact_text(plan.strip())))
+        elif playbook is not None:
+            out.append(_para("Playbook:"))
+            out.append(_code(redact_text(playbook.strip())))
+        last = match.end()
+
+    tail = raw[last:].strip()
+    if tail:
+        out.append(_para(redact_text(tail)))
+    return out or [_para(redact_text(raw.strip()))]
+
+
 def diff_report(diff: dict, old: dict, new: dict) -> tuple[str, list[tuple]]:
     """
     What changed between two captured configurations.

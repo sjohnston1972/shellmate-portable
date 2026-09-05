@@ -41,7 +41,16 @@ _VALUE = r'(?:"[^"]*"|\S+)'
 _PATTERNS: list[tuple[re.Pattern, str]] = [
     # Cisco / Arista: username x password [0|7] <secret>, enable secret 5
     # <hash>; Junos: secret "$9$...", authentication-password "...".
-    (re.compile(r"(?i)\b(password|secret)(\s+\d)?\s+" + _VALUE), r"\1\2 " + MASK),
+    #
+    # The optional linking word is for prose, not configuration (#558).
+    # A chat message is the first thing to go through here that is not
+    # a device line, and "the password is hunter2" used to mask the
+    # word "is" and store the password — the pattern masks whatever
+    # follows the keyword, and in prose that is a preposition. No
+    # configuration on any platform writes "password is", so allowing
+    # the hop cannot change what a device line redacts to.
+    (re.compile(r"(?i)\b(password|secret)(\s+\d)?(\s+(?:is|was|will be|should be|to|for|=|:))?\s+" + _VALUE),
+     r"\1\2\3 " + MASK),
 
     # SNMP community strings — a read-write community is a credential.
     (re.compile(r"(?i)\b(snmp-server\s+community)\s+\S+"), r"\1 " + MASK),

@@ -247,6 +247,33 @@ class SessionStore:
             CREATE INDEX IF NOT EXISTS idx_neighbours_remote
                 ON neighbours(remote_host);
 
+            -- The reasoning trail (#558).
+            --
+            -- The application survives a window close by design; the
+            -- chat did not, because it was an array in the browser.
+            -- Reloading the page threw away how a conclusion was
+            -- reached, at exactly the moment somebody has to write it
+            -- up.
+            --
+            -- Not keyed to a session: a conversation frequently spans
+            -- several devices, and one that switched tabs half way
+            -- through belongs to neither. `session_id` records which
+            -- tab a message was asked about, which is a different
+            -- question from which conversation it belongs to.
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                role            TEXT NOT NULL DEFAULT 'ai',
+                text            TEXT NOT NULL DEFAULT '',
+                session_id      TEXT NOT NULL DEFAULT '',
+                said_at         REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chat_conversation
+                ON chat_messages(conversation_id, id);
+            CREATE INDEX IF NOT EXISTS idx_chat_said_at
+                ON chat_messages(said_at DESC);
+
             CREATE TABLE IF NOT EXISTS meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -308,6 +335,27 @@ class SessionStore:
                     INSERT INTO notes_fts(notes_fts, rowid, notes)
                     VALUES ('delete', old.rowid, old.notes);
                     INSERT INTO notes_fts(rowid, notes) VALUES (new.rowid, new.notes);
+                END;
+
+                -- Conversations (#558). Insert and delete only: a
+                -- message is said once and never edited, unlike a
+                -- session note, so there is no update trigger to get
+                -- right and none to get wrong.
+                CREATE VIRTUAL TABLE IF NOT EXISTS chat_fts USING fts5(
+                    text,
+                    content='chat_messages', content_rowid='id',
+                    tokenize='porter unicode61'
+                );
+
+                CREATE TRIGGER IF NOT EXISTS chat_ai
+                AFTER INSERT ON chat_messages BEGIN
+                    INSERT INTO chat_fts(rowid, text) VALUES (new.id, new.text);
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS chat_ad
+                AFTER DELETE ON chat_messages BEGIN
+                    INSERT INTO chat_fts(chat_fts, rowid, text)
+                    VALUES ('delete', old.id, old.text);
                 END;
                 """
             )
@@ -873,6 +921,191 @@ class SessionStore:
     # end of Gi1/0/24" is answerable from the history rather than only in
     # the moment somebody looked.
     # -----------------------------------------------------------------
+
+    # -----------------------------------------------------------------
+    # Conversations (#558)
+    #
+    # The application survives a window close by design — sessions live in
+    # the server process, and closing the window hides it. The *reasoning*
+    # did not: the chat was an array in the browser, and reloading the page
+    # threw away the trail of how a conclusion was reached, at exactly the
+    # moment somebody has to write it up.
+    #
+    # Stored through the same redaction as everything else that leaves a
+    # session. This one is easy to argue out of — the text is already in
+    # the browser and the model has already seen it — and the argument is
+    # wrong: a stored conversation is searched, exported, sent to Jira and
+    # pasted into tickets, which is further than a session log ever goes.
+    # -----------------------------------------------------------------
+
+    def add_chat_message(self, conversation_id: str, role: str, text: str,
+                         session_id: str = "") -> int:
+        """
+        Store one chat message. Returns the row id, or -1.
+
+        Written synchronously rather than through the writer thread, for
+        the same reason `set_notes` is: a message is one small row, and
+        "saved" has to mean saved when the next thing that happens might
+        be the window closing.
+        """
+        body = _redacted(text or "")
+        if not (conversation_id or "").strip() or not body.strip():
+            return -1
+
+        try:
+            with self._lock:
+                connection = self.connect()
+                cursor = connection.execute(
+                    """
+                    INSERT INTO chat_messages
+                        (conversation_id, role, text, session_id, said_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (conversation_id, role if role in ("user", "ai") else "ai",
+                     body, session_id, time.time()),
+                )
+                connection.commit()
+                return int(cursor.lastrowid or -1)
+        except sqlite3.Error as exc:
+            # Never worth interrupting a conversation over.
+            logger.warning("Could not store a chat message: %s", exc)
+            return -1
+
+    def list_conversations(self, limit: int = 50) -> list[dict]:
+        """
+        Conversations, newest first, with enough to recognise one.
+
+        The first thing the engineer said is the title. A generated summary
+        would be better prose and a worse label: what somebody recognises a
+        fortnight later is the words they typed.
+        """
+        with self._lock:
+            rows = self.connect().execute(
+                """
+                SELECT conversation_id,
+                       COUNT(*)                       AS messages,
+                       MIN(said_at)                   AS started_at,
+                       MAX(said_at)                   AS last_at,
+                       MIN(CASE WHEN role = 'user' THEN id END) AS first_user
+                FROM chat_messages
+                GROUP BY conversation_id
+                ORDER BY last_at DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+
+            out = []
+            for row in rows:
+                entry = dict(row)
+                title = ""
+                if entry.get("first_user"):
+                    first = self.connect().execute(
+                        "SELECT text, session_id FROM chat_messages WHERE id = ?",
+                        (entry["first_user"],)).fetchone()
+                    if first:
+                        title = (first["text"] or "").strip().split("\n")[0][:120]
+                        entry["session_id"] = first["session_id"]
+                entry["title"] = title or "(no question)"
+                entry.pop("first_user", None)
+                out.append(entry)
+            return out
+
+    def get_conversation(self, conversation_id: str) -> list[dict]:
+        """Every message in one conversation, oldest first."""
+        with self._lock:
+            rows = self.connect().execute(
+                """
+                SELECT id, role, text, session_id, said_at
+                FROM chat_messages
+                WHERE conversation_id = ?
+                ORDER BY id
+                """,
+                (conversation_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def search_chat(self, query: str = "", limit: int = 50) -> list[dict]:
+        """
+        Find a conversation by something said in it.
+
+        Same two-tier shape as the command search: FTS where it is
+        available, LIKE where it is not — and a LIKE pass when FTS matched
+        nothing, because an index can go stale and "no results" is the one
+        answer nobody can tell apart from a broken index.
+        """
+        text = (query or "").strip()
+        if not text:
+            return []
+
+        with self._lock:
+            connection = self.connect()
+            rows = []
+            if self._fts_enabled:
+                try:
+                    rows = connection.execute(
+                        """
+                        SELECT m.id, m.conversation_id, m.role, m.session_id,
+                               m.said_at,
+                               snippet(chat_fts, 0, '', '', ' … ', 12) AS snippet
+                        FROM chat_fts
+                        JOIN chat_messages m ON m.id = chat_fts.rowid
+                        WHERE chat_fts MATCH ?
+                        ORDER BY m.said_at DESC
+                        LIMIT ?
+                        """,
+                        (_to_fts_query(text), int(limit)),
+                    ).fetchall()
+                except sqlite3.Error as exc:
+                    logger.warning("Chat search failed: %s", exc)
+                    rows = []
+
+            if not rows:
+                rows = connection.execute(
+                    """
+                    SELECT id, conversation_id, role, session_id, said_at,
+                           substr(text, 1, 200) AS snippet
+                    FROM chat_messages
+                    WHERE text LIKE ?
+                    ORDER BY said_at DESC
+                    LIMIT ?
+                    """,
+                    (f"%{text}%", int(limit)),
+                ).fetchall()
+
+            return [dict(r) for r in rows]
+
+    def delete_conversation(self, conversation_id: str) -> int:
+        """Remove one conversation. Returns how many messages went."""
+        with self._lock:
+            connection = self.connect()
+            cursor = connection.execute(
+                "DELETE FROM chat_messages WHERE conversation_id = ?",
+                (conversation_id,))
+            connection.commit()
+            return int(cursor.rowcount or 0)
+
+    def prune_conversations(self, before: float) -> int:
+        """
+        Drop conversations whose last message predates ``before``.
+
+        Chat is pruned on the same retention setting as the commands it is
+        about — a conversation kept after the session it discusses has been
+        swept is a reasoning trail pointing at nothing.
+        """
+        with self._lock:
+            connection = self.connect()
+            cursor = connection.execute(
+                """
+                DELETE FROM chat_messages
+                WHERE conversation_id IN (
+                    SELECT conversation_id FROM chat_messages
+                    GROUP BY conversation_id HAVING MAX(said_at) < ?
+                )
+                """,
+                (float(before),))
+            connection.commit()
+            return int(cursor.rowcount or 0)
 
     def record_neighbours(self, hostname: str, neighbours: list[dict],
                           seen_at: float | None = None) -> int:
