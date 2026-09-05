@@ -98,6 +98,12 @@ def test_the_rows_that_matter_come_first() -> None:
     check("updated is an outcome the table expects",
           "r.outcome === 'updated'" in JS)
     check("VLANs attempted per site are shown", "r.vlans" in JS)
+    check("the scheme form is a spec per provider, JSON otherwise",
+          "SCHEME_FIELDS = {" in JS and "editSpecScheme" in JS
+          and "azure: [" in JS and "manage_prefix" in JS,
+          "a form invented for fields the playbook does not read would be a form that lies")
+    check("Azure's scope is the subscription only, sent as an env var",
+          "sent as AZURE_SUBSCRIPTION_ID" in JS and "azure_resource_group" not in JS)
     check("the kit can be committed from the list",
           "kits/${encodeURIComponent(provider)}/commit" in JS,
           "nothing commits the runner's tree; a kit exists only on its disk "

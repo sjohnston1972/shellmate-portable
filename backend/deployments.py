@@ -478,11 +478,22 @@ def fetch_kit(deployment_id: str, runner=None) -> dict:
             "plan_bytes": len(texts["plan.yml"]), "apply_bytes": len(texts["apply.yml"])}
 
 
-#: What a provider's kit holds on the runner: the two playbooks, and a
-#: scheme.yml that documents the keys with their defaults. The scheme is
-#: optional in the sense that a kit without one still runs; it is fetched
-#: when present because it is the reference somebody reads.
-KIT_FILES = ("plan.yml", "apply.yml", "scheme.yml")
+#: What a provider's kit holds on the runner: three playbooks — the
+#: destroy is part of a complete kit even before ShellMate wires it — and
+#: two data files, a scheme.yml documenting the keys with their defaults
+#: and a sites.yml that is a commented template of the row keys. All five
+#: are committed; only plan and apply are snapshotted onto a deployment.
+KIT_FILES = ("plan.yml", "apply.yml", "destroy.yml", "scheme.yml", "sites.yml")
+KIT_PLAYBOOKS = ("plan.yml", "apply.yml", "destroy.yml")
+
+#: A scope value that is an environment variable on the runner, not an
+#: extra var. Not symmetric across providers and deliberately not assumed
+#: to be: Meraki's org id is genuinely a playbook variable, while Azure's
+#: subscription is read by azure.azcollection from the environment and the
+#: playbooks never name it. Sending it as a var would be silently ignored.
+SCOPE_AS_ENV = {
+    "azure": {"azure_subscription_id": "AZURE_SUBSCRIPTION_ID"},
+}
 
 
 def commit_kit(provider: str, git=None, runner=None) -> dict:
@@ -510,10 +521,10 @@ def commit_kit(provider: str, git=None, runner=None) -> dict:
     for name in KIT_FILES:
         path = f"{KIT_FOLDER}/{provider}/{name}"
         try:
-            text = (runner.read_playbook(path) if name in PLAYBOOKS
+            text = (runner.read_playbook(path) if name in KIT_PLAYBOOKS
                     else runner.read_file(path))
         except Exception as exc:
-            if name in PLAYBOOKS:
+            if name in ("plan.yml", "apply.yml"):
                 raise DeploymentError(
                     f"The runner has no {provider} kit at {path} ({exc}).") from exc
             text = ""
@@ -592,10 +603,19 @@ def run_vars(record: dict, kind: str) -> dict:
     """
     out = {"deployment": record.get("slug", ""),
            "provider": record.get("provider", "")}
-    out.update({k: v for k, v in (record.get("scope") or {}).items() if v not in ("", None)})
+    as_env = SCOPE_AS_ENV.get(record.get("provider", ""), {})
+    out.update({k: v for k, v in (record.get("scope") or {}).items()
+                if v not in ("", None) and k not in as_env})
     if kind == "apply":
         out["plan_job"] = str(((record.get("last_plan") or {}).get("job")) or "")
     return out
+
+
+def run_env(record: dict) -> dict:
+    """The scope values that travel as environment variables, by name."""
+    as_env = SCOPE_AS_ENV.get(record.get("provider", ""), {})
+    return {as_env[k]: str(v) for k, v in (record.get("scope") or {}).items()
+            if k in as_env and v not in ("", None)}
 
 
 def apply_allowed(record: dict) -> str:

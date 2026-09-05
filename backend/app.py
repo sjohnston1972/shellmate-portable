@@ -2745,7 +2745,7 @@ async def _start_deployment_run(deployment_id: str, kind: str) -> dict:
         if why:
             raise HTTPException(status_code=409, detail=why)
 
-    envvars: dict = {}
+    envvars: dict = dict(deployments.run_env(record))
     extra = dict(deployments.run_vars(record, kind))
     if record.get("keys"):
         env, more, unreadable = await asyncio.to_thread(key_store.resolve, record["keys"])

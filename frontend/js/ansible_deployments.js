@@ -40,11 +40,50 @@
   /** Polling handles, one per running job. */
   const polls = {};
 
+  // Per provider, not symmetric. Meraki's org id is a playbook variable;
+  // Azure's subscription is read from the environment by the collection
+  // and the resource group is per site from the scheme's rg_prefix.
   const SCOPE_FIELDS = {
     meraki: [{ name: 'meraki_org_id', label: 'Meraki organisation id', placeholder: '923103' }],
-    azure:  [{ name: 'azure_subscription_id', label: 'Azure subscription id' },
-             { name: 'azure_resource_group', label: 'Resource group' }],
+    azure:  [{ name: 'azure_subscription_id', label: 'Azure subscription id (sent as AZURE_SUBSCRIPTION_ID)' }],
     aws:    [{ name: 'aws_region', label: 'AWS region', placeholder: 'us-east-1' }],
+  };
+
+  /**
+   * The scheme, as a form, per provider — the keys the runner's kit reads,
+   * with the runner's own meaning and default as the hint.
+   *
+   * `kind` says how a field is typed and how it is written to the scheme:
+   * text, csv (a list of strings), lines (a list of objects from
+   * "a, b" rows, with `cols` naming the parts), or kv (a dict from
+   * "key = value" lines). A provider absent here gets the JSON editor.
+   */
+  const SCHEME_FIELDS = {
+    meraki: [
+      { name: 'product_types', label: 'Product types (comma-separated, required)', kind: 'csv',
+        required: true, dflt: ['appliance'], placeholder: 'appliance, switch' },
+      { name: 'manage_prefix', label: 'Manage prefix (required)', kind: 'text', required: true,
+        placeholder: 'deploy-',
+        hint: 'Only sites whose name starts with this are configured beyond creation. '
+            + 'It is what stops a deployment reaching into a network it did not create.' },
+      { name: 'vlan_subnet_base', label: 'VLAN subnet base (optional)', kind: 'text', placeholder: '10.10' },
+      { name: 'vlan_plan', label: 'VLAN plan — one per line: id, name, offset (optional)',
+        kind: 'lines', cols: ['id:int', 'name', 'offset:int'], placeholder: '10, data, 0\n20, voice, 1' },
+    ],
+    azure: [
+      { name: 'location', label: 'Location (required)', kind: 'text', required: true, placeholder: 'uksouth' },
+      { name: 'rg_prefix', label: 'Resource group prefix (required)', kind: 'text', required: true, placeholder: 'rg-' },
+      { name: 'vnet_prefix', label: 'VNet prefix (required)', kind: 'text', required: true, placeholder: 'vnet-' },
+      { name: 'base_prefix', label: 'Base prefix (required) — vnet is <base>.<third octet>.0/24', kind: 'text',
+        required: true, placeholder: '10.20' },
+      { name: 'manage_prefix', label: 'Manage prefix (required)', kind: 'text', required: true,
+        placeholder: 'azure-test-',
+        hint: 'Only sites whose name starts with this are configured beyond the resource group.' },
+      { name: 'subnets', label: 'Subnets — one per line: name, block (each a /26 at block×64; optional)',
+        kind: 'lines', cols: ['name', 'block:int'], placeholder: 'data, 0\nvoice, 1' },
+      { name: 'nsg_suffix', label: 'NSG name prefix (optional, default nsg-)', kind: 'text', placeholder: 'nsg-' },
+      { name: 'tags', label: 'Tags — one per line: key = value (optional)', kind: 'kv', placeholder: 'owner = netops' },
+    ],
   };
 
   // ---------------------------------------------------------------- data
@@ -193,7 +232,7 @@
         pick('tags', 'Tags', false),
         pick('mx', 'MX serial', false),
         pick('ms', 'MS serial', false),
-        pick('third_octet', 'Third octet (0–255; the site\'s subnets are built on it)', false),
+        pick('third_octet', 'Third octet (0–255; the site\'s subnets are built on it — required for Azure)', false),
         pick('timezone', 'Timezone (blank means Etc/UTC)', false),
         { name: 'extra', label: 'Other columns to carry through, comma-separated (optional)',
           value: (remembered.extra || []).join(', ') },
@@ -224,66 +263,83 @@
    * runner owns what a scheme means, and a form invented here for fields
    * the playbook does not read would be a form that lies.
    */
-  /**
-   * The Meraki scheme as a form — the four keys the runner's kit reads,
-   * with the runner's own meaning and defaults beside each. Other
-   * providers get the JSON editor until their kits declare their fields:
-   * a form invented here for fields the playbook does not read would be
-   * a form that lies.
-   */
-  async function editMerakiScheme(entry) {
+  function schemeToForm(field, value) {
+    if (value === undefined || value === null) value = field.dflt;
+    if (value === undefined || value === null) return '';
+    if (field.kind === 'csv') return (value || []).join(', ');
+    if (field.kind === 'lines') {
+      return (value || []).map(row => field.cols.map(c => {
+        const v = row[c.split(':')[0]]; return v === undefined || v === null ? '' : String(v);
+      }).join(', ')).join('\n');
+    }
+    if (field.kind === 'kv') return Object.entries(value || {}).map(([k, v]) => `${k} = ${v}`).join('\n');
+    return String(value);
+  }
+
+  function formToScheme(field, text) {
+    const t = (text || '').trim();
+    if (!t) return undefined;
+    if (field.kind === 'csv') return t.split(',').map(x => x.trim()).filter(Boolean);
+    if (field.kind === 'lines') {
+      return t.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+        const parts = l.split(',').map(x => x.trim());
+        const row = {};
+        field.cols.forEach((c, i) => {
+          const [key, type] = c.split(':');
+          if (parts[i] === undefined || parts[i] === '') return;
+          row[key] = type === 'int' ? Number(parts[i]) : parts[i];
+        });
+        return row;
+      });
+    }
+    if (field.kind === 'kv') {
+      const out = {};
+      t.split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
+        const i = l.indexOf('=');
+        if (i > 0) out[l.slice(0, i).trim()] = l.slice(i + 1).trim();
+      });
+      return out;
+    }
+    return t;
+  }
+
+  /** A provider's scheme as a form; null when the provider has no spec yet. */
+  async function editSpecScheme(entry) {
+    const spec = SCHEME_FIELDS[entry.provider];
+    if (!spec) return null;
     const s = entry.scheme || {};
-    const planLines = (s.vlan_plan || [])
-      .map(v => `${v.id}, ${v.name}, ${v.offset ?? ''}`).join('\n');
     const answer = await window.shellmateDialog.form({
       title: `Scheme for ${entry.name}`,
-      body: 'What every site is built to. The runner reads these from '
-          + 'scheme.yml; provisioning logic stays in Ansible.',
-      fields: [
-        { name: 'product_types', label: 'Product types (comma-separated, required)',
-          value: (s.product_types || ['appliance']).join(', '), placeholder: 'appliance, switch' },
-        { name: 'manage_prefix', label: 'Manage prefix (required)',
-          value: s.manage_prefix || '', placeholder: 'deploy-' },
-        { name: 'vlan_subnet_base', label: 'VLAN subnet base (optional)',
-          value: s.vlan_subnet_base || '', placeholder: '10.10' },
-        { name: 'vlan_plan', label: 'VLAN plan — one per line: id, name, offset (optional)',
-          type: 'textarea', rows: 6, value: planLines, placeholder: '10, data, 0\n20, voice, 1' },
-      ],
+      body: 'What every site is built to. The runner reads these from scheme.yml; '
+          + 'provisioning logic stays in Ansible.',
+      fields: spec.map(f => ({
+        name: f.name, label: f.label + (f.hint ? ` — ${f.hint}` : ''),
+        type: f.kind === 'lines' || f.kind === 'kv' ? 'textarea' : 'text',
+        rows: 5, value: schemeToForm(f, s[f.name]), placeholder: f.placeholder || '',
+      })),
       confirmLabel: 'Save scheme',
       validate: (v) => {
-        if (!(v.product_types || '').trim()) return 'Product types are required.';
-        if (!(v.manage_prefix || '').trim()) {
-          return 'A manage prefix is required — only sites whose name starts with '
-               + 'it are configured beyond creation. It is what stops a deployment '
-               + 'reaching into a network it did not create.';
+        for (const f of spec) {
+          if (f.required && !(v[f.name] || '').trim()) return `${f.label.split(' (')[0]} is required.`;
+          if (f.kind === 'lines') {
+            const bad = (v[f.name] || '').split('\n').map(l => l.trim()).filter(Boolean)
+              .find(l => l.split(',').length < f.cols.filter(c => !c.endsWith(':int') || true).length - 1);
+            if (bad) return `Line "${bad}" needs ${f.cols.map(c => c.split(':')[0]).join(', ')}.`;
+          }
         }
-        const bad = (v.vlan_plan || '').split('\n').map(l => l.trim()).filter(Boolean)
-          .find(l => { const p = l.split(',').map(x => x.trim()); return p.length < 2 || !/^\d+$/.test(p[0]); });
-        return bad ? `VLAN line "${bad}" needs at least "id, name", with a numeric id.` : '';
+        return '';
       },
     });
-    if (!answer) return null;
-    const scheme = {
-      product_types: answer.product_types.split(',').map(x => x.trim()).filter(Boolean),
-      manage_prefix: answer.manage_prefix.trim(),
-    };
-    if ((answer.vlan_subnet_base || '').trim()) scheme.vlan_subnet_base = answer.vlan_subnet_base.trim();
-    const plan = (answer.vlan_plan || '').split('\n').map(l => l.trim()).filter(Boolean)
-      .map(l => { const [id, name, offset] = l.split(',').map(x => x.trim());
-                  const row = { id: Number(id), name };
-                  if (offset !== undefined && offset !== '') row.offset = Number(offset);
-                  return row; });
-    if (plan.length) scheme.vlan_plan = plan;
-    return scheme;
+    if (!answer) return false;
+    const scheme = {};
+    spec.forEach(f => { const v = formToScheme(f, answer[f.name]); if (v !== undefined) scheme[f.name] = v; });
+    await saveScheme(entry, scheme);
+    return true;
   }
 
   async function editScheme(entry) {
-    if (entry.provider === 'meraki') {
-      const scheme = await editMerakiScheme(entry);
-      if (!scheme) return;
-      await saveScheme(entry, scheme);
-      return;
-    }
+    const handled = await editSpecScheme(entry);
+    if (handled !== null) return;
     const answer = await window.shellmateDialog.form({
       title: `Scheme for ${entry.name}`,
       body: 'What every site is built to: the base prefix, the VLAN plan, the rule '

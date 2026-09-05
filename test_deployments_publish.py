@@ -216,12 +216,13 @@ def test_committing_a_kit() -> None:
     git = FakeGit()
     runner = Runner({"deployments/_kit/meraki/plan.yml": "- hosts: localhost\n",
                      "deployments/_kit/meraki/apply.yml": "- hosts: localhost\n  tasks: []\n",
-                     "deployments/_kit/meraki/scheme.yml": "manage_prefix: deploy-\n"})
+                     "deployments/_kit/meraki/destroy.yml": "- hosts: localhost\n  tasks: []\n",
+                     "deployments/_kit/meraki/scheme.yml": "manage_prefix: deploy-\n",
+                     "deployments/_kit/meraki/sites.yml": "# sites: [{name}]\n"})
     out = d.commit_kit("meraki", git=git, runner=runner)
-    check("three files committed under the kit path",
-          sorted(git.trees[0]) == ["runner/project/deployments/_kit/meraki/apply.yml",
-                                   "runner/project/deployments/_kit/meraki/plan.yml",
-                                   "runner/project/deployments/_kit/meraki/scheme.yml"],
+    check("all five kit files committed under the kit path",
+          sorted(git.trees[0]) == sorted("runner/project/deployments/_kit/meraki/" + n
+                                         for n in d.KIT_FILES),
           str(sorted(git.trees[0])))
     check("nothing was sent back to the runner", runner.puts == 0)
     check("the message names the provider", "meraki" in git.messages[-1])

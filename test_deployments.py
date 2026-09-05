@@ -224,6 +224,23 @@ def test_the_kit() -> None:
           "no meraki kit" in why and "runner session" in why, why)
 
 
+def test_scope_per_provider() -> None:
+    """
+    Meraki's org id is a playbook variable; Azure's subscription is an
+    environment variable the collection reads. Sending the latter as a var
+    would be silently ignored.
+    """
+    print("\n-- Scope is per provider --")
+    m = d.save({"name": "M", "provider": "meraki", "scope": {"meraki_org_id": "923103"}})
+    check("Meraki: the org id is an extra var",
+          d.run_vars(m, "plan")["meraki_org_id"] == "923103" and d.run_env(m) == {})
+    a = d.save({"name": "A", "provider": "azure", "scope": {"azure_subscription_id": "394c"}})
+    check("Azure: the subscription is an env var, and not a var",
+          d.run_env(a) == {"AZURE_SUBSCRIPTION_ID": "394c"}
+          and "azure_subscription_id" not in d.run_vars(a, "plan"),
+          str((d.run_env(a), d.run_vars(a, "plan"))))
+
+
 def test_the_gate() -> None:
     """
     Meraki has no check mode, so the plan is the only preview.
@@ -267,7 +284,8 @@ def main() -> int:
     print("  Deployments")
     print("=" * 52)
     for test in (test_the_data_set, test_the_record, test_rendering_is_deterministic,
-                 test_two_paths_one_prefix, test_the_kit, test_the_gate):
+                 test_two_paths_one_prefix, test_the_kit, test_scope_per_provider,
+                 test_the_gate):
         try:
             test()
         except Exception as exc:

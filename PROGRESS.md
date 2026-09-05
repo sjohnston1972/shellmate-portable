@@ -141,3 +141,24 @@ unchanged} → apply {1 created, 3 updated, 1 skipped, 0 failed} → re-plan
 
 The area's browser check waited 400ms for a fetch; it now waits for the
 render. Tests: publish 33, ui 28, deployments 52, api 28.
+
+## 2026-09-06 01:20 — step 7, the Azure half; kits are five files; scope is per provider
+
+The runner's Azure kit is ready and converges the same way Meraki does —
+and answering my questions turned up the Meraki VLAN bug again in Azure
+(`subnets[0]` only; a plan that compared resource-group existence only).
+Fixed on its side, proved by a plan that immediately reported the missing
+voice subnet on both existing sites, then applied, then re-planned clean.
+Twice is a pattern: every scheme key the form exposes must be acted on by
+apply for every element and compared by plan, or the form lies. That rule
+has gone to the runner for AWS before it is written.
+
+On this side: the scheme form is now a spec per provider (Meraki and
+Azure, JSON for anything without a spec); a kit is five files and all five
+are committed, fetched fresh at the moment of committing; and scope is
+per provider — Meraki's org id is a playbook variable, Azure's
+subscription is an environment variable the collection reads and would
+silently ignore as a var. Encoded as a table rather than assumed
+symmetric, so AWS can say which it is.
+
+Tests: deployments 54, publish 33, api 28, ui 30.
