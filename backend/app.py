@@ -2705,7 +2705,7 @@ async def deployments_publish(deployment_id: str, request: DeploymentPublishRequ
         return await asyncio.to_thread(
             deployments.publish, deployment_id,
             record.get("plan_text") or "", record.get("apply_text") or "",
-            request.message)
+            request.message, None, None, record.get("destroy_text") or "")
     except deployments.DeploymentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ansible_git.GitError as exc:

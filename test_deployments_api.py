@@ -196,8 +196,10 @@ def test_the_flow() -> None:
     check("a new deployment has no playbooks until the kit is fetched",
           not client.get(f"/api/deployments/{kit['id']}").json()["plan_text"])
     res = client.post(f"/api/deployments/{kit['id']}/kit")
-    check("fetching the kit snapshots both playbooks",
-          res.status_code == 200 and len(res.json()["fetched"]) == 2, res.text[:200])
+    check("fetching the kit snapshots all three playbooks",
+          res.status_code == 200 and len(res.json()["fetched"]) == 3, res.text[:200])
+    check("including destroy, which is wired to nothing yet",
+          client.get(f"/api/deployments/{kit['id']}").json()["destroy_text"].startswith("- hosts"))
     check("and publish now has something to send",
           client.get(f"/api/deployments/{kit['id']}").json()["plan_text"].startswith("- hosts"))
     res = client.post("/api/deployments", json={"name": "No kit", "provider": "azure"})

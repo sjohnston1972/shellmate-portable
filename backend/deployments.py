@@ -83,14 +83,18 @@ FOLDER = "deployments"
 #: silently rewrite a deployment already built.
 KIT_FOLDER = f"{FOLDER}/_kit"
 
-#: The four files, in the order they are committed and sent.
-FILES = ("sites.yml", "scheme.yml", "plan.yml", "apply.yml")
+#: The five files, in the order they are committed and sent. destroy.yml
+#: travels with a deployment from the start even though it is wired to
+#: nothing until the teardown run: a deployment's folder should be the
+#: whole of what was run against it, and the destroy that fits an apply
+#: is the one snapshotted beside it, not whatever the kit says later.
+FILES = ("sites.yml", "scheme.yml", "plan.yml", "apply.yml", "destroy.yml")
 
 #: Which of them are playbooks (PUT /playbooks) and which are data
 #: (PUT /files). The runner validates the difference on upload — a data
 #: file sent to the playbook route is a 422 — so it is stated here rather
 #: than discovered at the second file.
-PLAYBOOKS = ("plan.yml", "apply.yml")
+PLAYBOOKS = ("plan.yml", "apply.yml", "destroy.yml")
 DATA_FILES = ("sites.yml", "scheme.yml")
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -117,7 +121,7 @@ def deployments() -> list[dict]:
     out = []
     for row in jsonfile.read(_file(), [], expect=list):
         summary = {k: v for k, v in row.items()
-                   if k not in ("sites", "site_ids", "plan_text", "apply_text")}
+                   if k not in ("sites", "site_ids", "plan_text", "apply_text", "destroy_text")}
         summary["sites"] = len(row.get("sites") or [])
         summary["built"] = len(row.get("site_ids") or {})
         out.append(summary)
@@ -373,6 +377,8 @@ def save(fields: dict) -> dict:
                               else (existing or {}).get("plan_text") or ""),
         "apply_text":     str(fields.get("apply_text") if fields.get("apply_text") is not None
                               else (existing or {}).get("apply_text") or ""),
+        "destroy_text":   str(fields.get("destroy_text") if fields.get("destroy_text") is not None
+                              else (existing or {}).get("destroy_text") or ""),
         # What the last commit and the last runs were. Never cleared by a
         # save: editing the scheme does not un-happen the apply, and the
         # ids the apply returned are the only record of what was built.
@@ -420,7 +426,8 @@ def render_scheme(record: dict) -> str:
     return _dump(document)
 
 
-def files_for(record: dict, plan_text: str, apply_text: str) -> dict[str, bytes]:
+def files_for(record: dict, plan_text: str, apply_text: str,
+              destroy_text: str = "") -> dict[str, bytes]:
     """
     The four files as bytes, keyed by the runner-side path.
 
@@ -430,12 +437,18 @@ def files_for(record: dict, plan_text: str, apply_text: str) -> dict[str, bytes]
     """
     slug = record.get("slug", "")
     paths_by_name = runner_paths(slug)
-    return {
+    files = {
         paths_by_name["sites.yml"]:  render_sites(record).encode("utf-8"),
         paths_by_name["scheme.yml"]: render_scheme(record).encode("utf-8"),
         paths_by_name["plan.yml"]:   (plan_text or "").encode("utf-8"),
         paths_by_name["apply.yml"]:  (apply_text or "").encode("utf-8"),
     }
+    # Only when there is one. A kit without a destroy is still a kit, and
+    # committing an empty destroy.yml would be committing a playbook that
+    # does nothing under a name that promises the opposite.
+    if (destroy_text or "").strip():
+        files[paths_by_name["destroy.yml"]] = destroy_text.encode("utf-8")
+    return files
 
 
 def kit_paths(provider: str) -> dict[str, str]:
@@ -463,14 +476,23 @@ def fetch_kit(deployment_id: str, runner=None) -> dict:
     paths_by_name = kit_paths(record["provider"])
     texts = {}
     for name, path in paths_by_name.items():
-        text = runner.read_playbook(path)
-        if not (text or "").strip():
+        try:
+            text = runner.read_playbook(path)
+        except Exception as exc:
+            if name == "destroy.yml":
+                text = ""          # a kit without a destroy is still a kit
+            else:
+                raise DeploymentError(
+                    f"The runner has no {record['provider']} kit at {path} "
+                    f"({exc}).") from exc
+        if not (text or "").strip() and name != "destroy.yml":
             raise DeploymentError(
                 f"The runner has no {record['provider']} kit at {path}. The "
                 "runner session owns the kits; ask for one before deploying.")
-        texts[name] = text
+        texts[name] = text or ""
     record["plan_text"] = texts["plan.yml"]
     record["apply_text"] = texts["apply.yml"]
+    record["destroy_text"] = texts.get("destroy.yml", "")
     record["kit_fetched"] = _now()
     record["updated"] = _now()
     _replace(record)
@@ -647,7 +669,8 @@ def apply_allowed(record: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def publish(deployment_id: str, plan_text: str, apply_text: str,
-            message: str = "", git=None, runner=None) -> dict:
+            message: str = "", git=None, runner=None,
+            destroy_text: str = "") -> dict:
     """
     Commit the four files to the repository, then send them to the runner.
 
@@ -687,7 +710,7 @@ def publish(deployment_id: str, plan_text: str, apply_text: str,
             "A deployment needs both its plan and its apply playbook before "
             "it can be published.")
 
-    files = files_for(record, plan_text, apply_text)
+    files = files_for(record, plan_text, apply_text, destroy_text)
     tree = as_git_tree(files)
     text = message or (f"Deployment {record['slug']}: "
                        f"{len(record.get('sites') or [])} sites ({record['provider']})")
@@ -708,6 +731,8 @@ def publish(deployment_id: str, plan_text: str, apply_text: str,
     replaced: list[str] = []
     for name in FILES:
         path = runner_paths(record["slug"])[name]
+        if path not in files:
+            continue
         content = files[path].decode("utf-8")
         if name in PLAYBOOKS:
             answer = runner.upload_playbook(path, content, overwrite=True) or {}

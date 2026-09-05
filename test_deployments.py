@@ -179,7 +179,12 @@ def test_two_paths_one_prefix() -> None:
            "sites": [{"name": "a"}], "scheme": {"x": 1}}
     files = d.files_for(rec, "- hosts: localhost\n", "- hosts: localhost\n  tasks: []\n")
     tree = d.as_git_tree(files)
-    check("four files each side", len(files) == 4 and len(tree) == 4)
+    check("four files each side when there is no destroy", len(files) == 4 and len(tree) == 4)
+    five = d.files_for(rec, "- hosts: localhost\n", "- hosts: localhost\n", "- hosts: localhost\n")
+    check("five when there is — destroy travels with the deployment from the start",
+          len(five) == 5 and "deployments/glasgow-phase-2/destroy.yml" in five)
+    check("and an empty destroy is not committed under a name that promises the opposite",
+          "deployments/glasgow-phase-2/destroy.yml" not in d.files_for(rec, "- a\n", "- b\n", "   "))
     check("the same bytes under both paths",
           all(tree[d.PROJECT_PREFIX + p] == b for p, b in files.items()))
     check("playbooks and data files are told apart, as the runner does",
@@ -206,11 +211,19 @@ def test_the_kit() -> None:
 
     rec = d.save({"name": "Kit", "provider": "meraki", "scheme": {}})
     full = Runner({"deployments/_kit/meraki/plan.yml": "- hosts: localhost\n",
-                   "deployments/_kit/meraki/apply.yml": "- hosts: localhost\n  tasks: []\n"})
+                   "deployments/_kit/meraki/apply.yml": "- hosts: localhost\n  tasks: []\n",
+                   "deployments/_kit/meraki/destroy.yml": "- hosts: localhost\n  tasks: []\n"})
     out = d.fetch_kit(rec["id"], runner=full)
     after = d.get(rec["id"])
-    check("both playbooks are fetched from the kit",
+    check("all three playbooks are fetched from the kit",
           sorted(full.asked) == sorted(d.kit_paths("meraki").values()), str(full.asked))
+    check("destroy is snapshotted beside them",
+          after["destroy_text"].startswith("- hosts"))
+    nodestroy = Runner({"deployments/_kit/meraki/plan.yml": "- hosts: localhost\n",
+                        "deployments/_kit/meraki/apply.yml": "- hosts: localhost\n"})
+    d.fetch_kit(rec["id"], runner=nodestroy)
+    check("a kit without a destroy is still a kit",
+          d.get(rec["id"])["destroy_text"] == "" and d.get(rec["id"])["plan_text"])
     check("and snapshotted on the record",
           after["plan_text"].startswith("- hosts") and after["apply_text"].startswith("- hosts"))
     check("with when", bool(after["kit_fetched"]) and out["plan_bytes"] > 0)

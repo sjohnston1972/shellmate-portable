@@ -102,13 +102,15 @@ def test_commit_then_send() -> None:
     rec = make()
     git, runner = FakeGit(), FakeRunner()
 
-    out = d.publish(rec["id"], PLAN, APPLY, git=git, runner=runner)
+    out = d.publish(rec["id"], PLAN, APPLY, git=git, runner=runner, destroy_text=APPLY)
     check("one commit was made", len(git.trees) == 1 and out["commit"]["sha"] == "abc1234")
-    check("with all four files", len(git.trees[0]) == 4, str(sorted(git.trees[0])))
+    check("with all five files", len(git.trees[0]) == 5, str(sorted(git.trees[0])))
     check("under the project prefix",
           all(p.startswith("runner/project/deployments/glasgow/") for p in git.trees[0]),
           str(sorted(git.trees[0])))
-    check("four files were sent to the runner", len(runner.calls) == 4)
+    check("five files were sent to the runner", len(runner.calls) == 5)
+    check("destroy went to the playbook route",
+          any(r == "playbook" and p.endswith("/destroy.yml") for r, p, _ in runner.calls))
     check("and the record remembers the commit",
           d.get(rec["id"])["last_commit"]["sha"] == "abc1234")
     check("the message names the deployment and the site count",
@@ -136,7 +138,7 @@ def test_routes_by_file_name() -> None:
     print("\n-- Playbooks and data on their own routes --")
     rec = make()
     runner = FakeRunner()
-    d.publish(rec["id"], PLAN, APPLY, git=FakeGit(), runner=runner)
+    d.publish(rec["id"], PLAN, APPLY, git=FakeGit(), runner=runner, destroy_text=APPLY)
 
     routes = {path.rsplit("/", 1)[1]: route for route, path, _ in runner.calls}
     check("plan and apply go to the playbook route",
@@ -144,7 +146,8 @@ def test_routes_by_file_name() -> None:
     check("sites and scheme go to the file route",
           routes["sites.yml"] == "file" and routes["scheme.yml"] == "file", str(routes),)
     check("decided by name here, not discovered at the second file",
-          set(d.PLAYBOOKS) == {"plan.yml", "apply.yml"})
+          set(d.PLAYBOOKS) == {"plan.yml", "apply.yml", "destroy.yml"}
+          and routes["destroy.yml"] == "playbook")
 
 
 def test_when_git_is_not_there() -> None:
