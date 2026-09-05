@@ -109,7 +109,8 @@ def deployments() -> list[dict]:
     """Every deployment, sites replaced by a count — the list view."""
     out = []
     for row in jsonfile.read(_file(), [], expect=list):
-        summary = {k: v for k, v in row.items() if k not in ("sites", "site_ids")}
+        summary = {k: v for k, v in row.items()
+                   if k not in ("sites", "site_ids", "plan_text", "apply_text")}
         summary["sites"] = len(row.get("sites") or [])
         summary["built"] = len(row.get("site_ids") or {})
         out.append(summary)
@@ -335,10 +336,27 @@ def save(fields: dict) -> dict:
         "scheme":         {str(k): v for k, v in scheme.items()},
         "sites":          [s for s in sites if isinstance(s, dict) and s.get("name")],
         "mapping":        mapping,
+        # What a run carries beyond the four files (#594's successor). The
+        # key *names* — values are read from the vault at the moment a run
+        # starts and never stored here. The scope is the provider's
+        # addressing: a Meraki org, an Azure subscription and resource
+        # group, an AWS region — sent as extra_vars for hosts: localhost
+        # playbooks, which is what the runner's skeletons take.
+        "keys":           [str(k) for k in (fields.get("keys") or (existing or {}).get("keys") or []) if k],
+        "scope":          {str(k): v for k, v in ((fields.get("scope") if isinstance(fields.get("scope"), dict)
+                                                  else (existing or {}).get("scope")) or {}).items()},
+        # The two playbooks, verbatim from the provider kit. ShellMate
+        # commits them and never rewrites them; the scheme is the only
+        # thing it renders.
+        "plan_text":      str(fields.get("plan_text") if fields.get("plan_text") is not None
+                              else (existing or {}).get("plan_text") or ""),
+        "apply_text":     str(fields.get("apply_text") if fields.get("apply_text") is not None
+                              else (existing or {}).get("apply_text") or ""),
         # What the last commit and the last runs were. Never cleared by a
         # save: editing the scheme does not un-happen the apply, and the
         # ids the apply returned are the only record of what was built.
         "last_commit":    (existing or {}).get("last_commit") or None,
+        "last_published": (existing or {}).get("last_published") or None,
         "last_plan":      (existing or {}).get("last_plan") or None,
         "last_apply":     (existing or {}).get("last_apply") or None,
         "site_ids":       (existing or {}).get("site_ids") or {},
@@ -443,6 +461,25 @@ def record_run(deployment_id: str, kind: str, job_id: str,
     return _replace(record)
 
 
+def run_vars(record: dict, kind: str) -> dict:
+    """
+    The extra_vars a plan or an apply carries.
+
+    The deployment's slug and provider, the scope, and — on an apply — the
+    plan it was approved against, so the outcome table can be shown next
+    to what was promised. Named `plan_job_id` rather than `plan_job` on
+    purpose: the runner's playbooks bind `plan_job_id: "{{ plan_job |
+    default('') }}"`, and a variable that references itself is a recursion
+    loop in ansible-core 2.19 — on the second run, not the first.
+    """
+    out = {"deployment": record.get("slug", ""),
+           "provider": record.get("provider", "")}
+    out.update({k: v for k, v in (record.get("scope") or {}).items() if v not in ("", None)})
+    if kind == "apply":
+        out["plan_job"] = str(((record.get("last_plan") or {}).get("job")) or "")
+    return out
+
+
 def apply_allowed(record: dict) -> str:
     """
     Why an apply may not start, or "" when it may.
@@ -537,6 +574,15 @@ def publish(deployment_id: str, plan_text: str, apply_text: str,
         else:
             runner.upload_file(path, content, overwrite=True)
         sent.append(path)
+
+    # Published means "on the runner", whether or not git was there to
+    # take the commit. It is what a plan checks for — a plan against a
+    # runner that has never received the files fails on a missing
+    # playbook, several screens away from the cause.
+    current = get(deployment_id) or record
+    current["last_published"] = {"at": _now(),
+                                 "commit": commit["sha"] if commit else ""}
+    _replace(current)
 
     logger.info("Published deployment %s: %s, %d file(s) to the runner",
                 record["slug"], commit["sha"] if commit else "uncommitted",

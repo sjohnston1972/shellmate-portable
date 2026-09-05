@@ -550,6 +550,21 @@ def events(job_id: str, since: int = 0) -> dict:
     return {"events": out, "last": out[-1]["counter"] if out else since}
 
 
+def result(job_id: str) -> dict:
+    """
+    What a run published with ``set_stats``, or nothing (Deployments).
+
+    ``{"has_result": bool, "result": dict | None}``. The runner sends
+    ``has_result: false`` rather than an empty object when a playbook
+    published nothing — ansible-runner writes ``{}`` in that case, and an
+    empty object read as "the plan found nothing to do" is a different
+    sentence from "the playbook did not say".
+    """
+    data = _call("GET", f"/api/v1/jobs/{job_id}/result") or {}
+    return {"has_result": bool(data.get("has_result")),
+            "result": data.get("result") if data.get("has_result") else None}
+
+
 def stdout(job_id: str) -> str:
     """The whole run as it would have looked in a shell."""
     return _call("GET", f"/api/v1/jobs/{job_id}/stdout", text=True) or ""

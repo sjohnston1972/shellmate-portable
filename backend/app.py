@@ -2527,6 +2527,265 @@ async def collection_compare(session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# REST — Deployments: build infrastructure from a definition
+#
+# The cloud accounts hold zero hosts, and Meraki is driven by ids rather
+# than connected to. So this is not an inventory: it is five hundred sites
+# as a data set, a scheme, and two playbooks the runner owns — committed to
+# the repository in one commit, sent to the runner, planned, and only then
+# applied.
+#
+# Nothing here runs a command on a device. A plan is a read-only playbook;
+# an apply is refused without a plan whose result has been read, because
+# Meraki has no check mode and the plan is the only preview there is.
+# ---------------------------------------------------------------------------
+
+
+class DeploymentRequest(BaseModel):
+    """Body for POST /api/deployments."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = ""
+    name: str
+    provider: str
+    description: str = ""
+    scheme: dict = {}
+    scope: dict = {}
+    keys: list[str] = []
+    environment_id: str = ""
+    template_id: str = ""
+    plan_text: str | None = None
+    apply_text: str | None = None
+
+
+class DeploymentSitesRequest(BaseModel):
+    """Body for POST /api/deployments/{id}/sites — an uploaded table."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    filename: str = ""
+    mapping: dict = {}
+    headed: bool | None = None
+    #: Preview only: return what the mapping would produce, store nothing.
+    preview: bool = False
+
+
+class DeploymentPublishRequest(BaseModel):
+    """Body for POST /api/deployments/{id}/publish."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = ""
+
+
+@app.get("/api/deployments")
+async def deployments_list() -> dict:
+    from backend import deployments
+
+    return {"deployments": await asyncio.to_thread(deployments.deployments),
+            "providers": list(deployments.PROVIDERS),
+            "site_fields": list(deployments.SITE_FIELDS)}
+
+
+@app.get("/api/deployments/{deployment_id}")
+async def deployments_get(deployment_id: str) -> dict:
+    from backend import deployments
+
+    record = await asyncio.to_thread(deployments.get, deployment_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No such deployment.")
+    return {**record, "apply_blocked": deployments.apply_allowed(record),
+            "runner_paths": deployments.runner_paths(record["slug"]),
+            "git_paths": deployments.git_paths(record["slug"])}
+
+
+@app.post("/api/deployments")
+async def deployments_save(request: DeploymentRequest) -> dict:
+    from backend import deployments
+
+    try:
+        return await asyncio.to_thread(deployments.save, request.model_dump())
+    except deployments.DeploymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/deployments/{deployment_id}")
+async def deployments_delete(deployment_id: str) -> dict:
+    """Forget the definition. Nothing in the cloud is touched."""
+    from backend import deployments
+
+    return {"deleted": await asyncio.to_thread(deployments.delete, deployment_id)}
+
+
+@app.post("/api/deployments/{deployment_id}/sites")
+async def deployments_sites(deployment_id: str, request: DeploymentSitesRequest) -> dict:
+    """
+    Read an uploaded table into sites, with the columns the caller named.
+
+    `preview` returns the headers and the first rows so the columns can be
+    nominated; a second call with the mapping stores the result. The
+    mapping is stored with the deployment, so the same file re-uploaded
+    behaves the same way.
+    """
+    from backend import deployments
+    from backend.ansible_inventories import InventoryError, preview
+
+    record = await asyncio.to_thread(deployments.get, deployment_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No such deployment.")
+
+    if request.preview or not request.mapping:
+        try:
+            read = await asyncio.to_thread(preview, request.text, request.filename,
+                                           request.headed)
+        except InventoryError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {**read, "mapping": record.get("mapping") or {}}
+
+    try:
+        sites = await asyncio.to_thread(deployments.sites_from_upload,
+                                        request.text, request.mapping, request.headed)
+        saved = await asyncio.to_thread(deployments.save, {
+            **record, "sites": sites, "mapping": request.mapping})
+    except deployments.DeploymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"sites": len(sites), "mapping": saved["mapping"], "id": saved["id"]}
+
+
+@app.post("/api/deployments/{deployment_id}/publish")
+async def deployments_publish(deployment_id: str, request: DeploymentPublishRequest) -> dict:
+    """One commit to the repository, then the four files to the runner."""
+    from backend import ansible_git, deployments
+
+    record = await asyncio.to_thread(deployments.get, deployment_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No such deployment.")
+    try:
+        return await asyncio.to_thread(
+            deployments.publish, deployment_id,
+            record.get("plan_text") or "", record.get("apply_text") or "",
+            request.message)
+    except deployments.DeploymentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ansible_git.GitError as exc:
+        raise HTTPException(status_code=502, detail=f"GitHub: {exc}") from exc
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+
+
+async def _start_deployment_run(deployment_id: str, kind: str) -> dict:
+    """
+    Start plan.yml or apply.yml with the deployment's keys and scope.
+
+    Keys become values here and nowhere earlier, exactly as an ordinary
+    run does it; one the vault cannot read stops the run by name. The
+    playbook is named by its runner path, so it runs from the deployment's
+    own folder and its vars_files resolve beside it.
+    """
+    from backend import ansible as ansible_module
+    from backend import ansible_keys as key_store
+    from backend import deployments
+
+    record = await asyncio.to_thread(deployments.get, deployment_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No such deployment.")
+    # Published means the four files reached the runner, with or without a
+    # commit. Checked before the plan gate: "run a plan first" is the
+    # wrong instruction for a deployment whose plan.yml is not on the
+    # runner yet, and the failure it would produce — a missing playbook —
+    # is several screens away from the cause.
+    if not record.get("last_published"):
+        raise HTTPException(status_code=409, detail=(
+            "This deployment has not been published yet — there is nothing on "
+            "the runner to run. Publish it first."))
+
+    if kind == "apply":
+        why = deployments.apply_allowed(record)
+        if why:
+            raise HTTPException(status_code=409, detail=why)
+
+    envvars: dict = {}
+    extra = dict(deployments.run_vars(record, kind))
+    if record.get("keys"):
+        env, more, unreadable = await asyncio.to_thread(key_store.resolve, record["keys"])
+        if unreadable:
+            raise HTTPException(
+                status_code=400,
+                detail="No readable value for: " + ", ".join(unreadable)
+                       + ". Unlock the vault, or set them again.")
+        envvars.update(env)
+        extra.update(more)
+
+    playbook = deployments.runner_paths(record["slug"])[f"{kind}.yml"]
+    try:
+        started = await asyncio.to_thread(
+            ansible_module.start, playbook, extra_vars=extra, envvars=envvars)
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+
+    await asyncio.to_thread(deployments.record_run, deployment_id, kind,
+                            str(started.get("id") or ""), None)
+    return {**started, "kind": kind, "deployment": deployment_id}
+
+
+@app.post("/api/deployments/{deployment_id}/plan")
+async def deployments_plan(deployment_id: str) -> dict:
+    """Start the read-only plan. The only preview there is."""
+    return await _start_deployment_run(deployment_id, "plan")
+
+
+@app.post("/api/deployments/{deployment_id}/apply")
+async def deployments_apply(deployment_id: str) -> dict:
+    """
+    Start the apply — refused without a plan somebody has read.
+
+    A 409 rather than a 400: the request is well formed and the state is
+    what is in the way, and the message says which state.
+    """
+    return await _start_deployment_run(deployment_id, "apply")
+
+
+@app.get("/api/deployments/{deployment_id}/result")
+async def deployments_result(deployment_id: str, kind: str = "plan") -> dict:
+    """
+    Fetch what the last plan or apply published, and remember it.
+
+    Fetching is what opens the gate for an apply: the plan's result has to
+    have been *read* — brought here and rendered — not merely produced.
+    An apply's per-site ids are folded into the record, because they are
+    the only record of what was built.
+    """
+    from backend import ansible as ansible_module
+    from backend import deployments
+
+    if kind not in ("plan", "apply"):
+        raise HTTPException(status_code=400, detail="kind is plan or apply.")
+    record = await asyncio.to_thread(deployments.get, deployment_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No such deployment.")
+    run = record.get(f"last_{kind}") or {}
+    if not run.get("job"):
+        raise HTTPException(status_code=404, detail=f"No {kind} has been run yet.")
+
+    try:
+        state = await asyncio.to_thread(ansible_module.status, run["job"])
+        if not state.get("finished"):
+            return {"job": run["job"], "status": state.get("status"),
+                    "finished": False, "has_result": False, "result": None}
+        fetched = await asyncio.to_thread(ansible_module.result, run["job"])
+    except Exception as exc:
+        raise _ansible_error(exc) from exc
+
+    if fetched["has_result"]:
+        await asyncio.to_thread(deployments.record_run, deployment_id, kind,
+                                run["job"], fetched["result"])
+    return {"job": run["job"], "status": state.get("status"), "finished": True,
+            **fetched}
+
+
+# ---------------------------------------------------------------------------
 # REST — Crash reports (#568)
 #
 # A crash on a locked-down machine produces nothing today: the window

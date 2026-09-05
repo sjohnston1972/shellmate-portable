@@ -47,3 +47,22 @@ them. Three `deploy-test-*` networks now exist in Steven's org.
 
 `python test_deployments_publish.py` — 24 passed. Guards: ansible 79,
 ansible_github 29, ansible_library 83, deployments 42.
+
+## 2026-09-05 22:10 — step 5 done: plan, then a gated apply
+
+Routes under `/api/deployments`: save, sites (preview, then store with the
+mapping named), publish, plan, apply, result. `ansible.result()` reads
+what a run published with set_stats. Keys live on the deployment by name
+and become values only when a run starts; an unreadable one stops the run
+by name.
+
+Three gates, in the order somebody hits them: not published → "publish
+first" (the missing-playbook failure it prevents is several screens from
+the cause); no plan → the check-mode sentence; plan not read → "has not
+finished". Fetching the plan's result is what opens the gate — read, not
+merely produced — and an apply carries the plan's job id it was approved
+against. Ids per site land on the record from the apply's result.
+
+The API test drives the whole flow against the runner's real payloads
+from `test_fixtures/`. `python test_deployments_api.py` — 24 passed.
+Guards: deployments 42, publish 24, ansible 79, startup 154, library 83.
