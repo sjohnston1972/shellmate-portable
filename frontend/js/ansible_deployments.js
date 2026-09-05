@@ -191,14 +191,27 @@
   }
 
   async function remove(entry) {
-    const ok = await window.shellmateDialog.confirm({
+    const built = Object.keys(entry.site_ids || {}).length;
+    // Forgetting is not destroying, and it must never destroy as a side
+    // effect. But a deployment with built sites is offered the choice
+    // here, because once the record is gone the sites are orphaned —
+    // destroy removes only what is in a list ShellMate still holds.
+    const answer = await window.shellmateDialog.form({
       title: `Forget ${entry.name}?`,
-      body: 'This deletes the definition from ShellMate. Nothing in the cloud is '
-          + 'touched — tearing down what an apply built is an apply of its own, '
-          + 'not a side effect of tidying this list.',
-      confirmLabel: 'Forget it', danger: true,
+      body: (built
+        ? `This deployment built ${built} site${built === 1 ? '' : 's'} that ShellMate still `
+          + 'holds the ids for. Forgetting it leaves them in the account with nothing '
+          + 'here able to tear them down. '
+        : '')
+          + 'Forgetting deletes the definition from ShellMate. Nothing in the cloud is '
+          + 'touched — tearing down is its own action, not a side effect of tidying this list.',
+      fields: [{ name: 'what', label: 'What to do', type: 'select', value: 'forget',
+                 options: [{ value: 'forget', label: 'Forget the definition only' },
+                           ...(built ? [{ value: 'destroy', label: 'Take me to Destroy first' }] : [])] }],
+      confirmLabel: 'Continue', danger: true,
     });
-    if (!ok) return;
+    if (!answer) return;
+    if (answer.what === 'destroy') { await show(entry.id); return; }
     await view.del(`/api/deployments/${encodeURIComponent(entry.id)}`);
     open = null;
     refresh();
@@ -271,6 +284,19 @@
       const out = await view.post(`/api/deployments/${encodeURIComponent(entry.id)}/sites`,
                                   { text, filename, mapping });
       toast(`${out.sites} site${out.sites === 1 ? '' : 's'} loaded.`);
+      // A built site that is no longer in the list is orphaned — destroy
+      // removes only what is in sites.yml. Said now, by name, because the
+      // runner lost sight of two networks exactly this way and had to add
+      // the rows back to remove them.
+      if ((out.orphaned || []).length) {
+        await window.shellmateDialog.alert({
+          title: `${out.orphaned.length} built site${out.orphaned.length === 1 ? '' : 's'} no longer in the list`,
+          body: `${out.orphaned.join(', ')} ${out.orphaned.length === 1 ? 'was' : 'were'} built by `
+              + 'this deployment and are not in the list you just uploaded. Destroy only '
+              + 'removes what is in the list, so their resources cannot be torn down from here '
+              + 'until the rows are put back. Remove a site after tearing it down, not before.',
+        });
+      }
       refresh();
     } catch (e) {
       toast(e.message || String(e), 'error');
@@ -455,10 +481,49 @@
       if (!ok) return;
     }
     try {
-      const started = await view.post(`/api/deployments/${encodeURIComponent(entry.id)}/${kind}`, {});
-      toast(`${kind === 'plan' ? 'Plan' : 'Apply'} started (${started.id}).`);
+      const route = kind === 'destroy_plan' ? 'destroy/plan' : kind;
+      const started = await view.post(`/api/deployments/${encodeURIComponent(entry.id)}/${route}`, {});
+      toast(`${{ plan: 'Plan', apply: 'Apply', destroy_plan: 'Destroy plan' }[kind]} started (${started.id}).`);
       await refresh();
       poll(entry.id, kind);
+    } catch (e) {
+      toast(e.message || String(e), 'error');
+    }
+  }
+
+  /** What destroy does not touch, per provider — observed by the runner, not reasoned. */
+  const NOT_REMOVED = {
+    meraki: ['any site whose name is outside the manage prefix',
+             'any network not in this deployment\'s site list',
+             'other networks in the organisation, and the organisation itself',
+             'claimed devices: untested — the organisation has none'],
+    azure:  ['any site whose name is outside the manage prefix',
+             'any resource group not in this deployment\'s site list',
+             'resource groups outside the deployment'],
+    aws:    ['any site whose name is outside the manage prefix',
+             'any VPC not in this deployment\'s site list',
+             'the default VPC and its default security group'],
+  };
+
+  async function startDestroy(entry) {
+    const gone = NOT_REMOVED[entry.provider] || [];
+    const answer = await window.shellmateDialog.form({
+      title: `Destroy what ${entry.name} built?`,
+      body: 'This removes, in the live account, what the destroy plan you have just '
+          + 'read listed — per site, in the order the provider needs. One site failing '
+          + 'does not stop the rest. It does NOT remove: ' + gone.join('; ') + '. '
+          + 'Type the deployment\'s name to confirm.',
+      fields: [{ name: 'confirm', label: `Type ${entry.name} to confirm`, placeholder: entry.name }],
+      confirmLabel: 'Destroy', danger: true,
+      validate: (v) => ((v.confirm || '').trim() === entry.name ? '' : 'The name does not match.'),
+    });
+    if (!answer) return;
+    try {
+      const started = await view.post(`/api/deployments/${encodeURIComponent(entry.id)}/destroy`,
+                                      { confirm: answer.confirm });
+      toast(`Destroy started (${started.id}).`);
+      await refresh();
+      poll(entry.id, 'destroy');
     } catch (e) {
       toast(e.message || String(e), 'error');
     }
@@ -568,12 +633,45 @@
     return el('div', { class: 'av-dep-result' }, [head, table]);
   }
 
+  const DESTROY_ORDER = { failed: 0, remove: 1, removed: 1, skip: 2, skipped: 2 };
+
+  function destroyTable(payload) {
+    const d = payload.destroy || {};
+    const counts = d.counts || {};
+    const dry = !!d.dry_run;
+    const head = el('div', { class: 'av-dep-summary' }, [
+      pill(dry ? `${counts.remove || 0} would be removed` : `${counts.remove ?? counts.removed ?? 0} removed`,
+           (counts.remove || counts.removed) ? 'bad' : ''),
+      pill(`${counts.skip ?? counts.skipped ?? 0} skipped`),
+      pill(`${counts.failed || 0} failed`, counts.failed ? 'bad' : ''),
+      d.plan_job ? pill(`against destroy plan ${d.plan_job}`) : null,
+      d.truncated ? pill('list truncated — the runner capped it', 'warn') : null,
+    ]);
+    const key = dry ? 'action' : 'outcome';
+    const rows = (d.sites || []).slice()
+      .sort((a, b) => (DESTROY_ORDER[a[key]] ?? 9) - (DESTROY_ORDER[b[key]] ?? 9));
+    const table = el('table', { class: 'av-dep-table' }, [
+      el('thead', {}, el('tr', {}, ['Site', dry ? 'Would' : 'Outcome', 'Elements, in order', 'Reason', 'Ids']
+        .map(h => el('th', { text: h })))),
+      el('tbody', {}, rows.map(r => el('tr', { class: `av-dep-${r[key]}` }, [
+        el('td', { text: r.name }),
+        el('td', {}, pill(r[key] || '', r[key] === 'failed' ? 'bad'
+          : (r[key] === 'remove' || r[key] === 'removed') ? 'warn' : '')),
+        el('td', { text: (r.elements || []).join(' → ') || '—' }),
+        el('td', { text: r.reason || '' }),
+        el('td', { class: 'av-dep-id', text: Object.entries(r.ids || {})
+          .map(([k, v]) => `${k}: ${v}`).join(', ') || '—' }),
+      ]))),
+    ]);
+    return el('div', { class: 'av-dep-result' }, [head, table]);
+  }
+
   function resultBlock(entry, kind) {
     const run = entry[`last_${kind}`];
     if (!run || !run.job) return null;
     const cached = results[`${entry.id}:${kind}`];
     const payload = (cached && cached.result) || run.result;
-    const title = kind === 'plan' ? 'Plan' : 'Apply';
+    const title = { plan: 'Plan', apply: 'Apply', destroy_plan: 'Destroy plan', destroy: 'Destroy' }[kind];
     const when = run.at ? new Date(run.at * 1000).toLocaleString() : '';
     const header = el('div', { class: 'av-dep-run-head' }, [
       el('h5', { text: `${title} ${run.job}` }),
@@ -583,7 +681,10 @@
          [icon('refresh'), payload ? 'Fetch again' : 'Fetch the result']),
     ]);
     let body;
-    if (payload) body = kind === 'plan' ? planTable(payload) : applyTable(payload);
+    if (payload) {
+      body = kind === 'plan' ? planTable(payload)
+           : kind === 'apply' ? applyTable(payload) : destroyTable(payload);
+    }
     else if (cached && cached.finished && !cached.has_result) {
       body = el('p', { class: 'av-inv-note',
         text: 'The run finished but published no result. Read its output under Runs.' });
@@ -624,6 +725,7 @@
 
   function detail(entry) {
     const blocked = entry.apply_blocked || '';
+    const destroyBlocked = entry.destroy_blocked || '';
     const steps = el('div', { class: 'av-dep-steps' }, [
       step(1, 'Sites', `${(entry.sites || []).length} loaded`,
            el('button', { type: 'button', class: 'btn-secondary',
@@ -655,11 +757,26 @@
                           ...(blocked ? { disabled: true } : {}),
                           title: blocked || 'Build what the plan described',
                           onclick: () => startRun(entry, 'apply') }, [icon('bolt'), 'Apply'])),
+      // Teardown has a plan of its own. The destroy plan is read-only and
+      // needs no confirmation; the destroy is off on the server's word,
+      // and the dialog behind it wants the deployment's name typed.
+      step(7, 'Destroy plan', entry.last_destroy_plan ? `last ${entry.last_destroy_plan.job}` : 'none yet',
+           el('button', { type: 'button', class: 'btn-secondary',
+                          ...(entry.last_published && (entry.destroy_text || '').trim() ? {} : { disabled: true }),
+                          onclick: () => startRun(entry, 'destroy_plan') },
+              [icon('science'), 'Plan a teardown'])),
+      step(8, 'Destroy', destroyBlocked ? 'not yet' : 'ready',
+           el('button', { type: 'button', class: 'btn-danger',
+                          ...(destroyBlocked ? { disabled: true } : {}),
+                          title: destroyBlocked || 'Remove what this deployment built',
+                          onclick: () => startDestroy(entry) }, [icon('delete_forever'), 'Destroy'])),
     ]);
     // The reason the button is off, in words beside it — a disabled
     // button with no sentence is a puzzle, and this one has a rule behind
     // it worth knowing.
     const why = blocked ? el('p', { class: 'av-dep-why', text: blocked }) : null;
+    const whyDestroy = destroyBlocked
+      ? el('p', { class: 'av-dep-why', text: `Destroy: ${destroyBlocked}` }) : null;
 
     return el('div', { class: 'av-dep-detail' }, [
       el('div', { class: 'av-dep-head' }, [
@@ -674,9 +791,11 @@
       ]),
       entry.description ? el('p', { class: 'av-env-desc', text: entry.description }) : null,
       el('p', { class: 'av-inv-note', text: `Files: ${Object.values(entry.runner_paths || {}).join(', ')}` }),
-      steps, why,
+      steps, why, whyDestroy,
       resultBlock(entry, 'plan'),
       resultBlock(entry, 'apply'),
+      resultBlock(entry, 'destroy_plan'),
+      resultBlock(entry, 'destroy'),
     ]);
   }
 

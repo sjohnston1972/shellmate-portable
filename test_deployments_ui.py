@@ -119,6 +119,31 @@ def test_the_rows_that_matter_come_first() -> None:
           and ".av-dep-unchanged" not in CSS)
 
 
+def test_teardown_is_behind_its_own_plan_and_a_typed_name() -> None:
+    print("\n-- Teardown --")
+    check("a destroy plan step, read-only, before destroy",
+          "'Plan a teardown'" in JS and "startRun(entry, 'destroy_plan')" in JS)
+    check("destroy is off on the server's word",
+          "...(destroyBlocked ? { disabled: true } : {})" in JS)
+    check("with the reason written beside it", "text: `Destroy: ${destroyBlocked}`" in JS)
+    check("the dialog wants the deployment's name typed",
+          "Type ${entry.name} to confirm" in JS
+          and "(v.confirm || '').trim() === entry.name" in JS)
+    check("and says, per provider, what destroy does NOT remove",
+          "NOT_REMOVED = {" in JS and "default VPC and its default security group" in JS
+          and "claimed devices: untested" in JS,
+          "observed by the runner, not reasoned")
+    check("the destroy table renders from outcome per row, never a list of names",
+          "r[key] === 'failed'" in JS and "elements || []" in JS,
+          "the runner's first version listed what was attempted as removed")
+    check("failures first", "DESTROY_ORDER = { failed: 0" in JS)
+    check("a built site missing from a re-upload is named as orphaned",
+          "no longer in the list" in JS and "orphaned" in JS,
+          "destroy removes only what is in sites.yml")
+    check("forget offers destroy first, and never does it silently",
+          "'Take me to Destroy first'" in JS and "value: 'forget'" in JS)
+
+
 def test_the_columns_are_asked() -> None:
     print("\n-- Columns asked, never guessed --")
     check("the upload previews first", "preview: true" in JS)
@@ -180,7 +205,9 @@ def main() -> int:
     print("  Deployments — the area")
     print("=" * 52)
     for test in (test_the_markup, test_the_gate_is_the_servers,
-                 test_the_rows_that_matter_come_first, test_the_columns_are_asked,
+                 test_the_rows_that_matter_come_first,
+                 test_teardown_is_behind_its_own_plan_and_a_typed_name,
+                 test_the_columns_are_asked,
                  test_nothing_is_markup):
         try:
             test()

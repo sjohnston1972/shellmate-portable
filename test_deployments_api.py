@@ -231,6 +231,14 @@ def test_the_flow() -> None:
           "deploy-test-001" not in ids and "deploy-test-002" in ids and "API Navigator DEV" in ids,
           str(ids))
 
+    print("\n-- Orphans --")
+    res = client.post(f"/api/deployments/{dep['id']}/sites",
+                      json={"text": "Network Name,Tags\ndeploy-test-002,retail\n",
+                            "mapping": {"name": "Network Name", "tags": "Tags"}})
+    check("a built site missing from a re-upload is named as orphaned",
+          res.status_code == 200 and "API Navigator DEV" in res.json()["orphaned"]
+          and "deploy-test-002" not in res.json()["orphaned"], res.text[:200])
+
     print("\n-- The kit --")
     res = client.post("/api/deployments", json={"name": "Kit via API", "provider": "meraki"})
     kit = res.json()

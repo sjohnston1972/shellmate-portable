@@ -174,5 +174,74 @@
       "unchanged": 5,
       "conflict": 0
     }
+  },
+  "destroy_aws": {
+    "_": "Real, after the runner fixed the ordering (subnets before the VPC) and the reporting (removed = removed, not attempted).",
+    "destroy": {
+      "provider": "aws",
+      "deployment": "aws-test",
+      "region": "us-east-1",
+      "dry_run": false,
+      "counts": {
+        "remove": 3,
+        "skip": 0,
+        "failed": 0
+      },
+      "truncated": false,
+      "sites": [
+        {
+          "name": "aws-test-002",
+          "outcome": "removed",
+          "reason": "",
+          "ids": {
+            "vpc_id": "vpc-0714f3a87f4df730d"
+          },
+          "elements": [
+            "security group",
+            "subnets",
+            "vpc"
+          ]
+        },
+        {
+          "name": "aws-test-001",
+          "outcome": "removed",
+          "reason": "",
+          "ids": {
+            "vpc_id": "vpc-0a1b2c3d4e5f60718"
+          },
+          "elements": [
+            "security group",
+            "subnets",
+            "vpc"
+          ]
+        },
+        {
+          "name": "aws-test-003",
+          "outcome": "removed",
+          "reason": "",
+          "ids": {
+            "vpc_id": "vpc-0f9e8d7c6b5a49382"
+          },
+          "elements": [
+            "security group",
+            "subnets",
+            "vpc"
+          ]
+        }
+      ]
+    }
+  },
+  "mirror_after_destroy": {
+    "_": "The apply plan after teardown: every site create, nothing left behind.",
+    "aws": {
+      "create": 3
+    },
+    "azure": {
+      "create": 2
+    },
+    "meraki": {
+      "create": 4,
+      "unchanged": 1
+    }
   }
 }

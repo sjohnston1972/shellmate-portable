@@ -43,3 +43,21 @@ from the data set is orphaned — destroy cannot see it. That becomes a
 warning on upload and a forget-offers-destroy flow in steps 4 and 5.
 
 Tests: deployments 69, api 35, publish 34.
+
+## 2026-09-06 04:40 — steps 4 and 5 done: the destroy step, the dialog, the orphan warning
+
+A Destroy plan step and a Destroy step after Apply; destroy off on the
+server's `destroy_blocked` word with the reason beside it; a dialog that
+wants the deployment's name typed and says, per provider, what destroy
+does NOT remove — the runner's observed list, not a reasoned one. The
+destroy table renders from `outcome` per row and never from a list of
+names, failures first: the runner's first version listed what was
+*attempted* as removed, and that is exactly the lie a table would have
+laundered.
+
+The sharpest finding became two pieces of UI: a re-upload that drops a
+built site names it as orphaned at that moment, and Forget on a deployment
+that built anything offers Destroy first rather than only forgetting.
+
+Documented under Ansible → Deployments → Tearing down. Tests: api 36,
+ui 41, deployments 69, ansible_view 44, startup 154, publish 34.

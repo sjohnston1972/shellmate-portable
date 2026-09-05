@@ -576,3 +576,37 @@ apply a new deployment starts from — live only on its disk until you press
 the organisation's rate limit is 30–45 minutes. The first apply of any new
 deployment should be against a handful of test-prefixed sites, with the
 plan read first.
+
+### Tearing down
+
+**A teardown has a plan of its own.** *Plan a teardown* runs the
+deployment's `destroy.yml` as a dry run and lists, per site, what would be
+removed and in what order — for AWS, the security group, then every
+subnet, then the VPC, because the VPC refuses to go while either remains.
+Nothing is removed by a destroy plan.
+
+**Destroy is behind that plan and a typed name.** The button stays off,
+with the reason beside it, until a destroy plan has run and been read,
+and it asks you to type the deployment's name. The name is checked by the
+server as well, because the API can be scripted and a script can skip a
+dialog. Destroy is also refused outright when the scheme has no manage
+prefix: destroy removes only sites whose name starts with it, and an empty
+prefix would match everything in the list.
+
+**What destroy does not remove**, per provider, observed rather than
+reasoned: anything outside the manage prefix; anything not in the site
+list; for Meraki, other networks and the organisation (claimed devices are
+untested — the organisation has none); for Azure, resource groups outside
+the deployment; for AWS, the default VPC and its default security group.
+One site failing does not stop the rest, and the outcome table lists
+failures first with the provider's own reason. The stored id of a site
+that failed or was skipped is kept — it is how you find what is still
+there.
+
+**A site removed from the list is orphaned.** Destroy only sees what is in
+`sites.yml`. If you upload a new list that no longer contains a site this
+deployment built, ShellMate names it at that moment, because from then on
+nothing here can tear its resources down until the row is put back. Remove
+a site *after* tearing it down, not before. For the same reason, *Forget*
+on a deployment that built anything offers to take you to Destroy first —
+it never destroys as a side effect of tidying the list.

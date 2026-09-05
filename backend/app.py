@@ -2661,7 +2661,15 @@ async def deployments_sites(deployment_id: str, request: DeploymentSitesRequest)
             **record, "sites": sites, "mapping": request.mapping})
     except deployments.DeploymentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"sites": len(sites), "mapping": saved["mapping"], "id": saved["id"]}
+    # A site that was built and is now missing from the list is orphaned:
+    # destroy removes only what is in sites.yml, so its resources become
+    # unreachable to tear down. Said at the moment it happens — the runner
+    # had to add rows back to remove two networks it had lost sight of.
+    before = set((record.get("site_ids") or {}).keys())
+    now = {s.get("name") for s in sites}
+    orphaned = sorted(before - now)
+    return {"sites": len(sites), "mapping": saved["mapping"], "id": saved["id"],
+            "orphaned": orphaned}
 
 
 @app.post("/api/deployments/kits/{provider}/commit")
