@@ -5864,10 +5864,35 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                     await asyncio.to_thread(handler.resize, cols, rows)
 
                 elif msg_type == "break":
-                    # Serial only: the break signal used to drop a booting
-                    # Cisco device into ROMMON.
-                    if hasattr(handler, "send_break"):
-                        await asyncio.to_thread(handler.send_break)
+                    # The break that drops a booting Cisco device into
+                    # ROMMON — on serial, and now on telnet as well, where
+                    # a console server turns `IAC BRK` into a real one on
+                    # the port it is wired to (#525).
+                    await _line_control(
+                        lambda: handler.send_break(),
+                        done="Break sent.")
+
+                elif msg_type == "baud":
+                    # ShellMate's rate, never the device's. Said in the
+                    # note as well as the docs, because the whole reason
+                    # somebody reaches for this is that they cannot read
+                    # what is on screen — and "I changed the baud and it
+                    # is still rubbish" has two very different causes.
+                    await _line_control(
+                        lambda: handler.set_baud(int(msg.get("baud", 9600))),
+                        done=lambda rate: f"ShellMate is now reading this port "
+                                          f"at {rate} baud. The device's own "
+                                          f"speed is unchanged.")
+
+                elif msg_type == "signal":
+                    await _line_control(
+                        lambda: handler.set_line_signal(
+                            str(msg.get("name", "")), bool(msg.get("on"))),
+                        done=lambda lines: _signal_note(msg, lines))
+
+                elif msg_type == "signals":
+                    await _line_control(lambda: handler.line_signals(),
+                                        done=None)
 
                 elif msg_type == "paste_lines":
                     # A block the user has already seen and approved, to be
@@ -5886,6 +5911,44 @@ async def terminal_websocket(websocket: WebSocket, session_id: str) -> None:
                         await _paste_finished(stopping)
 
         return
+
+    async def _line_control(action, done=None) -> None:
+        """
+        Do something to the line, and say what happened either way (#525).
+
+        Every one of these is a control the user pressed, so every one of
+        them answers: a refusal carries the transport's own reason, and a
+        success carries a note. Silence is the one outcome that is not
+        allowed — somebody pressing Break at a device stuck in boot and
+        seeing nothing concludes the device is dead rather than that the
+        control did not apply here.
+        """
+        from backend.connections.base import Unsupported
+
+        try:
+            result = await asyncio.to_thread(action)
+        except Unsupported as exc:
+            await websocket.send_json({"type": "line_control",
+                                       "ok": False, "detail": str(exc)})
+            return
+        except Exception as exc:                          # pragma: no cover
+            await websocket.send_json({"type": "line_control", "ok": False,
+                                       "detail": str(exc)})
+            return
+
+        note = ""
+        if callable(done):
+            note = done(result)
+        elif done:
+            note = done
+        await websocket.send_json({
+            "type": "line_control", "ok": True, "detail": note,
+            "result": result if isinstance(result, (dict, int, str)) else None,
+        })
+
+    def _signal_note(msg: dict, lines: dict) -> str:
+        name = str(msg.get("name", "")).upper()
+        return f"{name} {'asserted' if msg.get('on') else 'dropped'}."
 
     async def _start_paste(msg: dict) -> None:
         """Take a paste batch from the browser and start it."""

@@ -26,6 +26,17 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 
+class Unsupported(RuntimeError):
+    """
+    Something this transport cannot be asked to do, with the reason.
+
+    Its own exception rather than a silent no-op, because the failure a
+    no-op produces is unattributable: somebody presses Break at a device
+    stuck in boot, nothing happens, and they conclude the device is dead
+    rather than that the control never applied to this connection.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Connection parameters
 # ---------------------------------------------------------------------------
@@ -264,6 +275,69 @@ class ConnectionHandler(ABC):
         and plenty of telnet servers never negotiate NAWS.  Only transports
         that genuinely support it override this.
         """
+
+    # ------------------------------------------------------------------
+    # Out-of-band controls (#525)
+    #
+    # Everything below is something you do *to the line* rather than
+    # something you send down it, and no two transports offer the same
+    # set. A serial port has a break, a baud rate and modem control
+    # lines; telnet has a break and nothing else; SSH has none of them,
+    # because there is no line — there is a TCP stream inside an
+    # encrypted tunnel.
+    #
+    # Each default refuses with the reason rather than doing nothing.
+    # A control that silently does nothing is worse than one that says
+    # it cannot: somebody presses Break at a device stuck in boot,
+    # nothing happens, and they conclude the device is unresponsive
+    # rather than that the button was never going to work.
+    # ------------------------------------------------------------------
+
+    def capabilities(self) -> dict:
+        """
+        What this transport can be asked to do, and why not where it cannot.
+
+        Shape: ``{name: {"ok": bool, "why": str}}``. `why` is filled in
+        for the refusals only, and it is what the interface shows on the
+        disabled control — hiding the control instead would leave
+        somebody hunting a menu for something that was never there.
+        """
+        return {
+            "break":  {"ok": False, "why": self._no_break()},
+            "baud":   {"ok": False, "why": self._no_baud()},
+            "signals": {"ok": False, "why": self._no_signals()},
+        }
+
+    def _no_break(self) -> str:
+        return "This connection has no line to break."
+
+    def _no_baud(self) -> str:
+        return "Only a serial port has a baud rate."
+
+    def _no_signals(self) -> str:
+        return "Only a serial port has modem control lines."
+
+    def send_break(self, duration: float = 0.25) -> None:
+        """Assert a break condition on the line."""
+        raise Unsupported(self._no_break())
+
+    def set_baud(self, baud: int) -> int:
+        """
+        Change the speed this end talks at. Returns the rate now in use.
+
+        Note what this is not: it changes **ShellMate's** rate, never the
+        device's. A console at 9600 spoken to at 115200 produces rubbish,
+        and the fix is to set this to what the device already uses.
+        """
+        raise Unsupported(self._no_baud())
+
+    def line_signals(self) -> dict:
+        """The modem control lines, as they stand."""
+        raise Unsupported(self._no_signals())
+
+    def set_line_signal(self, name: str, on: bool) -> dict:
+        """Raise or drop one output line. Returns every line afterwards."""
+        raise Unsupported(self._no_signals())
 
     @property
     @abstractmethod

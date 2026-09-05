@@ -308,7 +308,30 @@ class SessionManager:
             "host_key":        getattr(session.get("handler"),
                                        "host_key_fingerprint", ""),
             "is_connected":    SessionManager._still_connected(session),
+            # What can be done to the line, and why not where it cannot
+            # (#525). Carried on the session rather than derived from
+            # `connection_type` in the browser: the transport is the thing
+            # that knows, and a second table of "which types have a break"
+            # would be a copy that drifts the first time one gains a
+            # capability.
+            "capabilities":    SessionManager._capabilities(session),
         }
+
+    @staticmethod
+    def _capabilities(session: dict[str, Any]) -> dict:
+        """
+        Ask the transport what it can do. Never raises.
+
+        A handler that cannot answer is reported as able to do nothing,
+        which is the safe direction: an offered control that fails is
+        worse than an absent one.
+        """
+        handler = session.get("handler")
+        try:
+            return handler.capabilities() if handler is not None else {}
+        except Exception as exc:                          # pragma: no cover
+            logger.debug("Could not read capabilities: %s", exc)
+            return {}
 
     @staticmethod
     def _still_connected(session: dict[str, Any]) -> bool:

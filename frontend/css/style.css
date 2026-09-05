@@ -10954,3 +10954,22 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
   color: var(--on-surface);
 }
 
+/* ---------------------------------------------------------------------------
+   Line controls on the tab menu (#525)
+
+   A note above the choices, because the one thing somebody has to know
+   before changing a baud rate is that it changes ShellMate's and not the
+   device's.
+--------------------------------------------------------------------------- */
+
+.tab-menu-note {
+  padding: 8px 12px 6px;
+  max-width: 240px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--on-surface-dim);
+  border-bottom: 1px solid var(--outline);
+}
+
+.tab-context-menu button.is-current { color: var(--primary); }
+

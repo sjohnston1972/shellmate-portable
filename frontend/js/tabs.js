@@ -229,6 +229,11 @@
       // Transport backing this tab. The file browser needs it to explain why
       // a serial or telnet tab cannot transfer files.
       connectionType:   sessionData.connection_type || 'ssh',
+      // What can be done to the line, as the transport itself reported it
+      // (#525). Kept rather than derived from connectionType: a second
+      // table of "which types have a break" in here would be a copy that
+      // drifts the first time a transport gains one.
+      capabilities:     sessionData.capabilities || {},
       hostname:         hostname || '',
       // What was dialled, never rewritten. `hostname` above is replaced with
       // whatever the device calls itself the moment it says so, which is
@@ -1984,6 +1989,7 @@
 
     // Filled in behind the menu, so a right-click never waits on a request.
     if (_menuEnabled('special_commands')) _appendSpecialCommands(_ctxMenu, tab);
+    _appendLineControls(_ctxMenu, tab);
     if (_menuEnabled('quick_broadcast')) _appendQuickBroadcast(_ctxMenu, tab);
 
     _ctxMenu.addEventListener('click', (ev) => {
@@ -2776,6 +2782,96 @@
    * hurry, halfway through a device booting. Break goes as its own message:
    * it is an out-of-band signal on the serial line, not a character.
    */
+  /**
+   * One row on the tab menu that opens a submenu.
+   *
+   * Factored out for the line controls (#525) rather than copied: the
+   * hover delay, the click path and the dismissal are three things that
+   * have to agree, and a second copy of them is a second set to keep
+   * agreeing.
+   */
+  function _submenuRow(menu, label, glyph, open) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'ctx-submenu-row';
+
+    const icon = document.createElement('span');
+    icon.className = 'material-symbols-outlined';
+    icon.textContent = glyph;
+
+    const chevron = document.createElement('span');
+    chevron.className = 'material-symbols-outlined ctx-submenu-arrow';
+    chevron.textContent = 'keyboard_arrow_right';
+
+    row.append(icon, document.createTextNode(label), chevron);
+
+    // The delay is the whole trick: sliding the pointer down the menu
+    // crosses this row on the way to something else, and opening
+    // instantly would flash a panel over whatever was being aimed at.
+    let hoverTimer = null;
+    row.addEventListener('mouseenter', () => {
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => open(row), SUBMENU_DELAY_MS);
+    });
+    row.addEventListener('mouseleave', () => clearTimeout(hoverTimer));
+    row.addEventListener('click', (e) => {
+      // Or the document-level dismissal takes the whole menu with it
+      // before the submenu is on screen.
+      e.stopPropagation();
+      clearTimeout(hoverTimer);
+      open(row);
+    });
+
+    menu.addEventListener('mouseover', (e) => {
+      if (row.contains(e.target)) return;
+      if (e.target.closest && e.target.closest('.ctx-submenu')) return;
+      clearTimeout(hoverTimer);
+      document.querySelectorAll('.ctx-submenu').forEach(el => el.remove());
+    });
+
+    menu.appendChild(row);
+    return row;
+  }
+
+  /**
+   * Baud rate and the modem lines, on the transports that have them (#525).
+   *
+   * A Nexus or ASR console runs at 115200 while ROMMON and most access
+   * switches sit at 9600. Until now that was close the tab and reopen the
+   * dialog, which loses everything the device printed on the way — and
+   * the reason to change baud is usually that you cannot read it.
+   *
+   * The row is absent, rather than present and disabled, when the
+   * transport has neither: a whole submenu that can only say no is not
+   * worth a line of a menu. The controls *inside* it explain themselves,
+   * which is where the explaining matters.
+   */
+  function _appendLineControls(menu, tab) {
+    if (menu.dataset.lineAdded) return;
+    menu.dataset.lineAdded = '1';
+
+    const caps = tab.capabilities || {};
+    const hasBaud = !!(caps.baud && caps.baud.ok);
+    const hasSignals = !!(caps.signals && caps.signals.ok);
+    if (!hasBaud && !hasSignals) return;
+
+    if (menu.children.length) {
+      const sep = document.createElement('div');
+      sep.className = 'ctx-sep';
+      menu.appendChild(sep);
+    }
+
+    if (hasBaud) {
+      const rate = (caps.baud.value || '') && ` (${caps.baud.value})`;
+      _submenuRow(menu, `Baud rate${rate}`, 'tune',
+                  (row) => _openBaudSubmenu(row, tab));
+    }
+    if (hasSignals) {
+      _submenuRow(menu, 'DTR and RTS', 'power',
+                  (row) => _openSignalsSubmenu(row, tab));
+    }
+  }
+
   function _appendSpecialCommands(menu, tab) {
     if (menu.dataset.specialAdded) return;
     menu.dataset.specialAdded = '1';
@@ -2866,15 +2962,16 @@
       button.appendChild(document.createTextNode(entry.name));
       if (entry.hint) button.title = entry.hint;
 
-      // A break only means something on a serial line; offering it elsewhere
-      // is offering something that will silently do nothing.
-      const serialOnly = entry.kind === 'break'
-                      && (tab.connectionType || 'ssh') !== 'serial';
-      if (serialOnly || !tab.isConnected) {
+      // Whether a break applies is the transport's answer, not a guess
+      // from the connection type (#525). Telnet has one — a console
+      // server turns IAC BRK into a real break on the port it is wired
+      // to, which is how you reach ROMMON on a device you cannot walk
+      // to — and hard-coding "serial only" here had made that
+      // unreachable.
+      const why = entry.kind === 'break' ? _cannot(tab, 'break') : '';
+      if (why || !tab.isConnected) {
         button.disabled = true;
-        button.title = serialOnly
-          ? 'Break is a serial signal — this session is not a serial console.'
-          : 'The session is not connected.';
+        button.title = why || 'The session is not connected.';
       } else {
         button.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -2900,6 +2997,134 @@
       Math.min(anchor.top - 4, window.innerHeight - height - 8))}px`;
     // No dismissal of its own: it shares the class, so the shared menu's
     // outside-click, Escape and close() all sweep it up with the parent.
+  }
+
+  /**
+   * Why a line control does not apply here, or "" when it does.
+   *
+   * The reason comes from the transport rather than from a rule written
+   * here. A disabled control that explains itself is the point: hiding it
+   * leaves somebody hunting a menu for something that was never there,
+   * and a control that silently does nothing is worse than either — press
+   * Break at a device stuck in boot, see nothing, and conclude the device
+   * is dead.
+   */
+  function _cannot(tab, name) {
+    const entry = (tab.capabilities || {})[name];
+    if (!entry) {
+      return 'ShellMate does not know whether this connection supports that.';
+    }
+    return entry.ok ? '' : (entry.why || 'Not available on this connection.');
+  }
+
+  /** Send a line control, and let the backend's answer do the talking. */
+  function _sendLineControl(tab, message) {
+    const ws = tab.websocket;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify(message));
+  }
+
+  /**
+   * The baud submenu, on a tab whose transport has a baud rate.
+   *
+   * Every rate a console realistically runs at and nothing else. A free
+   * number box invites 96000 and a screenful of rubbish that reads as a
+   * broken cable.
+   */
+  function _openBaudSubmenu(row, tab) {
+    document.querySelectorAll('.ctx-submenu').forEach(el => el.remove());
+    const caps = (tab.capabilities || {}).baud || {};
+    const rates = caps.choices || [9600];
+    const current = caps.value || 0;
+
+    const submenu = document.createElement('div');
+    submenu.className = 'tab-context-menu ctx-submenu';
+
+    const note = document.createElement('div');
+    note.className = 'tab-menu-note';
+    // Said here, where the choice is made, and again in the answer. The
+    // reason somebody reaches for this is that they cannot read the
+    // screen, and "I changed it and it is still rubbish" has two very
+    // different causes.
+    note.textContent = "This is the speed ShellMate reads at. It does not "
+                     + "change the device's own.";
+    submenu.appendChild(note);
+
+    rates.forEach(rate => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      const glyph = document.createElement('span');
+      glyph.className = 'material-symbols-outlined';
+      glyph.textContent = rate === current ? 'check' : 'tune';
+      button.appendChild(glyph);
+      button.appendChild(document.createTextNode(`${rate} baud`));
+      if (rate === current) button.classList.add('is-current');
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _hideTabContextMenu();
+        _sendLineControl(tab, { type: 'baud', baud: rate });
+        if (tab.capabilities && tab.capabilities.baud) {
+          tab.capabilities.baud.value = rate;
+        }
+      });
+      submenu.appendChild(button);
+    });
+
+    _placeSubmenu(submenu, row);
+  }
+
+  /**
+   * DTR and RTS, for the adapters that hold a device in reset.
+   *
+   * Only the two outputs are offered. CTS, DSR, RI and CD are the
+   * device's to assert, and a control that appears to drive one would be
+   * a control that lies.
+   */
+  function _openSignalsSubmenu(row, tab) {
+    document.querySelectorAll('.ctx-submenu').forEach(el => el.remove());
+    const submenu = document.createElement('div');
+    submenu.className = 'tab-context-menu ctx-submenu';
+
+    const note = document.createElement('div');
+    note.className = 'tab-menu-note';
+    note.textContent = 'Dropping DTR resets some devices. Both are asserted '
+                     + 'by default.';
+    submenu.appendChild(note);
+
+    [['dtr', 'DTR'], ['rts', 'RTS']].forEach(([name, label]) => {
+      [true, false].forEach(on => {
+        const button = document.createElement('button');
+        button.type = 'button';
+          const glyph = document.createElement('span');
+        glyph.className = 'material-symbols-outlined';
+        glyph.textContent = on ? 'power' : 'stop_circle';
+        button.appendChild(glyph);
+        button.appendChild(document.createTextNode(
+          `${on ? 'Assert' : 'Drop'} ${label}`));
+        button.addEventListener('click', (e) => {
+          e.stopPropagation();
+          _hideTabContextMenu();
+          _sendLineControl(tab, { type: 'signal', name, on });
+        });
+        submenu.appendChild(button);
+      });
+    });
+
+    _placeSubmenu(submenu, row);
+  }
+
+  /** Beside the row, flipped and clamped — the tab menu is often near an edge. */
+  function _placeSubmenu(submenu, row) {
+    document.body.appendChild(submenu);
+    const anchor = row.getBoundingClientRect();
+    const width = submenu.offsetWidth;
+    const height = submenu.offsetHeight;
+    const right = anchor.right + width + 8 <= window.innerWidth
+      ? anchor.right + 2
+      : Math.max(8, anchor.left - width - 2);
+    submenu.style.left = `${right}px`;
+    submenu.style.top = `${Math.max(8,
+      Math.min(anchor.top - 4, window.innerHeight - height - 8))}px`;
   }
 
   /** Put one special command on the wire. */
@@ -3303,6 +3528,11 @@
       address:      _addressOf(tab),
       port:         tab.port || 0,
       connectionType: tab.connectionType || 'ssh',
+      // The rate this end is reading at (#525). On a serial tab it can
+      // be changed mid-session, so the card is the one place it is
+      // visible without opening a menu — and a console at the wrong
+      // rate looks exactly like a broken cable.
+      baud: ((tab.capabilities || {}).baud || {}).value || 0,
       username:     tab.username || '',
       isConnected:  !!tab.isConnected,
       group:        _tagCache.get(sessionId) || '',

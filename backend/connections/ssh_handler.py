@@ -885,6 +885,19 @@ class SSHHandler(ConnectionHandler):
         except Exception:
             return b""
 
+    def _no_break(self) -> str:
+        return ("SSH has no break. There is no line to interrupt — the "
+                "session is a channel inside an encrypted stream. Reach the "
+                "device's console, over serial or through a console server, "
+                "and the break is available there.")
+
+    def _no_baud(self) -> str:
+        return "SSH has no baud rate; only a serial port does."
+
+    def _no_signals(self) -> str:
+        return ("SSH has no modem control lines. DTR and RTS are wires, and "
+                "there is no wire here.")
+
     def resize(self, cols: int, rows: int) -> None:
         """Send a window-size change so pagers and `terminal width` adapt."""
         if self._channel and not self._channel.closed:

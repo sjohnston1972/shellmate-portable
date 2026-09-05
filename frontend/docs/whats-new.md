@@ -12,6 +12,18 @@ exists.
   Your own connections and groups can be the inventory, and there is a
   playbook library you can edit here. See the Ansible page in the manual.
 
+- **Change the baud rate without dropping the session, and break over
+  telnet.** A Nexus or ASR console runs at 115200 while ROMMON and most
+  access switches sit at 9600; changing that used to mean closing the tab
+  and reopening the dialog, losing everything the device had printed. It
+  is now on the tab menu, from 1200 to 115200, and the tab's hover card
+  shows the rate. **Break** now works on telnet as well as serial — every
+  console server turns it into a real break on the port it is wired to,
+  which is how you reach ROMMON on a device you cannot walk to. **DTR**
+  and **RTS** can be raised and dropped for the adapters wired to hold a
+  device in reset. Where a control does not apply it is disabled and says
+  why, rather than hidden or silently doing nothing.
+
 - **Notes, kept with the session.** A change window produces a running
   commentary — "16:02 shut Gi1/0/24, 16:05 confirmed by site" — and it
   usually lives in Notepad, where it is never searched again and never

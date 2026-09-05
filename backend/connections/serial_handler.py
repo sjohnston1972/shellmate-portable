@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 import serial
 from serial.tools import list_ports
 
-from backend.connections.base import ConnectionError_, ConnectionHandler
+from backend.connections.base import ConnectionError_, ConnectionHandler, Unsupported
 
 from backend.advanced import get as advanced
 
@@ -203,6 +203,110 @@ class SerialHandler(ConnectionHandler):
                 self._serial.send_break(duration)
             except serial.SerialException as exc:
                 logger.warning("Could not send break on %s: %s", self.params.serial_port, exc)
+
+    # ------------------------------------------------------------------
+    # The line itself (#525)
+    # ------------------------------------------------------------------
+
+    #: Offered in the menu. Everything a console is realistically set to,
+    #: and nothing else — an arbitrary number box invites 96000 and a
+    #: session of rubbish that reads as a broken cable.
+    BAUD_RATES = (1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
+
+    def capabilities(self) -> dict:
+        return {
+            "break":   {"ok": True, "why": ""},
+            "baud":    {"ok": True, "why": "", "value": self.params.baud_rate,
+                        "choices": list(self.BAUD_RATES)},
+            "signals": {"ok": True, "why": ""},
+        }
+
+    def set_baud(self, baud: int) -> int:
+        """
+        Change the speed this end talks at, without dropping the session.
+
+        pyserial's `baudrate` is a live property, so this is a reconfigure
+        rather than a reconnect — which matters because reconnecting a
+        console loses whatever the device printed while you were away, and
+        the reason to change baud is usually that you cannot read it.
+
+        It changes **ShellMate's** rate and never the device's. A console
+        fixed at 9600 spoken to at 115200 answers in rubbish either way
+        round; this is how you match it, not how you move it.
+        """
+        try:
+            rate = int(baud)
+        except (TypeError, ValueError):
+            raise Unsupported(f"{baud!r} is not a baud rate.") from None
+        if rate not in self.BAUD_RATES:
+            raise Unsupported(
+                f"{rate} is not one of the rates ShellMate offers. A console "
+                "runs at one of " + ", ".join(str(r) for r in self.BAUD_RATES)
+                + ".")
+        if not (self._serial and self._serial.is_open):
+            raise Unsupported("The port is not open.")
+
+        try:
+            self._serial.baudrate = rate
+        except (serial.SerialException, ValueError, OSError) as exc:
+            # The adapter refused it. Reported rather than swallowed: the
+            # session goes on at the old rate, and somebody has to know
+            # which rate that is or they will read the next screenful of
+            # rubbish as the device's fault.
+            raise Unsupported(
+                f"The adapter would not change to {rate}: {exc}. Still at "
+                f"{self.params.baud_rate}.") from exc
+
+        self.params.baud_rate = rate
+        logger.info("Serial %s now at %d baud", self.params.serial_port, rate)
+        return rate
+
+    #: The lines this can raise or drop, and the lines it can only read.
+    #: DTR and RTS are outputs — an adapter wired to a device's reset holds
+    #: it there while DTR is asserted, which is the reason this exists.
+    OUTPUT_SIGNALS = ("dtr", "rts")
+    INPUT_SIGNALS = ("cts", "dsr", "ri", "cd")
+
+    def line_signals(self) -> dict:
+        """
+        Every modem control line, as it stands.
+
+        Inputs are read-only and included anyway: "RTS is up and CTS is
+        down" is the whole diagnosis for a session that accepts typing and
+        sends nothing, and neither half means anything without the other.
+        """
+        if not (self._serial and self._serial.is_open):
+            raise Unsupported("The port is not open.")
+        out = {}
+        for name in self.OUTPUT_SIGNALS + self.INPUT_SIGNALS:
+            try:
+                out[name] = bool(getattr(self._serial, name))
+            except Exception:
+                # An adapter that cannot report a line is not an error —
+                # plenty of USB bridges expose none of the inputs. Absent
+                # rather than guessed at as False, which would read as
+                # "the device is not asserting it".
+                out[name] = None
+        out["writable"] = list(self.OUTPUT_SIGNALS)
+        return out
+
+    def set_line_signal(self, name: str, on: bool) -> dict:
+        """Raise or drop DTR or RTS."""
+        wanted = (name or "").strip().lower()
+        if wanted not in self.OUTPUT_SIGNALS:
+            raise Unsupported(
+                f"{name} is not a line ShellMate can drive. DTR and RTS are "
+                "outputs; CTS, DSR, RI and CD are the device's to assert.")
+        if not (self._serial and self._serial.is_open):
+            raise Unsupported("The port is not open.")
+        try:
+            setattr(self._serial, wanted, bool(on))
+        except Exception as exc:
+            raise Unsupported(
+                f"The adapter would not change {wanted.upper()}: {exc}") from exc
+        logger.info("Serial %s: %s %s", self.params.serial_port,
+                    wanted.upper(), "asserted" if on else "dropped")
+        return self.line_signals()
 
     # ------------------------------------------------------------------
     # Teardown

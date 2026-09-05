@@ -95,6 +95,10 @@
       : info.address + (info.port ? `:${info.port}` : '');
     add('Address', target);
     add('Via', info.connectionType.toUpperCase() + (info.username ? ` as ${info.username}` : ''));
+    // A serial console at the wrong rate looks exactly like a broken
+    // cable, and the rate can now be changed mid-session (#525) — so it
+    // is worth being readable without opening a menu.
+    add('Baud', info.baud ? String(info.baud) : '');
     add('State', info.isConnected
       ? 'Connected' + (info.uptime ? ` for ${info.uptime}` : '')
       : 'Disconnected' + (info.uptime ? ` after ${info.uptime}` : ''),

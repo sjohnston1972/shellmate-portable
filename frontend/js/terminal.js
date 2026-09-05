@@ -324,6 +324,27 @@
           }
           break;
 
+        case 'line_control':
+          // Break, baud, DTR, RTS (#525). Every one of these is a control
+          // somebody pressed, so every one of them answers — a refusal in
+          // the transport's own words, a success saying what changed.
+          //
+          // Silence is the outcome that is not allowed. Press Break at a
+          // device stuck in boot, see nothing, and the conclusion is that
+          // the device is dead rather than that the control did not apply
+          // to this connection.
+          if (window.shellmateAlerts && window.shellmateAlerts.notify) {
+            window.shellmateAlerts.notify({
+              icon: msg.ok ? 'check_circle' : 'error',
+              title: msg.detail || (msg.ok ? 'Done.' : 'That did not apply here.'),
+              sessionId,
+            });
+          }
+          window.dispatchEvent(new CustomEvent('shellmate:line-control', {
+            detail: { sessionId, ...msg }
+          }));
+          break;
+
         case 'alias_expanded':
           window.dispatchEvent(new CustomEvent('shellmate:alias-expanded', {
             detail: { sessionId, typed: msg.typed, sent: msg.sent }

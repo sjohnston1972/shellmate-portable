@@ -39,6 +39,8 @@ WONT = 252
 WILL = 251
 SB   = 250   # Subnegotiation begin
 SE   = 240   # Subnegotiation end
+BRK  = 243   # RFC 854 "Break" — the NVT break, not a character
+IP   = 244   # RFC 854 "Interrupt Process"
 
 # --- Options we care about -------------------------------------------------
 OPT_ECHO = 1    # RFC 857  — the device echoes typed characters
@@ -357,6 +359,52 @@ class TelnetHandler(ConnectionHandler):
     # ------------------------------------------------------------------
     # Teardown
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # The line itself (#525)
+    # ------------------------------------------------------------------
+
+    def capabilities(self) -> dict:
+        return {
+            "break":   {"ok": True, "why": ""},
+            "baud":    {"ok": False, "why": self._no_baud()},
+            "signals": {"ok": False, "why": self._no_signals()},
+        }
+
+    def _no_baud(self) -> str:
+        return ("This is a telnet session, which has no baud rate. If the "
+                "far end is a console server, its own port speed is set on "
+                "the console server, not here.")
+
+    def _no_signals(self) -> str:
+        return ("This is a telnet session, which has no modem control "
+                "lines. A console server may expose DTR on its own line, "
+                "through its own interface.")
+
+    def send_break(self, duration: float = 0.25) -> None:
+        """
+        The telnet break, `IAC BRK`.
+
+        Every console server worth having — Opengear, Avocent, a Cisco
+        async line — turns this into a real break on the serial port it is
+        wired to, and that is how somebody reaches ROMMON on a device they
+        cannot walk to. Not sending it meant the one thing a console
+        server is for was the one thing this transport could not do.
+
+        `duration` is accepted and ignored: a break here is an event, not
+        a length of time. The far end decides how long to hold the line,
+        and pretending otherwise would put a number in the interface that
+        changes nothing.
+        """
+        if self._socket is None:
+            return
+        try:
+            # No IAC-doubling: this *is* a command, not data. Escaping it
+            # would send the two literal bytes 255 and 243 as text.
+            self._send_raw(bytes([IAC, BRK]))
+            logger.info("Telnet break sent to %s", self.params.target())
+        except OSError as exc:
+            logger.warning("Could not send a telnet break: %s", exc)
 
     def disconnect(self) -> None:
         """Close the socket."""

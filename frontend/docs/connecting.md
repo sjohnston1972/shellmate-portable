@@ -114,6 +114,39 @@ The two common causes, both reported explicitly:
 Either way ShellMate lists the ports it *can* see, which usually identifies
 the problem immediately.
 
+## The line itself: break, baud, DTR and RTS
+
+Some things are done *to* a connection rather than sent through it, and no
+two transports offer the same set. They are on the tab's own menu, and
+every one of them either works or says why it does not — a control that
+silently does nothing is worse than one that refuses, because pressing
+Break at a device stuck in boot and seeing nothing happen reads as a dead
+device rather than as a control that never applied.
+
+**Break** interrupts a device during boot, which is how you reach ROMMON.
+It works on a serial console and on **telnet**: every console server worth
+having — Opengear, Avocent, a Cisco async line — turns the telnet break
+into a real one on the port it is wired to, which is how you reach ROMMON
+on a device you cannot walk to. SSH has no break at all: there is no line
+to interrupt, only a channel inside an encrypted stream.
+
+**Baud rate** is on serial tabs, from 1200 to 115200. A Nexus or ASR
+console runs at 115200 while ROMMON and most access switches sit at 9600,
+and changing it used to mean closing the tab and reopening the dialog —
+which loses everything the device printed while you were away, and the
+reason to change baud is usually that you cannot read it. It changes now
+without dropping the session, and the tab's hover card shows the rate.
+
+> This sets **ShellMate's** speed, not the device's. A console fixed at
+> 9600 spoken to at 115200 produces rubbish either way round; this is how
+> you match the device, not how you move it.
+
+**DTR and RTS** are the two modem control lines ShellMate can drive, on
+serial tabs. Both are asserted by default; some adapters are wired so that
+dropping DTR holds the device in reset. CTS, DSR, RI and CD are the
+device's to assert and are shown but never driven — a control that
+appeared to drive one would be a control that lies.
+
 ## Telnet
 
 Still everywhere: older switches, out-of-band terminal servers, lab gear, and

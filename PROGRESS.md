@@ -214,3 +214,20 @@ Machine: SJLAP. The Ansible runner container is local here, reached on
   cause or those were something else. And it fixes a fixture, not the
   application: the behaviour it was tripping over is correct and stays.
 
+- **2026-09-05 08:40** — Step 8 done (#525). Break on telnet as well as
+  serial, baud changeable mid-session, DTR and RTS drivable, and the rate
+  on the tab's hover card. 33 checks in `test_line_controls.py`; 79 of 79
+  test files passing.
+
+  The design decision worth keeping: a `capabilities()` on the transport
+  contract rather than a table in the browser of which connection types
+  have a break. The old code hard-coded "serial only" in `tabs.js`, which
+  is exactly why telnet break — the one thing a console server exists for
+  — was unreachable. A second table of that shape drifts the first time a
+  transport gains a capability, and drifts silently.
+
+  Every refusal carries a reason and every control answers. `Unsupported`
+  is an exception rather than a no-op for one reason: press Break at a
+  device stuck in boot, see nothing happen, and the conclusion is that the
+  device is dead rather than that the control never applied here.
+
