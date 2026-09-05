@@ -1769,6 +1769,16 @@
       // the log is what happened, the note is why.
       { action: 'notes', icon: 'edit', label: 'Notes for this session',
         setting: 'notes' },
+      // What this device can see (#542). Disabled where a second channel
+      // cannot be opened, rather than hidden: the reason — that running
+      // the commands in your own session would put lines you did not type
+      // into your transcript — is worth reading.
+      { action: 'neighbours', icon: 'lan', label: 'Find neighbours…',
+        setting: 'neighbours',
+        disabled: (tab) => ((tab.connectionType || 'ssh') !== 'ssh'
+          ? 'Neighbours are collected over a second SSH channel, which this '
+            + 'connection cannot open.'
+          : (!tab.isConnected ? 'The session is not connected.' : '')) },
     ],
     [
       // Two entries, deliberately, because they are two different acts
@@ -2041,6 +2051,11 @@
           case 'logging':       _toggleLogging(tab);              break;
           case 'notes':
             if (typeof window.openNotes === 'function') window.openNotes();
+            break;
+          case 'neighbours':
+            if (typeof window.findNeighbours === 'function') {
+              window.findNeighbours(tab);
+            }
             break;
           case 'log-open':
             if (typeof window.viewLogFile === 'function') window.viewLogFile(tab.logFile);

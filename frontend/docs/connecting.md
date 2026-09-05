@@ -737,6 +737,41 @@ the generic one is used — the commands that are destructive on anything.
 **Settings → Terminal Behaviour → On devices ShellMate could not identify**
 turns that off if you would rather.
 
+## Finding the neighbours
+
+On a site you did not build, the first switch you get into knows about the
+other twelve. The subnet scanner cannot help — everything interesting is
+usually across a routed boundary — but CDP and LLDP are already running on
+those switches and already know the management address, the platform and
+both ends of every link.
+
+**Find neighbours…** on a tab's menu asks the device you are connected to.
+The results list what it can see: the device name, its management address,
+a platform guess, and which port it was seen on. Tick the ones you want,
+choose a group and a credential, and they are saved as connections.
+
+Four things the list is careful about:
+
+- **A second SSH channel, or nothing.** The commands run on a channel of
+  their own so they never appear in your session. On telnet and serial,
+  where a second channel is impossible, this refuses and says so rather
+  than typing two commands you did not into the transcript that is your
+  record of what you did.
+- **A neighbour with no address is still shown.** LLDP often reports a
+  system name and no management address at all. Leaving those out would
+  hide half a site; they are listed, marked, and cannot be ticked, because
+  there is nothing to connect to.
+- **Devices you already have are marked as known** rather than offered
+  again.
+- **The platform is a guess.** It is read from a string one device
+  advertised about another, so it is stored below the threshold that lets
+  ShellMate send anything to a device — the same treatment the scanner's
+  guesses get. Hover the platform to see the string it came from.
+
+What each device reported is kept, so "what is on the other end of
+Gi1/0/24" stays answerable afterwards. One answer per port: a switch
+swapped for another replaces the old entry rather than sitting beside it.
+
 ## Groups
 
 Saved connections live on the dashboard, and the **group tree** beside the

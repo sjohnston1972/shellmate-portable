@@ -258,3 +258,27 @@ Machine: SJLAP. The Ansible runner container is local here, reached on
   means choosing which, and whether diff text may ever leave the machine is
   Steven's call rather than mine. Left open with a comment saying so.
 
+- **2026-09-05 10:45** — Step 10 done (#542), and PLAN.md is complete.
+  `backend/neighbours.py`, a `neighbours` edge table, the routes, a tab-menu
+  entry and a results panel. 35 checks in `test_neighbours.py`; 81 of 81
+  test files passing.
+
+  Second channel or nothing, and it says why rather than borrowing the
+  session — running two commands in somebody's own terminal puts lines they
+  did not type into the transcript that is their record of what they did.
+
+  A neighbour with no management address is kept, marked and untickable
+  rather than dropped: LLDP reports a name and nothing else constantly, and
+  dropping those would silently hide half a site. The platform is treated
+  as the guess it is — one device repeating what another advertised about
+  itself — and stored below the acting threshold, exactly as the scanner's
+  guesses are.
+
+  One reuse worth recording, because I nearly wrote the copy again.
+  Discovery already had a bulk-login dialog that handles a locked vault, an
+  empty credential list and creating one inline. I had written a second,
+  simpler one before noticing; it is now shared with an `extraFields`
+  argument so the group is asked alongside rather than in a dialog of its
+  own. That is twice this run — `forget_host` was the first — that the
+  thing I was about to build already existed.
+

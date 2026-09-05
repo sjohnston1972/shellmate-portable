@@ -108,6 +108,7 @@ shellmate/
 │   ├── jsonfile.py              # The one way a JSON data file is read and written (#457)
 │   ├── keys.py                  # Making SSH keys, not just using them
 │   ├── licence.py               # Licence keys, verified without a network (#446)
+│   ├── neighbours.py            # What the device you reached can see (#542)
 │   ├── onboard.py               # What happens in the first few seconds of a session
 │   ├── paths.py                 # Single source of truth for every filesystem location ShellMate…
 │   ├── pipeline.py              # The chokepoint every keystroke passes through on its way out
@@ -204,6 +205,7 @@ shellmate/
 │       ├── markdown.js          # A small Markdown renderer for the built-in documentation
 │       ├── menu.js              # The one context menu
 │       ├── mode.js              # Learn / Troubleshoot mode toggle
+│       ├── neighbours.js        # "What else is on this site?" (#542)
 │       ├── notes.js             # What you were doing, written down beside what you did (#530)
 │       ├── palette.js           # Find a tab by name (#410), and recall a command (#522)
 │       ├── panel_resize.js      # Dragging a side panel wider

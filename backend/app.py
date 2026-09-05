@@ -1733,6 +1733,10 @@ class DiscoverySaveRequest(BaseModel):
     #: A named credential to attach to all of them. Forty devices found on one
     #: subnet almost always share one login.
     credential_ref: str = ""
+    #: The group they belong to (#542). Devices found through a neighbour
+    #: sweep are a site rather than a subnet, and arriving ungrouped means
+    #: somebody drags twelve of them one at a time.
+    tags: list[str] = []
 
 
 def _discovery_settings() -> dict:
@@ -1831,6 +1835,63 @@ async def discovery_forget(scan_id: str) -> dict:
     return {"status": "ok", "discarded": discovery.forget(scan_id)}
 
 
+@app.post("/api/sessions/{session_id}/neighbours")
+async def session_neighbours(session_id: str) -> dict:
+    """
+    Ask a live session what CDP and LLDP can see (#542).
+
+    Over a second SSH channel and nothing else. The live-session fallback
+    that configuration capture falls back to types into the terminal the
+    user is working in, and two commands they did not run would land in
+    the transcript that is their record of what they did.
+    """
+    from backend import neighbours as neighbours_module
+
+    session = manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="No such session")
+
+    try:
+        found = await asyncio.to_thread(neighbours_module.collect, session)
+    except neighbours_module.NeighbourError as exc:
+        # 409 rather than 500: the request was fine and the session is
+        # fine, this connection simply cannot answer it — and the reason
+        # is the useful part.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    # The edges are recorded whether or not anything is saved as a
+    # profile. "What is on the other end of Gi1/0/24" is worth answering
+    # later even when nobody wanted twelve new connections today.
+    if found["host"]:
+        await asyncio.to_thread(store.record_neighbours,
+                                found["host"], found["neighbours"])
+
+    # Which of them ShellMate already has, so the list can say so rather
+    # than offering to save a device that is already in the tree.
+    known = {(p.get("hostname") or "").strip() for p in profiles_module.get_profiles()}
+    for entry in found["neighbours"]:
+        entry["known"] = bool(entry["address"]) and entry["address"] in known
+    return found
+
+
+@app.get("/api/neighbours/{hostname}")
+async def neighbours_for(hostname: str) -> dict:
+    """
+    What this device reported, and what reported it (#542).
+
+    Both directions, because they answer different questions. A device you
+    cannot reach is often still visible in the fact that three of its
+    neighbours can see it.
+    """
+    return {
+        "hostname": hostname,
+        "ports": await asyncio.to_thread(store.neighbours_of, hostname),
+        "seen_by": await asyncio.to_thread(store.neighbours_naming, hostname),
+    }
+
+
 @app.post("/api/discovery/save")
 async def discovery_save(request: DiscoverySaveRequest) -> dict:
     """
@@ -1863,6 +1924,7 @@ async def discovery_save(request: DiscoverySaveRequest) -> dict:
                 # arrives knowing its platform rather than rediscovering it.
                 "platform": device.get("platform") or "",
                 "discovered": True,
+                **({"tags": request.tags} if request.tags else {}),
             })
 
             # A reference, never a copy. Forty copies of one lab password is

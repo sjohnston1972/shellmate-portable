@@ -24,6 +24,17 @@ exists.
   device in reset. Where a control does not apply it is disabled and says
   why, rather than hidden or silently doing nothing.
 
+- **Find the neighbours.** On a site you did not build, the first switch
+  you reach knows about the other twelve — and the subnet scanner cannot
+  see across a routed boundary, while CDP and LLDP already can. **Find
+  neighbours…** on a tab's menu lists what the device can see, with the
+  management address, a platform guess and the port each was seen on; tick
+  them, pick a group and a credential, and they are saved. It runs on a
+  second SSH channel and refuses rather than borrowing your session where
+  it cannot. A neighbour that advertised a name and no address is shown
+  and marked rather than hidden, and what each device reported is kept, so
+  "what is on the other end of Gi1/0/24" stays answerable.
+
 - **The overnight backups tell you what they found.** Scheduled backups
   were reporting into a log file nobody reads. The morning after a run that
   changed something, failed, or did not happen, a notice says so — with the

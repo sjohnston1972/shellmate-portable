@@ -11061,3 +11061,92 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
 .digest-failed  .digest-device { color: var(--error); }
 .digest-skipped .digest-device { color: var(--on-surface-dim); }
 
+/* ---------------------------------------------------------------------------
+   Neighbours (#542)
+
+   A list whose most important column is the tick box: which of these can
+   actually be saved, and which cannot because a neighbour advertised a name
+   and no address.
+--------------------------------------------------------------------------- */
+
+.nei-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 60vh;
+  overflow: auto;
+  text-align: left;
+}
+
+.nei-summary { margin: 0; font-size: 13px; }
+
+/* Why a protocol found nothing. An empty list on its own reads as "this
+   device has no neighbours", which is a much stronger claim. */
+.nei-quiet {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--warn-tint);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--on-surface);
+}
+
+.nei-hint { margin: 0; font-size: 11px; color: var(--on-surface-dim); }
+
+.nei-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.nei-table th {
+  padding: 4px 8px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--on-surface-dim);
+  border-bottom: 1px solid var(--outline);
+}
+
+.nei-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--outline);
+  vertical-align: middle;
+}
+
+.nei-table tr:last-child td { border-bottom: 0; }
+
+.nei-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--on-surface);
+}
+
+.nei-known {
+  padding: 1px 6px;
+  background: var(--surface-highest);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-full);
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--on-surface-dim);
+}
+
+.nei-address,
+.nei-port {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--on-surface-dim);
+}
+
+/* A platform read out of what one device said about another. Marked as
+   the guess it is, rather than shown like a fact ShellMate established. */
+.nei-guess {
+  font-style: italic;
+  color: var(--on-surface-dim);
+}
+

@@ -353,7 +353,7 @@
    * It uses the shared dialog now, which sits above every panel and brings
    * the focus trap and Escape handling with it.
    */
-  async function askForLogin(count) {
+  async function askForLogin(count, extraFields) {
     let sets = [];
     let locked = false;
     try {
@@ -395,6 +395,11 @@
           hint: 'The account these devices log in as.' },
         { name: 'credential_ref', label: 'Credential', type: 'select',
           options },
+        // Whatever the caller needs to ask at the same time (#542). A
+        // neighbour sweep saves a site rather than a subnet and wants a
+        // group; asking that in a second dialog would be two dialogs for
+        // one decision.
+        ...(extraFields || []),
       ],
     });
     if (!answer) return null;
@@ -485,4 +490,8 @@
   /** Opened from the connection dialog, where somebody realises they do not
    *  know the address. */
   window.shellmateDiscovery = { open };
+  // Shared rather than reimplemented (#542). This dialog handles a locked
+  // vault, an empty credential list and creating one inline — three things
+  // a second copy would get wrong differently.
+  window.askForBulkLogin = askForLogin;
 })();

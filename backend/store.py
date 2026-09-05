@@ -222,6 +222,31 @@ class SessionStore:
                 note        TEXT NOT NULL DEFAULT ''
             );
 
+            -- What a device says is on the other end of each of its
+            -- ports (#542). One row per edge, replaced when the same edge
+            -- is seen again, so "what is on Gi1/0/24" has one answer
+            -- rather than a history of the same answer.
+            --
+            -- Keyed on the local end alone: a port has one neighbour, and
+            -- a key that included the remote name would keep the old one
+            -- alongside the new after a device was swapped — which is
+            -- precisely the moment somebody needs to be told what changed
+            -- rather than shown both.
+            CREATE TABLE IF NOT EXISTS neighbours (
+                hostname     TEXT NOT NULL,
+                local_port   TEXT NOT NULL,
+                remote_host  TEXT NOT NULL DEFAULT '',
+                remote_port  TEXT NOT NULL DEFAULT '',
+                remote_addr  TEXT NOT NULL DEFAULT '',
+                platform     TEXT NOT NULL DEFAULT '',
+                protocol     TEXT NOT NULL DEFAULT '',
+                seen_at      REAL NOT NULL,
+                PRIMARY KEY (hostname, local_port)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_neighbours_remote
+                ON neighbours(remote_host);
+
             CREATE TABLE IF NOT EXISTS meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -840,6 +865,102 @@ class SessionStore:
             session = dict(row)
             session["commands"] = [dict(c) for c in commands]
             return session
+
+    # -----------------------------------------------------------------
+    # Neighbours (#542)
+    #
+    # The edges CDP and LLDP report, kept so that "what is on the other
+    # end of Gi1/0/24" is answerable from the history rather than only in
+    # the moment somebody looked.
+    # -----------------------------------------------------------------
+
+    def record_neighbours(self, hostname: str, neighbours: list[dict],
+                          seen_at: float | None = None) -> int:
+        """
+        Store what one device reports about its ports. Returns edges written.
+
+        Replaces rather than accumulates, per local port. A switch swapped
+        for another answers on the same port with a different name, and a
+        table that kept both would be a table nobody can read a topology
+        out of.
+
+        Neighbours with no local port are skipped: an edge with no near end
+        is not an edge, and giving it an empty port would make every such
+        neighbour collide on one row.
+        """
+        host = (hostname or "").strip()
+        if not host:
+            return 0
+        when = float(seen_at if seen_at is not None else time.time())
+        rows = []
+        for entry in neighbours or []:
+            local = str(entry.get("local_port") or "").strip()
+            if not local:
+                continue
+            rows.append((host, local,
+                         str(entry.get("name") or ""),
+                         str(entry.get("remote_port") or ""),
+                         str(entry.get("address") or ""),
+                         str(entry.get("platform") or ""),
+                         ",".join(entry.get("protocols")
+                                  or ([entry["protocol"]] if entry.get("protocol") else [])),
+                         when))
+        if not rows:
+            return 0
+
+        with self._lock:
+            connection = self.connect()
+            try:
+                connection.executemany(
+                    """
+                    INSERT INTO neighbours
+                        (hostname, local_port, remote_host, remote_port,
+                         remote_addr, platform, protocol, seen_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(hostname, local_port) DO UPDATE SET
+                        remote_host = excluded.remote_host,
+                        remote_port = excluded.remote_port,
+                        remote_addr = excluded.remote_addr,
+                        platform    = excluded.platform,
+                        protocol    = excluded.protocol,
+                        seen_at     = excluded.seen_at
+                    """, rows)
+                connection.commit()
+            except sqlite3.Error as exc:
+                logger.warning("Could not store neighbours of %s: %s", host, exc)
+                return 0
+        return len(rows)
+
+    def neighbours_of(self, hostname: str) -> list[dict]:
+        """Every edge recorded for a device, by port."""
+        with self._lock:
+            connection = self.connect()
+            try:
+                rows = connection.execute(
+                    "SELECT * FROM neighbours WHERE hostname = ? "
+                    "ORDER BY local_port", ((hostname or "").strip(),)).fetchall()
+            except sqlite3.Error:                         # pragma: no cover
+                return []
+            return [dict(row) for row in rows]
+
+    def neighbours_naming(self, hostname: str) -> list[dict]:
+        """
+        Every device that reports *this* one as its neighbour.
+
+        The other direction, and worth having on its own: a device you
+        cannot reach is often still visible because three of its
+        neighbours can see it.
+        """
+        with self._lock:
+            connection = self.connect()
+            try:
+                rows = connection.execute(
+                    "SELECT * FROM neighbours WHERE remote_host = ? "
+                    "ORDER BY hostname, local_port",
+                    ((hostname or "").strip(),)).fetchall()
+            except sqlite3.Error:                         # pragma: no cover
+                return []
+            return [dict(row) for row in rows]
 
     # -----------------------------------------------------------------
     # Notes (#530)
