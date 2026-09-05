@@ -23,11 +23,17 @@
  * Nothing here blocks reaching a device. The card is dismissible, every
  * choice has a working default already applied, and closing it without
  * answering leaves the application exactly as it was.
+ *
+ * It lives *in* the home screen rather than over the application. The
+ * first version was a full-screen overlay, and the UI tests found what a
+ * user would have: a scrim intercepts every click until it is dismissed,
+ * which is the opposite of the sentence above. On the home screen it is
+ * there when you come back and out of the way when you open a tab.
  */
 (function () {
   'use strict';
 
-  let overlay = null;
+  let card = null;
   let info = null;
   let vault = null;
 
@@ -106,7 +112,11 @@
 
   /** Called by update.js on the branch that means "never seen before". */
   async function offer() {
-    if (overlay) return;
+    if (card) return;
+    // Mounted in the home screen, after its heading. No home screen means
+    // no card — the rest of the interface does not stop for it.
+    const home = document.getElementById('welcome-content');
+    if (!home) return;
 
     try {
       info = info || await (await fetch('/api/system/info')).json();
@@ -117,12 +127,16 @@
       return;
     }
 
-    overlay = build();
-    document.body.appendChild(overlay);
+    card = build();
+    const heading = home.querySelector('h1');
+    if (heading && heading.nextSibling) {
+      home.insertBefore(card, heading.nextSibling);
+    } else {
+      home.prepend(card);
+    }
   }
 
   function build() {
-    const back = el('div', 'firstrun-overlay');
     const card = el('div', 'firstrun-card');
 
     const head = el('div', 'firstrun-head');
@@ -145,11 +159,11 @@
     actions.appendChild(done);
     card.appendChild(actions);
 
-    back.appendChild(card);
-    back.addEventListener('keydown', (e) => {
+    card.tabIndex = -1;
+    card.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') close();
     });
-    return back;
+    return card;
   }
 
   function section(title, hint) {
@@ -351,8 +365,8 @@
   }
 
   function close() {
-    if (overlay) overlay.remove();
-    overlay = null;
+    if (card) card.remove();
+    card = null;
   }
 
   window.shellmateFirstRun = { offer, paintChip };

@@ -122,3 +122,19 @@ fixed address.
 `python test_backup_webhook.py` — 40 passed, against a live receiver.
 Guards: settings 49, scheduler 45, advanced 392, support 78, security 58,
 backup_digest 23, vault 96, compliance 30.
+
+## 2026-09-05 18:05 — the first-run card blocked the UI tests, and would have blocked a user
+
+The full suite hung on `test_phase2.py` (normally 23s). The first-run card
+from #564 was a full-screen overlay, and on a fresh temp data folder — which
+is what every UI test starts with — it opened and intercepted every click
+until dismissed. Playwright reported it in those words: `firstrun-overlay
+intercepts pointer events`.
+
+That contradicts the card's own stated rule, "nothing here blocks reaching a
+device". A scrim is exactly that. It now lives in the home screen's column,
+after the heading, with no backdrop: there when you come back to the
+dashboard, out of the way the moment a tab opens. The UI tests found it
+before a user did, which is what they are for.
+
+`test_phase2.py` — 97 passed again. `test_firstrun.py` — 30.

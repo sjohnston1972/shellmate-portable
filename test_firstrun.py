@@ -69,7 +69,12 @@ def test_it_hangs_off_the_branch_that_already_existed() -> None:
           "without this it would open on every launch")
 
     check("a second call while it is open is a no-op",
-          "if (overlay) return;" in CARD)
+          "if (card) return;" in CARD)
+    check("it lives in the home screen, not over the application",
+          "getElementById('welcome-content')" in CARD
+          and "firstrun-overlay" not in CARD,
+          "a scrim intercepts every click until dismissed — the UI tests "
+          "found that before a user did")
     check("it is loaded", 'src="/static/js/firstrun.js"' in HTML)
 
 
@@ -173,13 +178,11 @@ def test_no_setting_is_written_two_ways() -> None:
 def test_the_styling() -> None:
     print("\n-- Both themes --")
 
-    block = CSS.split(".firstrun-overlay")[1]
+    block = CSS.split(".firstrun-card {")[1].split("#status-portable")[0]
     hardcoded = re.findall(r"(?:background|color)\s*:\s*(#[0-9a-fA-F]{3,8}"
-                           r"|rgba?\((?!0, 0, 0, 0\.6)[^)]*\))", block)
-    check("no hardcoded colours but the shadow", not hardcoded, str(hardcoded))
-    check("the card scrolls rather than growing past the window",
-          "max-height: 88vh" in block and "overflow-y: auto" in block,
-          "four sections on a laptop screen is close to the limit already")
+                           r"|rgba?\([^)]*\))", block)
+    check("no hardcoded colours", not hardcoded, str(hardcoded))
+    check("and no scrim", ".firstrun-overlay" not in CSS)
 
 
 def main() -> int:
