@@ -515,8 +515,19 @@ def events(job_id: str, since: int = 0) -> dict:
     ansible-runner numbers its own events, so the counter orders them and
     makes polling cheap: the panel asks for what it has not seen rather
     than re-reading the whole play every second.
+
+    ``since`` is sent to the runner *and* applied here. That is not
+    belt-and-braces for its own sake — the runner only learned to honour
+    the parameter in e35fe6b, and an older one ignores it and returns the
+    whole run. Filtering here as well means one code path against both.
+
+    The local sort is load-bearing for the same reason. That release also
+    fixed the runner sorting events by filename, which for a run of more
+    than nine events returned 1, 10, 11 ... 2, 20. Ordering by the counter
+    ourselves is what meant that never reached anybody here.
     """
-    data = _call("GET", f"/api/v1/jobs/{job_id}/events") or {}
+    data = _call("GET", f"/api/v1/jobs/{job_id}/events",
+                 params={"since": int(since)} if since else None) or {}
     out = []
     for raw in data.get("events") or []:
         if not isinstance(raw, dict):
