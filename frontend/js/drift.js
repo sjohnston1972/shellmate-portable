@@ -629,6 +629,24 @@
       });
     }
 
+    // Export (#540). Copy hands over the diff text; this hands over a
+    // document with the device, the two timestamps and the counts around
+    // it, which is what a change record has to carry to be one.
+    const exportBtn = document.getElementById('diff-export');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        if (!window.shellmateReport) return;
+        if (openPair) {
+          window.shellmateReport.diff(exportBtn, openPair.old, openPair.new);
+        } else if (openSession) {
+          // No pair to compare: the change record says so in as many words
+          // rather than rendering an empty section, which would read as
+          // "nothing changed" when the truth is "nothing was captured".
+          window.shellmateReport.change(exportBtn, openSession, null, null);
+        }
+      });
+    }
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && overlay && !overlay.classList.contains('hidden')) {
         overlay.classList.add('hidden');

@@ -437,6 +437,13 @@ def drift_report(session: dict) -> dict:
         "added":       comparison["added"],
         "removed":     comparison["removed"],
         "diff":        comparison["diff"],
+        # The two snapshots this was measured between (#540). diff_snapshots
+        # already knows them; not passing them through left the diff window
+        # able to show a comparison it could not then export, because the
+        # report endpoint builds from the snapshots rather than from text
+        # the browser happens to be holding.
+        "old_id":      comparison.get("old_id"),
+        "new_id":      comparison.get("new_id"),
         "summary":     _changed_summary(
             previous.get("captured_at"), comparison["changed"],
         ),

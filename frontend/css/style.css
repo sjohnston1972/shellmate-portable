@@ -3525,6 +3525,15 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
   flex: 0 0 auto;
 }
 
+/* The replay header is space-between, so a button dropped between the title
+   and the close would sit marooned in the middle of it. Pushed right, the
+   same way #diff-copy-all is, so the two panels read alike. */
+#replay-export {
+  margin-left: auto;
+  margin-right: 8px;
+  flex: 0 0 auto;
+}
+
 /* ---------------------------------------------------------------------------
    Session history and replay panels
 --------------------------------------------------------------------------- */
@@ -4867,6 +4876,13 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
   padding: 14px 20px;
   border-top: 1px solid var(--outline);
   flex-shrink: 0;
+}
+
+/* The file export is an alternative to sending, not a step on the way to it.
+   Left, away from Cancel and Send, so it does not read as the button before
+   the button. */
+#jira-export {
+  margin-right: auto;
 }
 
 [data-theme="light"] #jira-dialog {

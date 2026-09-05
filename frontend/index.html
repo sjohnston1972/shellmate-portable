@@ -2724,6 +2724,14 @@ GigEth0/2     unassigned    YES unset  down     down
           <span class="material-symbols-outlined">content_copy</span>
           Copy all
         </button>
+        <!-- #540: copy puts it on the clipboard; export puts it in a file
+             with the device, the timestamps and the counts around it, which
+             is what a change record actually has to carry. -->
+        <button id="diff-export" class="btn-tertiary"
+                title="Save these changes as a report you can send to someone">
+          <span class="material-symbols-outlined">download</span>
+          Export
+        </button>
         <button id="diff-close" class="icon-btn" aria-label="Close">
           <span class="material-symbols-outlined">close</span>
         </button>
@@ -3261,6 +3269,12 @@ GigEth0/2     unassigned    YES unset  down     down
     <div id="replay-panel" class="side-panel side-panel-wide">
       <div class="panel-header">
         <h2 class="panel-title" id="replay-title">Session</h2>
+        <!-- #540/#574: a session as a file, for people without ShellMate. -->
+        <button id="replay-export" class="btn-tertiary"
+                title="Save this session as a report you can send to someone">
+          <span class="material-symbols-outlined">download</span>
+          Export
+        </button>
         <button id="replay-close" class="icon-btn" aria-label="Close">
           <span class="material-symbols-outlined">close</span>
         </button>
@@ -3603,6 +3617,13 @@ GigEth0/2     unassigned    YES unset  down     down
       </div>
 
       <div id="jira-actions">
+        <!-- #540: not everybody has Jira, and those who do still need a
+             file for the CAB pack, the customer or the vendor case. -->
+        <button id="jira-export" class="btn-secondary"
+                title="Write this up as a file instead of sending it to Jira">
+          <span class="material-symbols-outlined">download</span>
+          Save as a file instead
+        </button>
         <button id="jira-cancel" class="btn-secondary">Cancel</button>
         <button id="jira-submit" class="btn-primary">
           <span class="material-symbols-outlined">upload</span>
@@ -3666,6 +3687,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/highlight_settings.js"></script>
   <script src="/static/js/regex_builder.js"></script>
   <script src="/static/js/vault.js"></script>
+  <script src="/static/js/report.js"></script>
   <script src="/static/js/history.js"></script>
   <script src="/static/js/drift.js"></script>
   <script src="/static/js/logs.js"></script>

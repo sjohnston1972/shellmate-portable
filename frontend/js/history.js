@@ -13,6 +13,9 @@
   'use strict';
 
   let overlay, replayOverlay, queryInput, deviceSelect, rangeSelect;
+  // Which session the replay is showing (#540). Held rather than
+  // re-read from the title, which carries a hostname and not an id.
+  let replaying = null;
   let resultsEl, statsEl;
 
   /**
@@ -49,6 +52,11 @@
     document.getElementById('history-close').addEventListener('click', closeHistory);
     document.getElementById('history-clear').addEventListener('click', clearHistory);
     document.getElementById('replay-close').addEventListener('click', closeReplay);
+    const exportBtn = document.getElementById('replay-export');
+    if (exportBtn) exportBtn.addEventListener('click', () => {
+      if (!replaying || !window.shellmateReport) return;
+      window.shellmateReport.session(exportBtn, replaying.id);
+    });
 
     queryInput.addEventListener('input', () => {
       clearTimeout(searchTimer);
@@ -93,7 +101,7 @@
   }
 
   function closeHistory() { overlay.classList.add('hidden'); }
-  function closeReplay()  { _stopPlayer(); replayOverlay.classList.add('hidden'); }
+  function closeReplay()  { _stopPlayer(); replaying = null; replayOverlay.classList.add('hidden'); }
 
 
   // -------------------------------------------------------------------------
@@ -738,6 +746,7 @@
   }
 
   function renderReplay(session) {
+    replaying = session;
     document.getElementById('replay-title').textContent =
       session.hostname || session.label || 'Session';
     _bindPlayer(session);

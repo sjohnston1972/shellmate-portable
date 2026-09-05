@@ -53,3 +53,28 @@ would have tested a weaker guarantee than the one that ships.
 `python test_report.py` — 61 passed, 0 failed. test_ansible_library,
 test_config_archive and test_groups still pass against the changed app.py.
 
+## 2026-09-05 07:32 — step 4 done (#540)
+
+Export on the replay header, the diff window, and the Jira modal as "Save
+as a file instead". One module (`frontend/js/report.js`) rather than three
+copies of "ask which format, post, toast, offer the folder" — three copies
+is how the copy buttons drifted apart in #429.
+
+The format is asked for, not assumed: Markdown is what goes into a ticket
+or a repository, the HTML page is what gets printed for a change board, and
+they are different documents to the person receiving them.
+
+Found while wiring the diff window: `drift_report` computed the two
+snapshot ids and then dropped them, so the window could show a comparison
+it had no way to export — the report endpoint builds from snapshots, not
+from diff text the browser happens to be holding. Carried through, two
+lines. Without it Export would have worked only after a config push, and
+the failure would have looked like a UI bug.
+
+`download` and `description` were already in the committed font subset, so
+no re-subsetting: a new icon name renders as its own name in plain text and
+raises nothing.
+
+test_icons 4 passed, test_contrast 59 passed, test_report 61 passed. All
+four changed JS files pass `node --check`.
+

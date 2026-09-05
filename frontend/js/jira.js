@@ -74,6 +74,34 @@
     document.getElementById('btn-conclude-session').addEventListener('click', openJiraModal);
     document.getElementById('jira-close').addEventListener('click', closeJiraModal);
     document.getElementById('jira-cancel').addEventListener('click', closeJiraModal);
+
+    // "Save as a file instead" (#540). Not everybody has Jira, and the
+    // people who do still need something to attach to a CAB pack, send to
+    // a customer, or put on a vendor case — none of which are reachable by
+    // creating an issue in a project.
+    //
+    // The active tab rather than every open one: a report is about a
+    // device, and a single file holding four unrelated sessions is not a
+    // change record for any of them. The description and the assistant
+    // conversation come along, because those are the parts that say why.
+    const exportBtn = document.getElementById('jira-export');
+    if (exportBtn) exportBtn.addEventListener('click', () => {
+      if (!window.shellmateReport) return;
+      const tab = typeof window.getActiveTab === 'function'
+        ? window.getActiveTab() : null;
+      if (!tab || !tab.sessionId) {
+        if (window.shellmateAlerts) window.shellmateAlerts.notify({
+          global: true, severity: 'warning', icon: 'error',
+          title: 'Nothing to write up',
+          body: 'Open a session first — a report is about a device.',
+        });
+        return;
+      }
+      window.shellmateReport.session(exportBtn, tab.sessionId, {
+        chat: chatHistory.slice(),
+        summary: descriptionInput ? descriptionInput.value.trim() : '',
+      });
+    });
     overlay.addEventListener('click', (e) => { if (e.target === overlay) closeJiraModal(); });
     submitBtn.addEventListener('click', submitToJira);
     modeBtnNew.addEventListener('click', () => setMode('new'));
