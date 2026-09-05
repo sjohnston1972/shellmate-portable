@@ -90,8 +90,15 @@ async def main() -> None:
         # The runner is not reachable in a test, so its record is stubbed —
         # what is under test is how ShellMate presents jobs, not whether a
         # container answers.
-        await page.route("**/api/ansible/jobs", lambda route: route.fulfill(
-            status=200, content_type="application/json", body=json.dumps([
+        # The glob has to admit a query string: the endpoint pages now, so
+        # the panel asks for "?limit=100" and a pattern ending at the path
+        # matches nothing. The stub answers in the paged shape for the same
+        # reason — a stub returning what the endpoint used to return tests a
+        # shape that no longer ships.
+        await page.route("**/api/ansible/jobs*", lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps({
+              "total": 402, "count": 3, "offset": 0, "limit": 100,
+              "jobs": [
                 {"id": "a1", "playbook": "drift-site-4.yml",
                  "status": "successful", "pipeline": "nightly-drift",
                  "scheduled_for": "2026-09-04T03:00:00+00:00",
@@ -103,7 +110,7 @@ async def main() -> None:
                 {"id": "b1", "playbook": "ntp.yml", "status": "successful",
                  "pipeline": None, "scheduled_for": None,
                  "started": "2026-09-04T10:00:00+00:00"},
-            ])))
+              ]})))
 
         await page.goto(BASE)
         await page.wait_for_selector("#ansible-stage", state="attached", timeout=15000)
@@ -137,6 +144,17 @@ async def main() -> None:
               "an on-time run should not be labelled late")
         check("and a manual run is never called late",
               "late" not in text.split("nightly-drift")[0], text[:200])
+
+        print("\n-- A window, not the record --")
+        # The runner pages and prunes its artifacts, so what it holds is
+        # bounded twice. An area that silently shows the newest hundred of
+        # four hundred reads as the whole history, and somebody looking for
+        # last month's run concludes it never happened.
+        check("it says what it is a window of",
+              "402" in text and "3 most recent" in text,
+              text[:300])
+        check("and does not present itself as complete",
+              "not the complete history" in text, text[:300])
 
         print("\n-- Nothing threw --")
         real = [e for e in errors if "favicon" not in e.lower()]

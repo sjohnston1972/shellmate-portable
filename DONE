@@ -1,0 +1,111 @@
+# Run finished — 5 September 2026 (the UI and reporting cluster)
+
+Thirteen steps planned, thirteen done, plus one unplanned fix that arrived
+mid-run. Archive in `docs/runs/2026-09-05-ui-and-reporting/` (PLAN.md and
+the full PROGRESS.md, with the reasoning behind each decision).
+
+**85 of 85 test files passing** at `e5df247`+. Every step committed and
+pushed to `origin/main` as it closed.
+
+
+## What the run did
+
+| Issue | What shipped | Commits |
+|---|---|---|
+| #540 | `backend/report.py`; a session, diff or change as Markdown or a self-contained HTML page; Export on the replay header, the diff window and the Jira modal; Jira out of `.env` into a Ticketing section with the token in the vault | `e69fca6`, `09dd12c`, `6951f2a`, `04e2b76` |
+| #574 | `backend/playback.py`; a page that replays the session with the same controls, and a plain transcript | `82bc1cc` |
+| #576 | `backend/logsearch.py` and `GET /api/logs/search`; case, regex and whole-word switches, a date range, hit counts, and jump-to-line in the viewer | `527d487`, `2a65432` |
+| #569 | A high-contrast token set and a matching terminal scheme, both measured at AAA | `e5df247` |
+
+Four new test files: `test_report.py`, `test_ticketing.py`,
+`test_playback.py`, `test_logsearch.py`. `test_contrast.py` went from 59
+assertions to 103.
+
+
+## The finds worth knowing about
+
+**`drift_report` was computing two ids and dropping them.** It called
+`diff_snapshots`, which returns `old_id` and `new_id`, and did not pass them
+through — so the diff window could display a comparison it had no way to
+export, because the report endpoint builds from snapshots rather than from
+diff text the browser happens to be holding. Two lines. Without it, Export
+would have worked only after a config push, and the failure would have
+looked like a UI bug rather than a missing field.
+
+**Markdown and HTML render from one block list, not one converted into the
+other.** Converting means parsing Markdown that contains arbitrary device
+output, and device output is angle brackets, ampersands, backticks and lines
+starting with a hash. A Cisco banner carrying three backticks closes a code
+fence early — it raises nothing and silently reformats the rest of the
+report as prose.
+
+**The Jira mask guard covered only one of three sources.** Eight bullet
+characters reaching the vault by any other route — the settings API is
+scriptable — would have been sent to Jira as the token. That fails much
+later, as "Jira rejected ShellMate", with nothing connecting it to the edit
+that caused it. Found by `test_ticketing.py` on its first run.
+
+**Three of my own test assertions were wrong rather than the code**, and all
+three would have passed for the wrong reason: "no `http` anywhere" flagged
+xterm.js's own licence-header attribution URLs (a comment is not a request);
+"no `**`" flagged the eight-asterisk redaction mask, not Markdown bold; and
+a 48 KB fixture cannot exercise a bound whose floor is 100 KB, so the bounds
+test was passing by not testing anything.
+
+
+## Unplanned, and worth reading
+
+The runner session shipped `e35fe6b` mid-run and **`/api/v1/jobs` is now
+paginated** — 100 by default, 500 max. `jobs()` returned a bare list with a
+docstring saying "every run the runner knows of", which became false. Fixed
+in `a14d7d4`: it returns a window that describes itself, and the Runs area
+says on screen when there is more. Two bounds, not one — even `total` is
+only what the runner has not pruned (about three weeks of an hourly
+pipeline), so nothing there claims to be a complete history any more.
+
+They also reported the event-ordering bug as affecting ShellMate. It did
+not, and the premise came from something I had told them: `events()` fetches
+the whole set, filters across all of it and re-sorts by counter itself, so
+it never used the response order as a cursor. Corrected with them; they have
+told Steven they overstated it. Their `?since=` is adopted anyway, because
+pulling a whole run's events on every poll to discard most is a real cost.
+
+
+## Left undone, deliberately
+
+**The executable is not rebuilt** — and this run changed bundled frontend
+files in almost every step, so `dist/ShellMate-Portable.exe` is now well
+behind. PyInstaller cannot replace it while ShellMate is running, and
+killing it could drop live device sessions. **Close ShellMate and run
+`pyinstaller build.spec --noconfirm` before testing any of this from the
+executable.** This is the second run in a row that ends this way.
+
+**ServiceNow as a second ticketing target.** #540 says it is the same shape
+and can follow; it was not this batch.
+
+**The webhook half of #539** is still waiting on your policy decision about
+whether config diff text may leave the machine at all.
+
+**Still blocked on you:** #611 (needs a host that boots without a login),
+#594 (needs the integrations), #518 (certificate decision), #449 (payment).
+
+
+## What I would suggest next
+
+The four issues in this cluster are done, so the open list is now the AI
+cluster (#551–#561, twelve of them), the estate cluster (#543–#548), and the
+packaging group (#563, #564, #568, #571, #572).
+
+My suggestion is **the estate cluster**, for the same reason as last time
+and now with more behind it: #544 (change record) is the issue that joins
+session notes, the config archive and the report writer this run just built
+— `report.change_report` already exists and already says the difference
+between "nothing changed" and "nothing was captured to compare". #543
+(compliance check) and #547 (scheduled show collection) both reuse the
+backup timer and the diff.
+
+**The decision I need before either can be planned** is the same one that
+was outstanding at the end of the last run, and it is still the only thing
+blocking a plan: which cluster — estate or AI — and, if AI, whether #560
+(native tool use) goes in the same batch, because it changes the shape of
+every other AI issue and doing it late means doing some of them twice.

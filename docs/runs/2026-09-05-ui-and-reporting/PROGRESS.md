@@ -266,3 +266,21 @@ and the button says so rather than showing a moon.
 
 `python test_contrast.py` — 103 passed, 0 failed (was 59).
 
+## 2026-09-05 08:38 — step 13, and the run is closed
+
+Tree regenerated in CLAUDE.md: report.py, playback.py, logsearch.py and
+report.js all carried their own header lines.
+
+The full suite caught the last one, which my own change had broken and
+which nothing else would have found: `test_ansible_runs.py` mocks the jobs
+endpoint with `page.route("**/api/ansible/jobs")`, and the panel now asks
+for `?limit=100`. A Playwright glob ending at the path matches no query
+string, so the stub never fired and the table never rendered. Its stub also
+still returned the old bare list — a stub answering in a shape that no
+longer ships tests nothing. Both fixed, plus two assertions for the window
+hint that is new behaviour.
+
+`python tools/run_tests.py` — **85 of 85 test files passed** (83 at the
+start of this run; test_report, test_ticketing, test_playback and
+test_logsearch are the four new ones).
+

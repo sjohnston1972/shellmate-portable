@@ -108,12 +108,15 @@ shellmate/
 │   ├── jsonfile.py              # The one way a JSON data file is read and written (#457)
 │   ├── keys.py                  # Making SSH keys, not just using them
 │   ├── licence.py               # Licence keys, verified without a network (#446)
+│   ├── logsearch.py             # Finding a line across every session log (#576)
 │   ├── neighbours.py            # What the device you reached can see (#542)
 │   ├── onboard.py               # What happens in the first few seconds of a session
 │   ├── paths.py                 # Single source of truth for every filesystem location ShellMate…
 │   ├── pipeline.py              # The chokepoint every keystroke passes through on its way out
 │   ├── platforms.py             # What ShellMate knows about each kind of device
+│   ├── playback.py              # A recorded session as a page that replays itself (#574)
 │   ├── profiles.py              # Connection profile persistence
+│   ├── report.py                # A session, a diff or a change as a file somebody else can read
 │   ├── scheduler.py             # Configuration backups on a timer, per group (#408)
 │   ├── schemes.py               # Terminal colour schemes as data
 │   ├── server.py                # Startup orchestration for ShellMate: port selection and
@@ -213,6 +216,7 @@ shellmate/
 │       ├── prefs.js             # Interface preferences that used to live in localStorage
 │       ├── prompts_editor.js    # Reading and changing what the assistant is told
 │       ├── regex_builder.js     # Build and test an output-colour pattern
+│       ├── report.js            # Export a session, a diff or a change as a file (#540)
 │       ├── settings.js          # Settings panel for ShellMate
 │       ├── settings_nav.js      # Make Settings navigable instead of a long scroll
 │       ├── sftp.js              # Remote file browser for the active SSH tab
