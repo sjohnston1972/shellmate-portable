@@ -18,7 +18,7 @@ connecting to devices. The runner's census stands — 0 EC2, 0 Azure VMs,
 0 Meraki devices — so the first real run creates networks and configuration
 and claims serials later against the same data set.
 
-## The one decision, taken as an assumption until Steven says otherwise
+## The one decision — taken by Steven on 2026-09-05: ShellMate is the sole git writer
 
 **ShellMate is the sole git writer.** It commits a deployment's four files
 to `sjohnston1972/ansible` in one commit (Trees API) and PUTs the same bytes

@@ -89,3 +89,11 @@ its scheme field list.
 
 `python test_deployments_ui.py` — 24 passed, including one pass in a
 browser. `test_ansible_view.py` gained the tab: 44 passed.
+
+## 2026-09-05 23:10 — the decision is taken
+
+Steven: ShellMate is the sole git writer; the runner's tree stays a mirror
+and is not committed there. The deploy-test networks stay. The runner has
+been told both. Steps 3 and 7 still wait on the runner's playbook texts
+and its Azure/AWS skeletons — asked for again, since its reply never
+arrived here.
