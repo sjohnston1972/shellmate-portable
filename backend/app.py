@@ -5427,6 +5427,27 @@ async def list_logs() -> list[dict]:
     return files
 
 
+@app.get("/api/logs/search")
+async def search_logs(q: str = "", since: str = "", until: str = "",
+                      regex: bool = False, case: bool = False,
+                      whole_word: bool = False) -> dict:
+    """
+    Search inside the session logs (#576).
+
+    A bad pattern is a 400 with the reason, not a 500: people type regular
+    expressions into a box while composing them, so a half-written one is
+    the field's normal state rather than a fault.
+    """
+    from backend import logsearch
+
+    try:
+        return await asyncio.to_thread(
+            logsearch.search, log_directory(), q, since, until,
+            regex, case, whole_word)
+    except logsearch.SearchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _log_path(filename: str) -> Path:
     """The log file a request names, or a 400/404 (see download_log)."""
     if ("/" in filename or "\\" in filename or filename in (".", "..")

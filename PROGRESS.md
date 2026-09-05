@@ -147,3 +147,29 @@ Three things caught along the way:
 
 `python test_playback.py` — 46 passed, 0 failed.
 
+## 2026-09-05 07:58 — step 8 done (#576)
+
+`backend/logsearch.py` and `GET /api/logs/search`. Case, regex and
+whole-word switches, a date range on the file's own date, and line numbers
+with the matching text rather than only a list of filenames — matching
+whole files would send somebody back to opening one at a time, which is
+where they started.
+
+The bounds are Stockton settings under a new `logs` category, because the
+right number differs between a laptop and a search over a slow share, and
+the worst outcome is fewer results rather than breakage. Both are
+*reported* in the response: a search that stopped early without saying so
+makes "no matches" and "I did not look" the same answer.
+
+test_advanced caught the two new settings before anything read them, which
+is exactly what that assertion is for.
+
+One test fixture of mine was wrong twice: a 48 KB file cannot exercise a
+bound whose floor is 100 KB, so the bound test was passing by not testing
+anything. 20,000 lines now.
+
+Route order checked rather than assumed: `/api/logs/search` is declared
+before `/api/logs/{filename}`, so "search" is not captured as a filename.
+
+`python test_logsearch.py` — 36 passed, 0 failed. test_advanced 363 passed.
+

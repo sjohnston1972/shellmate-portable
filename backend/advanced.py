@@ -189,6 +189,7 @@ CATEGORIES = {
     # a rendering fault.
     "diag":      "Logging and startup",
     "feedback":  "Bug and feature reports",
+    "logs":      "Session log search",
 }
 
 
@@ -825,6 +826,22 @@ SETTINGS: tuple[Setting, ...] = (
             "The relay files each report as a GitHub issue. Emptied, "
             "reports are saved to feedback-outbox.json in the data folder "
             "instead of being sent anywhere."),
+    # --- Session log search (#576) -----------------------------------------
+    Setting("logs.search_max_bytes", "Searched per log file", 5_000_000, "int",
+            "How much of one log file the search reads before it stops.",
+            "A log folder nobody has pruned can hold gigabytes, and a search "
+            "with no bound would hold the request open while it read all of "
+            "it.||Raise it if searches are missing matches in long logs; the "
+            "result says which files were cut, so a miss is visible rather "
+            "than silent.",
+            minimum=100_000, maximum=200_000_000, unit="bytes"),
+    Setting("logs.search_max_hits", "Matches kept per file", 200, "int",
+            "How many matching lines one file contributes to the results.",
+            "A pattern like `e` matches nearly every line, and a browser "
+            "handed a hundred thousand of them stops responding.||The hit "
+            "*count* is still complete up to the byte bound — this caps the "
+            "lines carried back, not the tally.",
+            minimum=10, maximum=5000),
 )
 
 SETTINGS_BY_KEY = {s.key: s for s in SETTINGS}
