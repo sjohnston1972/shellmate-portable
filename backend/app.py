@@ -2557,6 +2557,7 @@ class DeploymentRequest(BaseModel):
     template_id: str = ""
     plan_text: str | None = None
     apply_text: str | None = None
+    destroy_text: str | None = None
 
 
 class DeploymentSitesRequest(BaseModel):
@@ -2570,6 +2571,14 @@ class DeploymentSitesRequest(BaseModel):
     headed: bool | None = None
     #: Preview only: return what the mapping would produce, store nothing.
     preview: bool = False
+
+
+class DeploymentDestroyRequest(BaseModel):
+    """Body for POST /api/deployments/{id}/destroy — the name, typed back."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirm: str = ""
 
 
 class DeploymentPublishRequest(BaseModel):
@@ -2597,6 +2606,7 @@ async def deployments_get(deployment_id: str) -> dict:
     if record is None:
         raise HTTPException(status_code=404, detail="No such deployment.")
     return {**record, "apply_blocked": deployments.apply_allowed(record),
+            "destroy_blocked": deployments.destroy_allowed(record),
             "runner_paths": deployments.runner_paths(record["slug"]),
             "git_paths": deployments.git_paths(record["slug"])}
 
@@ -2714,7 +2724,8 @@ async def deployments_publish(deployment_id: str, request: DeploymentPublishRequ
         raise _ansible_error(exc) from exc
 
 
-async def _start_deployment_run(deployment_id: str, kind: str) -> dict:
+async def _start_deployment_run(deployment_id: str, kind: str,
+                                confirm: str | None = None) -> dict:
     """
     Start plan.yml or apply.yml with the deployment's keys and scope.
 
@@ -2744,6 +2755,13 @@ async def _start_deployment_run(deployment_id: str, kind: str) -> dict:
         why = deployments.apply_allowed(record)
         if why:
             raise HTTPException(status_code=409, detail=why)
+    if kind == "destroy":
+        why = deployments.destroy_allowed(record, confirm if confirm is not None else "")
+        if why:
+            raise HTTPException(status_code=409, detail=why)
+    if kind == "destroy_plan" and not (record.get("destroy_text") or "").strip():
+        raise HTTPException(status_code=409, detail=(
+            "This deployment has no destroy playbook. Fetch the kit again."))
 
     envvars: dict = dict(deployments.run_env(record))
     extra = dict(deployments.run_vars(record, kind))
@@ -2757,7 +2775,7 @@ async def _start_deployment_run(deployment_id: str, kind: str) -> dict:
         envvars.update(env)
         extra.update(more)
 
-    playbook = deployments.runner_paths(record["slug"])[f"{kind}.yml"]
+    playbook = deployments.runner_paths(record["slug"])[deployments.playbook_for(kind)]
     try:
         started = await asyncio.to_thread(
             ansible_module.start, playbook, extra_vars=extra, envvars=envvars)
@@ -2786,6 +2804,31 @@ async def deployments_apply(deployment_id: str) -> dict:
     return await _start_deployment_run(deployment_id, "apply")
 
 
+@app.post("/api/deployments/{deployment_id}/destroy/plan")
+async def deployments_destroy_plan(deployment_id: str) -> dict:
+    """
+    What a destroy would remove, per site, without removing it.
+
+    The same playbook with dry_run on — one file that knows the ordering —
+    and a teardown's own preview. Nothing is removed until this has been
+    run and its result read.
+    """
+    return await _start_deployment_run(deployment_id, "destroy_plan")
+
+
+@app.post("/api/deployments/{deployment_id}/destroy")
+async def deployments_destroy(deployment_id: str, request: DeploymentDestroyRequest) -> dict:
+    """
+    Remove what the deployment built — behind its plan and a typed name.
+
+    Refused, each by name, without a manage prefix, without a destroy plan
+    whose result has been read, with a plan older than the definition, or
+    with the wrong name typed. The name is checked here as well as in the
+    dialog: the API is scriptable, and a script can skip a dialog.
+    """
+    return await _start_deployment_run(deployment_id, "destroy", request.confirm)
+
+
 @app.get("/api/deployments/{deployment_id}/result")
 async def deployments_result(deployment_id: str, kind: str = "plan") -> dict:
     """
@@ -2799,8 +2842,9 @@ async def deployments_result(deployment_id: str, kind: str = "plan") -> dict:
     from backend import ansible as ansible_module
     from backend import deployments
 
-    if kind not in ("plan", "apply"):
-        raise HTTPException(status_code=400, detail="kind is plan or apply.")
+    if kind not in deployments.RUN_KINDS:
+        raise HTTPException(status_code=400,
+                            detail="kind is one of: " + ", ".join(deployments.RUN_KINDS) + ".")
     record = await asyncio.to_thread(deployments.get, deployment_id)
     if record is None:
         raise HTTPException(status_code=404, detail="No such deployment.")

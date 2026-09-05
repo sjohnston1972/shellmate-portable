@@ -292,8 +292,53 @@ def test_the_gate() -> None:
           str(d.get(rec["id"])["site_ids"]))
     check("and the list view counts what was built",
           next(x for x in d.deployments() if x["id"] == rec["id"])["built"] == 1)
-    check("a run is a plan or an apply, nothing else",
-          bool(_raises(lambda: d.record_run(rec["id"], "destroy", "j"))))
+    check("a run is one of the four kinds, nothing else",
+          bool(_raises(lambda: d.record_run(rec["id"], "teardown", "j"))))
+
+
+def test_the_destroy_gate() -> None:
+    """
+    Everything the apply gate asks, with more at stake, and two of its own.
+    """
+    print("\n-- No destroy plan, no destroy --")
+    rec = d.save({"name": "Tear", "provider": "meraki", "scheme": {},
+                  "destroy_text": ""})
+    check("no destroy playbook: refused, and says to fetch the kit",
+          "Fetch the kit" in d.destroy_allowed(rec))
+    rec = d.save({"id": rec["id"], "name": "Tear", "provider": "meraki",
+                  "scheme": {}, "destroy_text": "- hosts: localhost\n"})
+    check("no manage prefix: refused, and says why an empty one is dangerous",
+          "match everything" in d.destroy_allowed(rec), d.destroy_allowed(rec))
+    rec = d.save({"id": rec["id"], "name": "Tear", "provider": "meraki",
+                  "scheme": {"manage_prefix": "deploy-test-"}})
+    check("no destroy plan: refused", "destroy plan first" in d.destroy_allowed(rec))
+    d.record_run(rec["id"], "destroy_plan", "dp-1", None)
+    check("a plan not yet read: refused",
+          "not been read" in d.destroy_allowed(d.get(rec["id"])))
+    d.record_run(rec["id"], "destroy_plan", "dp-1",
+                 {"destroy": {"dry_run": True, "counts": {"remove": 1}, "sites": []}})
+    rec = d.get(rec["id"])
+    check("read: the button may come on", d.destroy_allowed(rec) == "", d.destroy_allowed(rec))
+    check("but the request itself needs the name typed",
+          "Type the deployment" in d.destroy_allowed(rec, ""))
+    check("and the wrong name is refused", "Type the deployment" in d.destroy_allowed(rec, "tear"))
+    check("the right name opens it", d.destroy_allowed(rec, "Tear") == "")
+
+    check("the destroy pair runs destroy.yml with dry_run flipped",
+          d.playbook_for("destroy_plan") == "destroy.yml"
+          and d.run_vars(rec, "destroy_plan")["dry_run"] is True
+          and d.run_vars(rec, "destroy")["dry_run"] is False
+          and d.run_vars(rec, "destroy")["plan_job"] == "dp-1")
+
+    d.record_run(rec["id"], "apply", "a-1", {"apply": {"sites": [
+        {"name": "s1", "outcome": "created", "ids": {"network_id": "N1"}},
+        {"name": "s2", "outcome": "created", "ids": {"network_id": "N2"}}]}})
+    d.record_run(rec["id"], "destroy", "x-1", {"destroy": {"sites": [
+        {"name": "s1", "outcome": "removed"},
+        {"name": "s2", "outcome": "failed", "reason": "still has a device"}]}})
+    ids = d.get(rec["id"])["site_ids"]
+    check("ids go only for the sites the runner says are gone",
+          "s1" not in ids and ids["s2"] == {"network_id": "N2"}, str(ids),)
 
 
 def main() -> int:
@@ -302,7 +347,7 @@ def main() -> int:
     print("=" * 52)
     for test in (test_the_data_set, test_the_record, test_rendering_is_deterministic,
                  test_two_paths_one_prefix, test_the_kit, test_scope_per_provider,
-                 test_the_gate):
+                 test_the_gate, test_the_destroy_gate):
         try:
             test()
         except Exception as exc:

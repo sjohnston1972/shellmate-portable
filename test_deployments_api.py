@@ -110,7 +110,7 @@ def test_the_flow() -> None:
         "name": "Deploy test", "provider": "meraki",
         "scheme": {"product_types": ["appliance"], "vlans": [{"id": 10, "name": "data"}]},
         "scope": {"meraki_org_id": "923103"}, "keys": ["meraki_key"],
-        "plan_text": PLAN, "apply_text": PLAN})
+        "plan_text": PLAN, "apply_text": PLAN, "destroy_text": PLAN})
     check("saved", res.status_code == 200, res.text[:200])
     dep = res.json()
 
@@ -131,10 +131,10 @@ def test_the_flow() -> None:
 
     res = client.post(f"/api/deployments/{dep['id']}/publish", json={})
     check("publish commits then sends", res.status_code == 200
-          and res.json()["commit"]["sha"] == "c0ffee1" and len(fake.uploaded) == 4,
+          and res.json()["commit"]["sha"] == "c0ffee1" and len(fake.uploaded) == 5,
           res.text[:300])
-    check("two playbooks, two files", sorted(r for r, _ in fake.uploaded) ==
-          ["file", "file", "playbook", "playbook"], str(fake.uploaded))
+    check("three playbooks, two files", sorted(r for r, _ in fake.uploaded) ==
+          ["file", "file", "playbook", "playbook", "playbook"], str(fake.uploaded))
 
     print("\n-- No plan, no apply --")
     res = client.post(f"/api/deployments/{dep['id']}/apply")
@@ -190,6 +190,47 @@ def test_the_flow() -> None:
           next(x for x in client.get("/api/deployments").json()["deployments"]
                if x["id"] == dep["id"])["built"] == 3)
 
+    print("\n-- Destroy, behind its own plan and a typed name --")
+    res = client.post(f"/api/deployments/{dep['id']}/destroy", json={"confirm": "Deploy test"})
+    check("destroy without a manage prefix is refused, and says why",
+          res.status_code == 409 and "manage prefix" in res.json()["detail"], res.text[:200])
+    current = client.get(f"/api/deployments/{dep['id']}").json()
+    client.post("/api/deployments", json={
+        "id": dep["id"], "name": current["name"], "provider": "meraki",
+        "scope": current["scope"], "keys": current["keys"],
+        "scheme": {**current["scheme"], "manage_prefix": "deploy-test-"},
+        "plan_text": PLAN, "apply_text": PLAN, "destroy_text": PLAN})
+    res = client.post(f"/api/deployments/{dep['id']}/destroy", json={"confirm": "Deploy test"})
+    check("without a destroy plan: refused",
+          res.status_code == 409 and "destroy plan first" in res.json()["detail"], res.text[:200])
+    res = client.post(f"/api/deployments/{dep['id']}/destroy/plan")
+    check("a destroy plan starts on destroy.yml with dry_run",
+          res.status_code == 200 and fake.started[-1]["playbook"].endswith("/destroy.yml")
+          and fake.started[-1]["extra_vars"]["dry_run"] is True, res.text[:200])
+    dplan = fake.started[-1]
+    fake.finished[dplan["job"]] = True
+    fake.results[dplan["job"]] = {"destroy": {"dry_run": True, "counts": {"remove": 2, "skip": 1},
+                                              "sites": [{"name": "deploy-test-001", "action": "remove"}]}}
+    client.get(f"/api/deployments/{dep['id']}/result?kind=destroy_plan")
+    res = client.post(f"/api/deployments/{dep['id']}/destroy", json={"confirm": "wrong"})
+    check("the wrong name typed is refused by the server, not only the dialog",
+          res.status_code == 409 and "Type the deployment" in res.json()["detail"], res.text[:200])
+    res = client.post(f"/api/deployments/{dep['id']}/destroy", json={"confirm": "Deploy test"})
+    check("the right name starts it, carrying the destroy plan's job",
+          res.status_code == 200 and fake.started[-1]["extra_vars"]["dry_run"] is False
+          and fake.started[-1]["extra_vars"]["plan_job"] == dplan["job"], res.text[:200])
+    dest = fake.started[-1]
+    fake.finished[dest["job"]] = True
+    fake.results[dest["job"]] = {"destroy": {"dry_run": False, "counts": {"removed": 1, "skipped": 1, "failed": 1},
+                                             "sites": [{"name": "deploy-test-001", "outcome": "removed"},
+                                                       {"name": "deploy-test-002", "outcome": "failed", "reason": "x"},
+                                                       {"name": "API Navigator DEV", "outcome": "skipped"}]}}
+    client.get(f"/api/deployments/{dep['id']}/result?kind=destroy")
+    ids = client.get(f"/api/deployments/{dep['id']}").json()["site_ids"]
+    check("ids go only for what the runner says is gone",
+          "deploy-test-001" not in ids and "deploy-test-002" in ids and "API Navigator DEV" in ids,
+          str(ids))
+
     print("\n-- The kit --")
     res = client.post("/api/deployments", json={"name": "Kit via API", "provider": "meraki"})
     kit = res.json()
@@ -222,7 +263,8 @@ def test_the_flow() -> None:
           res.status_code == 400 and "'Site'" in res.json()["detail"], res.text[:200])
     res = client.delete(f"/api/deployments/{dep['id']}")
     check("deleting forgets the record and touches nothing",
-          res.json()["deleted"] is True and len(fake.started) == 2)
+          res.json()["deleted"] is True and len(fake.started) == 4,
+          "plan, apply, destroy plan, destroy — and nothing on forget")
 
 
 def main() -> int:

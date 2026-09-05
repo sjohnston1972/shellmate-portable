@@ -595,8 +595,8 @@ def record_run(deployment_id: str, kind: str, job_id: str,
     claiming serials — and every later change needs the network id, and
     looking it up by name is how a renamed network becomes a new one.
     """
-    if kind not in ("plan", "apply"):
-        raise DeploymentError("A run is a plan or an apply.")
+    if kind not in RUN_KINDS:
+        raise DeploymentError("A run is one of: " + ", ".join(RUN_KINDS) + ".")
     record = get(deployment_id)
     if record is None:
         return None
@@ -608,8 +608,29 @@ def record_run(deployment_id: str, kind: str, job_id: str,
         for site in body.get("sites") or []:
             if isinstance(site, dict) and site.get("name") and site.get("ids"):
                 record.setdefault("site_ids", {})[site["name"]] = site["ids"]
+    if kind == "destroy" and isinstance(result, dict):
+        # The ids go only for the sites the runner says are gone. A site
+        # it skipped, or failed to remove, keeps its id — that id is how
+        # somebody finds what is still there.
+        body = result.get("destroy") if isinstance(result.get("destroy"), dict) else result
+        ids = record.get("site_ids") or {}
+        for site in body.get("sites") or []:
+            if isinstance(site, dict) and site.get("outcome") == "removed":
+                ids.pop(site.get("name", ""), None)
+        record["site_ids"] = ids
     record["updated"] = _now()
     return _replace(record)
+
+
+#: The runs a deployment can make. The destroy pair mirrors the apply pair:
+#: a read-only plan of what would go, then the thing itself, on the same
+#: playbook with `dry_run` flipped — one file that knows the ordering.
+RUN_KINDS = ("plan", "apply", "destroy_plan", "destroy")
+
+
+def playbook_for(kind: str) -> str:
+    """Which of the deployment's files a run kind executes."""
+    return "destroy.yml" if kind in ("destroy_plan", "destroy") else f"{kind}.yml"
 
 
 def run_vars(record: dict, kind: str) -> dict:
@@ -630,6 +651,11 @@ def run_vars(record: dict, kind: str) -> dict:
                 if v not in ("", None) and k not in as_env})
     if kind == "apply":
         out["plan_job"] = str(((record.get("last_plan") or {}).get("job")) or "")
+    if kind == "destroy_plan":
+        out["dry_run"] = True
+    if kind == "destroy":
+        out["dry_run"] = False
+        out["plan_job"] = str(((record.get("last_destroy_plan") or {}).get("job")) or "")
     return out
 
 
@@ -638,6 +664,44 @@ def run_env(record: dict) -> dict:
     as_env = SCOPE_AS_ENV.get(record.get("provider", ""), {})
     return {as_env[k]: str(v) for k, v in (record.get("scope") or {}).items()
             if k in as_env and v not in ("", None)}
+
+
+def destroy_allowed(record: dict, confirm: str | None = None) -> str:
+    """
+    Why a destroy may not start, or "" when it may.
+
+    Everything apply_allowed asks, with more at stake, plus two of its
+    own: the scheme's manage_prefix must be set, because destroy removes
+    only sites that match it and an empty prefix matches everything; and
+    the deployment's name must have been typed back, checked here as well
+    as in the dialog, because the API is scriptable and a script can skip
+    a dialog.
+
+    `confirm` is None when the caller is only asking whether the button
+    should be on, and the typed text when a destroy is actually requested.
+    """
+    if not (record.get("destroy_text") or "").strip():
+        return "This deployment has no destroy playbook. Fetch the kit again — " \
+               "a kit written before teardown existed has none."
+    prefix = str((record.get("scheme") or {}).get("manage_prefix") or "").strip()
+    if not prefix:
+        return "The scheme has no manage prefix. Destroy removes only sites " \
+               "whose name starts with it, and an empty prefix would match " \
+               "everything in the site list — set one before tearing down."
+    plan = record.get("last_destroy_plan") or {}
+    if not plan.get("job"):
+        return "Run a destroy plan first. It lists exactly what would be " \
+               "removed, per site, and nothing is removed until it has been read."
+    if not isinstance(plan.get("result"), dict):
+        return "The destroy plan has not finished, or its result has not " \
+               "been read yet."
+    if float(plan.get("at") or 0) < float(record.get("updated") or 0) - 1:
+        return "The definition changed after the destroy plan. Plan again, so " \
+               "what is removed is what you have read."
+    if confirm is not None and confirm.strip() != str(record.get("name") or "").strip():
+        return f"Type the deployment's name — {record.get('name')!r} — to confirm. " \
+               "This removes what it built."
+    return ""
 
 
 def apply_allowed(record: dict) -> str:
