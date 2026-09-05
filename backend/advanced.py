@@ -190,6 +190,7 @@ CATEGORIES = {
     "diag":      "Logging and startup",
     "feedback":  "Bug and feature reports",
     "logs":      "Session log search",
+    "backups":   "Scheduled backups",
 }
 
 
@@ -836,6 +837,28 @@ SETTINGS: tuple[Setting, ...] = (
             "The relay files each report as a GitHub issue. Emptied, "
             "reports are saved to feedback-outbox.json in the data folder "
             "instead of being sent anywhere."),
+    # --- Scheduled backups: telling something else (#539) ------------------
+    Setting("backups.webhook_timeout", "Webhook timeout", 10, "int",
+            "How long to wait for the webhook to accept a digest.",
+            "It runs after the captures are already stored, so the worst "
+            "case is a message nobody gets rather than a backup nobody "
+            "has. Short, because a chat service that has not answered in "
+            "ten seconds is not about to.",
+            minimum=1, maximum=120, unit="s"),
+    Setting("backups.webhook_diff_lines", "Lines of diff per device", 40, "int",
+            "The cap when the webhook is set to include what changed.",
+            "Only applies with 'Include what changed' on, which is off by "
+            "default. A configuration diff can be hundreds of lines, and a "
+            "chat service will either reject the message or render a wall "
+            "nobody reads. Whatever is sent is redacted first.",
+            minimum=1, maximum=500),
+    Setting("backups.webhook_link", "Link to include", "", "text",
+            "A URL for 'where to go and look', added to the message.",
+            "Blank by default and deliberately so: ShellMate binds to "
+            "loopback on a port chosen at startup, so a localhost link "
+            "posted into a team channel works for exactly one person and "
+            "reads as broken to everybody else. Set it only where ShellMate "
+            "really is reachable at a fixed address."),
     Setting("feedback.report_crashes", "Offer to report a crash", True, "bool",
             "After a fault, offer on the next launch to send what was "
             "recorded — with the whole text shown first.",

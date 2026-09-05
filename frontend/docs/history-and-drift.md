@@ -67,6 +67,43 @@ is the normal night, and something that announces it every day is something
 you learn to dismiss without reading — at which point the morning it matters
 looks like all the others.
 
+### Telling something else
+
+Nobody is sitting in front of ShellMate most mornings. Under
+**Settings → Configuration capture → Tell something else**, the same digest
+can be posted to a URL — a Teams or Slack channel, or anything that reads a
+POST.
+
+The same rule applies: **a clean night sends nothing.** A message every
+morning regardless is one that gets filtered into a folder.
+
+Three body formats. **Generic JSON** carries named fields something else can
+act on — filter on failures, open a ticket when a device changed — and it is
+the default because it is the one that keeps working. The **Teams** and
+**Slack** shapes are a convenience for posting straight into a channel;
+Teams changed its incoming-webhook format under Workflows, and a card that
+renders today and becomes an empty bubble after a platform change is worse
+than a body anything can read.
+
+**Include what changed** adds the configuration difference per device. It is
+off, and worth leaving off unless that channel is as private as your
+configuration archive: a running configuration carries hashes, keys and
+community strings. Whatever is sent is redacted first and capped per device
+(the cap is in Stockton, under Scheduled backups).
+
+**Show what would be sent** prints the exact body before anything leaves.
+Worth using: a webhook is the one integration where you cannot see what
+arrived until it has already arrived somewhere you may not control. **Send
+it now** posts the current digest — which on a quiet morning correctly says
+nothing was sent.
+
+The webhook URL is **a credential, not a location**: for Teams and Slack the
+whole authority to post into that channel is in the URL. ShellMate keeps it
+in the vault, never in `settings.json`, and masks it in a support bundle.
+
+If the webhook fails, the backup does not. It runs after the configurations
+are stored, so the worst case is a message nobody got.
+
 ## Notes
 
 A change window produces a running commentary. "16:02 shut Gi1/0/24, 16:05

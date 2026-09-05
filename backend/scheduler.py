@@ -517,6 +517,23 @@ def run_now(key: str) -> dict:
     if compliance_report:
         result = dict(result)
         result["compliance"] = compliance_report.get("summary", "")
+
+    # Tell whatever is watching (#539). After the compliance re-check, not
+    # before: its findings are attached to the group afterwards, and a
+    # message sent earlier would disagree with the panel for exactly the
+    # runs where the disagreement mattered most.
+    #
+    # It reads the digest rather than being handed `result`, so the numbers
+    # it posts are the numbers on the screen. It cannot fail the backup —
+    # the configurations are already stored, which is the part that
+    # mattered.
+    try:
+        from backend import backup_webhook
+
+        backup_webhook.notify_after_run()
+    except Exception as exc:
+        logger.warning("Could not post the backup digest: %s", exc)
+
     return result
 
 

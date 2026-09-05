@@ -1980,9 +1980,63 @@ GigEth0/2     unassigned    YES unset  down     down
             </div>
           </div>
         
+          <div class="settings-subgroup">
+          <h4 class="settings-subsection-title">Tell something else</h4>
+          <p class="settings-section-hint">The overnight digest goes to a URL as well as to this window — a Teams or Slack channel, or anything that reads a POST. Nothing is sent on a clean night: a message every morning whether or not anything happened is one that gets filtered away, and then the morning something did happen looks like all the others.</p>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-webhook-enabled"
+                   data-tip="Post the digest to the URL below when a scheduled backup finishes and there is something to report.||It runs after the captures are stored, so a webhook that fails costs you a message, never a backup. Nothing is sent when the night was clean.">Post the digest to a URL</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-webhook-enabled" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-webhook-url"
+                   data-tip="Where the digest is posted. In Teams and Slack this comes from the channel&#39;s own incoming-webhook or Workflows setup.||This is a credential even though it looks like a location: for Teams and Slack the whole authority to post into the channel is in the URL. It is kept in the vault, never in settings.json, and masked in a support bundle.">Webhook URL</label>
+            <input type="password" id="setting-webhook-url" class="setting-input setting-input-full" autocomplete="off" placeholder="https://…" />
+            <p class="settings-section-hint">Held in the vault like an API key. Anyone with this URL can post into that channel.</p>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-webhook-format"
+                   data-tip="What shape the body is. Generic JSON carries named fields something else can act on — filter on failures, open a ticket when a device changed.||The two card formats are a convenience for posting straight into a channel. JSON is the one that keeps working: Teams changed its incoming-webhook format under Workflows, and a card that renders today and becomes an empty bubble after a platform change is worse than a body anything can read.">Body format</label>
+            <select id="setting-webhook-format" class="setting-input">
+              <option value="json">Generic JSON</option>
+              <option value="teams">Microsoft Teams card</option>
+              <option value="slack">Slack message</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label class="setting-label" for="setting-webhook-diff"
+                   data-tip="Include what actually changed on each device, not just that it changed.||Off, and worth leaving off unless the channel is as private as the archive folder: a running configuration carries hashes, keys and community strings. Whatever is sent is redacted first and capped per device, and the cap is in Stockton under Scheduled backups.">Include what changed</label>
+            <label class="toggle">
+              <input type="checkbox" id="setting-webhook-diff" />
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <div class="setting-row">
+            <button type="button" id="webhook-preview" class="btn-secondary">
+              <span class="material-symbols-outlined">visibility</span>
+              Show what would be sent
+            </button>
+            <button type="button" id="webhook-test" class="btn-secondary">
+              <span class="material-symbols-outlined">send</span>
+              Send it now
+            </button>
+            <span id="webhook-status" class="setting-value"></span>
+          </div>
+          <pre id="webhook-body" class="webhook-body hidden"></pre>
+        </div>
+
           <!-- Advanced values for this area render here as a
                subsection (#152) — the same rows, one heading fewer. -->
           <div class="settings-slot" data-category="capture"></div>
+          <div class="settings-slot" data-category="backups"></div>
         </section>
 
         <!-- ===== AI ===== -->

@@ -1830,6 +1830,43 @@ async def backup_digest(all: bool = False) -> dict:
     return await asyncio.to_thread(scheduler.digest, all)
 
 
+@app.get("/api/backups/webhook/preview")
+async def backup_webhook_preview() -> dict:
+    """
+    The body that would be posted, as text (#539).
+
+    A webhook is the one integration where nobody can see what arrived
+    until it has already arrived somewhere they may not control. Showing
+    the body first is cheap; the alternative is finding out that "include
+    what changed" was on by reading a running configuration in a company
+    chat channel.
+    """
+    from backend import backup_webhook
+
+    return {
+        "configured": await asyncio.to_thread(backup_webhook.is_configured),
+        "body":       await asyncio.to_thread(backup_webhook.preview, None),
+    }
+
+
+@app.post("/api/backups/webhook/test")
+async def backup_webhook_test() -> dict:
+    """
+    Send the current digest now, to check the URL works.
+
+    Deliberately the *real* digest rather than a fabricated one. A test
+    that posts "this is a test" proves the URL is reachable and nothing
+    about whether the body is the shape the other end wanted — and on a
+    quiet morning the honest answer is "nothing to report", which is
+    itself the thing worth knowing about a webhook whose whole design is
+    that silence is normal.
+    """
+    from backend import backup_webhook, scheduler
+
+    report = await asyncio.to_thread(scheduler.digest, True)
+    return await asyncio.to_thread(backup_webhook.send, report)
+
+
 @app.post("/api/backups/digest/seen")
 async def backup_digest_seen() -> dict:
     """Mark the digest as read, so it stops asking."""

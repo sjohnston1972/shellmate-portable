@@ -80,3 +80,45 @@ both the wrong way.
 
 `python test_firstrun.py` — 29 passed. Guards: contrast 103, icons 4,
 tooltips 8, accessibility 20, settings 49, vault 96, startup 150.
+
+## 2026-09-05 17:40 — #539 finished
+
+The webhook half. The in-app digest shipped earlier; this is the other end
+of the same issue, and the reason it stayed open.
+
+`backend/backup_webhook.py`, fired from `run_now` after the compliance
+re-check — after, because compliance findings are attached to the group
+afterwards and a message sent earlier would disagree with the panel for
+exactly the runs where the disagreement mattered. It reads the digest rather
+than being handed the run's result, so the numbers it posts are the numbers
+on the screen.
+
+Silence is kept as the feature: a clean night sends nothing at all, and the
+Send-it-now button says so in those words rather than reporting a failure —
+a test that called silence a failure would have somebody chasing a webhook
+that works.
+
+The URL is a credential that looks like a location, so it is diverted into
+the vault like the Ansible token, masked for the panel, and never written to
+settings.json. Verified by reading the file back.
+
+Diffs are off by default and redacted and capped when on, and they are read
+from stored snapshots: `drift_report` opens a channel to the device, and by
+the time this runs the session it would have used has been closed.
+
+**A real bug the test caught.** `url()` had `from backend import vault` and
+then `vault.get(...)` — the module, not the instance. The AttributeError was
+swallowed by the locked-vault guard, so the webhook would have silently
+never fired. Found only because the test posts to an actual HTTP server and
+asserts something arrived.
+
+**One departure from the issue.** It asks for a ShellMate link in the body.
+There is nothing honest to put there by default — ShellMate binds to
+loopback on a port chosen at startup, so a localhost link in a team channel
+works for one person and reads as broken to everyone else. It is
+`backups.webhook_link`, empty unless a deployment really is reachable at a
+fixed address.
+
+`python test_backup_webhook.py` — 40 passed, against a live receiver.
+Guards: settings 49, scheduler 45, advanced 392, support 78, security 58,
+backup_digest 23, vault 96, compliance 30.

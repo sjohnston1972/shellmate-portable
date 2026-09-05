@@ -88,6 +88,50 @@
     document.getElementById('settings-save')
       .addEventListener('click', saveSettings);
 
+    // The backup webhook's two buttons (#539).
+    //
+    // Preview before Send, and both offered, because a webhook is the one
+    // integration where nobody can see what arrived until it has already
+    // arrived somewhere they may not control. Finding out that "include
+    // what changed" was on by reading a running configuration in a company
+    // channel is not a mistake anybody gets to take back.
+    const hookPreview = document.getElementById('webhook-preview');
+    if (hookPreview) hookPreview.addEventListener('click', async () => {
+      const out = document.getElementById('webhook-body');
+      const status = document.getElementById('webhook-status');
+      try {
+        const data = await (await fetch('/api/backups/webhook/preview')).json();
+        out.textContent = data.body || '';
+        out.classList.remove('hidden');
+        status.textContent = data.configured
+          ? '' : 'Not configured yet — this is what would be sent.';
+      } catch (e) {
+        status.textContent = String(e.message || e);
+      }
+    });
+
+    const hookTest = document.getElementById('webhook-test');
+    if (hookTest) hookTest.addEventListener('click', async () => {
+      const status = document.getElementById('webhook-status');
+      status.textContent = 'Sending…';
+      try {
+        const res = await fetch('/api/backups/webhook/test', { method: 'POST' });
+        const data = await res.json();
+        // The three outcomes read differently on purpose. "Nothing to
+        // report" is not a failure — it is the normal night, and a test
+        // that called it one would have somebody chasing a webhook that
+        // works.
+        status.textContent = data.sent
+          ? 'Sent.'
+          : (data.reason === 'nothing to report'
+             ? 'Nothing to report, so nothing was sent — which is what a '
+               + 'clean night looks like.'
+             : `Not sent: ${data.reason}.`);
+      } catch (e) {
+        status.textContent = String(e.message || e);
+      }
+    });
+
     // Diagnostics shortcuts (#222). Settings closes first — both open their
     // own overlay at the same level, and stacking them leaves the one behind
     // unreachable.
@@ -903,6 +947,20 @@
     _checked('setting-diff-on-connect',   l.diff_on_connect !== false);
     _checked('setting-save-config-files', !!l.save_config_files);
     _val('setting-config-dir',   l.config_directory      || 'configs');
+
+    // The backup webhook (#539). The URL is masked exactly as the Ansible
+    // token is, and for the same reason: it is a credential that looks
+    // like a location, and somebody changing the body format should not
+    // have to retype a URL they cannot read.
+    const bk = s.backups || {};
+    _checked('setting-webhook-enabled', bk.webhook_enabled === true);
+    _val('setting-webhook-format', bk.webhook_format || 'json');
+    _checked('setting-webhook-diff', bk.webhook_include_diff === true);
+    _val('setting-webhook-url', bk.has_webhook_url ? '•'.repeat(8) : '');
+    const hookUrl = document.getElementById('setting-webhook-url');
+    if (hookUrl) {
+      hookUrl.dataset.maskedOriginal = bk.has_webhook_url ? '•'.repeat(8) : '';
+    }
     _val('setting-config-keep',  l.config_keep_per_device ?? 20);
     _val('setting-config-age',   l.config_max_age_days    ?? 365);
     _val('setting-config-size',  l.config_max_total_mb    ?? 200);
@@ -1271,6 +1329,15 @@
         config_max_age_days:    _int('setting-config-age', 365),
         config_max_total_mb:    _int('setting-config-size', 200),
       },
+      backups: {
+        webhook_enabled:      _gchecked('setting-webhook-enabled'),
+        webhook_format:       _gval('setting-webhook-format') || 'json',
+        webhook_include_diff: _gchecked('setting-webhook-diff'),
+        // Only when it changed, like the Ansible token: sending the mask
+        // back would store eight bullet characters as the URL, and the
+        // failure would surface a week later as a digest nobody got.
+        ..._webhookUrlIfChanged(),
+      },
       alerts: {
         flash_tab:     _gchecked('setting-alert-flash'),
         sound:         _gchecked('setting-alert-sound'),
@@ -1411,6 +1478,16 @@
     const mask = (el.dataset.maskedOriginal || '').trim();
     if (typed === mask) return {};
     return { token: typed };
+  }
+
+  /** The webhook URL only when it was actually retyped (#539). */
+  function _webhookUrlIfChanged() {
+    const el = document.getElementById('setting-webhook-url');
+    if (!el) return {};
+    const typed = (el.value || '').trim();
+    const mask = (el.dataset.maskedOriginal || '').trim();
+    if (typed === mask) return {};
+    return { webhook_url: typed };
   }
 
   function _collectProviders() {

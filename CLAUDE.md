@@ -92,6 +92,7 @@ shellmate/
 │   ├── ansible_library.py       # What ShellMate keeps for Ansible, beside the runner (#586)
 │   ├── app.py                   # FastAPI application for ShellMate
 │   ├── auth.py                  # Optional authentication, for the deployments that need it
+│   ├── backup_webhook.py        # Telling something other than ShellMate what the night found (#539)
 │   ├── branding.py              # One source for the application icon
 │   ├── broadcast_collect.py     # The replies a broadcast produced, and how they differ (#529)
 │   ├── certs.py                 # Read an OpenSSH certificate and say what it actually permits

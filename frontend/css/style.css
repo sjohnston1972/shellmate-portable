@@ -12275,3 +12275,21 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
 /* The chip reads as information, not as a control, until it is hovered —
    it is a label that happens to open Diagnostics. */
 #status-portable.status-portable-warn { color: var(--warn); }
+
+/* What the backup webhook would post (#539). Its own scroller: a digest
+   with diffs in it is long, and a settings panel that scrolls sideways to
+   show JSON is worse than one that does not show it at all. */
+.webhook-body {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--on-surface-dim);
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+}

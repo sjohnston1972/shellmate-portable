@@ -289,6 +289,21 @@ DEFAULT_SETTINGS: dict = {
         # seen. A timestamp rather than a flag, because "seen" has to
         # survive the next night's run turning up more.
         "digest_seen": 0,
+        # Telling something other than ShellMate what the night found
+        # (#539). The URL itself is a bearer secret and lives in the
+        # vault, not here — anyone holding it can post into the channel.
+        "webhook_enabled": False,
+        # "json" | "teams" | "slack". Generic JSON is the default because
+        # it is the one that keeps working: Teams' incoming-webhook format
+        # changed under Workflows, and a card that renders the day it is
+        # written and degrades to an empty bubble a year later is worse
+        # than a body anything can read.
+        "webhook_format": "json",
+        # Off, and this one stays off unless somebody says otherwise: a
+        # digest that posts a running configuration into a chat channel has
+        # moved an estate somewhere with a very different access model.
+        # Redacted even then.
+        "webhook_include_diff": False,
     },
 
     # Driving Ansible through an ansible-runner-service container (#585).
@@ -621,6 +636,18 @@ def get_settings_for_ui() -> dict:
     ansible_block["token"] = "•" * 8 if stored_token else ""
     ansible_block["has_token"] = bool(stored_token)
 
+    # The backup webhook's URL, the same way (#539). It looks like a
+    # location and is a credential: the authority of a Teams or Slack
+    # incoming webhook is entirely in the URL.
+    backups_block = dict(s_out.get("backups") or {})
+    try:
+        stored_hook = vault.get("backup_webhook_url", "") or ""
+    except Exception:
+        stored_hook = ""
+    backups_block["webhook_url"] = "•" * 8 if stored_hook else ""
+    backups_block["has_webhook_url"] = bool(stored_hook)
+    s_out["backups"] = backups_block
+
     # The GitHub token, the same way (#609) — but with no environment
     # fallback. `GITHUB_TOKEN` exists in a great many development
     # environments, including the one ShellMate is built in, and picking
@@ -709,6 +736,12 @@ def update_settings(partial: dict) -> dict:
                                "ansible_github_token")
         _divert_section_secret(incoming, merged, "ticketing", "jira_api_token",
                                "jira_api_token")
+        # The backup webhook's URL (#539). A secret despite looking like a
+        # location: the whole of a Teams or Slack incoming webhook's
+        # authority is in the URL, so anyone who reads settings.json could
+        # post into the channel.
+        _divert_section_secret(incoming, merged, "backups", "webhook_url",
+                               "backup_webhook_url")
 
         jsonfile.write(paths.settings_file(), merged)
         invalidate()
