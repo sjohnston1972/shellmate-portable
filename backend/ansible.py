@@ -670,6 +670,13 @@ def inventory_from_estate(group: str = "") -> dict:
             entry["ansible_user"] = profile["username"]
         platform = (profile.get("platform") or profile.get("last_seen_platform") or "").lower()
         network_os = ANSIBLE_NETWORK_OS.get(platform)
+        if platform:
+            # ShellMate's own id, beside the Ansible name it maps to. A
+            # curated list built from this table has to store what
+            # ShellMate knew, not the mapping's output — reversing
+            # `cisco.ios.ios` back to `ios` in the browser would be a
+            # second copy of a map that already exists here (#608).
+            entry["shellmate_platform"] = platform
         if network_os:
             entry["ansible_network_os"] = network_os
             entry["ansible_connection"] = "ansible.netcommon.network_cli"

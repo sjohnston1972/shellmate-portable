@@ -2512,6 +2512,7 @@ GigEth0/2     unassigned    YES unset  down     down
           <div class="ansible-target-modes">
             <label><input type="radio" name="ansible-target" value="group" checked /> A ShellMate group</label>
             <label><input type="radio" name="ansible-target" value="hosts" /> Specific hosts</label>
+            <label><input type="radio" name="ansible-target" value="custom" /> A custom inventory</label>
             <label><input type="radio" name="ansible-target" value="runner" /> An inventory the runner holds</label>
           </div>
 
@@ -2527,6 +2528,12 @@ GigEth0/2     unassigned    YES unset  down     down
 
           <div id="ansible-target-hosts" class="ansible-target-pane hidden">
             <div id="ansible-host-list" class="ansible-hosts"></div>
+          </div>
+
+          <div id="ansible-target-custom" class="ansible-target-pane hidden">
+            <select id="ansible-custom-select" class="setting-input"></select>
+            <p class="field-hint">A list built in the Inventory area — devices picked out of the estate, or a file uploaded from somewhere ShellMate has never connected to. It travels with the run, exactly like a group does.</p>
+            <div id="ansible-custom-preview" class="ansible-preview"></div>
           </div>
 
           <div id="ansible-target-runner" class="ansible-target-pane hidden">

@@ -323,6 +323,42 @@ If you would rather the runner held a copy permanently, put a file in its
 automatically. There is no way to list it from here — the runner has no
 endpoint for that — so the choice is its own default or a path you name.
 
+### Custom inventories
+
+A run usually wants less than the whole estate, and sometimes wants
+something ShellMate has never connected to at all. Both are built in this
+area and appear as a target in the Run dialog.
+
+**Picked out of the estate.** Tick hosts in the table and save them as a
+named list. "The switches I am upgrading this weekend" is not a group and
+should not have to become one — making it a group changes the tree
+everybody else sees, for a list that stops mattering on Monday. The rows
+carry what ShellMate already knew: the address, the name, the username,
+the port and the platform.
+
+**Uploaded from somewhere else.** A CSV or a plain list of addresses — a
+Meraki export, an IPAM report, a spreadsheet somebody keeps. Two things
+are asked rather than guessed:
+
+- **Which column holds the address.** A heading may say `LAN IP`, `mgmt`,
+  `ip_address` or nothing at all. Picking one by pattern produces a list
+  that is well-formed, looks populated and dials nothing — and the run
+  that follows reports a problem about hosts rather than about the file.
+- **Whether the first row is a heading.** ShellMate concludes one and
+  shows you which, as a tick box. Getting it wrong loses something either
+  way: a heading read as a device adds a host called `ansible_host`, and a
+  device read as a heading drops one switch out of forty and says so
+  nowhere.
+
+**Nothing invents a platform.** An uploaded row gets no
+`ansible_network_os` unless you say what the devices are. A wrong one is
+worse than none: it makes Ansible treat a firewall as a switch, and the
+failure then arrives from a module several steps away from the cause.
+
+Worked examples of each shape are shipped with ShellMate. *Try it* loads
+one through the same parse a real upload goes through; the download icon
+beside it saves the file, so your own export can be made to match.
+
 ## Environments
 
 An environment is a named set of run settings: which inventory, which

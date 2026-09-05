@@ -185,6 +185,53 @@ def mapping_is_asked_for() -> None:
           "nothing to target" in why, why)
 
 
+def the_shipped_examples() -> None:
+    """
+    Every example ships in a shape the parser actually accepts.
+
+    Asserted through `preview` and `rows_from` rather than by eye, because
+    an example is a promise: somebody matches their own export to it. One
+    that only parses because something special-cased it teaches a shape
+    the real upload path refuses, and the person who followed it has no
+    way to tell which of the two was wrong.
+
+    This earned its place immediately. The plain-list example carries its
+    own comment — "# the distribution layer, 12 March" — and the comma in
+    that comment made the whole file read as a table, because comments
+    were dropped after the delimiter was chosen rather than before.
+    """
+    print("\n-- The shipped examples --")
+
+    check("there are examples to ship", len(store.EXAMPLES) >= 4,
+          str(len(store.EXAMPLES)))
+    check("listing them does not carry their contents",
+          all("text" not in e for e in store.examples()),
+          "a listing that carries five files is a listing nobody needs")
+
+    for shipped in store.EXAMPLES:
+        name = shipped["id"]
+        read = store.preview(shipped["text"], shipped["filename"])
+        rows = store.rows_from(shipped["text"], shipped["mapping"])
+        check(f"{name}: parses and yields hosts",
+              len(rows) >= 2 and all(r.get("host") for r in rows),
+              str(rows))
+        check(f"{name}: the count it previews is the count it produces",
+              read["count"] == len(rows),
+              f"previewed {read['count']}, parsed {len(rows)}")
+        check(f"{name}: every mapped column exists in the file",
+              all(column in (read["headers"] or [])
+                  for column in shipped["mapping"].values()),
+              f"{shipped['mapping']} against {read['headers']}")
+
+    # A comment with a comma in it is a plain list, not a one-column table.
+    plain = next(e for e in store.EXAMPLES if e["id"] == "plain")
+    check("a commented plain list is still read as a list",
+          store.preview(plain["text"])["kind"] == "list",
+          "the comma in the comment decided the delimiter")
+    check("and nothing but comments is refused",
+          bool(refuses(store.preview, "# just a note, nothing else\n")))
+
+
 def storing_them() -> None:
     print("\n-- Storing them --")
 
@@ -282,6 +329,7 @@ if __name__ == "__main__":
     reading_files()
     header_detection_can_be_overruled()
     mapping_is_asked_for()
+    the_shipped_examples()
     storing_them()
     nothing_invents_a_platform()
     the_shape_a_run_expects()

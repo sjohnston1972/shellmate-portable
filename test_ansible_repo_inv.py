@@ -214,9 +214,13 @@ async def main() -> None:
         check("an unidentified device gets no platform guess",
               "none" in seeded_text.lower() and "unidentified" in seeded_text.lower(),
               "the platform column did not say the honest default")
-        check("the generated INI includes the same host",
-              "10.9.9.9" in (await page.inner_text(".av-inv-ini")),
-              "the INI preview did not match the table above it")
+        # The generated INI used to be printed at the bottom of this area
+        # and is gone (#608): it answered a question the two tables above
+        # it had already answered. What replaced it is where a list
+        # somebody built gets made, so that is what is asserted instead.
+        check("the area offers somewhere to build a list of its own",
+              "custom inventories" in seeded_text.lower(),
+              f"got: {seeded_text[:400]!r}")
 
         # ---------------------------------------------------------------
         print("\n-- Nothing threw --")

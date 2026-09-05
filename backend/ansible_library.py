@@ -253,8 +253,15 @@ def save_environment(fields: dict) -> dict:
         variables[key] = value
 
     source = str(fields.get("inventory_source") or "estate")
-    if source not in ("estate", "runner"):
-        raise LibraryError("An inventory comes from the estate or from the runner.")
+    if source not in ("estate", "runner", "custom"):
+        raise LibraryError("An inventory comes from the estate, from a custom "
+                           "list, or from the runner.")
+    inventory_id = str(fields.get("inventory_id") or "").strip()
+    if source == "custom" and not inventory_id:
+        # An environment naming no list would fall through to the whole
+        # estate at run time, which is the widest possible target dressed
+        # as the narrowest.
+        raise LibraryError("Say which custom inventory this environment uses.")
 
     entry = {
         "id": str(fields.get("id") or uuid.uuid4()),
@@ -264,6 +271,7 @@ def save_environment(fields: dict) -> dict:
         "inventory_source": source,
         "group": str(fields.get("group") or "").strip(),
         "inventory_path": str(fields.get("inventory_path") or "").strip(),
+        "inventory_id": inventory_id,
         "limit": str(fields.get("limit") or "").strip(),
         "force_check": bool(fields.get("force_check", False)),
         "forks": int(fields.get("forks") or 0) or None,

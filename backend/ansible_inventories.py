@@ -106,16 +106,27 @@ def preview(text: str, filename: str = "", headed: bool | None = None) -> dict:
     if not body:
         raise InventoryError("That file is empty.")
 
-    lines = [line for line in body.split("\n") if line.strip()]
+    # Comments go first, before anything is concluded from a line.
+    #
+    # They used to be dropped only from a plain list, which meant a list
+    # carrying its own note — "# the distribution layer, 12 March" — had a
+    # comma in its first line and so was read as a table. Every address
+    # then became a one-column row with no header worth nominating, and
+    # the refusal that followed talked about the mapping rather than about
+    # the comment that caused it. Found by shipping the example (#608).
+    lines = [line for line in body.split("\n")
+             if line.strip() and not line.strip().startswith("#")]
+    if not lines:
+        raise InventoryError("That file has nothing in it but comments.")
     delimiter = _delimiter(lines[0])
 
     if delimiter is None:
         # A plain list: one host per line, nothing to map.
-        rows = [line.strip() for line in lines if not line.strip().startswith("#")]
+        rows = [line.strip() for line in lines]
         return {"kind": "list", "headers": [], "rows": [[r] for r in rows[:20]],
                 "count": len(rows), "filename": filename}
 
-    reader = csv.reader(io.StringIO(body), delimiter=delimiter)
+    reader = csv.reader(io.StringIO("\n".join(lines)), delimiter=delimiter)
     table = [row for row in reader if any((cell or "").strip() for cell in row)]
     if not table:
         raise InventoryError("That file has no rows in it.")
@@ -370,6 +381,109 @@ def as_inventory(inventory_id: str) -> dict:
         "group": record["name"],
         "custom": record["id"],
     }
+
+
+# ---------------------------------------------------------------------------
+# Worked examples
+# ---------------------------------------------------------------------------
+#: Files in the shapes this actually receives, shipped so somebody can see
+#: what "a CSV" means here before they go looking for their own.
+#:
+#: They are held as text rather than as files on disk because the frozen
+#: build unpacks its resources into a directory the bootloader deletes on
+#: exit — a data file beside the module is one more thing to remember in
+#: `build.spec`, and forgetting it fails silently at the only moment it
+#: matters.
+#:
+#: Each one is parsed by exactly the code an upload goes through. An
+#: example that only works because it was special-cased teaches a shape
+#: the parser does not accept, which is worse than shipping none.
+EXAMPLES = [
+    {
+        "id": "meraki",
+        "filename": "meraki-export.csv",
+        "title": "A Meraki device export",
+        "note": "Exported from the dashboard. The address is in a column "
+                "called LAN IP, which no pattern would find on its own — "
+                "which is the whole reason the column is asked for.",
+        "mapping": {"host": "LAN IP", "name": "Name"},
+        "text": (
+            "Name,Serial,Model,MAC,LAN IP,Network\n"
+            "sw-core-1,Q2AA-BBBB-CCCC,MS425-32,00:11:22:33:44:55,10.20.0.5,Site A\n"
+            "sw-core-2,Q2AA-BBBB-DDDD,MS425-32,00:11:22:33:44:56,10.20.0.6,Site A\n"
+            "sw-access-1,Q2DD-EEEE-FFFF,MS120-48,00:11:22:33:44:66,10.20.0.11,Site A\n"
+        ),
+    },
+    {
+        "id": "plain",
+        "filename": "addresses.txt",
+        "title": "A plain list of addresses",
+        "note": "One host per line and nothing else. There is no mapping to "
+                "do. Lines starting with # are ignored, so a list can carry "
+                "its own notes.",
+        "mapping": {},
+        "text": (
+            "# The distribution layer, 12 March\n"
+            "10.30.0.1\n"
+            "10.30.0.2\n"
+            "# 10.30.0.3 is out of service\n"
+            "10.30.0.4\n"
+        ),
+    },
+    {
+        "id": "headed",
+        "filename": "site-inventory.csv",
+        "title": "A spreadsheet with headings",
+        "note": "The ordinary case: somebody keeps a sheet. The headings are "
+                "theirs, not Ansible's, and each one is nominated by hand.",
+        "mapping": {"host": "management_ip", "name": "device",
+                    "user": "login", "port": "ssh_port"},
+        "text": (
+            "device,management_ip,login,ssh_port,location\n"
+            "edge-fw-1,10.40.0.1,netops,22,Glasgow\n"
+            "edge-fw-2,10.40.0.2,netops,2222,Glasgow\n"
+        ),
+    },
+    {
+        "id": "ansible",
+        "filename": "ansible-style.csv",
+        "title": "Columns already named for Ansible",
+        "note": "Headings that are already Ansible variable names. They are "
+                "still nominated rather than matched — a heading that looks "
+                "like a variable is not proof that it holds one.",
+        "mapping": {"host": "ansible_host", "user": "ansible_user",
+                    "port": "ansible_port", "name": "shellmate_name"},
+        "text": (
+            "ansible_host,ansible_user,ansible_port,shellmate_name\n"
+            "10.50.0.1,netops,2222,edge-1\n"
+            "10.50.0.2,netops,2222,edge-2\n"
+        ),
+    },
+    {
+        "id": "headless",
+        "filename": "headerless.csv",
+        "title": "An export with no headings",
+        "note": "The first row is a device, not a heading. Read as a heading "
+                "it would lose that switch and say so nowhere, so the "
+                "conclusion is shown as a tick box you can overrule.",
+        "mapping": {"host": "column 1", "name": "column 2"},
+        "text": (
+            "10.60.0.1,core-1\n"
+            "10.60.0.2,core-2\n"
+            "10.60.0.3,core-3\n"
+        ),
+    },
+]
+
+
+def examples() -> list[dict]:
+    """The shipped examples, without their contents."""
+    return [{k: v for k, v in e.items() if k != "text"} for e in EXAMPLES]
+
+
+def example(example_id: str) -> dict | None:
+    """One example, with its text."""
+    return next((e for e in EXAMPLES if e["id"] == example_id), None)
 
 
 def count() -> int:

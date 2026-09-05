@@ -10454,34 +10454,138 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
 
 .av-inv-skip-why { color: var(--on-surface-dim); }
 
-.av-inv-ini-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
-}
-
 .av-inv-note {
   margin: 0 0 8px;
   font-size: 12px;
   color: var(--on-surface-dim);
 }
 
-.av-inv-ini {
-  max-height: 320px;
-  overflow: auto;
-  margin: 0;
-  padding: 12px;
-  background: var(--bedrock);
-  border: 1px solid var(--outline);
-  border-radius: var(--radius-sm);
+/* ---------------------------------------------------------------------------
+   Ansible view — custom inventories (#608)
+
+   Lists somebody built, above the estate rather than below it: a run
+   pointed at four switches is the commoner intent than one pointed at
+   everything, so what is most often wanted is what is first on screen.
+--------------------------------------------------------------------------- */
+
+.av-inv-customs-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.av-spacer { flex: 1; }
+
+/* The picker is driven by its button; a bare file input beside a styled
+   one is two controls for one choice. */
+.av-inv-file { display: none; }
+
+.av-inv-custom-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.av-inv-custom-name .av-inv-note { margin: 0; }
+
+.av-inv-count {
   font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The tick column that turns the estate table into a way of building a
+   list. Narrow, so it reads as a control rather than a column of data. */
+.av-inv-tick { width: 28px; text-align: center; }
+
+.av-inv-picked { background: var(--primary-tint); }
+
+/* The shipped examples. A quiet row: they are how somebody learns the
+   shape once, not something they come back to. */
+.av-inv-examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
   font-size: 12px;
-  line-height: 1.5;
+}
+
+.av-inv-examples-label { color: var(--on-surface-dim); }
+
+.av-inv-example {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-full);
+  padding-right: 4px;
+}
+
+.av-inv-example .btn-tertiary { border: 0; }
+
+.av-inv-example-get {
+  display: inline-flex;
+  align-items: center;
+  color: var(--on-surface-dim);
+  text-decoration: none;
+}
+
+.av-inv-example-get:hover { color: var(--primary); }
+
+.av-inv-example-get .material-symbols-outlined { font-size: var(--icon-sm); }
+
+.av-inv-upload {
+  margin-top: 12px;
+  padding: 14px;
+  background: var(--surface-high);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+}
+
+.av-inv-upload-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.av-inv-headed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
   color: var(--on-surface);
-  white-space: pre-wrap;
-  word-break: break-word;
-  user-select: text;
+}
+
+.av-inv-preview {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.av-inv-mapping { margin-top: 6px; }
+
+.av-inv-map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.av-inv-map-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.av-inv-upload-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 /* ---------------------------------------------------------------------------

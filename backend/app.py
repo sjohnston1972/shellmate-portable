@@ -4027,6 +4027,9 @@ class PlaybookRunRequest(BaseModel):
     #: A path on the runner, when the source is "runner". Empty is its own
     #: default inventory.
     inventory_path: str = ""
+    #: A custom inventory, when the source is "custom" (#608). A curated
+    #: list or an uploaded file, built in the Inventory area.
+    inventory_id: str = ""
     # What credentials and defaults the run carries (#586). An environment
     # supplies anything the caller left blank; key names become values only
     # at the moment the run starts.
@@ -4108,7 +4111,8 @@ async def ansible_run(request: PlaybookRunRequest) -> dict:
         chosen = await asyncio.to_thread(library.environment, request.environment_id)
         if chosen is None:
             raise HTTPException(status_code=404, detail="No such environment.")
-        for name in ("limit", "group", "inventory_path", "inventory_source"):
+        for name in ("limit", "group", "inventory_path", "inventory_id",
+                     "inventory_source"):
             if not fields.get(name):
                 fields[name] = chosen.get(name) or fields.get(name)
         merged = dict(chosen.get("variables") or {})
@@ -4136,7 +4140,21 @@ async def ansible_run(request: PlaybookRunRequest) -> dict:
 
     content = ""
     skipped: list[dict] = []
-    if fields["inventory_source"] == "estate":
+    if fields["inventory_source"] == "custom":
+        # A list somebody built (#608). Refused by name when it is gone:
+        # an inventory deleted between choosing it and running is the one
+        # case where falling back to the estate would silently widen a run
+        # from four switches to the whole site.
+        from backend import ansible_inventories as custom_store
+
+        try:
+            inventory = await asyncio.to_thread(
+                custom_store.as_inventory, fields["inventory_id"])
+        except custom_store.InventoryError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        content = ansible_module.inventory_as_ini(inventory)
+        skipped = inventory.get("skipped", [])
+    elif fields["inventory_source"] == "estate":
         inventory = await asyncio.to_thread(
             ansible_module.inventory_from_estate, fields["group"])
         # Two different failures, two different fixes: a group that does not
@@ -4399,6 +4417,7 @@ class EnvironmentRequest(BaseModel):
     inventory_source: str = "estate"
     group: str = ""
     inventory_path: str = ""
+    inventory_id: str = ""
     limit: str = ""
     force_check: bool = False
     forks: int | None = None
@@ -4476,7 +4495,59 @@ async def ansible_inventories() -> dict:
     from backend import ansible_inventories as store
 
     return {"inventories": await asyncio.to_thread(store.inventories),
-            "fields": list(store.FIELDS)}
+            "fields": list(store.FIELDS),
+            "platforms": await asyncio.to_thread(_inventory_platforms)}
+
+
+def _inventory_platforms() -> list[dict]:
+    """
+    The platforms an uploaded list can declare itself to be.
+
+    Only the ones that map to an `ansible_network_os` are offered. A
+    platform ShellMate knows but Ansible has no collection for would be a
+    choice that changes nothing, and a choice that changes nothing is
+    worse than an absent one — somebody picks it and believes the run is
+    now platform-aware.
+    """
+    from backend import ansible as ansible_module
+    from backend import platforms as platform_module
+
+    out = []
+    for key, network_os in sorted(ansible_module.ANSIBLE_NETWORK_OS.items()):
+        profile = platform_module.get_profile(key)
+        out.append({"id": key, "network_os": network_os,
+                    "label": getattr(profile, "name", "") or key})
+    return out
+
+
+# Declared before the `{inventory_id}` route below, or "examples" would be
+# read as an id and answered with a 404 about an inventory nobody asked for.
+@app.get("/api/ansible/inventories/examples")
+async def ansible_inventory_examples() -> dict:
+    """Files in the shapes an upload actually arrives in (#608)."""
+    from backend import ansible_inventories as store
+
+    return {"examples": await asyncio.to_thread(store.examples)}
+
+
+@app.get("/api/ansible/inventories/examples/{example_id}")
+async def ansible_inventory_example(example_id: str) -> Response:
+    """
+    One example, as the file it is.
+
+    Served with its filename attached so it saves as something recognisable
+    rather than as the id — somebody downloading four of these wants four
+    files they can tell apart.
+    """
+    from backend import ansible_inventories as store
+
+    found = await asyncio.to_thread(store.example, example_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="There is no such example.")
+    return Response(
+        content=found["text"], media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{found["filename"]}"'})
 
 
 @app.get("/api/ansible/inventories/{inventory_id}")

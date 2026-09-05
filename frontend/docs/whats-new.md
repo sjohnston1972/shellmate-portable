@@ -12,6 +12,18 @@ exists.
   Your own connections and groups can be the inventory, and there is a
   playbook library you can edit here. See the Ansible page in the manual.
 
+- **Inventories you build yourself.** A run usually wants less than the
+  whole estate. Tick devices in the Inventory area and save them as a named
+  list — "the switches I am upgrading this weekend" no longer has to become
+  a group everybody else can see. Or upload a CSV or a plain list of
+  addresses from somewhere ShellMate has never connected to: a Meraki
+  export, an IPAM report, a spreadsheet. Which column holds the address is
+  asked rather than guessed, because a list built from the wrong column
+  looks populated and dials nothing; nothing invents a platform, because a
+  wrong `ansible_network_os` makes Ansible treat a firewall as a switch.
+  Worked examples of each shape are included. Either kind is then a target
+  in the Run dialog, exactly like a group.
+
 - **A paste can be edited before it goes, and sent a line at a time.** The
   paste question is now a working copy of the block rather than a preview cut
   off at 400 characters: edit the line that came out of the wiki wrong, strip

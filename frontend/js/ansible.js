@@ -40,6 +40,9 @@
   let lastState = null;
   /** Everything the estate offered last time the Run dialog was opened. */
   let estate = { groups: {}, hosts: [], hostvars: {}, skipped: [] };
+  /** The custom inventories, and the hosts of whichever one is chosen (#608). */
+  let customs = [];
+  let customHosts = [];
   /** The playbook the Run dialog is about, and which list it came from. */
   let running = { name: '', source: 'runner' };
   /** Whether the last status call found a runner answering. */
@@ -304,6 +307,9 @@
     document.getElementById('ansible-push-inventory')
       .addEventListener('click', pushInventory);
 
+    document.getElementById('ansible-custom-select')
+      .addEventListener('change', _describeCustomTarget);
+
     document.getElementById('ansible-run-go').addEventListener('click', startRun);
   }
 
@@ -322,9 +328,12 @@
     // ask. Firing the call regardless answers 409, logs a console error, and
     // leaves a radio offering a list that cannot arrive — a choice that is
     // there but does not work is worse than one that says why it is not.
-    await Promise.all(runnerReady
-      ? [_loadEstate(), _loadRunnerInventory()]
-      : [_loadEstate(), _noRunnerInventory()]);
+    await Promise.all([
+      _loadCustomInventories(),
+      ...(runnerReady
+        ? [_loadEstate(), _loadRunnerInventory()]
+        : [_loadEstate(), _noRunnerInventory()]),
+    ]);
     _showTargetPane();
   }
 
@@ -338,6 +347,8 @@
       .classList.toggle('hidden', mode !== 'group');
     document.getElementById('ansible-target-hosts')
       .classList.toggle('hidden', mode !== 'hosts');
+    document.getElementById('ansible-target-custom')
+      .classList.toggle('hidden', mode !== 'custom');
     document.getElementById('ansible-target-runner')
       .classList.toggle('hidden', mode !== 'runner');
   }
@@ -419,6 +430,98 @@
       note.textContent = `Left out — ${entry.name}: ${entry.why}`;
       host.appendChild(note);
     });
+  }
+
+  /**
+   * The lists somebody built in the Inventory area (#608).
+   *
+   * With none saved the choice is disabled rather than left offering an
+   * empty dropdown: an option that is there but cannot be used sends
+   * somebody looking for what they did wrong, when the answer is that
+   * there is nothing to choose yet.
+   */
+  async function _loadCustomInventories() {
+    const select = document.getElementById('ansible-custom-select');
+    const radio = document.querySelector('input[name="ansible-target"][value="custom"]');
+    select.innerHTML = '';
+    customs = [];
+    try {
+      const data = await _json('/api/ansible/inventories');
+      customs = data.inventories || [];
+    } catch (_) {
+      customs = [];
+    }
+
+    if (!customs.length) {
+      if (radio) {
+        radio.disabled = true;
+        if (radio.checked) {
+          const group = document.querySelector('input[name="ansible-target"][value="group"]');
+          if (group) group.checked = true;
+        }
+      }
+      const none = document.createElement('option');
+      none.value = '';
+      none.textContent = 'None saved yet — build one in the Inventory area';
+      select.appendChild(none);
+      document.getElementById('ansible-custom-preview').innerHTML = '';
+      return;
+    }
+
+    if (radio) radio.disabled = false;
+    customs.forEach(entry => {
+      const option = document.createElement('option');
+      option.value = entry.id;
+      option.textContent = `${entry.name} (${entry.hosts})`;
+      select.appendChild(option);
+    });
+    await _describeCustomTarget();
+  }
+
+  /**
+   * What the chosen list actually holds.
+   *
+   * Fetched rather than counted from the summary, because the hosts are
+   * also what the run is limited to — and a count that came from one place
+   * while the targets came from another is how a dialog ends up promising
+   * four devices and running against three.
+   */
+  async function _describeCustomTarget() {
+    const host = document.getElementById('ansible-custom-preview');
+    host.innerHTML = '';
+    customHosts = [];
+    const id = document.getElementById('ansible-custom-select').value;
+    if (!id) return;
+    let entry = null;
+    try {
+      entry = await _json(`/api/ansible/inventories/${encodeURIComponent(id)}`);
+    } catch (e) {
+      const bad = document.createElement('div');
+      bad.className = 'ansible-preview-skip';
+      bad.textContent = `That list could not be read: ${e.message || e}`;
+      host.appendChild(bad);
+      return;
+    }
+    customHosts = (entry.hosts || []).map(row => row.host).filter(Boolean);
+
+    const line = document.createElement('div');
+    line.className = 'ansible-preview-line';
+    line.textContent = customHosts.length
+      ? `${customHosts.length} host${customHosts.length === 1 ? '' : 's'}: `
+        + customHosts.slice(0, 8).join(', ')
+        + (customHosts.length > 8 ? `, and ${customHosts.length - 8} more` : '')
+      : 'That list has nothing in it.';
+    host.appendChild(line);
+
+    const note = document.createElement('div');
+    note.className = 'ansible-preview-line';
+    // Said here rather than left to be discovered from a module failure
+    // several steps away: a list that declares no platform is not broken,
+    // but it is not platform-aware either.
+    note.textContent = entry.platform
+      ? `Declared as ${entry.platform}.`
+      : 'No platform declared, so no ansible_network_os travels with it.';
+    host.appendChild(note);
   }
 
   /** No runner to ask, so the choice that depends on one is closed off. */
@@ -532,6 +635,7 @@
       return [...document.querySelectorAll('#ansible-host-list input:checked')]
         .map(box => box.value);
     }
+    if (mode === 'custom') return customHosts.slice();
     const group = document.getElementById('ansible-group-select').value;
     return group ? ((estate.groups || {})[group] || []) : (estate.hosts || []);
   }
@@ -584,11 +688,14 @@
           playbook: running.name, extra_vars: extraVars, limit, tags, check,
           // Where the hosts come from (#585): an estate inventory is built
           // here and travels with the run; the runner's own is a path.
-          inventory_source: _targetMode() === 'runner' ? 'runner' : 'estate',
+          inventory_source: { runner: 'runner', custom: 'custom' }[_targetMode()]
+                            || 'estate',
           group: _targetMode() === 'group'
             ? ((document.getElementById('ansible-group-select') || {}).value || '') : '',
           inventory_path: _targetMode() === 'runner'
             ? ((document.getElementById('ansible-runner-group') || {}).value || '') : '',
+          inventory_id: _targetMode() === 'custom'
+            ? ((document.getElementById('ansible-custom-select') || {}).value || '') : '',
         }),
       });
       const data = await res.json();
@@ -613,6 +720,11 @@
   function _targetDescription(limit) {
     const mode = _targetMode();
     if (mode === 'runner') return `the runner's ${limit[0] || 'inventory'}`;
+    if (mode === 'custom') {
+      const select = document.getElementById('ansible-custom-select');
+      const label = select.options[select.selectedIndex];
+      return label ? label.textContent : 'a custom inventory';
+    }
     if (mode === 'group') {
       const group = document.getElementById('ansible-group-select').value;
       return group ? `${group} (${limit.length})` : `every connection (${limit.length})`;
