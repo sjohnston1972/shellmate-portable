@@ -498,6 +498,14 @@ def _device_facts(session: dict) -> dict:
             "model":      take("model", ""),
             "confidence": take("confidence", 0.0),
             "source":     take("source", ""),
+            # The fingerprint's own gate, not a copy of the rule
+            # (#557). Platform-specific advice handed to the wrong
+            # platform is worse than none, and there is exactly one
+            # place that decides whether ShellMate is sure enough.
+            "certain_enough_to_act": bool(
+                take("certain_enough_to_act", False)
+                if not isinstance(fp, dict)
+                else fp.get("certain_enough_to_act", False)),
         })
 
     # What the connect-time drift check found (#549). Read from the cached

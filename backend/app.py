@@ -3927,6 +3927,8 @@ class PlatformRequest(BaseModel):
     dangerous_commands: list[str] = []
     config_mode_markers: list[str] = []
     comment_prefix: str = "!"
+    # House rules for the assistant on this platform (#557).
+    assistant_notes: str = ""
 
 
 # ---------------------------------------------------------------------------

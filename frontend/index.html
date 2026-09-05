@@ -1693,6 +1693,17 @@ GigEth0/2     unassigned    YES unset  down     down
               <input type="text" id="platform-dangerous" class="setting-input setting-input-full" placeholder="reload, write erase, shutdown" />
             </div>
 
+            <!-- #557: house rules for the assistant on this platform,
+                 appended to the cached system block so they cost
+                 nothing per turn — and only sent when the fingerprint
+                 is confident, because advice for the wrong platform is
+                 worse than none. -->
+            <div class="setting-row setting-row-stack">
+              <label class="setting-label" for="platform-notes"
+                     data-tip="House rules for the assistant on this platform: `Junos: prefer set-format output, and remind about commit confirmed`; `ASA: suggest packet-tracer before an ACL change`. A shop with a niche platform teaches it once here rather than editing a prompt everybody shares.||Only sent when ShellMate is confident enough about the platform to act on it, and never for the generic profile — advice that cannot be followed is how a model ends up inventing a command. It rides in the cached part of the request, so on Claude it costs nothing per turn.">Notes for the assistant</label>
+              <textarea id="platform-notes" class="setting-input setting-input-full" rows="3" placeholder="Prefer `show run | section` over the whole configuration on this platform."></textarea>
+            </div>
+
             <div class="setting-row setting-row-stack">
               <label class="setting-label"
                      data-tip="Each row is a short name and the command it becomes on this platform, which is what lets one alias mean the right thing on IOS and on Junos.||The one to avoid is an alias that shadows something the device already understands: the terminal shows you the substitution, but by then you have typed what you meant and sent something else.">Aliases</label>

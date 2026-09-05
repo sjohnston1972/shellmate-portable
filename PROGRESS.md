@@ -276,3 +276,25 @@ none.
 
 `python test_budget.py` — 25 passed. 98 of 98 test files pass.
 
+## 2026-09-05 13:41 — #557 closed
+
+`assistant_notes` per platform, into the cached preamble — same from one
+question to the next, so it belongs with the persona and costs nothing per
+turn on Claude.
+
+**The gate is the feature.** `certain_enough_to_act`, the fingerprint's own
+property, carried into the facts rather than re-implemented beside them.
+Advice for the wrong platform is worse than none: "prefer set-format
+output" on an IOS switch cannot be followed, and a model that follows it
+anyway invents a command. The generic profile stays silent — the
+never-guess rule applied to advice rather than to commands.
+
+The test asserts `prompts.py` reads the gate and never mentions
+`act_threshold`, because a second copy of a threshold is a second thing to
+keep in step.
+
+`test_tooltips` caught the tooltip: the natural Junos example contains a
+pipe, and `||` is the separator. Reworded rather than escaped.
+
+`python test_platform_notes.py` — 21 passed. 99 of 99 test files pass.
+

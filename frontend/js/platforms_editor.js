@@ -82,6 +82,7 @@
     setValue('platform-version', profile.version_command);
     setValue('platform-signatures', (profile.signatures || []).join(', '));
     setValue('platform-dangerous', (profile.dangerous_commands || []).join(', '));
+    setValue('platform-notes', profile.assistant_notes || '');
 
     const list = document.getElementById('alias-rows');
     list.innerHTML = '';
@@ -168,6 +169,10 @@
       aliases,
       config_mode_markers: (data.platforms[current] || {}).config_mode_markers || [],
       comment_prefix:      (data.platforms[current] || {}).comment_prefix || '!',
+      // #557. Not trimmed to one line: it is prose the shop wrote,
+      // and its line breaks are how it reads to the model too.
+      assistant_notes:     (document.getElementById('platform-notes')
+                            || { value: '' }).value.trim(),
     };
   }
 

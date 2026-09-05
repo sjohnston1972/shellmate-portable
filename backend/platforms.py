@@ -54,6 +54,21 @@ class PlatformProfile:
     config_mode_markers: list[str] = field(default_factory=list)
     comment_prefix: str = "!"
 
+    # House rules for the assistant on this platform (#557).
+    #
+    # A prompt preset per platform without a fourth global prompt:
+    # "Junos: prefer `| display set`, and remind about `commit
+    # confirmed`"; "ASA: suggest `packet-tracer` before an ACL
+    # change". A shop with a niche platform teaches it once here
+    # instead of editing a prompt every colleague also uses.
+    #
+    # Appended to the *cached* system preamble, so on Claude it costs
+    # nothing per turn — and only when the fingerprint is confident
+    # enough to act on, because notes for the wrong platform are
+    # worse than none. The generic profile stays silent, which is the
+    # never-guess rule applied to advice rather than to commands.
+    assistant_notes: str = ""
+
     # --- Things that will happen to the device unless someone intervenes ----
     #
     # Regular expressions, matched against both what is typed and what the

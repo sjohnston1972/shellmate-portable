@@ -376,7 +376,38 @@ def build_system_preamble(
             lines.append("")
             lines.append(f"=== DEVICE FACTS: {active_label} ===")
             lines.extend(f"  {fact}" for fact in facts)
+        notes = _platform_notes(device_context)
+        if notes:
+            lines.append("")
+            lines.append("=== HOUSE RULES FOR THIS PLATFORM ===")
+            lines.append(notes)
     return "\n".join(lines)
+
+
+def _platform_notes(facts: dict) -> str:
+    """
+    What this shop has taught the assistant about this platform (#557).
+
+    Only when the fingerprint is confident enough to act on. Notes for
+    the wrong platform are worse than none: "prefer `| display set`"
+    handed to an IOS switch is advice that cannot be followed, and a
+    model that follows it anyway invents a command. The generic
+    profile is silent for the same reason the generic profile sends no
+    paging command — never guess.
+    """
+    platform = str(facts.get("platform") or "").strip()
+    if not platform or platform == "generic":
+        return ""
+    # The same gate the onboarding uses. A weak guess is exactly when
+    # platform-specific advice does the most harm.
+    if not facts.get("certain_enough_to_act", True):
+        return ""
+    try:
+        from backend.platforms import get_profile
+
+        return str(getattr(get_profile(platform), "assistant_notes", "") or "").strip()
+    except Exception:                                     # never break chat
+        return ""
 
 
 def _horizon_line(horizon: dict | None) -> str:
