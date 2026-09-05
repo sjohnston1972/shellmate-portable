@@ -35,6 +35,26 @@ change that produces one.
 run twice over the same data folder, because two instances would fight over
 the same database. Quit from the tray icon first.
 
+## It fell over
+
+**"ShellMate hit a fault last time."** A toast on the next launch, with a
+**Review** button. It opens the report form showing the whole of what was
+recorded — the fault, where ShellMate was when it happened, and the last 50
+lines of ShellMate's own log, with passwords and community strings masked.
+Nothing from your terminal sessions is in it.
+
+Nothing is sent until you press Send, and there is no setting that makes it
+automatic. Edit or delete anything you would rather not send, or press
+**Discard this report**.
+
+The file is written whether or not you are asked, and sits in your data
+folder as `crash-<date>-<time>.json`. If you would rather never be asked,
+turn off **Offer to report a crash** under Settings → Bug and feature
+reports — that loses the prompt, not the evidence. At most ten are kept.
+
+A failure to start writes one too, before the message box, which is the case
+where there is otherwise nothing to go on.
+
 ## Settings are not being kept
 
 Look at the first line of the log. If it reports a folder inside your user

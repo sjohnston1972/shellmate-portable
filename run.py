@@ -84,6 +84,18 @@ def _fatal(message: str) -> None:
     front of them and point at the log.
     """
     logger.error("%s", message)
+
+    # Recorded before the message box, not after (#568). A startup failure
+    # is the case where there is no window to ask from and no log the user
+    # can reasonably be asked to read, which makes it the one that most
+    # needs a file the next launch can offer to send.
+    try:
+        from backend import crash as crash_module
+
+        crash_module.write(RuntimeError, RuntimeError(message), None, "startup")
+    except Exception:
+        pass
+
     if sys.platform == "win32":
         try:
             import ctypes
@@ -138,6 +150,13 @@ def main() -> int:
         return 0
 
     _apply_log_level()
+
+    # Before anything that can fault (#568). The session read loops, the
+    # scheduler and the store writer all run on threads, and an exception
+    # on one of those disappears into a log line at best today.
+    from backend import crash as crash_module  # noqa: E402
+
+    crash_module.install()
 
     from backend import version as app_version  # noqa: E402
 

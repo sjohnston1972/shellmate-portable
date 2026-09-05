@@ -31,6 +31,11 @@ const MAX_DESCRIPTION = 5000;
 const LABELS = {
   bug:     ['bug', 'user-reported'],
   feature: ['enhancement', 'user-reported'],
+  // A fault ShellMate recorded itself and the user chose to send (#568).
+  // Labelled `crash` as well as `bug` because the two want different
+  // triage: a crash report arrives with a traceback and no reproduction,
+  // and the first question is always whether anyone else has seen it.
+  crash:   ['bug', 'crash', 'user-reported'],
 };
 
 export { labelsFor };
@@ -63,7 +68,9 @@ export default {
 
     const labels = labelsFor(report.type);
     if (!labels) {
-      return json(400, { detail: "type must be 'bug' or 'feature'." });
+      return json(400, {
+        detail: `type must be one of: ${Object.keys(LABELS).join(', ')}.`,
+      });
     }
     const title = String(report.title || '').trim().slice(0, MAX_TITLE);
     if (!title) {

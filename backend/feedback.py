@@ -39,7 +39,12 @@ logger = logging.getLogger(__name__)
 #: and it can be rotated in a release. The relay holds the same value.
 APP_KEY = "shellmate-feedback-v1"
 
-TYPES = ("bug", "feature")
+# "crash" joins the two a person types (#568). It is a report like any
+# other from here down — the relay files it the same way and the outbox
+# holds it the same way — but it is the only kind whose text ShellMate
+# wrote rather than the user, which is exactly why the panel shows the
+# whole thing before anything is sent.
+TYPES = ("bug", "feature", "crash")
 MAX_TITLE = 200
 MAX_DESCRIPTION = 5000
 
@@ -75,7 +80,7 @@ def build_report(kind: str, title: str, description: str) -> dict:
     """
     kind = (kind or "").strip().lower()
     if kind not in TYPES:
-        raise ValueError("A report is a 'bug' or a 'feature'.")
+        raise ValueError("A report is a 'bug', a 'feature' or a 'crash'.")
 
     title = (title or "").strip()
     if not title:

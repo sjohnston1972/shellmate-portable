@@ -2254,6 +2254,71 @@ async def send_feedback(request: FeedbackRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+# ---------------------------------------------------------------------------
+# REST — Crash reports (#568)
+#
+# A crash on a locked-down machine produces nothing today: the window
+# closes, or a message box points at a log nobody reads, and the fault that
+# took the application down is a fault nobody has ever seen. The relay
+# exists (#370) for people who cannot reach GitHub; this gives it something
+# to carry.
+#
+# Nothing here sends anything. These three endpoints list, read and forget.
+# Sending is `POST /api/feedback` with the text the user has looked at,
+# exactly as a typed bug report is — which is the point, because the whole
+# guarantee is that a crash report is a report the user decided to send.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/crashes")
+async def crash_list() -> dict:
+    """
+    Faults recorded but not dealt with, newest first.
+
+    ``ask`` is the setting, returned alongside rather than looked up
+    separately in the browser: whether to offer and whether there is
+    anything to offer are one question asked once.
+    """
+    from backend import crash
+
+    reports = await asyncio.to_thread(crash.pending)
+    return {
+        "reports": [
+            {"file": r.get("file"), "when": r.get("when"),
+             "where": r.get("where"), "exception": r.get("exception"),
+             "title": crash.title_for(r)}
+            for r in reports
+        ],
+        "ask": bool(advanced_setting("feedback.report_crashes")),
+    }
+
+
+@app.get("/api/crashes/{name}")
+async def crash_detail(name: str) -> dict:
+    """
+    One recorded fault, in full, as the description that would be sent.
+
+    The same string the panel previews and the same string that travels.
+    Somebody who reads a preview and then finds something else went is
+    somebody who will never read a preview again.
+    """
+    from backend import crash
+
+    report = await asyncio.to_thread(crash.get, name)
+    if report is None:
+        raise HTTPException(status_code=404, detail="No such crash report.")
+    return {**report, "title": crash.title_for(report),
+            "description": crash.as_description(report)}
+
+
+@app.delete("/api/crashes/{name}")
+async def crash_discard(name: str) -> dict:
+    """Forget one recorded fault without sending it."""
+    from backend import crash
+
+    return {"discarded": await asyncio.to_thread(crash.discard, name)}
+
+
 @app.on_event("shutdown")
 async def _close_ai_clients() -> None:
     """The shared provider clients (#503)."""

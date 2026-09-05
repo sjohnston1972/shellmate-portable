@@ -101,6 +101,7 @@ shellmate/
 │   ├── config_archive.py        # Keeping the captured configurations as files
 │   ├── config_push.py           # Apply configuration with a preview first, and a way back (#407)
 │   ├── configs.py               # Configuration capture, storage and drift reporting
+│   ├── crash.py                 # What ShellMate can say about a fault it did not survive (#568)
 │   ├── desktop.py               # Present ShellMate as a desktop application rather than a browser…
 │   ├── diagnostics.py           # Is this install healthy? (#562)
 │   ├── discovery.py             # Finding out what is on the wire

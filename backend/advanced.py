@@ -836,6 +836,17 @@ SETTINGS: tuple[Setting, ...] = (
             "The relay files each report as a GitHub issue. Emptied, "
             "reports are saved to feedback-outbox.json in the data folder "
             "instead of being sent anywhere."),
+    Setting("feedback.report_crashes", "Offer to report a crash", True, "bool",
+            "After a fault, offer on the next launch to send what was "
+            "recorded — with the whole text shown first.",
+            "It never sends anything on its own, and there is no setting "
+            "that makes it. This governs whether you are asked. The file is "
+            "written either way and sits in the data folder, so turning "
+            "this off loses the prompt, not the evidence.||What travels is "
+            "the traceback, the About section and the last 50 lines of the "
+            "application log, all redacted. Never your terminal output: the "
+            "log says what ShellMate did, the scrollback says what your "
+            "device said, and only the first of those is diagnostic."),
     Setting("ai.cite_lines", "Let the assistant cite terminal lines", True,
             "bool",
             "Number the terminal lines sent as context, so an answer can "

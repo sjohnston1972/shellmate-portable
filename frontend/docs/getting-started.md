@@ -247,6 +247,7 @@ Everything lives in `ShellMate-Data` beside the executable.
 | `keys/` | SSH keys ShellMate made or imported |
 | `window-storage/` | The desktop window's own state — scroll positions and the like |
 | `shellmate.log` | What the application itself did, for troubleshooting |
+| `crash-….json` | A fault ShellMate did not survive, recorded so the next launch can offer to report it. Redacted, and never your terminal output |
 
 `platforms.json`, `schemes.json` and `snippets.json` are plain, commented
 JSON meant to be edited, kept in version control, or handed to a colleague.
