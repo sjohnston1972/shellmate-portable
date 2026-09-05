@@ -180,3 +180,10 @@ to "where does scope go", all encoded, none assumed.
 `destroy.yml` exists in every kit and is wired to nothing yet; Azure's
 and AWS's are unproven because proving them deletes what Steven said to
 leave. Tests: deployments 55, ui 32.
+
+## 2026-09-06 02:45 — close-out
+
+#594 retitled and closed against the run. Full suite: 116 of 116 test
+files pass (the AWS-touched suites, deployments 55 and ui 32, run again
+after the last edit). Executable rebuilt at `ebc506d`, 37,065,028 bytes.
+Archived to `docs/runs/2026-09-06-deployments/`; DONE is the hand-off.
