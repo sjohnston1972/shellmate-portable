@@ -201,3 +201,19 @@ second channel that speaks `_read_until_idle`'s protocol. Guards:
 scheduler 45, history 63, history_range 7, store_writer 11, advanced 395,
 groups 94, snippets 23, tooltips 8, contrast 103, backup_digest 23,
 backup_webhook 40.
+
+## 2026-09-05 20:05 — the one flake, fixed rather than waved away
+
+`test_ansible_env_keys.py` failed under the full suite twice this evening
+and passed alone both times — different assertions each time, which is what
+a race looks like, not a bug. The dialog closes the instant it is accepted;
+the save is a fetch that lands afterwards; the list re-renders after that.
+A fixed 200ms covered it on an idle machine and did not under a suite that
+is now seven files longer.
+
+The five post-accept sleeps are now `_settle()`: wait for the list to show
+(or stop showing) the expected text. 23/23 run concurrently with two other
+Playwright suites as load. Test-only; the executable at `654942c` carries
+every non-test change in the batch.
+
+Final suite: 111 of 112 before the fix, the one being this file.

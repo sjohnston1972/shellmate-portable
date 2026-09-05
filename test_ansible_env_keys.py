@@ -100,6 +100,28 @@ async def _accept(page, danger: bool = False) -> None:
     await page.wait_for_selector(".sm-dialog-overlay", state="detached", timeout=5000)
 
 
+async def _settle(page, selector: str, text: str, absent: bool = False,
+                  timeout: float = 5000) -> None:
+    """
+    Wait for a list to show (or stop showing) *text*, then return.
+
+    The dialog closes the moment it is accepted; the save is a fetch that
+    lands afterwards and the list re-renders after that. A fixed 200ms
+    covered it on an idle machine and did not under a full suite, where
+    the same assertions failed on two runs in the same evening — different
+    ones each time, which is what a race looks like. Waiting for the
+    condition costs nothing when it is already true.
+    """
+    import json as _json
+    predicate = ("!" if absent else "") +         f"(document.querySelector({_json.dumps(selector)}) || {{innerText: ''}})"         f".innerText.includes({_json.dumps(text)})"
+    try:
+        await page.wait_for_function(predicate, timeout=timeout)
+    except Exception:
+        # Let the assertion that follows say what the list actually held,
+        # rather than failing here with a timeout that says nothing.
+        pass
+
+
 async def main() -> None:
     threading.Thread(target=_serve, daemon=True).start()
     time.sleep(2.0)
@@ -132,7 +154,7 @@ async def main() -> None:
         await page.fill(".av-env-var-value", "10.0.0.1")
 
         await _accept(page)
-        await page.wait_for_timeout(200)
+        await _settle(page, "#av-environments-body", "Production")
 
         body = await page.inner_text("#av-environments-body")
         check("the new environment is listed", "Production" in body, body[:200])
@@ -158,7 +180,7 @@ async def main() -> None:
         await page.click('#av-environments-body .av-env-card button[title="Delete"]')
         await page.wait_for_selector(".sm-dialog-overlay", timeout=5000)
         await _accept(page, danger=True)
-        await page.wait_for_timeout(200)
+        await _settle(page, "#av-environments-body", "Production", absent=True)
         after_delete = await page.inner_text("#av-environments-body")
         # Back to the empty state, which is now the shared centred one
         # rather than a dashed box saying "none yet" (#595). Asserted on
@@ -191,7 +213,7 @@ async def main() -> None:
         await page.fill("#sm-dialog-field-4", "Azure client secret")   # description
         await page.fill("#sm-dialog-field-5", SECRET_VALUE)            # value
         await _accept(page)
-        await page.wait_for_timeout(200)
+        await _settle(page, "#av-keys-body", "azure_secret")
 
         keys_body = await page.inner_text("#av-keys-body")
         check("the new key is listed", "azure_secret" in keys_body, keys_body[:200])
@@ -219,7 +241,7 @@ async def main() -> None:
               value_field == "", f"got {value_field!r}")
         await page.fill("#sm-dialog-field-3", "AZURE_CLIENT_SECRET")
         await _accept(page)
-        await page.wait_for_timeout(200)
+        await _settle(page, "#av-keys-body", "AZURE_CLIENT_SECRET")
 
         keys_body = await page.inner_text("#av-keys-body")
         check("the new target is shown", "AZURE_CLIENT_SECRET" in keys_body, keys_body[:300])
@@ -237,7 +259,7 @@ async def main() -> None:
               "deleted with it" in confirm_body.lower() or "cannot be undone" in confirm_body.lower(),
               confirm_body[:200])
         await _accept(page, danger=True)
-        await page.wait_for_timeout(200)
+        await _settle(page, "#av-keys-body", "azure_secret", absent=True)
 
         keys_body = await page.inner_text("#av-keys-body")
         check("the key is gone after confirming delete",
