@@ -1,171 +1,168 @@
-# Run plan — the estate cluster
+# Run plan — the AI cluster
 
-Three issues: #544 (change record), #543 (compliance check against a golden
-snippet), #547 (scheduled show collection).
+Twelve issues: #560, #553, #551, #554, #556, #557, #559, #558, #555, #552,
+#529, #561.
 
-Ordered by what each needs from the one before, and with the largest last.
-#544 uses `report.change_report`, which the previous run built and which
-already distinguishes "the configuration is identical" from "no snapshot
-was captured to compare against". #543 needs a `check()` factored out of
-`config_push.preview`. #547 is marked *large* on the issue and is the one
-that stops if this run runs out of night — so it is last, and #544 and #543
-are complete before it starts.
+Succeeds the estate-cluster run, archived in
+`docs/runs/2026-09-05-estate-cluster/` with its own close-out entry. No DONE
+was written for it: it is being succeeded immediately rather than handed
+over, and a DONE created and deleted in the same minute is a signal nobody
+can read. #544 and #543 are closed on GitHub; #547 was never started and
+goes back on the open list untouched.
 
-Every step: verify, commit, push, append a timestamped entry to PROGRESS.md.
+## The one decision taken here
 
----
+**#560 goes first.** It changes the shape of every other AI issue —
+citations, the context inspector, runbooks and the broadcast comparison all
+look different once the model can ask for what it needs instead of being
+pre-loaded with it. Doing it late means doing several of them twice. This
+was flagged at the end of the last two runs and not overruled, so it is
+taken as settled; say so if it should not be.
 
-## #544 — the change record
+## How this run commits
 
-### 1. Where a change lives
+One issue, one close, one push — as asked. A step that finishes an issue
+closes it on GitHub with what shipped and why, then commits and pushes.
+Steps that are half of an issue commit and push without closing.
 
-A change must survive the session it started in — the issue's own stated
-risk. A device reloading mid-change is the ordinary case, not the edge one,
-and a record keyed by session id evaporates exactly then. Keyed on hostname,
-persisted, with `started_at`, `before_id` and the note.
+## Ordering
 
-**Done:** `python test_change.py` passes, including a case that starts a
-change, drops the session, and still ends the change afterwards.
-
-### 2. Start and end over the API
-
-`POST /api/sessions/{id}/change/start` captures, pins the baseline with the
-note, marks the start. `/change/end` captures, diffs against the start,
-gathers the commands typed in the window from history, and reports any
-reload still pending.
-
-**Done:** `test_change.py` drives both through TestClient; ending a change
-that was never started is a 404, not an empty record.
-
-### 3. The record on screen
-
-Opens the existing diff window — the end report is a dict `drift.js
-showDiff` already understands, plus a `commands` list — with Send to Jira,
-Export report and Propose the way back.
-
-**Done:** the three actions are wired, `test_icons.py` and
-`test_contrast.py` pass.
-
-### 4. A change across a group
-
-"Start a change on Glasgow/core" captures every member through the
-scheduler's headless harness, so a change spanning eight switches is one
-record.
-
-**Done:** a test starts and ends a group change against fake sessions and
-gets one record per device.
+Largest last. #561 is medium-to-large and #529 and #552 are mediums; if
+the run runs out it stops there, and the smaller issues that compound with
+#560 are done either way.
 
 ---
 
-## #543 — the compliance check
+## #560 — native tool use
 
-### 5. `check()` out of `preview()`
+### 1. The tool shapes, per provider
 
-`config_push.preview` already classifies every line as add, present or
-remove against the latest snapshot without sending anything. That
-classification is the whole check; it is currently welded to one device and
-one editor.
+`turns.py` grows a tool-message shape for each of the five providers, and
+each client learns to send `tools` and to stream tool blocks. Claude,
+OpenAI, xAI and DeepSeek are three payload shapes between them; Ollama's
+support is uneven and is probed rather than assumed.
 
-**Done:** `test_config_push.py` still passes, and a new test calls `check()`
-directly with a snapshot and a snippet.
+**Done:** `python test_turns.py` (new if absent) asserts each provider's
+tool call and tool result round-trip, and that a model with no tool support
+falls back to tags.
 
-### 6. The group question
+### 2. The loop, with the approval gate untouched
 
-`POST /api/groups/{key}/compliance {snippet_id}` over `profiles_tagged`,
-reading `store.latest_snapshot` per device. A device with no snapshot is
-reported as never captured — which is a different answer from compliant,
-and the one that must not be silently rounded to it.
+The socket gains `tool_call` and `tool_result`. A `run_command` call
+renders as today's command block; approving it sends it and returns the
+output as a tool result so the model continues the same turn. The
+guardrail in `pipeline.py`, the approval, and `investigate_max_steps` stay
+exactly where they are.
 
-**Done:** a test covers a group with a compliant device, a non-compliant
-one, and one that has never been captured, and asserts the three read
-differently.
+**Done:** a test drives a whole tool turn against a fake provider and
+proves nothing reaches a device without approval.
 
-### 7. The table, and its limit stated
+### 3. The read-only tools
 
-Device, missing lines, unexpected lines, snapshot age. "Open and fix" opens
-the session and the push editor prefilled with the missing lines.
+`get_parsed_output(command)`, `get_drift()`, `search_history(query)` —
+answered from what ShellMate already holds, needing no approval because
+they touch no device.
 
-The limit goes on the screen, not only in a comment: line-set matching
-ignores section context, so `description uplink` under the wrong interface
-counts as present. A check that overstates what it verified is worse than
-no check.
+**Done:** a test proves each is answered without a session write, and that
+a read-only tool asking for something absent says so rather than inventing.
 
-**Done:** the panel renders, says what it cannot see, and `test_icons.py`
-passes.
+**Closes #560.**
 
-### 8. Into the digest
+## 4. #553 — show what the assistant saw
 
-The result stores on the group like `backup_last` and routes with the
-nightly backup digest.
+The exact redacted context block each reply carried, on the bubble, plus a
+line saying where the visible window starts. Done next because it is what
+makes everything above inspectable.
 
-**Done:** the digest carries the compliance result; `test_scheduler.py` and
-the digest test pass.
+**Closes #553.**
 
----
+## 5. #551 — point at the screen
 
-## #547 — scheduled show collection
+Ask about a selection; explain the last command's output; a pasted config
+as the same attachment type, redacted server-side.
 
-### 9. What is eligible
+**Closes #551.**
 
-Only snippets not marked `writes`, checked against the dangerous list the
-way `config_push._dangerous` does. A scheduled job that can type is a
-different feature with a different blast radius.
+## 6. #554 — real tables and proper Markdown
 
-**Done:** a test proves a `writes` snippet and a snippet containing a
-dangerous command are both refused, by two separate routes.
+`markdown.js` for AI bubbles, parsed rows shipped to the browser as a real
+table with Copy CSV. The `[SUGGEST_CMD]` and `[PLAN]` splitting stays ahead
+of rendering, and the escaping is checked before reuse on model output.
 
-### 10. Collecting on the timer
+**Closes #554.**
 
-`scheduler.run_group` gains a `collect(session, snippet)` step after
-`capture`, on the second channel. Outputs are stored as commands under a
-synthetic session with `connection_type = "collection"`.
+## 7. #556 — a token budget
 
-**Done:** a test runs a group collection against a fake harness and finds
-the output in the store, attributed to the right device.
+Three bounded Stockton settings, the meter against them, and a price the
+team enters rather than one ShellMate guesses.
 
-### 11. Asking for it
+**Closes #556.**
 
-The schedule dialog gains "also collect": one or more read-only snippets.
+## 8. #557 — per-platform assistant notes
 
-**Done:** the control saves and reloads; `test_icons.py` passes.
+`assistant_notes` per platform, appended to the cached preamble only when
+the fingerprint is certain enough. The generic profile stays silent.
 
-### 12. Finding it again
+**Closes #557.**
 
-A Collections filter in History, and "compare with previous run" diffing
-the same command on the same device across two runs.
+## 9. #559 — citations
 
-**Done:** a test stores two runs and asserts the diff names only what
-changed between them.
+Numbered context lines, a rule to cite them, chips that scroll the terminal
+and highlight. Where the model does not cite, nothing changes.
 
-### 13. Bounds
+**Closes #559.**
 
-`history.max_output_chars`, retention, and a per-group collection age all
-apply. Unbounded growth is the stated risk and it is a real one: a nightly
-`show interfaces status` across two hundred devices is a lot of rows.
+## 10-11. #558 — conversation persistence and export
 
-**Done:** a test proves the age bound prunes, and the existing retention
-test still passes.
+Saved through the same redaction as the summary path, restored on relaunch,
+searchable from History, exported as Markdown. Two steps: the store and the
+API, then the restore and the export.
 
----
+**Closes #558.**
 
-## 14. Close the run
+## 12. #555 — local-model ergonomics
 
-Regenerate the tree (`python tools/claude_tree.py --write`), run the whole
-suite, archive, write DONE.
+Pull a model with progress, tokens per second, and a warning when the
+prompt filled the context — the silent-truncation problem the manual
+documents and nothing surfaces.
+
+**Closes #555.**
+
+## 13. #552 — runbooks
+
+A snippet becomes a plan the assistant walks with approval on every step,
+and a finished Investigate plan can be saved back as a snippet. A fourth
+persona body, which `prompts_editor.js` must show.
+
+**Closes #552.**
+
+## 14. #529 — broadcast that compares
+
+Collect the replies, diff each device against the first, and hand the
+parsed rows to the assistant rather than a hundred raw lines each.
+
+**Closes #529.**
+
+## 15. #561 — a local knowledge folder
+
+`ShellMate-Data/knowledge/` indexed into FTS5 and injected through the same
+block as Chroma, with redaction over the snippets. Last because it is the
+largest and the only one that stands alone.
+
+**Closes #561.**
+
+## 16. Close the run
+
+Regenerate the tree, run the whole suite, archive, write DONE.
 
 **Done:** `python tools/run_tests.py` reports every file passing.
 
 ---
 
-## Not in this run, and why
+## Not in this run
 
-- **The executable is still not rebuilt.** It cannot be while ShellMate is
-  running. It is the first line of DONE for the third time; it needs a
-  minute of Steven's, not a step here.
-- **#543's anchored mode** — matching a parent line plus its children — is
-  named on the issue as a follow-on. Step 7 states the limit instead.
-- **#546 (NetBox) and #548 (group push)** are in the same cluster and are
-  not in this batch. Three issues, one of them large, is already the size
-  of a night.
-- **If the run runs out**, it stops inside #547 and says which step. #544
-  and #543 are ordered first so they are whole either way.
+- **The executable is still not rebuilt**, for the third run running. It
+  cannot be while ShellMate is running.
+- **#547** goes back on the list untouched.
+- If the run runs out it stops inside whichever issue it is on and DONE
+  says which — the issues are ordered so that what is left is the largest.

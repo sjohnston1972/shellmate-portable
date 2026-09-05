@@ -94,6 +94,8 @@ shellmate/
 │   ├── auth.py                  # Optional authentication, for the deployments that need it
 │   ├── branding.py              # One source for the application icon
 │   ├── certs.py                 # Read an OpenSSH certificate and say what it actually permits
+│   ├── change.py                # A piece of work, bracketed (#544)
+│   ├── compliance.py            # Did the standard land everywhere? (#543)
 │   ├── config.py                # Configuration loader for ShellMate
 │   ├── config_archive.py        # Keeping the captured configurations as files
 │   ├── config_push.py           # Apply configuration with a preview first, and a way back (#407)
@@ -182,8 +184,10 @@ shellmate/
 │       ├── ansible_view.js      # The Ansible view: which area is showing, and nothing else (#586)
 │       ├── backup_digest.js     # What the overnight backups found (#539)
 │       ├── broadcast.js         # Send commands to several devices at once
+│       ├── change.js            # Bracketing a piece of work (#544)
 │       ├── chat.js              # AI chat panel for ShellMate
 │       ├── chat_context.js      # Choose which sessions the assistant can see
+│       ├── compliance.js        # Did the standard land everywhere? (#543)
 │       ├── config_push.js       # Apply configuration with a preview first (#407)
 │       ├── connections.js       # Connection dialog and profile management
 │       ├── credentials.js       # Managing the passwords ShellMate has been asked to remember
