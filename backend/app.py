@@ -1598,6 +1598,99 @@ async def run_group_backup(key: str) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+class ComplianceRequest(BaseModel):
+    """Body for POST /api/groups/{key}/compliance (#543)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: One snippet for every device in the group.
+    snippet_id: str = ""
+    #: Or one per platform, for a mixed group. The AAA lines for IOS are
+    #: not the AAA lines for NX-OS, and running the IOS block against a
+    #: firewall would report every line missing and be worse than useless.
+    snippets: dict[str, str] = {}
+    #: An optional block that should *not* be present anywhere.
+    must_not_have_id: str = ""
+    #: Keep the result on the group, the way backup_last is kept.
+    store: bool = True
+
+
+@app.post("/api/groups/{key:path}/compliance")
+async def group_compliance(key: str, request: ComplianceRequest) -> dict:
+    """
+    Check a group against a golden snippet (#543).
+
+    Reads the stored snapshots, so it needs no login and answers at once —
+    which is the whole appeal, and also why every verdict carries the age
+    of the evidence it was reached from. "Compliant" against a capture from
+    six weeks ago is a statement about six weeks ago.
+    """
+    from backend import compliance as compliance_module
+    from backend import groups as groups_module
+    from backend import snippets as snippets_module
+    from backend.profiles import profiles_tagged
+
+    profiles = await asyncio.to_thread(profiles_tagged, key, True)
+    if not profiles:
+        raise HTTPException(status_code=404,
+                            detail=f"No connections are in '{key}'.")
+
+    library = {s.id: s for s in await asyncio.to_thread(snippets_module.load_snippets)}
+
+    if not request.snippet_id and not request.snippets:
+        raise HTTPException(
+            status_code=400,
+            detail="Choose a snippet to check against, or one per platform.")
+
+    for snippet_id in filter(None, [request.snippet_id, request.must_not_have_id,
+                                    *request.snippets.values()]):
+        if snippet_id not in library:
+            raise HTTPException(status_code=404,
+                                detail=f"No snippet with id {snippet_id!r}.")
+
+    def snippet_for(platform: str):
+        # Per-platform first, then the single one. A group with a mapping
+        # and a device on a platform the mapping does not name gets the
+        # fallback if there is one, and "no-snippet" if there is not —
+        # rather than being quietly checked against another platform's block.
+        if request.snippets:
+            chosen = request.snippets.get(platform or "")
+            if chosen:
+                return library.get(chosen)
+            return library.get(request.snippet_id) if request.snippet_id else None
+        return library.get(request.snippet_id)
+
+    def must_not_have_for(_platform: str):
+        return library.get(request.must_not_have_id) if request.must_not_have_id else None
+
+    report = await asyncio.to_thread(
+        compliance_module.check_group, key, profiles, snippet_for,
+        store.latest_snapshot,
+        must_not_have_for if request.must_not_have_id else None)
+
+    report["snippet"] = (library.get(request.snippet_id).name
+                         if request.snippet_id in library else "")
+    report["summary"] = compliance_module.summary_line(report)
+
+    if request.store:
+        # On the group by id, the way backup_last is: a rename landing
+        # while the check ran would otherwise create a ghost entry under
+        # the old key (#466).
+        try:
+            group_id = next((g.get("id") for g in groups_module.list_groups()
+                             if g.get("key") == key), None)
+            current = next((g for g in groups_module.list_groups()
+                            if g.get("id") == group_id), None)
+            await asyncio.to_thread(
+                groups_module.update_group, current["key"] if current else key,
+                {"compliance_last": report})
+        except Exception as exc:                          # pragma: no cover
+            logger.info("Could not record the compliance result on %s: %s",
+                        key, exc)
+
+    return report
+
+
 class GroupChangeRequest(BaseModel):
     """Body for POST /api/groups/{key}/change/start (#544)."""
 

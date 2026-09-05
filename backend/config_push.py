@@ -86,6 +86,61 @@ def _current_config(session: dict, fresh: bool) -> tuple[str, dict | None]:
     return "", None
 
 
+def check(snapshot_text: str, lines, platform: str = "") -> dict:
+    """
+    Classify lines against a stored configuration, sending nothing.
+
+    Factored out of ``preview`` for the compliance check (#543), which asks
+    the same question of two hundred devices from their stored snapshots
+    rather than of one device from its live session. The classification is
+    the whole of both features; only where the configuration comes from
+    differs, and two copies of it would drift.
+
+    Args:
+        snapshot_text: The stored configuration to compare against.
+        lines:         The block, as text or an already-split list.
+        platform:      Reported back, for a caller assembling a table.
+
+    Returns:
+        ``{"platform", "lines": [{"text", "status"}], "counts"}`` where
+        status is ``add`` (not in the configuration), ``present`` (there,
+        verbatim) or ``remove`` (a ``no …`` whose target is there).
+
+    **The limit, stated because it cannot be seen from the result.** Lines
+    are matched as a *set*, stripped of indentation, so section context is
+    ignored: ``description uplink`` under the wrong interface counts as
+    present. That is right for the common case — a block of AAA or logging
+    or NTP lines is flat — and wrong for anything whose meaning depends on
+    the parent line above it. A check that overstates what it verified is
+    worse than no check, so every caller has to say so on screen. An
+    anchored mode is the follow-on named on the issue.
+
+    **"Unexpected lines" needs no extra parameter.** A must-not-have list
+    is the same call: anything that comes back ``present`` is a line that
+    should not be there. Adding a second mode would be a second thing to
+    keep correct for no gain.
+    """
+    current = {line.strip() for line in (snapshot_text or "").splitlines()
+               if line.strip()}
+    wanted = _clean_lines(lines if isinstance(lines, str) else "\n".join(lines))
+
+    rows: list[dict] = []
+    counts = {"add": 0, "present": 0, "remove": 0}
+    for line in wanted:
+        stripped = line.strip()
+        lowered = stripped.lower()
+        status = "add"
+        if stripped in current:
+            status = "present"
+        elif any(lowered.startswith(p) for p in _REMOVAL_PREFIXES):
+            target = stripped.split(" ", 1)[1].strip() if " " in stripped else ""
+            status = "remove" if target and target in current else "add"
+        counts[status] += 1
+        rows.append({"text": line, "status": status})
+
+    return {"platform": platform, "lines": rows, "counts": counts}
+
+
 def preview(session: dict, text: str, fresh: bool = False) -> dict:
     """
     What applying ``text`` would change, without sending anything.
@@ -106,24 +161,16 @@ def preview(session: dict, text: str, fresh: bool = False) -> dict:
             f"push the lines by hand.")
 
     current_text, snapshot = _current_config(session, fresh)
-    current = {line.strip() for line in current_text.splitlines() if line.strip()}
     lines = _clean_lines(text)
     if not lines:
         raise ConnectionError_("There is nothing to apply.")
 
-    rows = []
-    counts = {"add": 0, "present": 0, "remove": 0}
-    for line in lines:
-        stripped = line.strip()
-        lowered = stripped.lower()
-        status = "add"
-        if stripped in current:
-            status = "present"
-        elif any(lowered.startswith(p) for p in _REMOVAL_PREFIXES):
-            target = stripped.split(" ", 1)[1].strip() if " " in stripped else ""
-            status = "remove" if target and target in current else "add"
-        counts[status] += 1
-        rows.append({"text": line, "status": status})
+    # The classification itself lives in check(), which the compliance
+    # report (#543) asks the same question with — from a stored snapshot
+    # rather than a live session. Two copies would drift.
+    classified = check(current_text, lines, platform)
+    rows = classified["lines"]
+    counts = classified["counts"]
 
     dangerous = _dangerous(session, lines)
     return {

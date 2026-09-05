@@ -148,3 +148,38 @@ pass against the changed app.py and groups.js.
 
 **#544 is complete.** Steps 5–8 are #543 next.
 
+## 2026-09-05 10:19 — steps 5 and 6 done (#543)
+
+`config_push.check(snapshot_text, lines, platform)` factored out of
+`preview`. The classification *is* both features; only where the
+configuration comes from differs — a live session for one device, a stored
+snapshot for two hundred — and two copies of it would drift. `preview` now
+delegates and test_config_push still passes unchanged.
+
+`backend/compliance.py` and `POST /api/groups/{key}/compliance`. Four
+things the tests pinned down, each of which sends somebody to the wrong
+place if got wrong:
+
+- **Three states, not two.** `compliant`, `missing`, `never-captured`.
+  Folding the third into "not compliant" sends an engineer to fix a device
+  that may be fine; folding it into "compliant" reports a device nobody
+  has looked at as verified. An empty snapshot counts as never-captured
+  for the same reason.
+- **The age of the evidence is part of the verdict.** Compliant against a
+  six-week-old capture is a statement about six weeks ago, so every row
+  carries `age_days` and a `stale` flag.
+- **A mixed group gets a block per platform.** Running the IOS AAA lines
+  against a firewall reports every line missing, which reads as a badly
+  misconfigured device when the truth is the check was asked the wrong
+  question. A platform with no block gets `no-snippet`, not a verdict.
+- **The limit travels with the result.** Section context is ignored, so
+  `description uplink` under the wrong interface counts as present. The
+  caveat is a field on the report rather than something the panel
+  remembers — a caveat the panel owns is one a forwarded result loses.
+
+"Unexpected lines" needed no new parameter: a must-not-have block is the
+same call, and anything coming back `present` is a line that should not be
+there.
+
+`python test_compliance.py` — 30 passed. test_config_push 26, unchanged.
+
