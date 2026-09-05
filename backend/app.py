@@ -4414,6 +4414,65 @@ async def change_abandon(session_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# REST — Pulling a local model (#555)
+#
+# The privacy story depends on Ollama, and today a first-time user leaves
+# the application to get a model and never comes back knowing why answers
+# about the top of the buffer were wrong. Polled state rather than a
+# streamed response, exactly as the updater does: a pull is gigabytes, it
+# outlives any one request, and it has to survive the panel being closed.
+# ---------------------------------------------------------------------------
+
+
+class OllamaPullRequest(BaseModel):
+    """Body for POST /api/ollama/pull."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = ""
+
+
+@app.get("/api/ollama/pull")
+async def ollama_pull_state() -> dict:
+    """Where a pull has got to, and what is worth pulling."""
+    from backend import ollama_pull
+
+    return {**ollama_pull.state(), "recommended": list(ollama_pull.RECOMMENDED)}
+
+
+@app.post("/api/ollama/pull")
+async def ollama_pull_start(request: OllamaPullRequest) -> dict:
+    """
+    Start pulling a model.
+
+    A 409 for one already running rather than a 400: the request is well
+    formed and the state is what is in the way, and the message names the
+    model that is holding it.
+    """
+    from backend import ollama_pull
+
+    try:
+        return await asyncio.to_thread(ollama_pull.start_pull, request.model)
+    except ValueError as exc:
+        status = 409 if "already" in str(exc).lower() else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+
+@app.delete("/api/ollama/pull")
+async def ollama_pull_cancel() -> dict:
+    """
+    Stop a pull.
+
+    Gigabytes over somebody's home connection is a thing they must be able
+    to take back, and a cancel that only takes effect at the end of the
+    file is not a cancel.
+    """
+    from backend import ollama_pull
+
+    return {"cancelled": await asyncio.to_thread(ollama_pull.cancel_pull)}
+
+
+# ---------------------------------------------------------------------------
 # REST — Conversations (#558)
 #
 # The chat was an array in the browser. Reloading the page threw away the

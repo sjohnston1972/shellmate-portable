@@ -3628,6 +3628,41 @@ mark.search-hit.search-current { outline: 2px solid var(--primary); }
 }
 
 /* ---------------------------------------------------------------------------
+   Pulling a local model (#555)
+
+   The bar is one layer, not the model: Ollama reports progress per layer,
+   so a bar that claimed to be the whole download would run to the end and
+   jump back several times.
+--------------------------------------------------------------------------- */
+#ollama-pull-progress {
+  margin-top: 8px;
+}
+
+#ollama-pull-bar {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-highest);
+  overflow: hidden;
+}
+
+#ollama-pull-bar > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--primary);
+  transition: width 0.3s ease;
+}
+
+#ollama-pull-status {
+  margin: 6px 0 0;
+  color: var(--on-surface-dim);
+  font-size: 11.5px;
+}
+
+.ollama-pull-ok  { color: var(--ok); }
+.ollama-pull-bad { color: var(--error); }
+
+/* ---------------------------------------------------------------------------
    Runbooks (#552)
 --------------------------------------------------------------------------- */
 .snippet-walk {

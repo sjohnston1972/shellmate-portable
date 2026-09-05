@@ -93,6 +93,7 @@ shellmate/
 │   ├── app.py                   # FastAPI application for ShellMate
 │   ├── auth.py                  # Optional authentication, for the deployments that need it
 │   ├── branding.py              # One source for the application icon
+│   ├── broadcast_collect.py     # The replies a broadcast produced, and how they differ (#529)
 │   ├── certs.py                 # Read an OpenSSH certificate and say what it actually permits
 │   ├── change.py                # A piece of work, bracketed (#544)
 │   ├── compliance.py            # Did the standard land everywhere? (#543)
@@ -109,9 +110,11 @@ shellmate/
 │   ├── jira_client.py           # Jira Cloud REST API client for ShellMate session reporting
 │   ├── jsonfile.py              # The one way a JSON data file is read and written (#457)
 │   ├── keys.py                  # Making SSH keys, not just using them
+│   ├── knowledge.py             # The team's own documents, retrievable without a server (#561)
 │   ├── licence.py               # Licence keys, verified without a network (#446)
 │   ├── logsearch.py             # Finding a line across every session log (#576)
 │   ├── neighbours.py            # What the device you reached can see (#542)
+│   ├── ollama_pull.py           # Fetch a local model without leaving the application (#555)
 │   ├── onboard.py               # What happens in the first few seconds of a session
 │   ├── paths.py                 # Single source of truth for every filesystem location ShellMate…
 │   ├── pipeline.py              # The chokepoint every keystroke passes through on its way out
@@ -144,6 +147,8 @@ shellmate/
 │   │   ├── providers.py         # Model discovery per provider, cached to models.json
 │   │   ├── router.py            # Routes AI chat requests to the correct backend (Claude / xAI /…
 │   │   ├── summarize.py         # One-shot AI summary of a terminal session for the
+│   │   ├── toolloop.py          # Answering what the assistant asked for (#560)
+│   │   ├── tools.py             # What the assistant may ask ShellMate to do (#560)
 │   │   ├── turns.py             # A conversation, shaped for each provider
 │   │   ├── xai_client.py        # Streaming xAI (Grok) client for ShellMate
 │   ├── connections/
@@ -214,6 +219,7 @@ shellmate/
 │       ├── mode.js              # Learn / Troubleshoot mode toggle
 │       ├── neighbours.js        # "What else is on this site?" (#542)
 │       ├── notes.js             # What you were doing, written down beside what you did (#530)
+│       ├── ollama_pull.js       # Getting a local model without leaving the app (#555)
 │       ├── palette.js           # Find a tab by name (#410), and recall a command (#522)
 │       ├── panel_resize.js      # Dragging a side panel wider
 │       ├── platforms_editor.js  # Edit device platform definitions in the app

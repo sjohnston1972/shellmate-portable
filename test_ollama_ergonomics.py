@@ -269,8 +269,14 @@ def test_one_pull_at_a_time() -> None:
         gate.set()
         final = wait_for_phase("done", "failed")
         check("  the first pull still finishes", final["phase"] == "done", str(final))
+        # Accepted, not "in a particular phase at this instant". With
+        # the gate released the thread can finish before start_pull
+        # returns, so asserting "pulling" is a race that passes on an
+        # idle machine and fails on a busy one.
+        started = ollama_pull.start_pull("mistral:7b")
         check("  and a pull may be started once it has",
-              ollama_pull.start_pull("mistral:7b")["phase"] == "pulling")
+              started["phase"] in ("pulling", "done")
+              and started["model"] == "mistral:7b", str(started))
         wait_for_phase("done", "failed", "idle")
     finally:
         gate.set()
@@ -388,7 +394,59 @@ def _message(call) -> str:
     return ""
 
 
+def test_the_integration_is_wired() -> None:
+    """
+    A module nothing loads, and a field nothing carries, are both features
+    nobody has.
+    """
+    print("\n-- Wired up --")
+    root = Path(__file__).parent
+    html = (root / "frontend" / "index.html").read_text(encoding="utf-8")
+    chat = (root / "frontend" / "js" / "chat.js").read_text(encoding="utf-8")
+    pull = (root / "frontend" / "js" / "ollama_pull.js").read_text(encoding="utf-8")
+    app = (root / "backend" / "app.py").read_text(encoding="utf-8")
+
+    check("the routes exist",
+          '"/api/ollama/pull"' in app and "ollama_pull_cancel" in app)
+    check("a pull already running is a 409, not a 400",
+          "status = 409" in app,
+          "the request is well formed and the state is what is in the way")
+
+    check("the panel is loaded", "js/ollama_pull.js" in html)
+    check("and there is a control to pull with",
+          'id="ollama-pull-start"' in html and 'id="setting-ollama-model"' in html)
+    check("with a cancel, because a pull is gigabytes",
+          'id="ollama-pull-cancel"' in html)
+    check("the suggestions carry their reason, not just a name",
+          "option.label" in pull,
+          "qwen2.5:14b tells somebody choosing their first model nothing")
+    check("polling stops when nothing is happening",
+          "clearInterval(timer)" in pull,
+          "a timer that runs forever is a request a second for the session")
+
+    check("tokens per second survives into the meter",
+          "tokens_per_second: Number(msg.tokens_per_second)" in chat,
+          "lastUsage is rebuilt field by field, so anything not named there "
+          "is silently dropped")
+    check("and reaches the tooltip",
+          "tokens/second on the last reply" in chat)
+
+    check("the truncation warning exists",
+          "_warnIfTruncated" in chat)
+    check("it fires only when the model actually said so",
+          "!msg.context_full" in chat,
+          "warning on a guess would train people to ignore it")
+    check("once per conversation",
+          "truncationWarned" in chat,
+          "a warning on every reply is one people stop reading, and the "
+          "condition does not change until somebody acts on it")
+    check("and it says what to do about it",
+          "Raise the context window" in chat)
+
+
 def main() -> int:
+
+
     print("=" * 60)
     print("  Local-model ergonomics — speed, truncation, pulling")
     print("=" * 60)
@@ -402,7 +460,8 @@ def main() -> int:
         test_cancelling,
         test_failures_read_like_sentences,
         test_the_recommended_list,
-    ):
+    
+        test_the_integration_is_wired,):
         try:
             test()
         except Exception as exc:

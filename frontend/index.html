@@ -2028,6 +2028,32 @@ GigEth0/2     unassigned    YES unset  down     down
                    data-tip="Where the local Ollama server is. Blank falls back to OLLAMA_HOST from the environment, which itself defaults to http://localhost:11434.||Not a secret, so this one is kept in settings.json rather than the vault, and it is readable by anyone who can open your data folder. Ollama is the answer when the estate has no route to the internet or the output must not leave the building.">Ollama host URL</label>
             <input type="text" id="setting-ollama-host" class="setting-input setting-input-full" autocomplete="off" placeholder="http://localhost:11434" />
           </div>
+
+          <!-- #555. The privacy story depends on Ollama, and a
+               first-time user had to leave the application to get a
+               model. Polled rather than streamed: a pull is gigabytes
+               and has to survive this panel being closed. -->
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setting-ollama-model"
+                   data-tip="Download a model into your local Ollama without leaving ShellMate. Pick one of the suggestions or type any tag from ollama.com.||A pull is several gigabytes and can be cancelled at any point. A machine with no route to the internet cannot pull at all, and the message says so rather than failing silently.">Pull a model</label>
+            <div class="setting-input-group setting-input-group-full">
+              <input type="text" id="setting-ollama-model" class="setting-input setting-input-full" autocomplete="off" list="ollama-recommended" placeholder="qwen2.5:14b" />
+              <datalist id="ollama-recommended"></datalist>
+              <button type="button" id="ollama-pull-start" class="btn-secondary">
+                <span class="material-symbols-outlined">download</span>
+                Pull
+              </button>
+              <button type="button" id="ollama-pull-cancel" class="btn-secondary hidden">
+                <span class="material-symbols-outlined">cancel</span>
+                Cancel
+              </button>
+            </div>
+            <div id="ollama-pull-progress" class="hidden">
+              <div id="ollama-pull-bar"><span></span></div>
+              <p id="ollama-pull-status"></p>
+            </div>
+            <p class="settings-section-hint" id="ollama-pull-hint"></p>
+          </div>
         
           <div class="settings-subgroup">
           <h4 class="settings-subsection-title">Knowledge Base (Chroma DB)</h4>
@@ -3828,6 +3854,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/prompts_editor.js"></script>
   <script src="/static/js/highlight.js"></script>
   <script src="/static/js/ai_panel.js"></script>
+  <script src="/static/js/ollama_pull.js"></script>
   <script src="/static/js/chat_context.js"></script>
   <script src="/static/js/device.js"></script>
   <script src="/static/js/highlight_settings.js"></script>

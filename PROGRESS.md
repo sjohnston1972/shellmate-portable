@@ -423,3 +423,24 @@ added can do neither.
 **105 of 105 test files pass** on a clean run with nothing else touching
 the tree.
 
+## 2026-09-05 15:56 — #555 closed, and the executable rebuilt
+
+**The exe is current again** — `dist/ShellMate-Portable.exe` at `37904fe`,
+carrying four runs of work. ShellMate was not running, so nothing had to be
+closed and no live session was at risk; I checked before assuming.
+
+#555: the truncation warning, tokens per second, and pulling a model.
+
+The warning is the point. Ollama cuts a long prompt from the front and
+answers confidently about output it never read; the manual documented it
+and nothing surfaced it. Reported only when the window is known — with the
+setting at 0 no `num_ctx` is sent, so none is invented. Warning on a guess
+would train people to ignore it.
+
+Two integration bugs caught before shipping: `lastUsage` is rebuilt field
+by field, so `tokens_per_second` was being dropped on its way to the meter;
+and a test asserted the pull's phase at an instant after releasing its
+gate, a race that passes on an idle machine and fails on a busy one.
+
+`python test_ollama_ergonomics.py` — 49 passed. 105 of 105 test files pass.
+

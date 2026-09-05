@@ -2700,13 +2700,45 @@
   let lastUsage = null;
   const totalUsage = { input: 0, output: 0, cache_read: 0, replies: 0 };
 
+  /**
+   * The silent-truncation warning (#555).
+   *
+   * Ollama truncates the prompt from the front when it exceeds num_ctx and
+   * says nothing at all, so the model answers confidently about output it
+   * never saw — and the engineer has no way to tell that from a bad
+   * answer. This is the one failure the manual documents and the interface
+   * never surfaced.
+   *
+   * Said once per conversation. A warning on every reply after the first
+   * is one people stop reading, and the condition does not change until
+   * somebody acts on it.
+   */
+  let truncationWarned = false;
+
+  function _warnIfTruncated(msg) {
+    if (truncationWarned || !msg || !msg.context_full) return;
+    truncationWarned = true;
+    const limit = Number(msg.context_limit) || 0;
+    appendErrorBubble(
+      'The local model did not see the start of this context: the request '
+      + `filled its ${limit ? limit.toLocaleString() + '-token ' : ''}window `
+      + 'and Ollama dropped the oldest part without saying so. Answers about '
+      + 'anything early in the buffer may be wrong. Raise the context window '
+      + 'under Settings, Advanced, AI Assistant, or ask about less at once.');
+  }
+
   function _recordUsage(msg) {
+    _warnIfTruncated(msg);
     lastUsage = {
       input:      Number(msg.input) || 0,
       output:     Number(msg.output) || 0,
       cache_read: Number(msg.cache_read) || 0,
       cache_write: Number(msg.cache_write) || 0,
       provider:   msg.provider || currentBackend,
+      // Ollama only, and only when it reported a duration (#555).
+      // Carried explicitly because this object is rebuilt field by
+      // field, so anything not named here is silently dropped.
+      tokens_per_second: Number(msg.tokens_per_second) || 0,
     };
     // `input` is the uncached prompt on every provider (#499); what the
     // request contained is that plus what the cache served or stored.
@@ -2849,6 +2881,13 @@
         + '(cleared with the chat).';
     }
 
+    // What a local model is actually managing (#555). Only Ollama
+    // reports it, and only after a reply, so it is absent rather
+    // than zero the rest of the time.
+    if (lastUsage && lastUsage.tokens_per_second) {
+      title += `\n${lastUsage.tokens_per_second} tokens/second on the last reply.`;
+    }
+
     const money = _conversationCost();
     if (money) title += `\n${money}`;
 
@@ -2887,6 +2926,8 @@
     // Not a concluded runbook — just a cleared chat. Ending it here
     // stops the next question carrying steps nobody is walking.
     endRunbook();
+    // A fresh conversation is a fresh chance to be warned (#555).
+    truncationWarned = false;
     _investigation.steps = 0;
     // Reset Jira chat history so context estimate resets too
     if (typeof window._clearJiraChatHistory === 'function') window._clearJiraChatHistory();
