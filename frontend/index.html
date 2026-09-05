@@ -2039,6 +2039,75 @@ GigEth0/2     unassigned    YES unset  down     down
           <div class="settings-slot" data-category="backups"></div>
         </section>
 
+        <!-- ===== Backup and transfer ===== -->
+        <section class="settings-section">
+          <h3 class="settings-section-title">Backup and transfer</h3>
+          <p class="settings-section-hint">Take your setup to another machine, or bring one in. Everything here works on the files in your data folder — nothing touches a device.</p>
+
+          <div class="settings-subgroup">
+          <h4 class="settings-subsection-title">Export my setup</h4>
+          <p class="settings-section-hint">One zip you can mail, put on a stick, or keep as a backup. Tick what goes in it.</p>
+
+          <div id="setup-parts" class="setup-parts"></div>
+
+          <p class="settings-section-hint" id="setup-never"></p>
+          <p class="settings-section-hint setup-warn">Saved device passwords and API keys are not in a bundle and cannot be — it is a file that gets mailed around. If your vault is sealed to this Windows account it cannot be moved at all; a master-password vault has its own backup, under Credentials vault.</p>
+
+          <div class="setting-row">
+            <button type="button" id="setup-export" class="btn-primary">
+              <span class="material-symbols-outlined">download</span>
+              Export
+            </button>
+            <span class="setting-value"></span>
+          </div>
+          <p class="settings-section-hint" id="setup-export-status"></p>
+        </div>
+
+          <div class="settings-subgroup">
+          <h4 class="settings-subsection-title">Import a setup</h4>
+          <p class="settings-section-hint">Nothing is changed until you have seen what is in the file and chosen what to do with each part.</p>
+
+          <div class="setting-row">
+            <button type="button" id="setup-choose" class="btn-secondary">
+              <span class="material-symbols-outlined">folder_open</span>
+              Choose a bundle…
+            </button>
+            <button type="button" id="setup-apply" class="btn-primary hidden">
+              <span class="material-symbols-outlined">upload</span>
+              Import what is ticked
+            </button>
+          </div>
+          <p class="settings-section-hint" id="setup-import-status"></p>
+          <div id="setup-preview"></div>
+          <p class="settings-section-hint">Sessions have to be closed first. Replacing connections and settings underneath a live connection would leave that session running against a configuration it was not started with.</p>
+        </div>
+
+          <div class="settings-subgroup">
+          <h4 class="settings-subsection-title">Move my data folder</h4>
+          <p class="settings-section-hint">Put everything somewhere else — a bigger disk, an encrypted volume, a synced folder — and point ShellMate at it from then on.</p>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label" for="setup-move-target"
+                   data-tip="Where the data folder should live from now on. ShellMate copies everything there and writes a `data-dir.txt` beside the executable naming it.||Your current folder is left exactly as it is — nothing is deleted. To go back, delete `data-dir.txt` and ShellMate returns to its usual folder beside the executable.">Move it to</label>
+            <div class="setting-input-group setting-input-group-full">
+              <input type="text" id="setup-move-target" class="setting-input setting-input-full" placeholder="D:\ShellMate-Data" />
+              <button type="button" class="btn-secondary" id="setup-move-choose">
+                <span class="material-symbols-outlined">folder_open</span>
+                Browse
+              </button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <button type="button" id="setup-move-go" class="btn-secondary">
+              <span class="material-symbols-outlined">swap_horiz</span>
+              Move it
+            </button>
+          </div>
+          <p class="settings-section-hint" id="setup-move-status"></p>
+        </div>
+        </section>
+
         <!-- ===== AI ===== -->
         <section class="settings-section">
           <h3 class="settings-section-title">AI Providers</h3>
@@ -3950,6 +4019,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/support.js"></script>
   <script src="/static/js/keys.js"></script>
   <script src="/static/js/stockton.js"></script>
+  <script src="/static/js/setup.js"></script>
   <script src="/static/js/firstrun.js"></script>
   <script src="/static/js/knowledge.js"></script>
   <script src="/static/js/broadcast.js"></script>

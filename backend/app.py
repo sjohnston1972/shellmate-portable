@@ -18,6 +18,7 @@ REST endpoints:
 """
 
 import asyncio
+import base64
 import contextlib
 import datetime
 import json
@@ -2289,6 +2290,179 @@ async def send_feedback(request: FeedbackRequest) -> dict:
             request.kind, request.title, request.description)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# REST — Export, import, and moving the data folder (#563)
+#
+# The manual lists every file in ShellMate-Data and says three of them are
+# meant to be handed to a colleague. Until now that was the whole story: the
+# way to move a setup to a laptop was to copy a folder by hand and find out
+# some days later that the vault had not come with it.
+#
+# Nothing here carries a secret. Not the vault, not the plaintext credential
+# file, not an API key, not a device password — a setup bundle is a file
+# people mail to each other, and every other decision follows from that.
+# ---------------------------------------------------------------------------
+
+
+class SetupExportRequest(BaseModel):
+    """Body for POST /api/setup/export."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Part keys to include. Empty means everything that is not optional.
+    include: list[str] = []
+
+
+class SetupApplyRequest(BaseModel):
+    """Body for POST /api/setup/apply."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: The bundle, base64. Read by the browser rather than uploaded as
+    #: multipart, the same way a vault backup is restored — one code path
+    #: for "a file the user picked", and no upload handling to get wrong.
+    data: str = ""
+    #: ``{part key: "replace" | "merge" | "skip"}``.
+    actions: dict[str, str] = {}
+
+
+class SetupMoveRequest(BaseModel):
+    """Body for POST /api/setup/move and /api/setup/move/plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: str = ""
+
+
+@app.get("/api/setup/parts")
+async def setup_parts() -> dict:
+    """What an export can contain, and what is never in one."""
+    from backend import setup_bundle
+
+    return {
+        "parts": [
+            {"key": p.key, "file": p.filename, "label": p.label,
+             "describe": p.describe, "mergeable": p.mergeable,
+             "optional": p.optional,
+             "present": await asyncio.to_thread(lambda pp=p: pp.path().exists())}
+            for p in setup_bundle.PARTS
+        ],
+        # Returned rather than written into the page, so the promise and
+        # the code that keeps it cannot drift apart.
+        "never": list(setup_bundle.NEVER),
+    }
+
+
+@app.post("/api/setup/export")
+async def setup_export(request: SetupExportRequest) -> Response:
+    """
+    Build a setup bundle and return it as a download.
+
+    The zip itself rather than a path: it is a file to be mailed or copied
+    to a stick, and writing it into the data folder first would leave a
+    copy of somebody's configuration lying beside the thing it configures.
+    """
+    from backend import setup_bundle
+
+    blob, manifest = await asyncio.to_thread(
+        setup_bundle.export, list(request.include) or None)
+    stamp = time.strftime("%Y-%m-%d")
+    logger.info("Exported a setup bundle: %s part(s), %s bytes",
+                len(manifest.get("parts") or []), len(blob))
+    return Response(
+        content=blob,
+        media_type="application/zip",
+        headers={"Content-Disposition":
+                 f'attachment; filename="shellmate-setup-{stamp}.zip"'},
+    )
+
+
+@app.post("/api/setup/inspect")
+async def setup_inspect(request: SetupApplyRequest) -> dict:
+    """
+    What is in a bundle, without applying any of it.
+
+    The preview is the reason this is an import rather than an instruction
+    to unzip: "31 connections, 4 of which you already have" is a decision
+    somebody can take, and a folder of JSON files is not.
+    """
+    from backend import setup_bundle
+
+    try:
+        blob = base64.b64decode(request.data or "", validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400,
+                            detail="That file could not be read.") from exc
+    try:
+        return await asyncio.to_thread(setup_bundle.inspect, blob)
+    except setup_bundle.BundleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/setup/apply")
+async def setup_apply(request: SetupApplyRequest) -> dict:
+    """
+    Import a bundle, having been told what to do with each part.
+
+    Refused while sessions are open, mirroring the updater's blockers: it
+    is the same class of problem, which is replacing state underneath a
+    live connection.
+    """
+    from backend import setup_bundle
+
+    open_sessions = [
+        s.get("display_label") or s.get("hostname") or "a device"
+        for s in session_manager.get_all_sessions()
+    ]
+    if open_sessions:
+        raise HTTPException(
+            status_code=409,
+            detail=("Close your sessions first — importing settings and "
+                    "connections underneath a live connection would leave "
+                    "this session running against a configuration it was "
+                    "not started with. Open: "
+                    + ", ".join(open_sessions[:6])
+                    + ("…" if len(open_sessions) > 6 else "")))
+
+    try:
+        blob = base64.b64decode(request.data or "", validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400,
+                            detail="That file could not be read.") from exc
+    try:
+        return await asyncio.to_thread(setup_bundle.apply, blob,
+                                       dict(request.actions or {}))
+    except setup_bundle.BundleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/setup/move/plan")
+async def setup_move_plan(request: SetupMoveRequest) -> dict:
+    """What moving the data folder there would do. Changes nothing."""
+    from backend import setup_bundle
+
+    return await asyncio.to_thread(setup_bundle.move_plan, request.target)
+
+
+@app.post("/api/setup/move")
+async def setup_move(request: SetupMoveRequest) -> dict:
+    """
+    Copy the data folder somewhere else and point future launches at it.
+
+    The original is left exactly where it was, and the response says so.
+    A move that deleted it would be the one operation in ShellMate with no
+    way back, performed on the folder holding everything the user has
+    configured.
+    """
+    from backend import setup_bundle
+
+    try:
+        return await asyncio.to_thread(setup_bundle.move_data_dir,
+                                       request.target, session_manager)
+    except setup_bundle.BundleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

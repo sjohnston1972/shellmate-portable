@@ -128,6 +128,7 @@ shellmate/
 │   ├── schemes.py               # Terminal colour schemes as data
 │   ├── server.py                # Startup orchestration for ShellMate: port selection and
 │   ├── settings_store.py        # Application settings persistence for ShellMate
+│   ├── setup_bundle.py          # Taking a ShellMate setup somewhere else (#563)
 │   ├── snippets.py              # The saved command library
 │   ├── ssh_config.py            # What OpenSSH already knows about a host (#527)
 │   ├── store.py                 # Persistent session history in SQLite
@@ -233,6 +234,7 @@ shellmate/
 │       ├── report.js            # Export a session, a diff or a change as a file (#540)
 │       ├── settings.js          # Settings panel for ShellMate
 │       ├── settings_nav.js      # Make Settings navigable instead of a long scroll
+│       ├── setup.js             # Taking a setup somewhere else (#563)
 │       ├── sftp.js              # Remote file browser for the active SSH tab
 │       ├── stockton.js          # The advanced settings, rendered from the registry
 │       ├── support.js           # Assembling a support request worth answering
@@ -487,6 +489,9 @@ no file at all — sees the new one. `ai.panel_enabled` is the worked example.
 # Server
 SHELLMATE_HOST=127.0.0.1
 SHELLMATE_PORT=8765
+# Optional: keep the data folder somewhere other than beside the exe.
+# Wins over data-dir.txt. The Move tool in Settings writes that file instead.
+# SHELLMATE_DATA_DIR=
 
 # AI providers (all optional — leave blank to disable; the vault wins over .env)
 ANTHROPIC_API_KEY=
@@ -525,8 +530,8 @@ DEFAULT_SERIAL_PORT=COM3
 DEFAULT_BAUD_RATE=9600
 ```
 
-Every one of these is read by `backend/config.py`, `backend/ansible.py` or
-`backend/jira_client.py`.
+Every one of these is read by `backend/config.py`, `backend/ansible.py`,
+`backend/jira_client.py` or `backend/paths.py`.
 A variable the code reads and this block does not mention is a variable
 nobody knows exists; the drift is silent in that direction only.
 

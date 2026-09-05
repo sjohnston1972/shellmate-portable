@@ -138,3 +138,32 @@ dashboard, out of the way the moment a tab opens. The UI tests found it
 before a user did, which is what they are for.
 
 `test_phase2.py` — 97 passed again. `test_firstrun.py` — 30.
+
+## 2026-09-05 18:30 — #563 done
+
+Export, import, and moving the data folder. `backend/setup_bundle.py`,
+routes under `/api/setup/`, a Backup and transfer section in Settings, and
+one override check in `paths.data_dir()`.
+
+The rule everything follows from: nothing secret is in a bundle. Tested by
+putting a secret in every place one could be — provider key, Ansible token,
+webhook URL, the vault, the plaintext credential file — and reading the zip
+back. The credential sets travel as names and usernames so a colleague's
+profiles point at something meaningful; the passwords are theirs to fill in.
+
+Import previews first, always, with counts and how many you already have.
+Merge is the default for lists and incoming loses ties, because somebody
+importing a colleague's setup has their own corrections in these files.
+Profiles merge on `identity()`, or #73's duplicates come straight back.
+Refused while sessions are open, mirroring `updater.blockers`.
+
+The move copies, points, and never deletes — the original stays exactly
+where it was, and the response says so every time. The override is
+`data-dir.txt` beside the exe or `SHELLMATE_DATA_DIR`, resolved in
+`paths.data_dir()` and nowhere else; a pointer to an unusable folder is
+ignored with a warning rather than refusing to start.
+
+`python test_setup_bundle.py` — 54 passed, a real round trip on a seeded
+folder. Guards: startup 153, settings 49, vault 96, security 58, support 78,
+profiles 198, diagnostics 64, updater 32, env_example 8, tooltips, contrast,
+accessibility.

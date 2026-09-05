@@ -267,10 +267,36 @@ Everything lives in `ShellMate-Data` beside the executable.
 | `window-storage/` | The desktop window's own state — scroll positions and the like |
 | `shellmate.log` | What the application itself did, for troubleshooting |
 | `crash-….json` | A fault ShellMate did not survive, recorded so the next launch can offer to report it. Redacted, and never your terminal output |
+| `data-dir.txt` | Beside the *executable*, not in the data folder: names a different data folder, written by Settings → Backup and transfer → Move. Delete it to go back |
 
 `platforms.json`, `schemes.json` and `snippets.json` are plain, commented
 JSON meant to be edited, kept in version control, or handed to a colleague.
 Delete any of them and the shipped defaults come back.
+
+### Taking it with you
+
+**Settings → Backup and transfer** does three things the manual used to
+answer with "copy the folder".
+
+**Export my setup** writes one zip — settings, connections, groups, the
+names of your credential sets, platform definitions, colour schemes, the
+command library, the assistant prompts — with a manifest and a checksum per
+file. Mail it, put it on a stick, or keep it as a backup. **Saved passwords
+and API keys are never in it**, because it is a file that gets mailed around.
+If your vault is sealed to this Windows account it cannot be moved at all; a
+master-password vault has its own backup under Credentials vault.
+
+**Import a setup** shows what is in a bundle before changing anything — "31
+connections, 4 of which you already have" — and asks per file: add what is
+missing, replace yours entirely, or skip. *Add what is missing* is the
+default for lists and keeps your own corrections; *replace* says so in the
+confirmation. Sessions have to be closed first.
+
+**Move my data folder** copies everything to a folder you choose and writes
+`data-dir.txt` beside the executable naming it. Nothing is deleted: the
+original folder stays exactly as it was, so going back is deleting that one
+file. `SHELLMATE_DATA_DIR` in the environment does the same for a deployment
+with nowhere sensible to put a file beside the exe, and wins over the file.
 
 `configs/` can be pointed anywhere, including a network share — see
 [History and drift](#history-and-drift).

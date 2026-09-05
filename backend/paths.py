@@ -19,10 +19,13 @@ Three distinct roots, deliberately kept separate:
 ``data_dir()``      Where user data is written.  Stable across runs, writable.
 """
 
+import logging
 import os
 import sys
 import tempfile
 from pathlib import Path
+
+_logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Frozen-vs-source detection
@@ -30,6 +33,21 @@ from pathlib import Path
 
 # The name of the data folder created alongside the executable.
 DATA_DIR_NAME = "ShellMate-Data"
+
+#: A pointer file beside the executable naming a different data folder (#563).
+#:
+#: One override, resolved in one place. The alternative — reading an
+#: environment variable wherever somebody happened to need it — is how a
+#: portable application ends up with two answers to "where is my data", and
+#: for this one that means a stick somebody believes is carrying their setup
+#: and is not.
+DATA_DIR_POINTER = "data-dir.txt"
+
+#: The same thing from the environment, for a headless or containerised
+#: deployment where there is nowhere sensible to put a file beside the exe.
+#: It wins over the pointer, because it is the more explicit of the two.
+DATA_DIR_ENV = "SHELLMATE_DATA_DIR"
+
 
 # Resolved once on first use and reused — probing writability on every call
 # would mean disk I/O on every settings read.
@@ -116,6 +134,46 @@ def _user_data_fallback() -> Path:
     return Path.home() / ".shellmate-portable"
 
 
+def _override_dir() -> Path | None:
+    """
+    The folder an override names, when it names a usable one.
+
+    A bad override is ignored with a warning rather than raising. The
+    pointer is a text file people are told they may edit, and it is going
+    to end up naming a network drive that is not mounted this morning —
+    at which point ShellMate falling back to its ordinary folder is
+    recoverable and ShellMate refusing to start is not.
+    """
+    candidates = []
+
+    from_env = os.environ.get(DATA_DIR_ENV, "").strip()
+    if from_env:
+        candidates.append((from_env, DATA_DIR_ENV))
+
+    try:
+        pointer = app_dir() / DATA_DIR_POINTER
+        if pointer.is_file():
+            named = pointer.read_text(encoding="utf-8").strip()
+            if named:
+                candidates.append((named, pointer.name))
+    except OSError:
+        pass
+
+    for raw, source in candidates:
+        try:
+            target = Path(raw).expanduser()
+            target.mkdir(parents=True, exist_ok=True)
+            if _is_writable(target):
+                return target
+            _logger.warning("%s names %s, which is not writable — using the "
+                            "ordinary data folder instead", source, target)
+        except OSError as exc:
+            _logger.warning("%s names a folder that could not be used (%s) — "
+                            "using the ordinary data folder instead",
+                            source, exc)
+    return None
+
+
 def data_dir() -> Path:
     """
     Return the writable directory holding settings, profiles, logs and the
@@ -131,6 +189,16 @@ def data_dir() -> Path:
     global _data_dir_cache, _data_dir_is_fallback
 
     if _data_dir_cache is not None:
+        return _data_dir_cache
+
+    # An explicit override wins (#563) — `data-dir.txt` beside the
+    # executable, written by the Move tool, or the environment for a
+    # deployment with nowhere sensible to put a file. Resolved here and
+    # nowhere else.
+    overridden = _override_dir()
+    if overridden is not None:
+        _data_dir_cache = overridden
+        _data_dir_is_fallback = False
         return _data_dir_cache
 
     portable = app_dir() / DATA_DIR_NAME
