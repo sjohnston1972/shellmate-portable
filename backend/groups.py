@@ -352,6 +352,13 @@ def list_groups() -> list[dict]:
             # Scheduled backups (#408): the schedule, and how the last one went.
             "backup":      entry.get("backup") or None,
             "backup_last": entry.get("backup_last") or None,
+            # Compliance (#543): the standing choice of what this group is
+            # checked against, and the last result. Projected here as well
+            # as accepted in update_group — this function builds the public
+            # view field by field, so a key stored and not named here is a
+            # key nothing can read back.
+            "compliance":      entry.get("compliance") or None,
+            "compliance_last": entry.get("compliance_last") or None,
         })
 
     # Favourites first, then the hand-arranged order, then alphabetically for
@@ -455,6 +462,14 @@ def update_group(key: str, changes: dict) -> dict:
             entry.pop("defaults", None)
     if "backup_last" in changes and isinstance(changes["backup_last"], dict):
         entry["backup_last"] = changes["backup_last"]
+    # Compliance (#543): the standing choice of what to check against, and
+    # the last result. Both have to be named here — this function handles
+    # the keys it knows and silently drops the rest, which is how a field
+    # can be written, returned as accepted, and never persisted.
+    if "compliance" in changes and isinstance(changes["compliance"], dict):
+        entry["compliance"] = changes["compliance"]
+    if "compliance_last" in changes and isinstance(changes["compliance_last"], dict):
+        entry["compliance_last"] = changes["compliance_last"]
     if "order" in changes:
         try:
             entry["order"] = int(changes["order"])

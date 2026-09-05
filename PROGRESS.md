@@ -215,3 +215,42 @@ casing because `inner_text` returns *rendered* text — a CSS
 `python test_compliance_ui.py` — 18 passed. test_compliance 30,
 test_contrast 103, test_icons 4.
 
+## 2026-09-05 10:33 — step 8 done, and #543 is complete
+
+Compliance findings now reach the morning digest, and the check repeats
+itself after every scheduled backup for any group that asked for it —
+which is the moment its evidence is freshest, and the difference between a
+standard verified every night and one verified the afternoon somebody
+happened to click.
+
+Four rules the tests hold:
+
+- **Only the two states somebody acts on** reach the digest: devices
+  missing lines, and devices there is no capture to check. "46 compliant"
+  is not news, and a digest that leads with it is one people skim — at
+  which point the morning something *is* missing looks like every other.
+- **Named separately from the backup's own numbers.** "The capture failed"
+  and "the capture worked and the standard is not there" are two different
+  mornings' work.
+- **A stale result is not tonight's news.** A finding from a click three
+  weeks ago is only attached if it ran with this backup; the devices may
+  have been fixed since, and date-stamping old news as new is worse than
+  saying nothing.
+- **A deleted snippet is said out loud.** A check that quietly stops
+  running reports compliance by omission, which is the worst available way
+  for this to fail.
+
+**The bug worth recording is one I walked straight into.** `update_group`
+handles the keys it knows and silently drops the rest, and `list_groups`
+builds the public view field by field — so `compliance_last` was written,
+accepted, and never persisted, and then not readable either. That is
+exactly the silently-dropped-field shape I have been calling out since the
+Ansible build request, and it cost two rounds of "why is this None". Both
+places now name the two keys, with a comment saying why they have to.
+
+`python test_scheduler.py` — 45 passed (was 30). test_groups,
+test_compliance, test_group_clone, test_config_push and test_change_api
+all still pass.
+
+**#543 is complete.** Steps 9–13 are #547, the large one.
+

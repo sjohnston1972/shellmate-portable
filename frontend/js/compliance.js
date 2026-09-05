@@ -98,22 +98,30 @@
         { name: 'forbidden', label: 'And should not have (optional)',
           type: 'select',
           options: [{ value: '', label: 'Nothing in particular' }, ...options] },
+        // Off by default. Somebody asking a one-off question about a site
+        // has not asked for a nightly one, and a check that starts
+        // recurring because it was run once is a surprise.
+        { name: 'every_night', type: 'checkbox', value: false,
+          label: 'Check again after every scheduled backup, and report it '
+               + 'in the morning digest' },
       ],
       confirmLabel: 'Check',
     });
     if (!answer || !answer.snippet) return;
 
-    await run(group, answer.snippet, answer.forbidden || '');
+    await run(group, answer.snippet, answer.forbidden || '',
+              !!answer.every_night);
   }
 
-  async function run(group, snippetId, forbiddenId) {
+  async function run(group, snippetId, forbiddenId, everyNight) {
     let report;
     try {
       const res = await fetch('/api/groups/' + encodeURIComponent(group.key)
                               + '/compliance', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ snippet_id: snippetId,
-                               must_not_have_id: forbiddenId || '' }),
+                               must_not_have_id: forbiddenId || '',
+                               every_night: !!everyNight }),
       });
       report = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(report.detail || `HTTP ${res.status}`);

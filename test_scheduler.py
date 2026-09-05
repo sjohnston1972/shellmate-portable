@@ -13,6 +13,7 @@ and one with no credentials each end up in the right column of the result.
 import shutil
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -127,12 +128,171 @@ def test_stored_on_the_group() -> None:
     check("clearing the schedule removes it", entry["backup"] is None)
 
 
+def test_compliance_reaches_the_digest() -> None:
+    """
+    The two states somebody acts on, and only those.
+
+    "46 compliant" is not news, and a digest that leads with it is one
+    people learn to skim — at which point the morning something is missing
+    looks like every other morning.
+    """
+    print("\n-- Compliance in the digest --")
+    from backend import groups as groups_module
+    from backend import scheduler as sched
+
+    for group in groups_module.list_groups():
+        groups_module.delete_group(group["key"])
+    groups_module.create_group("glasgow")
+
+    now = time.time()
+    groups_module.update_group("glasgow", {
+        "backup_last": {"at": now, "group": "glasgow", "ok": ["sw1", "sw2"],
+                        "changed": [], "failed": [], "skipped": []},
+        # Ran with that backup: the timestamps are within the hour.
+        "compliance_last": {
+            "at": now - 5, "group": "glasgow", "checked": 3,
+            "snippet": "Standard AAA",
+            "summary": "1 of 3 missing lines, 1 never captured.",
+            "counts": {"compliant": 1, "missing": 1, "never-captured": 1},
+            "devices": [],
+        },
+    })
+
+    report = sched.digest(include_seen=True)
+    check("a clean backup with a compliance finding is still reported",
+          report["anything"] is True,
+          "the backup changed nothing, so only the compliance finding "
+          "makes this worth saying")
+    entry = report["groups"][0]
+    check("the non-compliant count is carried",
+          entry["non_compliant"] == 1, str(entry))
+    check("so is the one with no capture to check",
+          entry["unverifiable"] == 1, str(entry))
+    check("they are separate numbers, not folded into failures",
+          entry["failed"] == [] and entry["non_compliant"] == 1,
+          "a capture that failed and a capture that worked while the "
+          "standard is absent are two different mornings' work")
+    check("the summary sentence comes along", "1 of 3" in entry["compliance"],
+          entry["compliance"])
+    check("and so does which block was checked",
+          entry["snippet"] == "Standard AAA", str(entry))
+
+    line = sched.digest_line(report)
+    check("the one-line digest names it",
+          "missing standard lines" in line, line)
+    check("and mentions the unverifiable ones separately",
+          "no capture to check" in line, line)
+
+
+def test_a_fully_compliant_group_is_not_news() -> None:
+    print("\n-- Silence is the feature --")
+    from backend import groups as groups_module
+    from backend import scheduler as sched
+
+    for group in groups_module.list_groups():
+        groups_module.delete_group(group["key"])
+    groups_module.create_group("quiet")
+
+    now = time.time()
+    groups_module.update_group("quiet", {
+        "backup_last": {"at": now, "group": "quiet", "ok": ["sw1"],
+                        "changed": [], "failed": [], "skipped": []},
+        "compliance_last": {
+            "at": now - 5, "checked": 12, "snippet": "Standard",
+            "summary": "All 12 device(s) have the whole block.",
+            "counts": {"compliant": 12}, "devices": [],
+        },
+    })
+
+    report = sched.digest(include_seen=True)
+    check("a clean backup and a clean check say nothing at all",
+          report["anything"] is False,
+          "a digest that fires every morning is one that gets dismissed "
+          "unread, and then the morning it matters looks like the others")
+
+
+def test_a_stale_compliance_result_is_not_this_morning_s_news() -> None:
+    """
+    A finding from a click three weeks ago is not a finding about tonight.
+
+    Reporting it with tonight's backup would date-stamp old news as new,
+    and the devices may well have been fixed since.
+    """
+    print("\n-- Old news --")
+    from backend import groups as groups_module
+    from backend import scheduler as sched
+
+    for group in groups_module.list_groups():
+        groups_module.delete_group(group["key"])
+    groups_module.create_group("stale")
+
+    now = time.time()
+    groups_module.update_group("stale", {
+        "backup_last": {"at": now, "group": "stale", "ok": ["sw1"],
+                        "changed": [], "failed": [], "skipped": []},
+        "compliance_last": {
+            "at": now - 21 * 86400, "checked": 4, "snippet": "Standard",
+            "summary": "3 of 4 missing lines.",
+            "counts": {"missing": 3}, "devices": [],
+        },
+    })
+
+    report = sched.digest(include_seen=True)
+    check("a three-week-old check is not attached to tonight's backup",
+          report["anything"] is False,
+          "the devices may have been fixed since; reporting it as tonight's "
+          "finding is date-stamping old news as new")
+
+
+def test_the_nightly_recheck() -> None:
+    print("\n-- Repeating it after the backup --")
+    from backend import groups as groups_module
+    from backend import scheduler as sched
+    from backend import snippets as snippets_module
+
+    for group in groups_module.list_groups():
+        groups_module.delete_group(group["key"])
+    groups_module.create_group("nightly")
+
+    check("a group that has not asked for one gets none",
+          sched.recheck_compliance("nightly") is None)
+
+    saved = snippets_module.save_snippet({
+        "name": "Standard NTP", "commands": ["ntp server 10.0.0.1"]})
+    groups_module.update_group("nightly", {"compliance": {
+        "enabled": True, "snippet_id": saved.id, "must_not_have_id": ""}})
+
+    report = sched.recheck_compliance("nightly")
+    check("a group that has asked for one gets it",
+          report is not None and report.get("snippet") == "Standard NTP",
+          str(report))
+    check("and the result is stored on the group",
+          (next(g for g in groups_module.list_groups()
+                if g["key"] == "nightly").get("compliance_last") or {})
+          .get("snippet") == "Standard NTP")
+
+    # The snippet is deleted out from under it — the failure mode that
+    # would otherwise report compliance by omission.
+    snippets_module.delete_snippet(saved.id)
+    report = sched.recheck_compliance("nightly")
+    check("a deleted snippet is said out loud, not silently skipped",
+          report is not None and "has been deleted" in report.get("summary", ""),
+          str(report))
+    check("and nothing is claimed about any device",
+          report.get("checked") == 0 and report.get("devices") == [],
+          "a check that quietly stops running reports compliance by omission")
+
+
 def main() -> int:
     print("=" * 52)
     print("  Scheduled backups")
     print("=" * 52)
     for test in (test_when, test_run, test_stored_on_the_group,
-                 test_what_did_not_happen):
+                 test_what_did_not_happen,
+                 test_compliance_reaches_the_digest,
+                 test_a_fully_compliant_group_is_not_news,
+                 test_a_stale_compliance_result_is_not_this_morning_s_news,
+                 test_the_nightly_recheck):
         try:
             test()
         except Exception as exc:

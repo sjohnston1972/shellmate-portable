@@ -232,10 +232,27 @@ def digest(include_seen: bool = False) -> dict:
         changed = list(last.get("changed") or [])
         failed = list(last.get("failed") or [])
         missed = int(last.get("missed") or 0)
+
+        # What the compliance check found, when the group has one and it
+        # ran with this backup (#543). Only the two states somebody acts
+        # on: devices missing lines, and devices there is no evidence
+        # about at all. "46 compliant" is not news and a digest that
+        # leads with it gets skimmed.
+        check = group.get("compliance_last") or {}
+        check_at = float(check.get("at") or 0)
+        counts = check.get("counts") or {}
+        # Only if the check is from this run rather than from a click
+        # three weeks ago — a stale finding reported as this morning's
+        # news is worse than no finding.
+        fresh_check = check_at and abs(check_at - at) < 3600
+        non_compliant = int(counts.get("missing", 0)) if fresh_check else 0
+        unverifiable = int(counts.get("never-captured", 0)) if fresh_check else 0
+
         # An ok run with nothing changed is not news. Reporting it is how
         # a digest becomes noise, and noise is how the one that matters
         # gets missed.
-        if not changed and not failed and not missed:
+        if (not changed and not failed and not missed
+                and not non_compliant and not unverifiable):
             continue
 
         out.append({
@@ -251,6 +268,13 @@ def digest(include_seen: bool = False) -> dict:
             "missed": missed,
             "missed_from": last.get("missed_from"),
             "missed_to": last.get("missed_to"),
+            # Named separately from the backup's own numbers: "the capture
+            # failed" and "the capture worked and the standard is not
+            # there" are different mornings' work.
+            "non_compliant": non_compliant,
+            "unverifiable": unverifiable,
+            "compliance": (check.get("summary", "") if fresh_check else ""),
+            "snippet": (check.get("snippet", "") if fresh_check else ""),
         })
 
     out.sort(key=lambda entry: entry["at"], reverse=True)
@@ -260,6 +284,8 @@ def digest(include_seen: bool = False) -> dict:
         "changed": sum(len(entry["changed"]) for entry in out),
         "failed": sum(len(entry["failed"]) for entry in out),
         "missed": sum(entry["missed"] for entry in out),
+        "non_compliant": sum(entry["non_compliant"] for entry in out),
+        "unverifiable": sum(entry["unverifiable"] for entry in out),
         "seen_at": seen,
     }
 
@@ -282,6 +308,10 @@ def digest_line(report: dict) -> str:
     if report["missed"]:
         parts.append(f"{report['missed']} run"
                      f"{'' if report['missed'] == 1 else 's'} missed")
+    if report.get("non_compliant"):
+        parts.append(f"{report['non_compliant']} missing standard lines")
+    if report.get("unverifiable"):
+        parts.append(f"{report['unverifiable']} with no capture to check")
     where = (report["groups"][0]["name"] if len(report["groups"]) == 1
              else f"{len(report['groups'])} groups")
     return f"Scheduled backups, {where}: " + ", ".join(parts) + "."
@@ -410,6 +440,64 @@ def tick(now: float) -> list[str]:
     return ran
 
 
+def recheck_compliance(key: str) -> dict | None:
+    """
+    Re-run a group's saved compliance check after its backup (#543).
+
+    The check reads stored snapshots, so its answer is exactly as fresh as
+    the last capture. Running it immediately after the nightly backup is
+    the moment its evidence is newest — and it is the difference between a
+    standard that is *verified* every night and one that was verified the
+    afternoon somebody happened to click.
+
+    Returns None when the group has not asked for one. Never raises: a
+    compliance check is a report about a backup, and it must not be able to
+    turn a completed backup into a failed one.
+    """
+    from backend import compliance as compliance_module
+    from backend import groups as groups_module
+    from backend import snippets as snippets_module
+    from backend.profiles import profiles_tagged
+    from backend.store import store as history
+
+    try:
+        group = next((g for g in groups_module.list_groups()
+                      if g.get("key") == key), None)
+        wanted = (group or {}).get("compliance") or {}
+        if not wanted.get("enabled") or not wanted.get("snippet_id"):
+            return None
+
+        library = {s.id: s for s in snippets_module.load_snippets()}
+        golden = library.get(wanted["snippet_id"])
+        if golden is None:
+            # The snippet was deleted after the group was set to check
+            # against it. Said out loud rather than silently stopping: a
+            # check that quietly stops running reports compliance by
+            # omission, which is the worst way for this to fail.
+            logger.warning("Group %s checks against snippet %s, which no "
+                           "longer exists", key, wanted["snippet_id"])
+            return {"group": key, "at": time.time(), "devices": [],
+                    "counts": {}, "checked": 0,
+                    "summary": "The snippet this group checks against has "
+                               "been deleted, so nothing was checked.",
+                    "limits": compliance_module.LIMITS,
+                    "stale_after_days": compliance_module.STALE_AFTER_DAYS,
+                    "snippet": ""}
+
+        forbidden = library.get(wanted.get("must_not_have_id") or "")
+        profiles = profiles_tagged(key, include_nested=True)
+        report = compliance_module.check_group(
+            key, profiles, lambda _platform: golden, history.latest_snapshot,
+            (lambda _platform: forbidden) if forbidden else None)
+        report["snippet"] = golden.name
+        report["summary"] = compliance_module.summary_line(report)
+        groups_module.update_group(key, {"compliance_last": report})
+        return report
+    except Exception as exc:
+        logger.warning("Compliance re-check for %s failed: %s", key, exc)
+        return None
+
+
 def run_now(key: str) -> dict:
     """Back up a group immediately and record the result on it."""
     from backend import groups as groups_module
@@ -421,6 +509,14 @@ def run_now(key: str) -> dict:
     # backup ran used to make this create a ghost entry under the old key.
     current = next((g for g in groups_module.list_groups() if g.get("id") == group_id), None)
     groups_module.update_group(current["key"] if current else key, {"backup_last": result})
+
+    # Immediately after, while the captures are as fresh as they will ever
+    # be. Its result goes on the group and into the digest; it cannot fail
+    # the backup that produced its evidence.
+    compliance_report = recheck_compliance(current["key"] if current else key)
+    if compliance_report:
+        result = dict(result)
+        result["compliance"] = compliance_report.get("summary", "")
     return result
 
 

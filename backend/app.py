@@ -1613,6 +1613,11 @@ class ComplianceRequest(BaseModel):
     must_not_have_id: str = ""
     #: Keep the result on the group, the way backup_last is kept.
     store: bool = True
+    #: Repeat this check after every scheduled backup of the group. Off by
+    #: default: somebody asking a one-off question about a site has not
+    #: asked for a nightly one, and a check that starts recurring because
+    #: it was run once is a surprise.
+    every_night: bool = False
 
 
 @app.post("/api/groups/{key:path}/compliance")
@@ -1681,9 +1686,20 @@ async def group_compliance(key: str, request: ComplianceRequest) -> dict:
                              if g.get("key") == key), None)
             current = next((g for g in groups_module.list_groups()
                             if g.get("id") == group_id), None)
+            changes: dict = {"compliance_last": report}
+            if request.every_night:
+                # Remembered so the scheduler can repeat it the moment the
+                # captures are freshest — which is the difference between a
+                # standard verified every night and one verified the
+                # afternoon somebody happened to click.
+                changes["compliance"] = {
+                    "enabled": True,
+                    "snippet_id": request.snippet_id,
+                    "must_not_have_id": request.must_not_have_id,
+                }
             await asyncio.to_thread(
                 groups_module.update_group, current["key"] if current else key,
-                {"compliance_last": report})
+                changes)
         except Exception as exc:                          # pragma: no cover
             logger.info("Could not record the compliance result on %s: %s",
                         key, exc)
