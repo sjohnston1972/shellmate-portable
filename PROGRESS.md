@@ -117,3 +117,33 @@ The second halves are worth having — a wrong account e-mail gets the same
 401 from Jira that a bad token does, so the obvious move is to make a new
 token, which does not help.
 
+## 2026-09-05 07:55 — steps 6 and 7 done (#574)
+
+`backend/playback.py`: a session as a page that replays itself, and as a
+plain transcript. Both from the store record, both redacted, both into the
+reports folder. The replay header's Export now offers four things; the Jira
+modal still offers two, because somebody who came to raise a ticket wants
+the write-up, not a 300 KB page of terminal.
+
+The load-bearing part is the payload. Device output goes into a script tag
+as JSON, and JSON has no opinion about the document it sits in — the
+characters that spell a closing script tag are ordinary text to it. So are
+U+2028 and U+2029, which JSON treats as whitespace and JavaScript treats as
+statement terminators, so a device emitting one produces a page that parses
+differently from the JSON it was built from. Both escaped, both tested with
+output that actually contains them, and the escaping proven lossless.
+
+Three things caught along the way:
+
+- `play_arrow` is not in the committed font subset and would have rendered
+  as its own name in plain text. Used `replay` instead, which is in it and
+  is what the in-app Play button already uses.
+- Two of my assertions were wrong, not the code. "No http anywhere" flagged
+  xterm.js's own licence-header attribution URLs — a comment is not a
+  request, and what must be true is that no element fetches. And "no **"
+  flagged the redaction mask, which is eight asterisks; even the lazy
+  version matched it, because bold needs non-asterisk content between the
+  markers.
+
+`python test_playback.py` — 46 passed, 0 failed.
+

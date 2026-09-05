@@ -42,7 +42,8 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
-from backend import auth, config_archive, desktop, jira_client, paths, report
+from backend import (auth, config_archive, desktop, jira_client, paths,
+                     playback, report)
 from backend import groups as groups_module
 from backend import schemes as schemes_module
 from backend.configs import capture_config, diff_snapshots, drift_report
@@ -4009,8 +4010,8 @@ class ReportRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: str = "session"          # session | diff | change
-    format: str = "md"             # md | html
+    kind: str = "session"          # session | diff | change | playback | transcript
+    format: str = "md"             # md | html (ignored by playback/transcript)
     session_id: str = ""
     old_id: int | None = None
     new_id: int | None = None
@@ -4063,6 +4064,26 @@ async def _report_blocks(request: ReportRequest) -> tuple[str, list, str]:
 @app.post("/api/reports")
 async def write_report(request: ReportRequest) -> dict:
     """Write the report into ShellMate-Data/reports and return its path."""
+    # The playback and the transcript are documents of their own rather than
+    # a third format of the session report (#574): one is an interactive
+    # page carrying a terminal emulator, the other is deliberately markup-free
+    # for pasting into a vendor case. Neither is "the session report, as X".
+    if request.kind in ("playback", "transcript"):
+        session = await asyncio.to_thread(store.get_session, request.session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="No such session")
+        fmt = "html" if request.kind == "playback" else "txt"
+        try:
+            path = await asyncio.to_thread(playback.write, session, fmt)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not write the file: {exc}") from exc
+        return {"path": str(path), "folder": str(path.parent),
+                "name": path.name, "bytes": path.stat().st_size,
+                "kind": request.kind, "format": fmt,
+                "title": f"Session playback — {session.get('label') or ''}"}
+
     if request.format not in ("md", "html"):
         raise HTTPException(
             status_code=400,

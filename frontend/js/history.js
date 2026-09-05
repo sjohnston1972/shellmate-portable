@@ -55,7 +55,7 @@
     const exportBtn = document.getElementById('replay-export');
     if (exportBtn) exportBtn.addEventListener('click', () => {
       if (!replaying || !window.shellmateReport) return;
-      window.shellmateReport.session(exportBtn, replaying.id);
+      window.shellmateReport.session(exportBtn, replaying.id, null, true);
     });
 
     queryInput.addEventListener('input', () => {

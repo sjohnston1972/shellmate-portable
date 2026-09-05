@@ -97,7 +97,7 @@
    * @param {Element} anchor  The button the menu hangs from.
    * @param {Function} body   Given "md" or "html", returns the request body.
    */
-  function offer(anchor, body) {
+  function offer(anchor, body, extras) {
     if (!window.shellmateMenu) return;
     window.shellmateMenu.open(anchor, [
       { heading: 'Export as' },
@@ -111,6 +111,7 @@
         title: 'Self-contained, and laid out for print-to-PDF',
         onClick: () => write(body('html')),
       },
+      ...(extras || []),
     ]);
   }
 
@@ -119,11 +120,36 @@
     write,
     reveal,
 
-    /** The replay header: one session, its commands and its notes. */
-    session(anchor, sessionId, extra) {
+    /**
+     * One session: its commands, its notes, and — where it makes sense —
+     * the two documents that are not reports at all.
+     *
+     * @param {boolean} withPlayback  Offer the self-contained replay and the
+     *        plain transcript as well (#574). The replay header does; the
+     *        Jira modal does not, because somebody who came to raise a
+     *        ticket wants the write-up, not a 300 KB page of terminal.
+     */
+    session(anchor, sessionId, extra, withPlayback) {
+      const extras = withPlayback ? [
+        'sep',
+        {
+          // 'replay', not 'play_arrow': the latter is outside the
+          // committed font subset and would render as its own name in
+          // plain text. It is also what the in-app Play button uses.
+          icon: 'replay', label: 'Playback (.html)',
+          title: 'A page that replays the session, with the same controls. '
+               + 'Opens by double-clicking, on a machine without ShellMate.',
+          onClick: () => write({ kind: 'playback', session_id: sessionId }),
+        },
+        {
+          icon: 'article', label: 'Transcript (.txt)',
+          title: 'Plain text, for pasting into a vendor case or a mail',
+          onClick: () => write({ kind: 'transcript', session_id: sessionId }),
+        },
+      ] : [];
       offer(anchor, (format) => ({
         kind: 'session', format, session_id: sessionId, ...(extra || {}),
-      }));
+      }), extras);
     },
 
     /** The diff window: two snapshots and what moved between them. */
