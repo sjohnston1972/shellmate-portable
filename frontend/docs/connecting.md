@@ -220,6 +220,42 @@ the credential column holds the name of a shared credential and nothing else.
 Cells beginning `=`, `+`, `-` or `@` are written with a leading apostrophe, so
 a device named after a spreadsheet formula cannot run when the file is opened.
 
+## Bringing over ~/.ssh/config
+
+If you already use OpenSSH, Termius or VS Code, the hostnames, ports,
+accounts and bastions are worked out and written down. ShellMate reads that
+file rather than asking you to type it all again.
+
+**Import ~/.ssh/config** appears on the home view when the file exists. It
+shows what it would create, host by host, and then makes one saved
+connection per `Host` stanza, tagged `ssh-config` so the whole import can be
+found or removed together. Passwords are not in that file and are not
+imported.
+
+`HostName`, `Port`, `User` and `IdentityFile` come across. So does
+`ProxyJump`, as the jump host — with its own username and port when the
+stanza gives them.
+
+**What cannot be expressed is left out, and named.** A stanza with a
+`ProxyCommand` reaches its device by running a program, and ShellMate has no
+shell to run it in. Imported without it, the connection would look complete,
+carry a name you recognise, and dial the address directly — which is either
+the wrong machine or nothing at all. So it is listed with the reason and not
+imported. The same goes for a `ProxyJump` chain of more than one hop, and for
+`RemoteCommand`.
+
+`Match` blocks are reported but not applied: their conditions can depend on
+the user, the network or the output of a command, so what OpenSSH would do
+with them is not knowable from here. Ignoring them silently would leave you
+with a connection that works from the office and not from home, and nothing
+connecting the two.
+
+Typing a hostname in the connection dialog also checks the file. If it names
+that host, the **empty** fields fill from the stanza and a line under the
+address says which ones — the port you typed is the port you meant, so
+nothing already filled in is touched. A stanza with a `ProxyCommand` fills
+nothing at all and says why.
+
 ## On-connect commands
 
 The first thirty seconds on every device are the same thirty seconds. A saved

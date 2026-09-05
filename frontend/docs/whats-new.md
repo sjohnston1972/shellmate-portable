@@ -12,6 +12,16 @@ exists.
   Your own connections and groups can be the inventory, and there is a
   playbook library you can edit here. See the Ansible page in the manual.
 
+- **ShellMate reads your ~/.ssh/config.** If you already use OpenSSH,
+  Termius or VS Code, the hostnames, ports, accounts and bastions are
+  already written down. **Import ~/.ssh/config** on the home view turns each
+  `Host` stanza into a saved connection, tagged so the whole import can be
+  found or removed together, and typing a hostname in the connection dialog
+  fills the empty fields from the matching stanza and says which ones it
+  filled. A stanza ShellMate cannot express — a `ProxyCommand`, a
+  multi-hop `ProxyJump` — is listed with the reason and left out rather
+  than imported without the part that made it work.
+
 - **Inventories you build yourself.** A run usually wants less than the
   whole estate. Tick devices in the Inventory area and save them as a named
   list — "the switches I am upgrading this weekend" no longer has to become

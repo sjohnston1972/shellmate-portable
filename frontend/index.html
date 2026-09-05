@@ -246,6 +246,13 @@
                 <span class="material-symbols-outlined">help</span>
                 Support
               </button>
+              <!-- Hidden unless ~/.ssh/config exists (#527). A button that
+                   can only ever say "there is no file" is a button that
+                   teaches people not to read this row. -->
+              <button type="button" class="welcome-link hidden" id="welcome-link-sshconfig">
+                <span class="material-symbols-outlined">download</span>
+                Import ~/.ssh/config
+              </button>
             </div>
             <div class="shortcuts-hint">
               <span class="shortcut-pill"><kbd>Ctrl</kbd>+<kbd>T</kbd> New tab</span>
@@ -745,6 +752,11 @@
                 Find
               </button>
             </div>
+            <!-- What ~/.ssh/config already said about this host (#527).
+                 Named field by field rather than announced as "filled from
+                 your config": a connection that quietly went somewhere
+                 other than what was typed is the worst kind of helpful. -->
+            <p class="field-hint hidden" id="field-ssh-config-note"></p>
           </div>
 
           <div class="form-row">

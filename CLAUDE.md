@@ -118,6 +118,7 @@ shellmate/
 │   ├── server.py                # Startup orchestration for ShellMate: port selection and
 │   ├── settings_store.py        # Application settings persistence for ShellMate
 │   ├── snippets.py              # The saved command library
+│   ├── ssh_config.py            # What OpenSSH already knows about a host (#527)
 │   ├── store.py                 # Persistent session history in SQLite
 │   ├── support.py               # Building a diagnostic bundle worth reading
 │   ├── updater.py               # Download a release and swap the executable (#443, #444, #448)

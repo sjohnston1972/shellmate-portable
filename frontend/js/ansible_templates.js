@@ -513,7 +513,21 @@
       // in-progress edit or fill.
       if (changed) mode = 'list';
       render(state);
-      if (await seedOnce()) render(view.state);
+
+      // The seed is two round trips, and somebody can open the editor
+      // during them. Re-rendering then replaces the form under their
+      // hands: the text survives, because the fields are rebuilt from the
+      // draft, but the nodes do not — so anything mid-gesture is aimed at
+      // an element that has left the document.
+      //
+      // Guarded the same way `onData` two lines below is, and for the same
+      // reason. It is not known to have caused anything; it was found
+      // while looking for something else (#586) and left fixed because a
+      // re-render over an open form is wrong on its own terms, not
+      // because it explains a failure. It does not: slowing this response
+      // to a second and repeating the sequence does not reproduce that
+      // one.
+      if (await seedOnce() && mode === 'list') render(view.state);
     },
     onData: (state) => {
       if (view.current === 'templates' && mode === 'list') render(state);

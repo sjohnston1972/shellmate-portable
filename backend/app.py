@@ -4611,6 +4611,58 @@ class InventorySaveRequest(BaseModel):
     text: str = ""
 
 
+# ---------------------------------------------------------------------------
+# What OpenSSH already knows (#527)
+# ---------------------------------------------------------------------------
+class SshConfigImportRequest(BaseModel):
+    """Body for POST /api/ssh-config/import."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Which stanzas to bring across. Empty means every one that can be
+    #: expressed — never every one in the file, which is a different set.
+    names: list[str] = []
+    tag: str = ""
+
+
+@app.get("/api/ssh-config")
+async def ssh_config_stanzas() -> dict:
+    """Every concrete Host in ~/.ssh/config, and what cannot come across."""
+    from backend import ssh_config
+
+    return await asyncio.to_thread(ssh_config.importable)
+
+
+@app.get("/api/ssh-config/match")
+async def ssh_config_match(host: str = "") -> dict:
+    """
+    What the file says about one typed host.
+
+    Answers `{"match": null}` rather than 404 for a host it does not name.
+    A hostname absent from a config file is the ordinary case, not an
+    error, and a 404 in the console on every connection somebody types
+    would be noise that trains people to ignore the console.
+    """
+    from backend import ssh_config
+
+    found = await asyncio.to_thread(ssh_config.match, host)
+    return {"match": found, "path": str(ssh_config.config_path())}
+
+
+@app.post("/api/ssh-config/import")
+async def ssh_config_import(request: SshConfigImportRequest) -> dict:
+    """Create a profile per importable stanza, and say what was left out."""
+    from backend import ssh_config
+
+    if not await asyncio.to_thread(ssh_config.available):
+        raise HTTPException(
+            status_code=404,
+            detail=f"There is no {ssh_config.config_path()} to import from.")
+    return await asyncio.to_thread(
+        ssh_config.import_profiles, request.names,
+        request.tag or ssh_config.IMPORT_TAG)
+
+
 @app.get("/api/ansible/inventories")
 async def ansible_inventories() -> dict:
     """The custom inventories, without their rows."""

@@ -113,3 +113,54 @@ Machine: SJLAP. The Ansible runner container is local here, reached on
   had that guard; this path never did. Both section secrets now go through
   one helper that has it.
 
+- **2026-09-05 05:35** — Step 6 done (#527). `backend/ssh_config.py`, its
+  routes, an import door on the home view and a fill in the connection
+  dialog. 34 checks in `test_ssh_config.py`.
+
+  One deliberate departure from the issue's sketch, which put the fill
+  inside `ssh_handler.connect()`. Nothing above the transport has a channel
+  to report on at that point, so a fill applied there would be invisible at
+  exactly the moment it changed where the session was going — and "the
+  address you typed is not the address this dialled" is not a thing to
+  discover from a device answering wrongly. In the dialog it is visible by
+  construction, named field by field, and can be typed over before anything
+  is sent.
+
+  A paramiko 5.0.0 bug on the way: `SSHConfig.get_hostnames()` raises
+  `KeyError: 'host'` on any file containing a `Match` block, because it
+  walks every parsed entry expecting a key a Match entry does not have.
+  Match blocks are ordinary, so that is not an edge case — it is "the
+  listing fails for exactly the people with the most in their config". The
+  `Host` lines are read from the file directly now; `lookup()` is
+  unaffected and still supplies every value.
+
+  And a test of mine was wrong before paramiko was: the sample config had
+  `Host *` at the top and then asserted the specific stanza won. OpenSSH
+  keeps the *first* value it obtains, which is why real files put the
+  defaults block last. paramiko was right and the assertion was not.
+
+- **2026-09-05 05:45** — A wrong turn worth recording, because the
+  temptation was to ship it quietly.
+
+  With the failing output now kept (#586), the intermittent showed up twice
+  at the identical line — `test_ansible_templates.py:146`, waiting for a
+  refusal banner. Reading the area turned up a plausible cause: the example
+  seeding is two round trips and re-renders the area when it lands, with no
+  guard against the editor being open by then, so a click on its way to the
+  Create button would land on a node that had left the document.
+
+  It is not the cause. Reverting the guard and running the file four times
+  did not reproduce the failure; slowing the seed response to a second to
+  widen the window did not either — it perturbed a different check instead.
+  So the diagnosis is unsupported, and saying otherwise would have made the
+  next person believe #586 was solved.
+
+  The guard is kept, because a re-render over an open form is wrong on its
+  own terms, and the comment says exactly that rather than claiming a cause.
+  The speculative assertion that went with it is gone: it passed with the
+  bug restored, so it asserted nothing, and a check that cannot fail is
+  worse than no check.
+
+  What is now known about the intermittent: the location, and that it is not
+  this. That is still more than the name it used to arrive as.
+

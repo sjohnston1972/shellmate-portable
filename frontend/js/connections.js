@@ -50,6 +50,176 @@
   /** Where this profile's credentials are kept: "vault", "plaintext" or "". */
   let activeProfileStorage = '';
 
+
+  // -------------------------------------------------------------------------
+  // What ~/.ssh/config already knows (#527)
+  // -------------------------------------------------------------------------
+
+  /** Show the import door only when there is something behind it. */
+  async function _offerSshConfigImport() {
+    const link = document.getElementById('welcome-link-sshconfig');
+    if (!link) return;
+    try {
+      const found = await (await fetch('/api/ssh-config')).json();
+      if (found.present && (found.ready.length || found.blocked.length)) {
+        link.classList.remove('hidden');
+      }
+    } catch (_) { /* no file, no door */ }
+  }
+
+  /**
+   * Import the stanzas, after saying exactly what will and will not come.
+   *
+   * The blocked ones are shown at the same weight as the rest, not as a
+   * footnote. A stanza left out silently is a device somebody believes
+   * they imported, and they find out when it is not on the dashboard —
+   * or worse, when a profile that did import dials the wrong machine
+   * because its ProxyCommand was dropped.
+   */
+  async function _importSshConfig() {
+    let found;
+    try {
+      found = await (await fetch('/api/ssh-config')).json();
+    } catch (e) {
+      if (window.shellmateDialog) {
+        window.shellmateDialog.alert({
+          title: 'Could not read ~/.ssh/config',
+          body: String(e.message || e),
+        });
+      }
+      return;
+    }
+
+    const list = [
+      ...found.ready.map(h => ({
+        text: h.name,
+        detail: `${h.hostname}:${h.port}`
+                + (h.username ? ` as ${h.username}` : '')
+                + (h.jump_host ? ` via ${h.jump_host}` : ''),
+      })),
+      ...found.blocked.map(h => ({
+        text: `${h.name} — not imported`,
+        detail: h.refusals[0],
+      })),
+    ];
+
+    const go = await window.shellmateDialog.confirm({
+      title: `Import ${found.ready.length} connection`
+             + `${found.ready.length === 1 ? '' : 's'}?`,
+      body: found.blocked.length
+        ? `${found.blocked.length} of the ${found.hosts.length} hosts in this `
+          + 'file describe connections ShellMate cannot make. They are left '
+          + 'out rather than imported without the part it cannot do.'
+        : 'Each becomes a saved connection, tagged so you can find or remove '
+          + 'them together. Passwords are not in the file and are not '
+          + 'imported.',
+      list,
+      note: (found.caveats || []).join(' '),
+      confirmLabel: 'Import',
+    });
+    if (!go) return;
+
+    try {
+      const result = await (await fetch('/api/ssh-config/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })).json();
+      renderWelcomeProfiles();
+      window.shellmateDialog.alert({
+        title: 'Imported',
+        body: `${result.imported.length} added`
+              + (result.already.length ? `, ${result.already.length} already here` : '')
+              + (result.skipped.length ? `, ${result.skipped.length} left out` : '')
+              + `. They are tagged ${result.tag}.`,
+      });
+    } catch (e) {
+      window.shellmateDialog.alert({
+        title: 'Import failed',
+        body: String(e.message || e),
+      });
+    }
+  }
+
+  /**
+   * Fill the blanks from a matching Host stanza, and say what was filled.
+   *
+   * Only blanks. Somebody who typed a port meant that port, and a config
+   * file quietly overriding it would be a tool arguing with its user.
+   *
+   * This happens here rather than inside the connection itself because
+   * here it is visible and reversible: the fields are on screen, the note
+   * names them, and anything wrong can be typed straight over before
+   * anything is sent. A fill applied at connect time would change where
+   * the session went with nothing on screen to say so.
+   */
+  async function _fillFromSshConfig() {
+    const note = document.getElementById('field-ssh-config-note');
+    const host = (document.getElementById('field-hostname').value || '').trim();
+    if (!note) return;
+    note.classList.add('hidden');
+    note.textContent = '';
+    if (!host) return;
+
+    let found = null;
+    try {
+      const data = await (await fetch(
+        `/api/ssh-config/match?host=${encodeURIComponent(host)}`)).json();
+      found = data.match;
+    } catch (_) {
+      return;    // No file, or no answer. Neither is worth a message.
+    }
+    if (!found) return;
+
+    // A stanza ShellMate cannot express fills nothing at all. Taking the
+    // address and leaving the ProxyCommand behind would build exactly the
+    // wrong connection out of the right file.
+    if ((found.refusals || []).length) {
+      note.textContent = `~/.ssh/config has a stanza for ${found.name}, and `
+        + `nothing was filled from it: ${found.refusals[0]}`;
+      note.classList.remove('hidden');
+      return;
+    }
+
+    const filled = [];
+    const put = (id, value, label) => {
+      const el = document.getElementById(id);
+      if (!el || !value || (el.value || '').trim()) return;
+      el.value = value;
+      filled.push(label);
+    };
+    put('field-username', found.username, 'username');
+    put('field-key-path', found.private_key_path, 'key file');
+    put('field-jump-host', found.jump_host, 'jump host');
+    put('field-jump-username', found.jump_username, 'jump username');
+
+    // A port is never blank — it defaults to 22 — so "still 22" is the
+    // honest test for untouched, and a stanza that also says 22 has
+    // changed nothing worth reporting.
+    const port = document.getElementById('field-port');
+    if (port && found.port && found.port !== 22 && Number(port.value) === 22) {
+      port.value = found.port;
+      filled.push('port');
+    }
+    const jumpPort = document.getElementById('field-jump-port');
+    if (jumpPort && found.jump_host && found.jump_port
+        && Number(jumpPort.value) === 22) {
+      jumpPort.value = found.jump_port;
+    }
+    // The address last, so the fields above were matched against what was
+    // typed rather than against what the stanza renamed it to.
+    const hostField = document.getElementById('field-hostname');
+    if (found.hostname && found.hostname !== host) {
+      hostField.value = found.hostname;
+      filled.push(`address ${found.hostname}`);
+    }
+
+    if (!filled.length) return;
+    note.textContent = `Filled from ~/.ssh/config (${found.name}): `
+      + `${filled.join(', ')}. Type over anything that is wrong.`;
+    note.classList.remove('hidden');
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     overlay          = document.getElementById('modal-overlay');
     form             = document.getElementById('connection-form');
@@ -74,6 +244,18 @@
 
     document.getElementById('btn-welcome-connect')
       .addEventListener('click', () => showConnectionDialog());
+
+    // On leaving the field rather than on every keystroke: a lookup per
+    // character would fire against half-typed hostnames and fill the
+    // dialog from whichever prefix happened to match a stanza (#527).
+    const hostField = document.getElementById('field-hostname');
+    if (hostField) hostField.addEventListener('blur', _fillFromSshConfig);
+
+    const importLink = document.getElementById('welcome-link-sshconfig');
+    if (importLink) {
+      importLink.addEventListener('click', _importSshConfig);
+      _offerSshConfigImport();
+    }
 
     // Home-view doors (#233). Each guards its opener: a missing module must
     // cost a dead button, not the whole dashboard.
