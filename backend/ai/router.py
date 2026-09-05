@@ -8,6 +8,7 @@ import logging
 from collections.abc import AsyncIterator
 
 from backend.ai.prompts import build_context_prompt, build_system_preamble, get_system_prompt
+from backend import knowledge
 from backend.ai import chroma_client, toolloop, turns
 from backend.ai import tools as tool_registry
 from backend.connections.manager import SessionManager
@@ -19,6 +20,38 @@ from backend.session.transcript import match_prompt
 from backend.advanced import get as advanced
 
 logger = logging.getLogger(__name__)
+
+def _knowledge_query(message: str, command_history: list[str]) -> str:
+    """
+    What to search the knowledge folder for (#561).
+
+    The message alone is often not a query at all. "Is that right?" retrieves
+    nothing; "is `ip ospf network point-to-point` right?" retrieves the
+    standards page. The last command carries the nouns — interface names,
+    protocol names, the platform's own spelling of a feature — so it is
+    appended to the question rather than used instead of it.
+    """
+    last = command_history[-1] if command_history else ""
+    return f"{message} {last}".strip()
+
+
+def _knowledge_snippets(query: str) -> list[dict]:
+    """
+    Passages from the user's own documents, or nothing (#561).
+
+    Both halves run on the worker thread, the availability check included:
+    it is a sqlite read, and the point of putting this behind
+    ``asyncio.to_thread`` is that nothing on the retrieval path touches the
+    loop that is also serving every live terminal session.
+
+    Never raises. ``knowledge.search`` swallows its own failures for the same
+    reason ``chroma_client`` does — a missing snippet has to cost a little
+    context rather than the answer.
+    """
+    if not knowledge.is_configured():
+        return []
+    return knowledge.search(query)
+
 
 def _extract_commands(buffer_text: str) -> list[str]:
     """
@@ -248,6 +281,14 @@ async def stream_chat(
                 else:
                     active_buffer = plain
 
+    # The knowledge folder, retrieved for the same reason as Chroma and in
+    # the same shape (#561) — but started here rather than beside it,
+    # because the query wants the last command and that is only known now.
+    # It still overlaps the extra-context reads and the parsing below, which
+    # is the part that costs anything.
+    knowledge_task = asyncio.create_task(asyncio.to_thread(
+        _knowledge_snippets, _knowledge_query(message, command_history)))
+
     # Extra contexts (/context all or /context N)
     extra_contexts: list[dict] = []
 
@@ -299,6 +340,12 @@ async def stream_chat(
     if design_task is not None:
         design_context = chroma_client.format_for_prompt(await design_task)
 
+    # Beside Chroma rather than instead of it. A site that has Chroma
+    # standing has better retrieval than this — it matches on meaning — and
+    # taking that away from the few people who have it to ship this would be
+    # a worse assistant for them.
+    knowledge_context = knowledge.format_for_prompt(await knowledge_task)
+
     effective_mode = (mode or get_settings().get("ai", {}).get("mode") or "tshoot")
     # Ansible mode is chosen by where the user is, not by the mode toggle,
     # so it arrives on the message rather than from settings (#602).
@@ -319,6 +366,7 @@ async def stream_chat(
         + ([{"label": "Ansible", "buffer": "\n".join(ansible_block)}]
            if ansible_block else []) or None,
         design_context=design_context,
+        knowledge_context=knowledge_context,
         device_context=device_context,
         parsed_tables=parsed_tables or None,
         investigation=investigation,

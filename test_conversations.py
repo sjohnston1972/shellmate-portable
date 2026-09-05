@@ -89,9 +89,15 @@ def test_it_is_redacted() -> None:
     that door that is not a device line. The pattern now hops a linking
     word, which no configuration on any platform writes.
 
-    It is a partial fix and this test says so. Prose is genuinely hard,
-    and a test that pretended otherwise would be worse than one that does
-    not.
+    That was a partial fix, and this test said so: a longer phrase between
+    the keyword and the value still defeated it, and the assertion at the
+    bottom asserted the *failure*, with a note to invert rather than delete
+    it if the limitation were ever fixed.
+
+    It has been. The phrase is now allowed, bounded, and must start with a
+    preposition — which is the discriminator that keeps "the password
+    **policy** on these switches is terrible" out of it. The assertion
+    below is the inverted one.
     """
     print("\n-- Masked --")
     settings_store.update_settings({"logging": {"redact_secrets": True}})
@@ -116,13 +122,22 @@ def test_it_is_redacted() -> None:
           "hunter2" not in redact("password: hunter2"),
           redact("password: hunter2"))
 
-    # Stated rather than hidden. A longer phrase between the keyword and
-    # the value still defeats it, and somebody reading this should know
-    # that rather than infer a guarantee the redactor does not make.
-    check("a longer phrase still defeats it, and this test says so",
-          "hunter2" in redact("the password for the box is hunter2"),
-          "if this ever starts passing, the limitation has been fixed — "
-          "invert this assertion rather than deleting it")
+    # Was: "a longer phrase still defeats it, and this test says so".
+    # It no longer does, so this is the inversion that assertion asked for.
+    for sentence in ("the password for the box is hunter2",
+                     "the enable secret for the edge routers is hunter2",
+                     "the password on sw-01 is hunter2"):
+        check(f"a phrase in the way no longer defeats it: {sentence!r}",
+              "hunter2" not in redact(sentence), redact(sentence))
+
+    # The other half of the same fix, and the reason it is bounded to a
+    # phrase starting with a preposition: a sentence *about* passwords is
+    # not a password, and a redactor that masks the point of the sentence
+    # is one people learn to ignore.
+    check("but a sentence about passwords keeps its point",
+          "terrible" in redact("the password policy on these switches "
+                               "is terrible"),
+          redact("the password policy on these switches is terrible"))
 
 
 def test_a_conversation_is_not_a_session() -> None:

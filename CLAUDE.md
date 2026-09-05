@@ -211,6 +211,7 @@ shellmate/
 │       ├── history.js           # Search across every session ever recorded
 │       ├── jira.js              # Conclude Session / Jira integration for ShellMate
 │       ├── keys.js              # Making an SSH key without leaving the application
+│       ├── knowledge.js         # The folder the assistant reads your own documents from (#561)
 │       ├── layout.js            # Tiling. Show several sessions at once instead of one at a time
 │       ├── licence.js           # The Licence section in Settings (#446, #448)
 │       ├── logs.js              # Logs panel for ShellMate

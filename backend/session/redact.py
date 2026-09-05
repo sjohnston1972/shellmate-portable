@@ -42,6 +42,23 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
     # Cisco / Arista: username x password [0|7] <secret>, enable secret 5
     # <hash>; Junos: secret "$9$...", authentication-password "...".
     #
+    # A password named in prose, with a phrase in the way: "the password
+    # **for the box** is hunter2", "the enable secret **for the edge
+    # routers** is hunter2". This must come before the rule under it,
+    # which would otherwise match first and mask the word `the`, leaving
+    # the password beside it.
+    #
+    # The phrase has to *start with a preposition*, and that is the whole
+    # discriminator. A preposition keeps the subject the password itself;
+    # any other word changes it — "the password **policy** on these
+    # switches is terrible" is a sentence about policy, and masking
+    # `terrible` there is how a redactor teaches people to ignore it, at
+    # which point the mask that matters is ignored too.
+    (re.compile(r"(?i)\b(password|secret)"
+                r"(\s+(?:for|on|of|to|at|in|with)(?:\s+[\w.\-]+){0,3}?)"
+                r"(\s+(?:is|was|will be|should be|=|:))\s+" + _VALUE),
+     r"\1\2\3 " + MASK),
+
     # The optional linking word is for prose, not configuration (#558).
     # A chat message is the first thing to go through here that is not
     # a device line, and "the password is hunter2" used to mask the
@@ -54,20 +71,50 @@ _PATTERNS: list[tuple[re.Pattern, str]] = [
 
     # SNMP community strings — a read-write community is a credential.
     (re.compile(r"(?i)\b(snmp-server\s+community)\s+\S+"), r"\1 " + MASK),
-    # `show snmp community` prints it as "Community name: <string>".
-    (re.compile(r"(?i)\b(community\s+(?:name|securityname)\s*:)\s*\S+"), r"\1 " + MASK),
+    # `show snmp community` prints it as "Community name: <string>", and
+    # `show snmp` on IOS prints "Community string: <string>" — the second
+    # spelling was missing, so the one command an engineer is most likely to
+    # run when asking about SNMP printed the community in clear.
+    (re.compile(r"(?i)\b(community\s+(?:name|string|securityname)\s*:)\s*\S+"),
+     r"\1 " + MASK),
     # The trap receiver's community: snmp-server host <ip> [traps|informs]
     # [vrf X] [version 1|2c] <community> (for version 3 the token is the
     # user, which costs nothing to mask).
     (re.compile(r"(?i)\b(snmp-server\s+host\s+\S+"
                 r"(?:\s+(?:traps|informs|vrf\s+\S+|version\s+(?:1|2c|3\s+(?:auth|noauth|priv))))*)"
                 r"\s+(?!traps\b|informs\b|vrf\b|version\b)\S+"), r"\1 " + MASK),
+    # Prose rather than configuration: "the snmp community is public123",
+    # "the community for the edge is public123". This has to come before the
+    # catch-all below, and the reason is worth stating: without it the
+    # catch-all matched "community is" and masked the word *is*, leaving the
+    # string in place. Output that looks redacted and is not is worse than
+    # output that was never redacted, because the mask is the thing somebody
+    # checks for before pasting a log into a ticket.
+    #
+    # Shaped exactly like the password prose rule above, and for the same
+    # reason: what may sit between the noun and the value is `string`/`name`
+    # or a phrase starting with a preposition, and nothing else. "The
+    # community policy on these switches is terrible" is a sentence about
+    # policy, and a redactor that masks `terrible` there is one people learn
+    # to ignore.
+    (re.compile(r"(?i)\b(community)"
+                r"((?:\s+(?:string|name))?"
+                r"(?:\s+(?:for|on|of|to|at|in|with)(?:\s+[\w.\-]+){0,3}?)?)"
+                r"(\s+(?:is|was|will be|should be|=|:))\s+" + _VALUE),
+     r"\1\2\3 " + MASK),
+
     # Anything else that says "community <value>" — but not BGP communities,
     # which are route policy, not secrets: "set community 65000:100",
     # "match community CL", "send-community both", or the well-known names.
+    # Linking verbs and prepositions are excluded too, so a prose form the
+    # rule above does not catch fails to mask rather than masking the wrong
+    # word — a mask on "is" is a lie, an unmasked line is only a miss.
     (re.compile(r"(?i)(?<!set\s)(?<!match\s)(?<!send-)\b(community)\s+"
                 r"(?!ro\b|rw\b|name\b|securityname\b|index\b|list\b|none\b"
-                r"|internet\b|local-as\b|no-export\b|no-advertise\b|\d)\S+"), r"\1 " + MASK),
+                r"|internet\b|local-as\b|no-export\b|no-advertise\b|string\b"
+                r"|is\b|was\b|are\b|were\b|be\b|for\b|on\b|of\b|to\b|the\b"
+                r"|\d)\S+"),
+     r"\1 " + MASK),
 
     # SNMPv3 users: auth (md5|sha) <pass> priv (des|3des|aes [bits]) <pass>;
     # NX-OS prints the localised form "auth md5 0x… priv [aes-128] 0x…

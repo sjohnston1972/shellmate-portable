@@ -265,6 +265,28 @@ def test_the_switch() -> None:
 # worked.
 CREDENTIAL_FORMS: list[tuple[str, str, str]] = [
     # (line, the secret, what must survive)
+    # `show snmp` prints "Community string:" and `show snmp community`
+    # prints "Community name:". Only the second was covered, so the one
+    # command somebody is most likely to run when asking about SNMP put the
+    # community in the buffer in clear.
+    ("Community string: public123",                              "public123",    "Community string:"),
+    ("  Community string: private456 (RW)",                      "private456",   "(RW)"),
+    # Prose, because people type prose into the chat box. Before these, the
+    # catch-all matched "community is" and masked the word *is*, leaving the
+    # string beside it — output that looks redacted and is not, which is
+    # worse than output that was never redacted, because the mask is the
+    # thing somebody checks for before pasting a log into a ticket.
+    ("The snmp community is public123 and must not be quoted.",  "public123",    "must not be quoted"),
+    ("the community string is public123",                        "public123",    "community string is"),
+    ("the community for the edge is public123",                  "public123",    "for the edge"),
+    # The same shape for a password, which is how somebody actually asks
+    # for help: "the password for the box is hunter2, why is it not
+    # working". A phrase between the noun and the value used to put the
+    # mask on `the` and leave the password beside it.
+    ("the password is hunter2",                                  "hunter2",      "password is"),
+    ("the password for the box is hunter2",                      "hunter2",      "password for"),
+    ("the enable secret for the edge routers is hunter2",        "hunter2",      "edge routers"),
+    ("the password on sw-01 is hunter2",                         "hunter2",      "sw-01"),
     ("crypto isakmp key MyS3cret address 10.1.1.1",              "MyS3cret",     "address 10.1.1.1"),
     ("crypto isakmp key 6 ENCRYPTEDBLOB address 10.1.1.1",       "ENCRYPTEDBLOB", "key 6 "),
     (" key MyTacacsSecret",                                      "MyTacacsSecret", " key "),
@@ -301,6 +323,10 @@ ORDINARY_LINES = [
     "service password-encryption",
     " authentication key-chain BGP-KEYS",
     "Community Index: cisco0",
+    # A sentence about communities is not a community. A redactor that fires
+    # on these is one people learn to ignore, and then the one that matters
+    # is ignored too.
+    " neighbor 10.1.1.1 send-community extended",
 ]
 
 

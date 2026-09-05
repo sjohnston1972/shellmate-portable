@@ -203,14 +203,51 @@ rather than leaving the assistant unable to answer.
 
 ## Knowledge base
 
-If you run a Chroma vector database of your own design guidelines, point
+The assistant can read your own documents — standards, runbooks, site notes —
+and use them when it answers. There are two ways to give it some, and if you
+set up both, **both** are searched and both reach the prompt.
+
+### The knowledge folder
+
+The one that needs nothing standing up. Put `.md` or `.txt` files in the
+folder named under **Settings → AI Providers → Knowledge folder**, press
+**Index new and changed files**, and matching passages are added to the
+assistant's context on every chat.
+
+The folder lives in your data folder, so it travels with a portable copy of
+ShellMate. Nothing leaves the machine to index it, and it works air-gapped.
+
+Indexing does not happen on its own. Files that have not changed since the
+last run are left alone, so re-indexing a folder of fifty documents where you
+edited one is quick. **Rebuild** reads everything again, which is what you
+want after an upgrade changes how documents are split up.
+
+Files that were passed over are named, with the reason — too large, not UTF-8
+text, not a `.md` or `.txt` file. A document silently skipped is a document
+you believe the assistant has read.
+
+Matching is by words, not meaning, so a passage that says the same thing in
+different words will be missed. Headings help: the folder is split by heading,
+and a heading that names the thing it is about is the difference between a
+page that is found and one that is not.
+
+Passages are **redacted before they are sent**, through the same rules as
+terminal output — a runbook with an SNMP community or a password hash in it
+does not put that value in a prompt. The rules cover the forms devices print
+and the ordinary ways people write a credential down, but a document is
+prose, and prose is harder than configuration: treat this as a safety net,
+not as permission to keep live credentials in the folder.
+
+### Chroma
+
+If you already run a Chroma vector database of your own documents, point
 ShellMate at it under **Settings → AI Providers**, in the **Knowledge Base
 (Chroma DB)** subsection — there is a Test connection button next to the
-fields. Matching snippets are retrieved on every chat and added to the
-assistant's context, so its answers reflect your standards rather than generic
-advice.
+fields. It matches on meaning rather than words, so it finds paraphrases the
+folder will not.
 
-Left unconfigured, this is skipped entirely with no penalty.
+Left unconfigured, this is skipped entirely with no penalty, and the knowledge
+folder above is unaffected.
 
 ## Around the conversation
 

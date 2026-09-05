@@ -2056,6 +2056,37 @@ GigEth0/2     unassigned    YES unset  down     down
           </div>
         
           <div class="settings-subgroup">
+          <h4 class="settings-subsection-title">Knowledge folder</h4>
+          <p class="settings-section-hint">Your own documents — standards, runbooks, site notes — as <code>.md</code> or <code>.txt</code> files in a folder beside ShellMate. Matching passages are added to the assistant's context on every chat, the same way Chroma's are, with no server to stand up and nothing leaving this machine to index them.</p>
+
+          <div class="setting-row setting-row-stack">
+            <label class="setting-label"
+                   data-tip="Where to put the documents. It lives in your data folder, so it travels with a portable copy of ShellMate.||The folder is not searchable until it has been indexed, and indexing does not happen on its own — a walk of fifty documents on every page load would make this panel feel broken on a slow disk.">Folder</label>
+            <code id="knowledge-folder" class="knowledge-folder"></code>
+          </div>
+
+          <div class="setting-row">
+            <button type="button" id="knowledge-open" class="btn-secondary">
+              <span class="material-symbols-outlined">folder_open</span>
+              Open folder
+            </button>
+            <button type="button" id="knowledge-reindex" class="btn-secondary"
+                    data-tip="Read the files that are new or have changed since the last index.||Unchanged files are left alone, which is why this is quick on a folder of fifty documents where you edited one.">
+              <span class="material-symbols-outlined">refresh</span>
+              Index new and changed files
+            </button>
+            <button type="button" id="knowledge-rebuild" class="btn-tertiary"
+                    data-tip="Read every file again, whether it changed or not.||The way out when an upgrade changes how documents are split up: the old index is still there and still matches, it is just built to the previous shape.">
+              <span class="material-symbols-outlined">restore</span>
+              Rebuild
+            </button>
+          </div>
+
+          <p class="settings-section-hint" id="knowledge-status"></p>
+          <div id="knowledge-skipped" class="hidden"></div>
+        </div>
+
+          <div class="settings-subgroup">
           <h4 class="settings-subsection-title">Knowledge Base (Chroma DB)</h4>
           <p class="settings-section-hint">Optional. When set, ShellMate queries this Chroma collection on every chat for design-guideline snippets and injects matches into the AI prompt. Leave blank to disable.</p>
 
@@ -3857,6 +3888,7 @@ GigEth0/2     unassigned    YES unset  down     down
   <script src="/static/js/support.js"></script>
   <script src="/static/js/keys.js"></script>
   <script src="/static/js/stockton.js"></script>
+  <script src="/static/js/knowledge.js"></script>
   <script src="/static/js/broadcast.js"></script>
   <script src="/static/js/settings_nav.js"></script>
   <script src="/static/js/tooltips.js"></script>

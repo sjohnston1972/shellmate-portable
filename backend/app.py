@@ -3921,6 +3921,94 @@ async def broadcast_collect_replies(request: BroadcastCollectRequest) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# REST — The knowledge folder (#561)
+#
+# `chroma_client.py` promises retrieval over the team's own documents and
+# asks for a running Chroma with server-side embeddings to deliver it. On a
+# portable executable in an air-gapped comms room that is not a feature, it
+# is a paragraph in the manual describing something nobody can have.
+#
+# This is the same promise kept with what is already in the process: a
+# folder of `.md` and `.txt` files, and the FTS5 that `store.py` has been
+# running since history existed. It sits beside Chroma rather than replacing
+# it — a site with Chroma standing already has better retrieval than this,
+# and both blocks reach the prompt.
+# ---------------------------------------------------------------------------
+
+
+class KnowledgeReindexRequest(BaseModel):
+    """Body for POST /api/knowledge/reindex."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Re-read every file rather than only the changed ones. The way out
+    #: when a chunking change means the index was built by an older version.
+    force: bool = False
+
+
+@app.get("/api/knowledge")
+async def knowledge_state() -> dict:
+    """
+    What is indexed, and where the folder is.
+
+    The path is returned whether or not the folder exists: "put your
+    documents here" needs somewhere to point at, and a panel that showed
+    nothing until the folder existed would never tell anybody to make it.
+    """
+    from backend import knowledge
+
+    folder = knowledge.knowledge_dir()
+    return {
+        **await asyncio.to_thread(knowledge.stats),
+        "folder": str(folder),
+        "exists": folder.is_dir(),
+        "configured": await asyncio.to_thread(knowledge.is_configured),
+    }
+
+
+@app.post("/api/knowledge/reindex")
+async def knowledge_reindex(request: KnowledgeReindexRequest) -> dict:
+    """
+    Walk the folder and bring the index up to date.
+
+    On a thread because it is file I/O over a folder that may hold fifty
+    documents, and this runs on the same event loop as every live terminal
+    session. A reindex that stalled the read loops would drop keystrokes on
+    a device somebody is mid-change on.
+    """
+    from backend import knowledge
+
+    folder = knowledge.knowledge_dir()
+    if not folder.is_dir():
+        # Made on request rather than on startup, so that "is there a
+        # folder" stays a question the state endpoint can answer honestly.
+        await asyncio.to_thread(folder.mkdir, parents=True, exist_ok=True)
+
+    return await asyncio.to_thread(knowledge.reindex, request.force)
+
+
+@app.post("/api/knowledge/reveal")
+async def knowledge_reveal() -> dict:
+    """
+    Open the knowledge folder in the file manager.
+
+    The one thing this feature asks of a user is that they put files in a
+    folder, and a path they have to copy out of a panel and paste into
+    Explorer is where most of them stop.
+    """
+    from backend import knowledge
+
+    folder = knowledge.knowledge_dir()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        opened = await asyncio.to_thread(desktop.reveal, folder)
+    except Exception as exc:
+        logger.info("Could not open the knowledge folder: %s", exc)
+        opened = False
+    return {"opened": bool(opened), "folder": str(folder)}
+
+
+# ---------------------------------------------------------------------------
 # REST — The saved command library
 # ---------------------------------------------------------------------------
 

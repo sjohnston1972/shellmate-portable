@@ -12150,3 +12150,31 @@ textarea.av-bld-input { min-height: unset; resize: vertical; }
   color: var(--on-surface-dim);
 }
 
+/* The knowledge folder (#561). */
+.knowledge-folder {
+  display: block;
+  padding: 6px 8px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  background: var(--surface-high);
+  color: var(--on-surface-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  /* A path is one long unbreakable token, and a settings panel that scrolls
+     sideways to show it is worse than one that wraps it. */
+  overflow-wrap: anywhere;
+}
+
+/* Reserved for the things somebody has to act on: a build without FTS5, a
+   folder that would not open. Ordinary counts stay in the muted hint colour
+   so that the one line that matters is the one that is coloured. */
+.knowledge-degraded { color: var(--warn); }
+
+.knowledge-skipped-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: var(--on-surface-muted);
+}
+
+.knowledge-skipped-list li { margin: 2px 0; }

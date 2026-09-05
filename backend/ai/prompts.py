@@ -501,6 +501,8 @@ def build_context_prompt(
     command_history: list[str],
     extra_contexts: list[dict] | None = None,
     design_context: str = "",
+    # Passages from the user's own knowledge folder (#561).
+    knowledge_context: str = "",
     device_context: dict | None = None,
     parsed_tables: list[str] | None = None,
     investigation: dict | None = None,
@@ -606,6 +608,15 @@ def build_context_prompt(
     # Design-guideline snippets from Chroma (only present when configured + matched)
     if design_context:
         lines.append(design_context)
+        lines.append("")
+
+    # Passages from the user's own knowledge folder (#561). Its own block
+    # rather than folded into the Chroma one: they come from different
+    # places, and attributing a local file to a server the user may not even
+    # run is how somebody ends up hunting for a document that is on their
+    # own disk.
+    if knowledge_context:
+        lines.append(knowledge_context)
         lines.append("")
 
     return "\n".join(lines)
